@@ -1,0 +1,29 @@
+.view-screen-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.builder-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+    padding: 0.25rem 1rem;
+    flex-shrink: 0;
+    border-top-left-radius: 6px;
+    background-color: var(--neutral-fill-layer-rest);
+    border-bottom: 1px solid var(--neutral-stroke-rest);
+}
+
+.toolbar-separator {
+    width: 1px;
+    height: 20px;
+    background-color: var(--neutral-stroke-rest);
+    margin: 0 8px;
+}
+
+.view-screen-content {
+    flex: 1;
+    overflow: hidden;
+}

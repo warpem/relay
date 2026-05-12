@@ -1,0 +1,53 @@
+.file-browser {
+    display: flex;
+    flex-direction: column;
+    width: 1000px;
+}
+
+.address-bar {
+    display: flex;
+    align-items: center;
+    padding: 5px 0;
+}
+
+.non-editable-part {
+    margin-right: 2px;
+}
+
+.toolbar {
+    display: flex;
+    justify-content: space-between;
+    padding-top: 5px;
+    padding-bottom: 5px;
+}
+
+.columns-container {
+    display: flex;
+    overflow-x: auto;
+    flex: 1;
+    min-width: 0;
+}
+
+.bottom-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    padding-top: 5px;
+    padding-bottom: 5px;
+}
+
+.popover-content {
+    padding: 10px;
+}
+
+.save-file-input {
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+    border-top: 1px solid var(--neutral-stroke-rest);
+    background: var(--neutral-layer-1);
+}
+
+.error-message {
+    color: var(--error-foreground);
+    font-size: 0.875rem;
+    margin-top: 0.5rem;
+}

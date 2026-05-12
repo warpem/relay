@@ -1,0 +1,111 @@
+@using Refund.Services.Core.DataManager
+@using Refund.Services.Core.Session
+@using Relay.Components.ActivityCalendar
+@using Refund.DataModel.ReadOnly
+@using Relay.Panels.Right.Actions
+@using Refund.Components.Jobs
+@using Refund.DataModel
+@using Relay.Emoji
+
+@typeparam TItem where TItem : class, IIdentifiable, IAnnotated, IAudited, IJobContainer
+@inject RelaySession Session
+@inject DataManager DataManager
+
+<div id="@($"card-{Item.Id}")"
+     class="card-common listing-card @(IsSelected ? " selected" : "")"
+     @onclick:stopPropagation="true"
+     @onclick="@OnCardClick"
+     @ondblclick:stopPropagation="true"
+     @ondblclick:preventDefault="true"
+     @ondblclick="@OnHeaderClick">
+
+    <a href="@NavigationUrl"
+       style="display: flex; gap: 0.75rem;
+              flex-wrap: nowrap; cursor: pointer;
+              text-decoration: none; color: inherit;"
+       @onclick="OnHeaderClick"
+       @onclick:stopPropagation="true">
+
+        @if (!string.IsNullOrWhiteSpace(Item.HeroImage))
+        {
+            @if (Item.HeroImage.Length < 5)
+            {
+                var emoji = EmojiLibrary.FindByGlyph(Item.HeroImage).FluentEmoji;
+                @if (emoji != null)
+                {
+                    <FluentEmoji Value="@emoji" Width="64"/>
+                }
+            }
+        }
+
+        <div class="item-heading">
+            <h5 style="margin-bottom: 0;
+                       width: 420px;
+                       white-space: nowrap;
+                       overflow: hidden;
+                       text-overflow: ellipsis;">
+                @Item.QualifiedName
+            </h5>
+            <div class="details">
+                @{
+                    var createdEvent = Item.GetMostRecentEvent(EventType.Created);
+                }
+                @if (createdEvent != null)
+                {
+                    <span class="created">Created @createdEvent.Timestamp.ToString("yyyy-MM-dd")</span>
+                }
+                @ExtraDetails
+            </div>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(Item.Notes))
+        {
+            <FluentTooltip Anchor="@($"card-{Item.Id}")"
+                           MaxWidth="500px"
+                           Position="TooltipPosition.Top">
+                <div style="width: 450px;">
+                    @Item.Notes
+                </div>
+            </FluentTooltip>
+        }
+    </a>
+
+    <div>
+        @if (Jobs.Any())
+        {
+            <div class="jobs-section">
+                <div class="job-list">
+                    @foreach (var _job in Jobs.OrderByDescending(j => j.GetEvents(EventType.Created).FirstOrDefault()?.Timestamp).Take(5))
+                    {
+                        var job = _job;
+
+                        <JobLine Job="job"
+                                 ShowStatus="true"
+                                 NameWidth="200px"
+                                 IncludeSpace="@(Item is ReadOnlyProject)" />
+                    }
+                </div>
+                <ActivityCalendar Jobs="@Jobs"/>
+            </div>
+        }
+        else
+        {
+            <div class="empty-state">
+                <span>No jobs yet</span>
+            </div>
+        }
+    </div>
+</div>
+
+<FluentMenu Anchor="@($"card-{Item.Id}")" Trigger="MouseButton.Right"
+            Anchored="false" OpenChanged="HandleContextMenu">
+    <span style="font-size: 0.75rem; padding: 0 1rem; opacity: 0.5; max-width: 200px;">
+        @Item.QualifiedName
+    </span>
+    <FluentDivider />
+    
+    @if (_contextMenuActions != null)
+    {
+        <ActionMenuLevel Actions="_contextMenuActions"/>
+    }
+</FluentMenu>

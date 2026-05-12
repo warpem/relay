@@ -1,0 +1,39 @@
+@using Refund.DataModel.ReadOnly
+@using Relay.Screens.Main.View
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+
+<div class="factory-panel @(_isCollapsed ? "collapsed" : "")">
+    <div class="factory-panel-header" @onclick="@(() => { _isCollapsed = !_isCollapsed; StateHasChanged(); })">
+        <FluentIcon Value="@(new Icons.Regular.Size16.BuildingFactory())" />
+        @if (!_isCollapsed)
+        {
+            <span class="factory-panel-title">Factories</span>
+            <span class="factory-count">@Definitions.Count()</span>
+            <span style="cursor: pointer; margin-left: 4px; display: flex; align-items: center;"
+                  title="New factory"
+                  @onclick="HandleCreateFactory"
+                  @onclick:stopPropagation="true">
+                <FluentIcon Value="@(new Icons.Regular.Size16.Add())" />
+            </span>
+        }
+    </div>
+    @if (!_isCollapsed)
+    {
+        <div class="factory-panel-list">
+            @if (!Definitions.Any())
+            {
+                <div class="factory-panel-empty">No factory definitions</div>
+            }
+            else
+            {
+                @foreach (var def in Definitions)
+                {
+                    <FactoryCard @key="@($"FD{def.Id}")"
+                                 Definition="def"
+                                 Mode="FactoryCard.FactoryCardMode.Definition"
+                                 OnDoubleClick="@(async _ => await HandleDefinitionDoubleClick(def))" />
+                }
+            }
+        </div>
+    }
+</div>

@@ -1,0 +1,68 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <EnableDefaultContentItems>true</EnableDefaultContentItems>
+    <UserSecretsId>0de818ab-2cdb-4082-ae9e-d104ed763528</UserSecretsId>
+  </PropertyGroup>
+  <PropertyGroup>
+	<AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+  </PropertyGroup>
+  <PropertyGroup>
+    <StaticWebAssetsBuildMode>All</StaticWebAssetsBuildMode>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Refund\Refund.csproj" />
+    <ProjectReference Include="..\Warp\WarpLib\WarpLib.csproj" />
+    <ProjectReference Include="..\ElkSharp\src\ElkSharp\ElkSharp.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Blazored.LocalStorage" Version="4.5.0" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.*" />
+    <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components" Version="4.14.0" />
+    <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components.Emoji" Version="4.14.0" />
+    <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components.Icons" Version="4.14.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Razor.RuntimeCompilation" Version="10.0.*" />
+	<PackageReference Include="Microsoft.Authentication.WebAssembly.Msal" Version="10.0.*" />
+	<PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.*" />
+	<PackageReference Include="Serilog.AspNetCore" Version="10.0.*" />
+	<PackageReference Include="Serilog.Sinks.Map" Version="2.0.0" />
+    <PackageReference Include="SkiaSharp" Version="3.119.0" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="3.119.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Update="wwwroot\js\app.js">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Screens\Overlay\Queues\QueueJobCard.razor.js">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Update="wwwroot\css\app.css">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Update="wwwroot\css\color-icons-fonts.css">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
+    <OutputPath>..\bin\debug</OutputPath>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
+    <OutputPath>..\bin\release</OutputPath>
+	<PlatformTarget>AnyCPU</PlatformTarget>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  
+
+    <Target Name="CopyConfigurations" AfterTargets="Build;Publish">
+        <ItemGroup>
+            <DataFiles Include="$(ProjectDir)\Configs\*.json" />
+        </ItemGroup>
+        <Copy SourceFiles="@(DataFiles)" DestinationFolder="$(TargetDir)\Configs" SkipUnchangedFiles="true" />
+    </Target>
+</Project>

@@ -1,0 +1,28 @@
+<div class="emoji-selector">
+    <div class="search-bar">
+        <FluentSearch Value="@_searchText"
+                      ValueChanged="@HandleSearchChanged"
+                      Placeholder="Search emojis..." 
+                      Autofocus="true" 
+                      Immediate="true"
+                      ImmediateDelay="500"
+                      Style="width: 100%;"/>
+    </div>
+
+    <div class="emoji-grid-container" @ref="gridContainer">
+        <!-- Spacer div for total scrollable height -->
+        <div style="height: @ScrollHeightPx; width: 1px;"></div>
+        
+        <!-- Virtual items -->
+        @foreach (var item in VisibleItems)
+        {
+            <button type="button"
+                    class="emoji-button"
+                    style="left: @(item.X)px; top: @(item.Y)px"
+                    @onclick="() => OnSelect(item.Emoji)"
+                    title="@item.Emoji.Name">
+                <FluentEmoji Value="@item.Emoji.FluentEmoji"/>
+            </button>
+        }
+    </div>
+</div>

@@ -1,0 +1,67 @@
+@using System.Globalization
+@using Microsoft.FluentUI.AspNetCore.Components
+
+<div class="calendar-grid" id="@($"tooltip-here-{Month.Month}")">
+    @* <div class="weekday-header"> *@
+    @*     @foreach (var day in Enum.GetValues<DayOfWeek>().OrderBy(d => d == DayOfWeek.Sunday ? 7 : (int)d)) *@
+    @*     { *@
+    @*         <div class="weekday-label">@day.ToString()[..2]</div> *@
+    @*     } *@
+    @* </div> *@
+
+    @{
+        var startDate = GetStartDate();
+        var endDate = new DateTime(Month.Year, Month.Month, DateTime.DaysInMonth(Month.Year, Month.Month));
+        var currentDate = startDate;
+
+        while (currentDate <= endDate)
+        {
+            <div class="week-row">
+                @for (var i = 0; i < 7; i++)
+                {
+                    var date = currentDate;
+                    var currentDateOnly = DateOnly.FromDateTime(date);
+                    var hasActivity = ActivityData.TryGetValue(currentDateOnly, out var dateJobs);
+                    var isCurrentMonth = date.Month == Month.Month;
+                    var isFutureDate = date > DateTime.Now;
+
+                    <div class="@GetDayCellClass(isCurrentMonth, isFutureDate)"
+                         style="@GetActivityStyle(hasActivity ? dateJobs!.Count : 0)"
+                         id="@(date.ToString("yyyy-MM-dd"))">
+                    </div>
+                    
+                    @if (hasActivity)
+                    {
+                        <FluentTooltip Position="TooltipPosition.Top"
+                                       Anchor="@(date.ToString("yyyy-MM-dd"))">
+                            <div class="tooltip-content">
+                                <div class="date-header">@date.ToString("D")</div>
+                                @if (dateJobs?.Any() == true)
+                                {
+                                    @for (int ij = 0; ij < Math.Min(5, dateJobs.Count); ij++)
+                                    {
+                                        var job = dateJobs[ij];
+                                        <JobView Job="@job" ShowStatus="false"/>
+                                    }
+
+                                    @if (dateJobs.Count > 5)
+                                    {
+                                        <div class="job-item">+@(dateJobs.Count - 5) more</div>
+                                    }
+                                }
+                                else
+                                {
+                                    <div class="no-jobs">No activity</div>
+                                }
+                            </div>
+                        </FluentTooltip>
+                    }
+
+                    currentDate = currentDate.AddDays(1);
+                }
+            </div>
+        }
+    }
+
+    
+</div>

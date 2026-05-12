@@ -1,0 +1,83 @@
+@typeparam TValue
+
+<ComboButton IconStart="@ButtonIconStart"
+             IconEnd="@ButtonIconEnd"
+             Loading="@ButtonLoading"
+             Disabled="@ButtonDisabled"
+             Appearance="@ButtonAppearance"
+             Color="@ButtonColor"
+             BackgroundColor="@ButtonBackgroundColor"
+             AutoFocus="@ListAutoFocus"
+             HorizontalPosition="@ListHorizontalPosition"
+             ButtonMaxWidth="@ButtonMaxWidth"
+             ButtonMinWidth="@ButtonMinWidth"
+             OnClick="@OnClick"
+             Href="@Href"
+             VerticalPosition="@ListVerticalPosition"
+             Style="@ButtonStyle"
+             IsOpen="@_isOpen">
+    <ChildContent>
+        @ButtonLabel
+    </ChildContent>
+    <MenuContent>
+        @if (IsFiltered)
+        {
+            <FilteredListbox TValue="TValue"
+                             SelectedOptionChanged="@(v => OnListValueChanged(v))"
+                             Options="@Options"
+                             ListWidth="@ListWidth"
+                             ListHeight="@ListHeight"
+                             OptionTemplate="@OptionTemplate"
+                             HrefSelector="@HrefSelector"
+                             OnOptionClicked="@(async args => await HandleOptionLinkClick(args.Args, args.Value))"/>
+        }
+        else
+        {
+            <style>
+                .listbox-height-@(_id) div {
+                    max-height: @(ListHeight)px;
+                }
+            </style>
+
+            <div class="filtered-list-container listbox-height-@(_id)" style="@($"max-width: {ListWidth}px;")">
+                <FluentListbox TOption="@((TValue Value, string Text))"
+                               Items="@Options"
+                               Multiple="false"
+                               Disabled="@ButtonDisabled"
+                               Width="@($"{ListWidth}px")"
+                               SelectedOptionChanged="@(v => OnListValueChanged(v.Value))">
+                    <OptionTemplate Context="item">
+                        @if (HrefSelector != null)
+                        {
+                            <a href="@HrefSelector(item.Value)"
+                               style="text-decoration: none; color: inherit; display: block;"
+                               @onclick:preventDefault
+                               @onclick:stopPropagation
+                               @onclick="@(async args => await HandleOptionLinkClick(args, item.Value))">
+                                @if (OptionTemplate != null)
+                                {
+                                    @OptionTemplate(item)
+                                }
+                                else
+                                {
+                                    <span class="option-span">@item.Text</span>
+                                }
+                            </a>
+                        }
+                        else
+                        {
+                            @if (OptionTemplate != null)
+                            {
+                                @OptionTemplate(item)
+                            }
+                            else
+                            {
+                                <span class="option-span">@item.Text</span>
+                            }
+                        }
+                    </OptionTemplate>
+                </FluentListbox>
+            </div>
+        }
+    </MenuContent>
+</ComboButton>

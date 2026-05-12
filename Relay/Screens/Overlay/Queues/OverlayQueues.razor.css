@@ -1,0 +1,52 @@
+.queue-container {
+    height: 100%;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    gap: 1.5rem;
+    overflow-x: auto;
+    padding-left: 0.5rem;
+}
+
+.bottom-fade {
+    width: 100%;
+    height: 20px;
+    background: linear-gradient(
+            to bottom,
+            rgb(from var(--neutral-fill-layer-rest) r g b / 0%) 0%,
+            rgb(from var(--neutral-fill-layer-rest) r g b / 100%) 100%
+    );
+    position: absolute;
+    bottom: 0px;
+}
+
+.right-fade {
+    width: 30px;
+    height: 100%;
+    background: linear-gradient(
+            to right,
+            rgb(from var(--neutral-fill-layer-rest) r g b / 0%) 0%,
+            rgb(from var(--neutral-fill-layer-rest) r g b / 100%) 100%
+    );
+    position: absolute;
+    top: 28px;
+    right: 0px;
+}
+
+.right-fade-button {
+    order: 100;
+    width: 56px;
+    height: 24px;
+    background: linear-gradient(
+            to right,
+            rgb(from var(--neutral-fill-layer-rest) r g b / 0%) 0%,
+            rgb(from var(--neutral-fill-layer-rest) r g b / 100%) 50%
+    );
+    position: absolute;
+    top: 4px;
+    right: 2px;
+}
+
+.no-select {
+    user-select: none; /* Standard syntax */
+}

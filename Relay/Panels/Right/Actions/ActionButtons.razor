@@ -1,0 +1,13 @@
+
+@if (Actions.Any())
+{
+    <div style="display: flex; flex-direction: column; 
+                        justify-content: flex-end; 
+                        align-items: stretch; 
+                        row-gap: 0.5rem;">
+        @foreach (var action in Actions)
+        {
+            <ActionButton @key="@action.Name" Action="action" />
+        }
+    </div>
+}

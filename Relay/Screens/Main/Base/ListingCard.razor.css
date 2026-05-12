@@ -1,0 +1,55 @@
+.listing-card {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 8px;
+    width: 500px;
+    min-height: 192px;
+}
+
+.item-heading {
+    display: inline-block;
+    vertical-align: top;
+}
+
+.item-heading .details {
+    line-height: 0.875rem;
+}
+
+.created {
+    font-weight: 400;
+    font-size: 0.75rem;
+    color: var(--neutral-fill-strong-rest);
+}
+
+.item-header {
+    gap: 0.5rem;
+}
+
+.item-header:hover {
+    background-color: var(--neutral-layer-2);
+}
+
+.jobs-section {
+    display: flex;
+    flex-wrap: nowrap;
+    flex-grow: 0;
+    align-items: start;
+    justify-content: space-between;
+    column-gap: 0;
+}
+
+.job-list {
+    display: flex;
+    flex-direction: column;
+    padding-top: 20px;
+    gap: 1px;
+}
+
+.empty-state {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100px;
+    width: 100%;
+}

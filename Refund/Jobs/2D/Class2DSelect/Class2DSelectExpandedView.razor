@@ -1,0 +1,40 @@
+﻿@using Refund.Components.Class2DSelection
+
+@if (_job == null || _job.VisAvailableIteration < 0)
+{
+    <FluentProgressRing Style="height: 70px; width: 70px;" />
+}
+else
+{ 
+    <h5>Selected:</h5>
+    <div>
+        <Class2DSelection ClassAtlasImagePath=@(_job.VisSelectedClassAtlas)
+                          NImagesInFile="_job.SelectedClasses.Length"
+                          ClassPositionsInAtlas=@(Enumerable.Range(1, _job.SelectedClasses.Length).ToArray())
+                          ClassIds=@_selectedClassIdx
+                          ClassResolutions=@_selectedClassResolutions
+                          ClassSizes=@_selectedClassSizes
+                          RenderedImageSidelengthPx="128"
+                          SpacingPx="6"
+                          BorderColorUnselected="transparent"
+                          SelectionIsMutable="false"
+                          BorderColorSelected="transparent"
+                          BorderWidthPx="0" />
+    </div>
+    
+    <h5 style="margin-top: 30px;">Unselected:</h5>
+    <div>
+        <Class2DSelection ClassAtlasImagePath=@(_job.VisUnselectedClassAtlas)
+                          NImagesInFile="_job.UnselectedClasses.Length"
+                          ClassPositionsInAtlas=@(Enumerable.Range(1, _job.UnselectedClasses.Length).ToArray())
+                          ClassIds=@_unselectedClassIdx
+                          ClassResolutions=@_unselectedClassResolutions
+                          ClassSizes=@_unselectedClassSizes
+                          RenderedImageSidelengthPx="128"
+                          SpacingPx="6"
+                          BorderColorUnselected="transparent"
+                          SelectionIsMutable="false"
+                          BorderColorSelected="transparent"
+                          BorderWidthPx="0" />
+    </div>
+}

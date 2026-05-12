@@ -1,0 +1,9 @@
+﻿.project-avatar {
+    border-radius: 4px;
+}
+
+.owner {
+    font-weight: 600;
+    font-size: 0.75rem;
+    margin-left: 0.5rem;
+}

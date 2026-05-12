@@ -1,0 +1,50 @@
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Refund.Components
+@using Refund.Components.IsosurfaceViewer
+@using Refund.DataModel
+
+@implements IAsyncDisposable
+
+@if (_job == null)
+{
+    <span>No job available to display.</span>
+}
+else
+{
+    <div class="refine3d-view-container">
+        @{
+            string path3dVolume = _job.VisMap3d(ExpandedViewService.CurrentVisIteration);
+            
+            if (!string.IsNullOrWhiteSpace(path3dVolume) && File.Exists(path3dVolume))
+            {
+                <div style="max-width: 500px; max-height: 500px;">
+                    <IsosurfaceViewer MinHeight="500" MinWidth="500" VolumePath="@path3dVolume" />
+                </div>
+            }
+        }
+        
+        <!-- Orthoslices in horizontal row -->
+        <div class="visualization-section">
+            <MapOrthosliceDisplay MapOrthoslicesPath="@_job.VisFilteredSlices(ExpandedViewService.CurrentVisIteration)"
+                                  RenderedImageSidelengthPx="220"
+                                  BorderWidthPx="0"
+                                  SpacingPx="5"
+                                  IsVerticalLayout="false"/>
+        </div>
+
+        <!-- FSC, Angular Distribution, and Fourier Sampling in a row -->
+        <div class="visualizations-row">
+            <ServerImage ServerPath="@_job.VisFsc(ExpandedViewService.CurrentVisIteration)"
+                         height="250"
+                         class="visualization-item"/>
+
+            <ServerImage ServerPath="@_job.VisAngularDistribution(ExpandedViewService.CurrentVisIteration)"
+                         height="250"
+                         class="visualization-item"/>
+
+            <ServerImage ServerPath="@_job.VisFourierSampling(ExpandedViewService.CurrentVisIteration)"
+                         height="250"
+                         class="visualization-item"/>
+        </div>
+    </div>
+}

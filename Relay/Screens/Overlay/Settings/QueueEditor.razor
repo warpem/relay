@@ -1,0 +1,302 @@
+@using Refund.DataModel
+@using Refund.JobQueues
+@using Refund.Services.Core.DataManager
+@using Refund.Components.CodeEditor
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@inject DataManager DataManager
+
+<div class="queue-editor">
+    <div class="queue-list">
+        
+        <span style="font-weight: bold;">Available queues</span>
+        
+        <div class="queue-list-buttons">
+            <FluentButton Title="Add new queue"
+                          IconEnd="@(new Icons.Regular.Size20.Add())"
+                          OnClick="AddNewQueue" />
+            <FluentButton Title="Copy current queue"
+                          IconEnd="@(new Icons.Regular.Size20.Copy())"
+                          Disabled="@(_selectedQueue == null)"
+                          OnClick="CopySelectedQueue" />
+            <FluentButton Title="Move queue up"
+                          IconEnd="@(new Icons.Regular.Size20.ArrowUp())"
+                          Disabled="@(!CanMoveQueueUp)"
+                          OnClick="MoveQueueUp" />
+            <FluentButton Title="Move queue down"
+                          IconEnd="@(new Icons.Regular.Size20.ArrowDown())"
+                          Disabled="@(!CanMoveQueueDown)"
+                          OnClick="MoveQueueDown" />
+        </div>
+
+        <div class="queue-items">
+            @foreach (var _queue in DataManager.ClusterQueues)
+            {
+                var queue = _queue;
+                var isSelected = queue == _selectedQueue;
+                
+                <div class="queue-item @(isSelected ? "selected" : "")"
+                     @onclick="() => SelectQueue(queue)">
+                    <span class="queue-name">@queue.Alias</span>
+                    <ConfirmButton Id="@("delete-queue-" + queue.Id)" Class="delete-button"
+                                   Position="ConfirmationPosition.Right"
+                                   BackgroundColor="transparent"
+                                   IconEnd="@(isSelected ? 
+                                                  new Icons.Regular.Size20.Delete().WithColor("var(--foreground-on-accent-rest)") : 
+                                                  new Icons.Regular.Size20.Delete())"
+                                   Disabled="@(!queue.IsEmpty)"
+                                   Style="@(isSelected ? "color: var(--foreground-on-accent-rest);" : "")"
+                                   OnClick="@(() => DeleteQueue(queue))"/>
+                    
+                    @if (!queue.IsEmpty)
+                    {
+                        <FluentTooltip Anchor="@("delete-queue-" + queue.Id)">
+                            Can't delete queue because it still has jobs in it
+                        </FluentTooltip>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+    
+    @if (_selectedQueue != null)
+    {
+        <div class="editor-main">
+            <div class="script-editor">
+                <span style="font-weight: bold;">Submission script template</span>
+                
+                <div class="variable-chips">
+                    Available variables:
+                    
+                    @foreach (var _variable in GetSubmissionScriptVariables())
+                    {
+                        var variable = _variable;
+
+                        <FluentBadge Style="font-family: monospace; font-size: 10px;"
+                                     Appearance="Appearance.Neutral"
+                                     Circular="true"
+                                     OnClick="() => InsertSubmissionScriptVariable(variable)">
+                            <span class="@(ScriptContains(variable) ? "inuse" : "")">
+                                {{ @variable }}
+                            </span>
+                        </FluentBadge>
+                    }
+                </div>
+
+                <div class="variable-chips">
+                    Available modules:
+
+                    @foreach (var _module in Job.Modules)
+                    {
+                        var module = _module;
+
+                        <FluentBadge Style="font-family: monospace; font-size: 10px;"
+                                     Appearance="Appearance.Neutral"
+                                     Circular="true"
+                                     OnClick="() => InsertSubmissionScriptModule(module)">
+                            <span class="@(ScriptContains(module) ? "inuse" : "")">
+                                {{ @module }} {{ /@module }}
+                            </span>
+                        </FluentBadge>
+                    }
+                </div>
+                
+                <CodeEditor @ref="_submissionScriptEditor" 
+                            Value="@_selectedQueue.SubmissionScriptTemplate"
+                            ValueExpression="@(() => _selectedQueue.SubmissionScriptTemplate)"
+                            ValueChanged="HandleSubmissionScriptTemplateChanged"
+                            CursorPositionChanged="HandleSubmissionScriptCursorPositionChanged"/>
+            </div>
+            
+            <div class="settings-area">
+                <FluentTabs Style="margin-top: -8px;">
+                    
+                    <FluentTab Label="Settings">
+                        <div class="settings-form">
+                            <div class="settings-field">
+                                <span>Queue name</span>
+                                <FluentTextField Value="@_selectedQueue.Alias"
+                                                 ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.Alias)))"/>
+                            </div>
+
+                            <div class="settings-field">
+                                <span>Queue type</span>
+                                <FluentSelect Items="@QueueTypes"
+                                              Value="@_selectedQueue.QueueType.ToString()"
+                                              ValueChanged="@(value => HandleFieldChanged(Enum.Parse<JobQueueType>(value), nameof(ClusterQueue.QueueType)))"/>
+                            </div>
+
+                            <div class="settings-field">
+                                <span>Send command template</span>
+                                
+                                <div class="setting-variable-chips">
+                                    Available variables:
+
+                                    @foreach (var _variable in GetCommandTemplateVariables())
+                                    {
+                                        var variable = _variable;
+
+                                        <FluentBadge Style="font-family: monospace; font-size: 10px;"
+                                                     Appearance="Appearance.Neutral"
+                                                     Circular="true"
+                                                     OnClick="() => InsertSettingVariable(variable, nameof(_selectedQueue.SendCommmandTemplate))">
+                                            {{ @variable }}
+                                        </FluentBadge>
+                                    }
+                                </div>
+                                
+                                <FluentTextField Value="@_selectedQueue.SendCommmandTemplate"
+                                                 ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.SendCommmandTemplate)))" />
+                            </div>
+
+                            <div class="settings-field">
+                                <span>Submit job command template</span>
+                                
+                                <div class="setting-variable-chips">
+                                    Available variables:
+
+                                    @foreach (var _variable in GetSubmitJobTemplateVariables())
+                                    {
+                                        var variable = _variable;
+
+                                        <FluentBadge Style="font-family: monospace; font-size: 10px;"
+                                                     Appearance="Appearance.Neutral"
+                                                     Circular="true"
+                                                     OnClick="() => InsertSettingVariable(variable, nameof(_selectedQueue.SubmitJobTemplate))">
+                                            {{ @variable }}
+                                        </FluentBadge>
+                                    }
+                                </div>
+                                
+                                <FluentTextField Value="@_selectedQueue.SubmitJobTemplate"
+                                                 ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.SubmitJobTemplate)))" />
+                            </div>
+
+                            <div class="settings-field">
+                                <span>Status job command template</span>
+                                
+                                <div class="setting-variable-chips">
+                                    Available variables:
+
+                                    @foreach (var _variable in GetStatusJobTemplateVariables())
+                                    {
+                                        var variable = _variable;
+
+                                        <FluentBadge Style="font-family: monospace; font-size: 10px;"
+                                                     Appearance="Appearance.Neutral"
+                                                     Circular="true"
+                                                     OnClick="() => InsertSettingVariable(variable, nameof(_selectedQueue.StatusJobTemplate))">
+                                            {{ @variable }}
+                                        </FluentBadge>
+                                    }
+                                </div>
+                                
+                                <FluentTextField Value="@_selectedQueue.StatusJobTemplate"
+                                                 ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.StatusJobTemplate)))" />
+                            </div>
+
+                            <div class="settings-field">
+                                <span>Abort job command template</span>
+                                
+                                <div class="setting-variable-chips">
+                                    Available variables:
+
+                                    @foreach (var _variable in GetAbortJobTemplateVariables())
+                                    {
+                                        var variable = _variable;
+
+                                        <FluentBadge Style="font-family: monospace; font-size: 10px;"
+                                                     Appearance="Appearance.Neutral"
+                                                     Circular="true"
+                                                     OnClick="() => InsertSettingVariable(variable, nameof(_selectedQueue.AbortJobTemplate))">
+                                            {{ @variable }}
+                                        </FluentBadge>
+                                    }
+                                </div>
+                                
+                                <FluentTextField Value="@_selectedQueue.AbortJobTemplate"
+                                                 ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.AbortJobTemplate)))" />
+                            </div>
+                        </div>
+                    </FluentTab>
+                    
+                    <FluentTab Label="Custom variables">
+                        <div class="custom-variables-header">
+                            <FluentButton Appearance="Appearance.Accent" 
+                                          OnClick="AddCustomVariable">
+                                Add Variable
+                            </FluentButton>
+                        </div>
+
+                        <div class="custom-variables-list">
+                            <div class="custom-variable-row">
+                                <span>Name</span>
+                                <span>Description</span>
+                                <span>Default value</span>
+                                <div style="width: 32px;"></div>
+                            </div>
+                            
+                            @foreach (var _variable in _selectedQueue.CustomVariables)
+                            {
+                                var variable = _variable;
+
+                                <div class="custom-variable-row">
+                                    <FluentTextField Value="@variable.Key"
+                                                     ValueChanged="@(newValue => HandleCustomVariableKeyChanged(variable.Key, newValue))"/>
+                                    <FluentTextField Value="@variable.Value.description"
+                                                     ValueChanged="@(newValue => HandleCustomVariableDescriptionChanged(variable.Key, newValue))"/>
+                                    <FluentTextField Value="@variable.Value.defaultValue"
+                                                     ValueChanged="@(newValue => HandleCustomVariableValueChanged(variable.Key, newValue))"/>
+
+                                    <ConfirmButton Position="ConfirmationPosition.Left"
+                                                   BackgroundColor="transparent"
+                                                   IconEnd="@(new Icons.Regular.Size20.Delete())"
+                                                   OnClick="@(() => DeleteCustomVariable(variable.Key))"/>
+                                </div>
+                            }
+                        </div>
+                    </FluentTab>
+
+                    <FluentTab Label="Advanced settings">
+                        <div class="settings-form">
+                            <div class="settings-field">
+                                <span>Custom shell</span>
+                                <FluentTextField Value="@_selectedQueue.CustomShell"
+                                                 ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.CustomShell)))" />
+                            </div>
+
+                            <div class="settings-field">
+                                <span>Custom shell arguments</span>
+                                <FluentTextField Value="@_selectedQueue.CustomShellArguments"
+                                                 ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.CustomShellArguments)))" />
+                            </div>
+
+                            <div class="settings-field">
+                                <span>Job ID parsing regular expression</span>
+                                <FluentTextField Value="@_selectedQueue.JobIdParseRegex"
+                                                 ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.JobIdParseRegex)))" />
+                            </div>
+
+                            <div class="settings-field">
+                                <span>Job status parsing template (Pending)</span>
+                                <FluentTextField Value="@_selectedQueue.JobStatusParseTemplatePending"
+                                                 ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.JobStatusParseTemplatePending)))" />
+                            </div>
+
+                            <div class="settings-field">
+                                <span>Job status parsing template (Running)</span>
+                                <FluentTextField Value="@_selectedQueue.JobStatusParseTemplateRunning"
+                                                 ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.JobStatusParseTemplateRunning)))" />
+                            </div>
+
+                            <div class="settings-field">
+                                <span>Job status parsing template (Failed)</span>
+                                <FluentTextField Value="@_selectedQueue.JobStatusParseTemplateFailed"
+                                                 ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.JobStatusParseTemplateFailed)))" />
+                            </div>
+                        </div>
+                    </FluentTab>
+                </FluentTabs>
+            </div>
+        </div>
+    }
+</div>

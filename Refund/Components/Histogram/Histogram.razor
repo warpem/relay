@@ -1,0 +1,68 @@
+@using System.Globalization
+@using Microsoft.JSInterop
+@implements IAsyncDisposable
+
+<div class="histogram-container @Class" style="@Style" @attributes="AdditionalAttributes">
+
+    <!-- Range input fields if range selection is enabled -->
+    @if (RangeSelectionEnabled)
+    {
+        <div class="histogram-range-inputs">
+            <RobustFluentNumberField
+                TValue="decimal"
+                Value="@SelectedRangeStart"
+                ValueChanged="@OnRangeStartChanged"
+                Min="@MinRange.ToString(CultureInfo.InvariantCulture)"
+                Max="@(Math.Max(SelectedRangeEnd - MinGapInValues, MinRange).ToString(CultureInfo.InvariantCulture))"
+                Step="@GetEffectiveStepSize().ToString(CultureInfo.InvariantCulture)"
+                Style="width: 100%"
+                Immediate="true"
+                ImmediateDelay="300"
+                AutoComplete="off"
+                Disabled="@IsDisabled"/>
+
+            <RobustFluentNumberField
+                TValue="decimal"
+                Value="@SelectedRangeEnd"
+                ValueChanged="@OnRangeEndChanged"
+                Min="@(Math.Min(SelectedRangeStart + MinGapInValues, MaxRange).ToString(CultureInfo.InvariantCulture))"
+                Max="@MaxRange.ToString(CultureInfo.InvariantCulture)"
+                Step="@GetEffectiveStepSize().ToString(CultureInfo.InvariantCulture)"
+                Style="width: 100%"
+                Immediate="true"
+                ImmediateDelay="300"
+                AutoComplete="off"
+                Disabled="@IsDisabled"/>
+        </div>
+    }
+    
+    <div class="histogram-chart">
+        <!-- Range selection overlay if enabled (placed first to be behind bars) -->
+        @if (RangeSelectionEnabled)
+        {
+            <div id="@RangeId" class="histogram-range-selection">
+                <!-- Range background only (handles moved to separate container) -->
+            </div>
+        }
+        
+        <!-- Main histogram svg for bars -->
+        <svg id="@HistogramId" class="histogram-svg">
+            <!-- Bars will be added here by JS -->
+        </svg>
+        
+        <!-- Range handles in a separate container to be on top -->
+        @if (RangeSelectionEnabled)
+        {
+            <div class="histogram-range-handles">
+                <div id="@RangeStartHandleId" class="histogram-range-handle left @(IsDisabled ? "disabled" : "")"></div>
+                <div id="@RangeEndHandleId" class="histogram-range-handle right @(IsDisabled ? "disabled" : "")"></div>
+            </div>
+        }
+    </div>
+    
+    <!-- Min/Max labels -->
+    <div class="histogram-labels">
+        <div class="histogram-label min-label">@MinRangeFormatted</div>
+        <div class="histogram-label max-label">@MaxRangeFormatted</div>
+    </div>
+</div>

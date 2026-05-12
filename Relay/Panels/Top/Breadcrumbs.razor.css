@@ -1,0 +1,15 @@
+﻿.breadcrumbs {
+    width: 10.813rem !important;
+}
+
+
+.delimiter-icon {
+    width: 0.5rem !important;
+    height: 0.5rem !important;
+    margin-left: 0.25rem;
+    margin-right: 0.25rem;
+    background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="5" height="7" viewBox="0 0 5 7" fill="none"><path d="M4.5 2.63398C5.16667 3.01888 5.16667 3.98113 4.5 4.36603L1.5 6.09808C0.833333 6.48298 0 6.00185 0 5.23205L0 1.76795C0 0.998148 0.833333 0.517024 1.5 0.901924L4.5 2.63398Z" fill="%232E77D0"/></svg>');
+    background-size: contain; /* Adjust as needed */
+    background-repeat: no-repeat;
+    background-position: center;
+}

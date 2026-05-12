@@ -1,0 +1,56 @@
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Refund.Services
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+
+<div class="view-toolbar">
+    @if (!IsBrowseMode && DiagramService.ViewMode == ViewMode.List)
+    {
+        @if (SortingService.Criterion == JobSortCriterion.Custom)
+        {
+            <span class="toolbar-label">Move</span>
+            <FluentButton Title="Move left"
+                          IconEnd="@(new Icons.Regular.Size20.ArrowLeft())"
+                          Disabled="@(!CanMoveLeft)"
+                          OnClick="OnMoveLeft" />
+            <FluentButton Title="Move right"
+                          IconEnd="@(new Icons.Regular.Size20.ArrowRight())"
+                          Disabled="@(!CanMoveRight)"
+                          OnClick="OnMoveRight" />
+            <span class="toolbar-separator"></span>
+        }
+
+        <span class="toolbar-label">Sort</span>
+        <FluentSelect Items="@SortOptions"
+                      Multiple="false"
+                      Width="130px"
+                      OptionText="@(i => i.Text)"
+                      OptionValue="@(i => i.Value)"
+                      OptionSelected="@(i => i.Selected)"
+                      SelectedOption="@SelectedSortOption"
+                      SelectedOptionChanged="@(EventCallback.Factory.Create<Option<string>?>(this, OnSortOptionChanged))" />
+        <FluentButton Title="Switch sort direction" OnClick="ToggleSortDirection" IconEnd="@SortDirectionIcon" />
+    }
+
+    <span class="toolbar-separator"></span>
+    <span class="toolbar-label">View</span>
+    <FluentButton Title="List view"
+                  Appearance="@(DiagramService.ViewMode == ViewMode.List ? Appearance.Accent : Appearance.Stealth)"
+                  IconEnd="@(new Icons.Regular.Size20.Grid())"
+                  OnClick="@(() => DiagramService.SetViewMode(ViewMode.List))" />
+    <FluentButton Title="Diagram view"
+                  Appearance="@(DiagramService.ViewMode == ViewMode.Diagram ? Appearance.Accent : Appearance.Stealth)"
+                  IconEnd="@(new Icons.Regular.Size20.Flow())"
+                  OnClick="@(() => DiagramService.SetViewMode(ViewMode.Diagram))" />
+
+    @if (DiagramService.ViewMode == ViewMode.Diagram)
+    {
+        <span class="toolbar-separator"></span>
+        <span class="toolbar-label">Diagram</span>
+        <FluentButton Title="Zoom to fit"
+                      IconEnd="@(new Icons.Regular.Size20.ZoomFit())"
+                      OnClick="@(() => DiagramService.RequestZoomToFit())" />
+        <FluentButton Title="Reset layout"
+                      IconEnd="@(new Icons.Regular.Size20.ArrowClockwise())"
+                      OnClick="@(() => DiagramService.RequestRelayout())" />
+    }
+</div>

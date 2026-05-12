@@ -1,0 +1,19 @@
+@namespace Refund.UIFields
+@inherits UiFieldViewBase
+
+<FluentTextField Class="borderless" 
+                 @bind-Value="@ValueT"
+                 Style="width: 100%"
+                 Placeholder="No value"
+                 Disabled="true" />
+
+@code
+{
+    private UiStatic FieldDescriptionT => (UiStatic)FieldDescription ?? null;
+
+    private string ValueT
+    {
+        get => Value?.ToString();
+        set { }
+    }
+}

@@ -1,0 +1,92 @@
+@using Refund.DataModel
+@using Refund.DataModel.ReadOnly
+@using Refund.Services
+@using Refund.Services.Core.DataManager
+@using Refund.Utils
+@using Relay.Panels.Right.Actions
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+
+<div class="folder-card"
+     id="@($"folder-{Folder.Id}")"
+     style="width: @(DiagramMode ? DiagramWidth : VisualProvider.GetWidth(1))px;
+            height: @(DiagramMode ? DiagramHeight : VisualProvider.GetHeight(1))px;
+            border-left: 6px solid @(string.IsNullOrEmpty(Folder.ColorTag) ? "var(--neutral-stroke-rest)" : Folder.ColorTag);
+            @(!string.IsNullOrEmpty(Folder.ColorTag) ? $"background-color: color-mix(in srgb, {Folder.ColorTag} 25%, var(--neutral-fill-layer-rest));" : "")
+            @(Selection.IsSelected(SelectionKey) ? "outline: 2px solid var(--accent-fill-rest);" : "")
+            @(_isDragOver ? "outline: 2px dashed var(--accent-fill-rest); background: var(--neutral-fill-secondary-hover);" : "")"
+     @onclick:stopPropagation="true"
+     @onclick="HandleClick"
+     @ondblclick:stopPropagation="true"
+     @ondblclick="HandleDoubleClick"
+     @oncontextmenu:stopPropagation="true"
+     @oncontextmenu:preventDefault="@DiagramMode"
+     @oncontextmenu="@HandleRightClick"
+     draggable="@(DiagramMode ? "false" : "true")"
+     @ondragstart="HandleDragStart"
+     @ondragend="HandleDragEnd"
+     @ondragover="HandleDragOver"
+     @ondragover:preventDefault="@_isDragOver"
+     @ondrop="HandleDrop"
+     @ondragleave="HandleDragLeave">
+
+    <div class="folder-card-content @(Folder.Layout is { } _l && _l.Nodes.Count > 0 ? "has-minimap" : "")">
+
+        <FluentIcon Value="@(new Icons.Regular.Size20.Folder())"
+                    Color="Microsoft.FluentUI.AspNetCore.Components.Color.Neutral"/>
+
+        <span class="folder-card-title">
+            @Folder.Alias
+        </span>
+
+        <span style="font-size: 11px; opacity: 0.6;">
+            @ItemCountText
+        </span>
+
+        @if (Folder.Layout is { } layout && layout.Nodes.Count > 0)
+        {
+            var (svgW, svgH) = GetMinimapSize(layout);
+            <div class="folder-minimap-container">
+                <svg viewBox="0 0 @F(layout.GraphWidth) @F(layout.GraphHeight)"
+                     class="folder-minimap"
+                     width="@F(svgW)" height="@F(svgH)">
+                    @foreach (var edge in layout.Edges)
+                    {
+                        <path d="@GetEdgePath(edge)" fill="none" stroke="var(--neutral-foreground-rest)" stroke-width="1" opacity="0.4"/>
+                    }
+                    @foreach (var node in layout.Nodes)
+                    {
+                        @if (node.IsFolder)
+                        {
+                            <rect x="@F(node.X)" y="@F(node.Y)"
+                                  width="@F(node.Width)" height="@F(node.Height)"
+                                  rx="2" fill="var(--neutral-foreground-hint)" opacity="0.6"/>
+                        }
+                        else
+                        {
+                            <circle cx="@F(node.X + node.Width / 2)" cy="@F(node.Y + node.Height / 2)"
+                                    r="5" fill="@GetNodeColor(node)"/>
+                        }
+                    }
+                </svg>
+            </div>
+        }
+    </div>
+
+    @if (!DiagramMode)
+    {
+        <FluentMenu Anchor="@($"folder-{Folder.Id}")" Trigger="MouseButton.Right"
+                    Anchored="false" OpenChanged="HandleContextMenu">
+            <span style="font-size: 0.75rem; padding: 0 1rem; opacity: 0.5;
+                        display: block; max-width: 250px; overflow: hidden;
+                        text-overflow: ellipsis; white-space: nowrap;">
+                @Folder.Alias
+            </span>
+            <FluentDivider />
+
+            @if (_contextMenuActions != null)
+            {
+                <ActionMenuLevel Actions="_contextMenuActions"/>
+            }
+        </FluentMenu>
+    }
+</div>

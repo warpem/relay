@@ -1,0 +1,26 @@
+.form-content {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    min-width: 400px;
+}
+
+.form-item {
+    display: flex;
+    flex-direction: column;
+    min-width: 400px;
+}
+
+.error-message {
+    color: var(--error);
+}
+
+.reconnect-notice {
+    margin-top: 8px;
+    padding: 8px 12px;
+    background-color: var(--neutral-layer-2);
+    border-left: 1px solid var(--accent-fill-rest);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}

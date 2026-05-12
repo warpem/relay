@@ -1,0 +1,91 @@
+@using Refund.DataModel.ReadOnly
+@using Refund.Services
+@using Refund.Services.Core.DataManager
+@using Relay.Panels.Right.Actions
+@using Refund.DataModel
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@inject MenuActionService MenuActions
+
+<div style="display: flex; flex-direction: column; justify-content: flex-start; row-gap: 2rem;">
+    @if (Folder != null)
+    {
+        <div class="property-panel">
+            <h5>@Folder.QualifiedName</h5>
+
+            <div class="property-item">
+                <span class="property-title">Name</span>
+                <FluentTextField Class="property-value"
+                                 AutoComplete="off"
+                                 Value="@Folder.Alias"
+                                 ValueChanged="@HandleAliasChanged" />
+                @if (!string.IsNullOrEmpty(_aliasValidationError))
+                {
+                    <div style="display: flex; flex-wrap: nowrap; font-size: 0.75rem; color: var(--error); gap: 0.3rem;">
+                        <FluentIcon Value="@(new Icons.Filled.Size12.ErrorCircle().WithColor("var(--error)"))" />
+                        <span>@_aliasValidationError</span>
+                    </div>
+                }
+            </div>
+
+            <div class="property-item">
+                <span class="property-title">Notes</span>
+                <FluentTextArea Class="property-value"
+                                Rows="5"
+                                Value="@Folder.Notes"
+                                ValueChanged="@HandleNotesChanged" />
+            </div>
+
+            <div class="property-item">
+                <span class="property-title">Created</span>
+                <span class="property-value">
+                    @Folder.CreationDate.ToString("yyyy-MM-dd HH:mm")@if (Folder.CreatedBy != null)
+                    {
+                        <text>, by </text><FluentBadge>@Folder.CreatedBy.Name</FluentBadge>
+                    }
+                </span>
+            </div>
+
+            <div class="property-item">
+                <span class="property-title">Last modified</span>
+                <span class="property-value">
+                    @Folder.UpdateDate.ToString("yyyy-MM-dd HH:mm")@if (Folder.UpdatedBy != null)
+                    {
+                        <text>, by </text><FluentBadge>@Folder.UpdatedBy.Name</FluentBadge>
+                    }
+                </span>
+            </div>
+
+            @{
+                int nItems = Folder.Items.Count;
+                int nJobs = Folder.Items.OfType<ReadOnlyJob>().Count();
+                int nFolders = Folder.Items.OfType<ReadOnlyFolder>().Count();
+            }
+            <div class="property-item">
+                <span class="property-title">Contents</span>
+                <span class="property-value">
+                    @if (nItems == 0)
+                    {
+                        <text>Empty</text>
+                    }
+                    else
+                    {
+                        @if (nJobs > 0)
+                        {
+                            <text>@nJobs @(nJobs == 1 ? "job" : "jobs")</text>
+                        }
+                        @if (nJobs > 0 && nFolders > 0)
+                        {
+                            <text>, </text>
+                        }
+                        @if (nFolders > 0)
+                        {
+                            <text>@nFolders @(nFolders == 1 ? "folder" : "folders")</text>
+                        }
+                    }
+                </span>
+            </div>
+        </div>
+
+        <ActionButtons Actions="@MenuActions.GetFolderActions(Folder)" />
+    }
+</div>

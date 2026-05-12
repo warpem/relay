@@ -1,0 +1,17 @@
+﻿@using Refund.DataModel.ReadOnly
+@using Refund.Services
+@using Refund.Services.Core.Session
+@using Relay.Emoji
+@using Relay.Screens.Main.Base
+@inject MenuActionService MenuActions
+
+@inherits ListingCardLogic<ReadOnlyProject>
+
+<ListingCard TItem="ReadOnlyProject"
+             Item="@Item"
+             IsSelected="@IsSelected"
+             OnClick="@OnClick"
+             OnNavigate="@HeaderClick"
+             NavigationUrl="@NavigationUrl"
+             GetContextMenuActions="GetContextMenuActions">
+</ListingCard>

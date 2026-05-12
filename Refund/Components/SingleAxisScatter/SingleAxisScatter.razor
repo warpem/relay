@@ -1,0 +1,73 @@
+@using Microsoft.JSInterop
+@using Refund.Components.GlobalTooltip
+@using Refund.Services
+@implements IAsyncDisposable
+
+<div class="single-axis-scatter @Class" style="@Style" @attributes="AdditionalAttributes">
+    <div class="scatter-container">
+        
+        <!-- Left column: Y-axis labels + histogram -->
+        <div class="y-axis-column">
+            <div class="axis-labels">
+                <div id="@TopLabelId" class="axis-label top"></div>
+                <div id="@CenterLabelId" class="axis-label center"></div>
+                <div id="@BottomLabelId" class="axis-label bottom"></div>
+            </div>
+            
+            <svg id="@HistogramId" class="histogram"></svg>
+        </div>
+        
+        <!-- Main scrollable plot area -->
+        <div class="plot-area">
+            <div class="canvas-container">
+                
+                <!-- Highlight band for RangeHighlightMin..RangeHighlightMax -->
+                <div id="@RangeHighlightId" class="range-highlight"></div>
+                
+                <!-- Axis lines -->
+                <div id="@TopLineId" class="axis-line top"></div>
+                <div id="@CenterLineId" class="axis-line center"></div>
+                <div id="@BottomLineId" class="axis-line bottom"></div>
+                
+                <!-- The main canvas for points -->
+                <canvas id="@CanvasId"></canvas>
+                
+                <!-- Highlight circle -->
+                <div id="@HighlightCircleId" 
+                     class="highlight-circle"
+                     style="@(PointClicked.HasDelegate || HighlightChanged.HasDelegate ? "cursor: pointer;" : "")"></div>
+                
+                <!-- Tooltip container -->
+                <GlobalTooltip TooltipId="@TooltipId"
+                               TargetId="@HighlightCircleId"
+                               Placement="TooltipPlacement.Right"
+                               IsVisible="true">
+                    
+                    <DynamicTooltipContent Subscription="_tooltipSubscription">
+                        @if (TooltipTemplate != null)
+                        {
+                            ScatterPoint? pointToShow = null;
+                            
+                            if (HighlightIndex >= 0 && PointsCollections.Count > 0)
+                            {
+                                // Find the first valid point to show
+                                foreach (var collection in PointsCollections)
+                                {
+                                    if (HighlightIndex < collection.Count && collection[HighlightIndex].Value.HasValue)
+                                    {
+                                        pointToShow = collection[HighlightIndex];
+                                        break;
+                                    }
+                                }
+                            }
+                            
+                            @TooltipTemplate(pointToShow)
+                        }
+                    </DynamicTooltipContent>
+                    
+                </GlobalTooltip>
+            </div>
+        </div>
+        
+    </div>
+</div>

@@ -1,0 +1,108 @@
+.factory-card {
+    border-radius: 6px;
+    border: 2px solid var(--neutral-stroke-rest);
+    outline: 2px solid var(--neutral-stroke-rest);
+    outline-offset: 2px;
+    background-color: var(--neutral-fill-layer-rest);
+    position: relative;
+    overflow: visible;
+    cursor: default;
+    display: flex;
+    flex-direction: column;
+    user-select: none;
+}
+
+.factory-card.selected {
+    border-color: var(--accent-fill-rest);
+    outline-color: var(--accent-fill-rest);
+}
+
+.factory-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 6px 8px;
+    min-height: 28px;
+}
+
+.factory-header ::deep .status-icon {
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.factory-name {
+    font-weight: 600;
+    font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    word-break: break-word;
+}
+
+.factory-type-label {
+    font-size: 11px;
+    opacity: 0.6;
+    padding: 0 8px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.factory-minimap-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    padding: 4px;
+    overflow: hidden;
+}
+
+.factory-minimap {
+    display: block;
+}
+
+.factory-port-dots-container {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    top: 30px;
+}
+
+.factory-port-dots-left {
+    left: -8px;
+}
+
+.factory-port-dots-right {
+    right: -8px;
+}
+
+.factory-port-dot {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 2px solid var(--neutral-fill-layer-rest);
+    cursor: pointer;
+    position: relative;
+}
+
+.factory-port-dot:hover {
+    outline: 2px solid var(--neutral-base-color);
+}
+
+.port-tooltip {
+    position: absolute;
+    left: 18px;
+    top: -2px;
+    height: 16px;
+    line-height: 16px;
+    font-size: 9pt;
+    border-radius: 4px;
+    background-color: var(--neutral-fill-layer-rest);
+    text-wrap: nowrap;
+    z-index: 99;
+    padding-left: 2px;
+    padding-right: 2px;
+}

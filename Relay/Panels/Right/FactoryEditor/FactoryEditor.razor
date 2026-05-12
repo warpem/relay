@@ -1,0 +1,150 @@
+@using Refund.DataModel
+@using Refund.DataModel.ReadOnly
+@using Refund.Services
+@using Refund.Services.Core.DataManager
+@using Refund.Services.Core.Session
+@using Refund.Utils
+@using Relay.Panels.Right.JobEditor
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+
+@if (_instance != null)
+{
+    @if (_showQueueWizard)
+    {
+        <FactoryQueueWizard Instance="_instance"
+                            OnClose="@(() => { _showQueueWizard = false; StateHasChanged(); })"
+                            OnQueued="@(async () => { _showQueueWizard = false; await Editor.SetInstance(null); })" />
+    }
+    else
+    {
+        <div style="display: flex; flex-direction: column; width: 100%; align-items: stretch">
+            @* Header — mirrors JobEditor layout *@
+            <div>
+                <div>
+                    <h5>
+                        FI@(_instance.Id)@(_instance.Definition != null ? $": {_instance.Definition.Alias}" : "")
+                    </h5>
+                    @if (!string.IsNullOrWhiteSpace(_instance.Alias) && _instance.Definition != null)
+                    {
+                        <h6>
+                            @_instance.Definition.Alias
+                        </h6>
+                    }
+                    <div class="right-panel-compact">
+                        <FluentTextField Placeholder="Custom instance name"
+                                         Style="width: 100%; margin-top: 10px"
+                                         Value="@_instance.Alias"
+                                         ValueChanged="@HandleAliasChanged" />
+                    </div>
+                </div>
+            </div>
+
+            @* Exposed input ports — shown like JobEditor's port display *@
+            @if (_instance.Definition?.ExposedPortsIn.Any() == true)
+            {
+                <div class="right-panel-ports" style="margin: 1.25rem 0; display: flex; flex-direction: column; row-gap: 0.75rem;">
+                    @foreach (var exposedPort in _instance.Definition.ExposedPortsIn)
+                    {
+                        var subJob = GetSubJob(exposedPort.SubJobId);
+                        if (subJob == null) { continue; }
+
+                        var realPort = subJob.PortsIn.Values.FirstOrDefault(p => p.Name == exposedPort.PortName);
+                        if (realPort == null) { continue; }
+
+                        var isDisabled = subJob.Status != JobStatus.Building;
+                        var isActive = realPort.IsActive();
+                        var opacity = isActive ? "1.0" : "0.4";
+
+                        <div style="display: flex; align-items: flex-start; opacity: @opacity;">
+                            <div style="width: 16px; height: 16px; margin-top: 3px; margin-right: 8px; flex-shrink: 0;">
+                                <svg width="16" height="16">
+                                    <circle cx="8" cy="8" r="8" fill="@PortColors.Get(realPort.ResourceType)" />
+                                </svg>
+                            </div>
+                            <FluentStack Orientation="Orientation.Vertical" VerticalGap="2" Style="flex: 1;">
+                                <FluentLabel Typo="Typography.H6">
+                                    <span>@(!string.IsNullOrWhiteSpace(exposedPort.CustomName) ? exposedPort.CustomName : realPort.Alias) (@realPort.Edges.Count / @GetPortRequirementText(realPort))</span>
+                                </FluentLabel>
+                                <div style="font-size: 10pt; font-weight: 500;">
+                                    @foreach (var _edge in realPort.Edges)
+                                    {
+                                        var edge = _edge;
+                                        <div style="display: flex; align-items: center; column-gap: 3px;">
+                                            <div>J@($"{edge.Source.Job.Id}")→@(edge.Source.Alias)</div>
+                                            @if (!isDisabled)
+                                            {
+                                                <FluentButton BackgroundColor="transparent"
+                                                              Color="transparent"
+                                                              OnClick="() => HandlePortEdgeRemoved(edge)">
+                                                    <FluentIcon Value="@(new Icons.Filled.Size16.Delete())"></FluentIcon>
+                                                </FluentButton>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                            </FluentStack>
+                        </div>
+                    }
+                </div>
+            }
+
+            @* Exposed properties grouped by sub-job *@
+            @foreach (var group in GroupedProperties)
+            {
+                var subJob = GetSubJob(group.Key);
+                if (subJob == null) { continue; }
+                var isDisabled = subJob.Status != JobStatus.Building;
+                var capturedSubJob = subJob;
+
+                <FluentAccordion>
+                    <FluentAccordionItem Heading="@(isDisabled ? $"{subJob.QualifiedName} ({subJob.Status})" : subJob.QualifiedName)" Expanded="true">
+                        <FluentStack Orientation="Orientation.Vertical" VerticalGap="16" Style="width: 100%; margin-bottom: 0px">
+                            @foreach (var exposed in group)
+                            {
+                                var prop = GetPropertyInfo(capturedSubJob, exposed.PropertyName);
+                                if (prop == null) { continue; }
+
+                                <UiFieldView Property="@prop"
+                                             Job="@capturedSubJob"
+                                             IsDisabled="@isDisabled"
+                                             CustomLabel="@exposed.CustomName"
+                                             ErrorMessage="@string.Empty"
+                                             ValueChanged="@(args => HandleParameterChanged(capturedSubJob, args))" />
+                            }
+                        </FluentStack>
+                    </FluentAccordionItem>
+                </FluentAccordion>
+            }
+
+            @* Queue and pause buttons *@
+            <div style="display: flex; justify-content: space-evenly;
+                        column-gap: 1rem; padding: 1rem 0;">
+                <FluentButton Style="width: 100%;"
+                              IconStart="@(new Icons.Regular.Size20.Pause())"
+                              OnClick="@(async () => await Editor.SetInstance(null))">
+                    Pause editing
+                </FluentButton>
+                @if (IsAllLocal)
+                {
+                    <FluentButton Appearance="Appearance.Accent"
+                                  Style="width: 100%;"
+                                  Disabled="@(!CanQueue)"
+                                  IconStart="@(new Icons.Filled.Size20.Play())"
+                                  OnClick="HandleRunLocally">
+                        Run locally
+                    </FluentButton>
+                }
+                else
+                {
+                    <FluentButton Appearance="Appearance.Accent"
+                                  Style="width: 100%;"
+                                  Disabled="@(!CanQueue)"
+                                  IconStart="@(new Icons.Filled.Size20.Play())"
+                                  OnClick="@(() => { _showQueueWizard = true; StateHasChanged(); })">
+                        Queue...
+                    </FluentButton>
+                }
+            </div>
+        </div>
+    }
+}

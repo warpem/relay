@@ -1,0 +1,129 @@
+@using Refund.DataModel
+@using Refund.DataModel.ReadOnly
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+
+<style>
+    fluent-text-field.user-field::part(root) {
+        cursor: pointer !important;
+        border: none !important;
+    }
+    fluent-text-field.user-field::part(control) {
+        cursor: pointer !important;
+    }
+</style>
+
+@if (Session.User.Role == UserRole.Admin)
+{
+    <div class="token-actions">
+        <h6>Registration Tokens:</h6>
+        
+        <FluentButton OnClick="GenerateToken"
+                      Appearance="Appearance.Accent">
+            Generate New Token
+        </FluentButton>
+
+        <ConfirmButton OnClick="InvalidateTokens"
+                       Position="ConfirmationPosition.Right"
+                       Color="var(--error)"
+                       BackgroundColor="transparent"
+                       Appearance="@Appearance.Outline">
+            Invalidate All Tokens
+        </ConfirmButton>
+    </div>
+    
+    <FluentDataGrid Items="@DataManager.Users.AsQueryable()" RowSize="DataGridRowSize.Medium" MultiLine="true">
+        
+        <TemplateColumn Title="ID" Width="90px" Sortable="true" SortBy="@(GridSort<ReadOnlyUser>.ByAscending(x => x.Id))">
+            <div style="height: 32px; align-content: center; margin-left: 5px;">
+                @context.Id
+            </div>
+        </TemplateColumn>
+
+        <TemplateColumn Title="Username" Sortable="true" SortBy="@(GridSort<ReadOnlyUser>.ByAscending(x => x.Username))">
+            <FluentTextField Class="user-field"
+                            Style="width: 100%; margin-left: -9px;"
+                            Value="@(GetFieldValue(context, nameof(ReadOnlyUser.Username)))"
+                            ValueChanged="@(value => OnUsernameChanged(value, context))"
+                            AutoComplete="off"/>
+
+            @if (HasErrors(context, nameof(ReadOnlyUser.Username)))
+            {
+                <div class="error-text">
+                    @_errorMessages[nameof(ReadOnlyUser.Username)]
+                </div>
+            }
+        </TemplateColumn>
+
+        <TemplateColumn Title="Name" Sortable="true" SortBy="@(GridSort<ReadOnlyUser>.ByAscending(x => x.Name))">
+            <FluentTextField Class="user-field"
+                            Value="@(GetFieldValue(context, nameof(ReadOnlyUser.Name)))"
+                            ValueChanged="@(value => OnNameChanged(value, context))"
+                            Style="width: 100%; margin-left: -9px;"
+                            AutoComplete="off"/>
+
+            @if (HasErrors(context, nameof(ReadOnlyUser.Name)))
+            {
+                <div class="error-text">
+                    @_errorMessages[nameof(ReadOnlyUser.Name)]
+                </div>
+            }
+        </TemplateColumn>
+
+        <TemplateColumn Title="Email" Sortable="true" SortBy="@(GridSort<ReadOnlyUser>.ByAscending(x => x.Email))">
+            <FluentTextField Class="user-field"
+                            Value="@(GetFieldValue(context, nameof(ReadOnlyUser.Email)))"
+                            ValueChanged="@(value => OnEmailChanged(value, context))"
+                            Style="width: 100%; margin-left: -9px;"
+                            AutoComplete="off"/>
+
+            @if (HasErrors(context, nameof(ReadOnlyUser.Email)))
+            {
+                <div class="error-text">
+                    @_errorMessages[nameof(ReadOnlyUser.Email)]
+                </div>
+            }
+        </TemplateColumn>
+
+        <TemplateColumn Title="Role" Style="overflow: visible;" Align="@Align.Center" Width="110px"
+                       Sortable="true" SortBy="@(GridSort<ReadOnlyUser>.ByAscending(x => x.Role))">
+
+            <FluentSelect Class="user-field"
+                         Value="@(context.Role.ToString())"
+                         ValueChanged="@(value => OnRoleChanged(value, context))"
+                         Items="_roles"
+                         Width="100px"
+                         Placeholder="Please select a role"
+                         Position="SelectPosition.Below"
+                         Disabled="@(context == Session.User)"/>
+
+            @if (HasErrors(context, nameof(ReadOnlyUser.Role)))
+            {
+                <div class="error-text">
+                    @_errorMessages[nameof(ReadOnlyUser.Role)]
+                </div>
+            }
+        </TemplateColumn>
+        <TemplateColumn Align="@Align.End" Width="180px">
+            <div style="display: flex; gap: 0.5rem;">
+                <ConfirmButton aria-label="Reset password"
+                               Title="Reset password"
+                               IconEnd="@(new Icons.Regular.Size16.Key().WithColor("var(--error)"))"
+                               OnClick="@(() => ResetPassword(context))"
+                               Style="margin-right: 8px;"
+                               Disabled="@(context == Session.User)"
+                               Position="ConfirmationPosition.Bottom"/>
+
+                <ConfirmButton aria-label="Delete user"
+                               Title="Delete user"
+                               IconEnd="@(new Icons.Regular.Size16.Delete().WithColor("var(--error)"))"
+                               OnClick="@(() => DeleteUser(context))"
+                               Disabled="@(context == Session.User)"
+                               Position="ConfirmationPosition.Bottom"/>
+            </div>
+        </TemplateColumn>
+    </FluentDataGrid>
+}
+else
+{
+    <p>You are not authorized to view this page.</p>
+}

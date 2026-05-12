@@ -1,0 +1,11 @@
+.view-screen-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.view-screen-content {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+}

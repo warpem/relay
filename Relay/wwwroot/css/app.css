@@ -1,0 +1,52 @@
+@import 'color-icons-fonts.css';
+
+
+html, body {
+    height: 100%;
+}
+
+.card-common {
+    box-shadow: 0 0 6px var(--neutral-stroke-rest);
+    border-radius: 4px;
+    outline: 1px solid var(--neutral-stroke-rest);
+    background-color: var(--neutral-fill-layer-rest);
+    z-index: 0;
+    user-select: none;
+}
+
+.card-common:hover {
+    z-index: 1;
+}
+
+.card-common.selected {
+    box-shadow: 0 0 8px var(--accent-fill-rest);
+    outline: 3px solid var(--accent-fill-rest);
+}
+
+.property-panel {
+    display: flex; 
+    flex-direction: column; 
+    row-gap: 1rem;
+}
+
+.property-item {
+    display: flex;
+    flex-direction: column;
+    flex-wrap: nowrap;
+}
+
+.property-title {
+    font-weight: 600;
+    font-size: 0.75rem;
+    flex-shrink: 0;
+}
+
+.property-value {
+    font-weight: 400;
+    font-size: 0.75rem;
+    flex-shrink: 0;
+}
+
+.tab-h100 fluent-tab-panel {
+    height: 100%;
+}

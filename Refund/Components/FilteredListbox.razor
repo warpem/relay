@@ -1,0 +1,63 @@
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@inherits FluentComponentBase
+@typeparam TValue
+
+<div class="filtered-list-container" style="@($"max-width: {ListWidth}px;")">
+    <FluentTextField @bind-Value="_filterText"
+                     Placeholder="@FilterPlaceholder"
+                     Style="margin-bottom: 0px; border-radius: 0; width: 100%;"
+                     Disabled="@Disabled"
+                     Immediate="true"
+                     Autofocus="true"
+                     AutoComplete="off">
+        <FluentIcon Value="@(new Icons.Regular.Size16.Search())" Slot="end" />
+    </FluentTextField>
+
+    <style>
+        .listbox-height-@(_id) div {
+            max-height: @(ListHeight)px;
+        }
+    </style>
+    
+    <div class="listbox-height-@(_id)">
+        <FluentListbox TOption="@((TValue Value, string Text))" 
+                       Items="@(Options.Where(opt => ShouldShowOption(opt.Text)))"
+                       SelectedOptionChanged="@(v => OnValueChanged(v.Value))"
+                       Multiple="false"
+                       Disabled="@Disabled"
+                       Width="@($"{ListWidth}px")"
+                       Autofocus="false"
+                       Style="border-radius: 0;">
+            <OptionTemplate Context="item">
+                @if (HrefSelector != null)
+                {
+                    <a href="@HrefSelector(item.Value)"
+                       style="text-decoration: none; color: inherit; display: block;"
+                       @onclick:preventDefault
+                       @onclick:stopPropagation
+                       @onclick="@(async args => await OnOptionClicked.InvokeAsync((args, item.Value)))">
+                        @if (OptionTemplate != null)
+                        {
+                            @OptionTemplate(item)
+                        }
+                        else
+                        {
+                            <span class="option-span">@item.Text</span>
+                        }
+                    </a>
+                }
+                else
+                {
+                    @if (OptionTemplate != null)
+                    {
+                        @OptionTemplate(item)
+                    }
+                    else
+                    {
+                        <span class="option-span">@item.Text</span>
+                    }
+                }
+            </OptionTemplate>
+        </FluentListbox>
+    </div>
+</div>

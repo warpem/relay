@@ -1,0 +1,108 @@
+@using System.Globalization
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.FluentUI.AspNetCore.Components
+@using System.Net.Http
+@implements  IDisposable
+@inherits UiFieldViewBase
+
+<div style="display: flex; flex-direction: column; gap: 0.25rem;">
+    @* working around a weird FluentUI bug that doesn't always update the field when the value changes, so brute-forcing it with @key *@
+    <RobustFluentNumberField @key="@(ValueT)"
+                       TValue="@(int?)"
+                       Class="borderless"
+                       Value="@ValueT"
+                       Style="width: 100%"
+                       Placeholder="No value"
+                       Min="@(FieldDescriptionT.Min.ToString(CultureInfo.InvariantCulture))"
+                       Max="@(FieldDescriptionT.Max.ToString(CultureInfo.InvariantCulture))"
+                       Step="1"
+                       ValueChanged="@OnInputChanged"
+                       Disabled="@IsDisabled"/>
+    
+    @if (_isValid && !string.IsNullOrEmpty(_previewUrl))
+    {   
+        <img src="@_previewUrl" alt="EMDB Entry Preview" style="max-height: 128px; max-width: 100%; object-fit: contain;" />
+    }
+</div>
+
+@code {
+    private string _previewUrl;
+    private bool _isValid;
+    private System.Timers.Timer _debounceTimer;
+    private static readonly HttpClient HttpClient = new HttpClient();
+    
+    private UiEmdbEntry FieldDescriptionT => (UiEmdbEntry)FieldDescription ?? null;
+
+    private int? ValueT
+    {
+        get => (int?)Value;
+        set => ValueChanged.InvokeAsync(value);
+    }
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+
+        _debounceTimer = new System.Timers.Timer(500);
+        _debounceTimer.AutoReset = false;
+        _debounceTimer.Elapsed += async (sender, args) =>
+        {
+            await InvokeAsync(CheckEmdbEntry);
+        };
+
+        if (ValueT != null && ValueT.Value > 0)
+            // Check initial value on component init
+            _debounceTimer.Start();
+    }
+
+    private void OnInputChanged(int? value)
+    {
+        ValueT = value;
+
+        // Reset preview state
+        _previewUrl = null;
+        _isValid = false;
+
+        _debounceTimer.Stop();
+        _debounceTimer.Start();
+    }
+
+    private async Task CheckEmdbEntry()
+    {
+        if (ValueT is not > 0)
+        {
+            // Invalid or empty value
+            _previewUrl = null;
+            _isValid = false;
+            StateHasChanged();
+            return;
+        }
+
+        _isValid = false;
+        StateHasChanged();
+
+        string paddedId = ValueT.Value.ToString("D4");
+        _previewUrl = $"https://www.ebi.ac.uk/emdb/images/entry/EMD-{paddedId}/400_{paddedId}.gif";
+
+        try
+        {
+            // Check if entry exists by trying to fetch the preview image
+            var request = new HttpRequestMessage(HttpMethod.Head, _previewUrl);
+            var response = await HttpClient.SendAsync(request);
+            _isValid = response.IsSuccessStatusCode;
+        }
+        catch
+        {
+            _isValid = false;
+        }
+        finally
+        {
+            StateHasChanged();
+        }
+    }
+
+    public void Dispose()
+    {
+        _debounceTimer?.Dispose();
+    }
+}

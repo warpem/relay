@@ -1,0 +1,16 @@
+﻿.slim-text-field {
+    border-bottom: 2px lightblue solid;
+    padding: 0px 2px;
+    position: relative;
+    bottom: -1px;
+}
+
+.slim-text-field:focus-visible {
+    outline: none;
+    background-color: #f0f8ffaa;
+    border-bottom: 2px blue solid;
+}
+
+.slim-text-field.invalid {
+    background-color: lightcoral !important;
+}

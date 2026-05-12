@@ -1,0 +1,43 @@
+.folder-column {
+    overflow-y: auto;
+    border-right: 1px solid #ccc;
+    flex: 0 0 250px; /* Fixed width, do not shrink or grow */
+}
+
+.loading-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100%;
+    flex: 0 0 250px; /* Fixed width, do not shrink or grow */
+}
+
+/* Existing styles for items */
+.item {
+    max-width: 240px;
+    padding: 3px;
+    cursor: pointer;
+    display: flex;
+    overflow: hidden;
+    white-space: nowrap;
+    justify-content: left;
+    align-items: center;
+}
+
+.item.selected {
+    background-color: var(--accent-fill-rest);
+    color: white;
+}
+
+.item.non-selectable {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.item-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: inline-block;
+    margin-left: 4px;
+}

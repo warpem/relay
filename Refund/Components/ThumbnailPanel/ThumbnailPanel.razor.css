@@ -1,0 +1,53 @@
+.thumbnail-panel {
+    display: flex;
+    align-items: center;
+}
+
+.thumbnail-container {
+    overflow-x: hidden;
+    overflow-y: hidden;
+    position: relative;
+    flex: 1; /* Allow the container to take up available space */
+}
+
+.thumbnail-panel:hover .thumbnail-container {
+    overflow-x: auto;
+    scrollbar-width: thin; /* For Firefox */
+}
+
+.thumbnail-container::-webkit-scrollbar {
+    height: 8px;
+}
+
+.thumbnail-container::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.5);
+}
+
+.thumbnail-container::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.status-bar-container {
+    position: relative;
+    width: 100%;
+}
+
+.status-bar {
+    position: absolute;
+    width: 100%;
+    height: 8px;
+}
+
+.status-segment {
+    position: absolute;
+    top: 0;
+    height: 8px;
+    pointer-events: none;
+}
+
+.status-highlight {
+    position: absolute;
+    height: 8px;
+    border: 1px solid black;
+    box-sizing: border-box;
+}

@@ -1,0 +1,37 @@
+﻿@using Refund.Components.Class2DSelection
+
+@if (_job == null)
+{
+    <FluentProgressRing Style="height: 70px; width: 70px;" />
+}
+else
+{
+    <div class="d-flex w-100 justify-content-end position-relative pb-2">
+        <FluentButton Appearance="Appearance.Outline"
+                      OnClick="ClearAll"
+                      Disabled="@(_nClassesSelected == 0)"
+                      Class="job-card-button mr-2">Clear all</FluentButton>
+        <FluentButton Appearance="Appearance.Outline"
+                      OnClick="SelectAll"
+                      Disabled="@(_nClassesSelected == _job.NClasses)"
+                      Class="job-card-button mr-2">Select all</FluentButton>
+        <FluentButton Class="job-card-button job-card-button-accent mr-8"
+                      OnClick="@SaveSelectionState"
+                      Disabled="@(_nClassesSelected == 0)"
+                      Appearance="Appearance.Accent">Export selection from final iteration</FluentButton>
+    </div>
+
+    <Class2DSelection @ref="_class2DSelectionComponent"
+                      ClassAtlasImagePath=@(_job.VisClassAtlas(_expandedViewService.CurrentVisIteration))
+                      NImagesInFile="@_job.NClasses"
+                      ClassPositionsInAtlas=@_classNumbers
+                      ClassIds=@_classIdx
+                      ClassResolutions=@_classResolutions
+                      ClassSizes=@_classSizes
+                      RenderedImageSidelengthPx="128"
+                      SpacingPx="6"
+                      BorderColorUnselected="transparent"
+                      BorderColorSelected="#fd7e14"
+                      BorderWidthPx="4"
+                      OnSelectionChanged="@SelectionChanged"/>
+}

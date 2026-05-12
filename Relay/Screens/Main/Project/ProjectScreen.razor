@@ -1,0 +1,17 @@
+@using Refund.DataModel.ReadOnly
+@using Relay.Screens.Main.Base
+
+@inherits ListingScreenLogic<ReadOnlySpace>
+
+<ListingScreen TItem="ReadOnlySpace"
+               Title="@GetTitle()"
+               CreateButtonText="@GetCreateButtonText()"
+               Items="@GetItems()"
+               OnCreateClick="@ShowCreateDialogAsync">
+    <ItemTemplate>
+        <SpaceCard @key="context.QualifiedName"
+                  Item="context"
+                  IsSelected="@(Selection.IsSelected(GetSelectionKey(context)))"
+                  OnClick="@(async args => await HandleItemClicked(context, args))" />
+    </ItemTemplate>
+</ListingScreen>

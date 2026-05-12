@@ -1,0 +1,33 @@
+﻿<div class="recent-activity">
+<style>
+    fluent-tooltip::part(tooltip) {
+        background-color: rgba(66,66,66,1);
+        color: white;
+    }
+</style>
+@{
+    var idPostfix = 0;
+
+    @for(var week = _startDate; week < DateTime.Now; week = week.AddDays(7))
+    {
+        <div>
+            @for(var i = 0; i < System.Globalization.DateTimeFormatInfo.CurrentInfo.DayNames.Length; i++)
+            {
+                var currentDate = week.AddDays(i);
+                var id = $"week-day-{idPostfix++}";
+                var currentMonthColor = DateTime.Now.Month == currentDate.Month ? Color.Accent : Color.Disabled;
+
+                <FluentIcon Id="@id"
+                            Value="@RecentActivityUtils.GetFluentIcon(_activityLevel, currentDate)"
+                            Color="@(currentMonthColor)"/>
+
+                <FluentTooltip Anchor="@id" Position="TooltipPosition.Top" >
+                    <ChildContent>
+                        @TooltipHtmlContent(currentDate, Jobs)
+                    </ChildContent>
+                </FluentTooltip>
+            }
+        </div>
+    }
+}
+</div>

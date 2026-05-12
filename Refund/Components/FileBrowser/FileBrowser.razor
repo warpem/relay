@@ -1,0 +1,158 @@
+@using Microsoft.FluentUI.AspNetCore.Components
+
+<div class="file-browser"
+     style="@($"height: {Height}px;")">
+
+    <FluentInputFile @ref="@fileUploader"
+                     AnchorId="buttonUpload"
+                     DragDropZoneVisible="false"
+                     Mode="InputFileMode.Buffer"
+                     Multiple="true"
+                     MaximumFileSize="@((long)1 << 31)"
+                     BufferSize="@(1 << 20)"
+                     OnProgressChange="@OnFileUploadProgressChange"
+                     OnCompleted="@OnFileUploadCompleted" />
+
+    <!-- Address Bar -->
+    <div class="address-bar">
+        <span class="non-editable-part">@TopLevelFolderLabel</span>
+        <FluentTextField Value="@EditableAddress"
+                         Placeholder="Enter path"
+                         ValueChanged="@HandleAddressBarKeyDown"
+                         Style="flex: 1;" />
+    </div>
+
+    <!-- Top Toolbar -->
+    <div class="toolbar">
+
+        <div class="toolbar-left">
+            <FluentButton id="buttonCreateFolder" Title="Create folder" IconEnd="@IconCreateFolder" OnClick="CreateFolderAsync" Disabled="@(!IsCurrentFolderWritable)" />
+            <FluentButton id="buttonUpload" Title="Upload file" Style="margin-left: 4px;" IconEnd="@IconUploadFile" OnClick="StartFileUpload" Disabled="@(!IsCurrentFolderWritable || filesBeingUploaded.Any())" />
+            <FluentButton id="buttonRename" Title="Rename" Style="margin-left: 10px;" IconEnd="@IconRename" OnClick="RenameItem" Disabled="@(!CanRenameItem)" />
+            <FluentButton id="buttonDelete" Title="Delete" Style="margin-left: 4px;" IconEnd="@IconDelete" OnClick="ShowDeleteConfirmation" Disabled="@(!CanDeleteItem)" />
+        </div>
+
+        <div class="toolbar-right">
+            <ToggleButton @bind-IsToggled="ShowHiddenFiles" Icon="@IconShowHiddenFiles"
+                          Title="Show hidden files" Style="margin-right: 10px;" />
+
+            <FluentSelect Items="@SortOptions"
+                          Multiple="false"
+                          Width="100px"
+                          OptionText="@(i => i.Text)"
+                          OptionValue="@(i => i.Value)"
+                          OptionSelected="@(i => i.Selected)"
+                          SelectedOption="@SelectedSortOption"
+                          SelectedOptionChanged="@(EventCallback.Factory.Create<Option<string>?>(this, OnSortOptionChanged))" />
+            <FluentButton Title="Switch sort direction" OnClick="ToggleSortDirection" IconEnd="@IconSort" />
+        </div>
+    </div>
+
+    <!-- Columns Container -->
+    <div class="columns-container" @ref="columnsContainer">
+        @for (int i = 0; i < FolderLevels.Count; i++)
+        {
+            var level = FolderLevels[i];
+            var isLastColumn = i == FolderLevels.Count - 1;
+            var showFilesInThisColumn = ShowFilesInBrowser || (SelectionMode == SelectionMode.SingleFolder && isLastColumn);
+            var filesAreSelectable = SelectionMode != SelectionMode.SingleFolder;
+
+            <FolderColumn Path="@level.Path"
+                          LevelIndex="@i"
+                          OnItemSelected="@OnItemSelectedAsync"
+                          SelectedItem="@level.SelectedItem"
+                          SelectedItems="@SelectedItems"
+                          ShowFiles="@showFilesInThisColumn"
+                          FilesAreSelectable="@filesAreSelectable"
+                          ShowFolders="true"
+                          ShowHiddenItems="@ShowHiddenFiles"
+                          AllowedExtensions="@AllowedExtensions"
+                          SortOption="@SortOption"
+                          IsAscending="@SortIsAscending"
+                          @key="@($"{level.Path}, {level.RefreshTrigger}")" />
+        }
+        @if (SelectedItems.Any() && SelectedItems.Any(item => !item.IsDirectory))
+        {
+            <DetailsColumn Items="SelectedItems.Where(item => !item.IsDirectory).ToList()" />
+        }
+    </div>
+
+    @if (SelectionMode == SelectionMode.SaveFile)
+    {
+        <div class="save-file-input">
+            <FluentTextField @bind-Value="SaveFileName"
+                             Placeholder="Enter file name"
+                             Style="width: 100%;"
+                             Immediate="true" />
+            @if (!string.IsNullOrEmpty(SaveFileNameError))
+            {
+                <div class="error-message">@SaveFileNameError</div>
+            }
+        </div>
+    }
+
+    <!-- Bottom Toolbar -->
+    <div class="bottom-toolbar">
+        @if (ShowSelectionButtons)
+        {
+            @if (ShowCancelButton)
+            {
+                <FluentButton OnClick="CancelSelection">Cancel</FluentButton>
+            }
+            <FluentButton Style="margin-left: 8px;"
+                          Appearance="Appearance.Accent"
+                          OnClick="ConfirmSelection"
+                          Disabled="@IsSelectButtonDisabled">
+                @(SelectionMode == SelectionMode.SaveFile ? "Save" : "Select")
+            </FluentButton>
+        }
+    </div>
+
+    <!-- Rename Popover -->
+    <FluentPopover Style="width: 250px;" AnchorId="buttonRename" @bind-Open="IsRenameModalVisible" AutoFocus="true">
+        <Body>
+        <FluentTextField Style="width: 100%;" @bind-Value="NewName" Placeholder="Enter new name" />
+        <div style="display: flex;">
+            <FluentButton OnClick="ConfirmRenameAsync" Appearance="Appearance.Accent">Rename</FluentButton>
+            <FluentButton Style="margin-left: 10px;" OnClick="() => IsRenameModalVisible = false">Cancel</FluentButton>
+        </div>
+        </Body>
+    </FluentPopover>
+
+    <!-- Create Folder Popover -->
+    <FluentPopover Style="width: 250px;" AnchorId="buttonCreateFolder" @bind-Open="IsCreateFolderModalVisible" AutoFocus="true">
+        <Body>
+        <FluentTextField Style="width: 100%;" @bind-Value="NewFolderName" Placeholder="Enter folder name" />
+        <div style="display: flex;">
+            <FluentButton OnClick="ConfirmCreateFolderAsync" Appearance="Appearance.Accent">Create</FluentButton>
+            <FluentButton Style="margin-left: 10px;" OnClick="() => IsCreateFolderModalVisible = false">Cancel</FluentButton>
+        </div>
+        </Body>
+    </FluentPopover>
+
+    <!-- Delete Confirmation Popover -->
+    <FluentPopover Style="width: 250px;" AnchorId="buttonDelete" @bind-Open="IsDeleteConfirmationVisible" AutoFocus="true">
+        <Body>
+        <h4 style="margin-bottom: 0.25rem">Are you sure?</h4>
+        <div style="margin-bottom: 10px;">
+            @if (SelectedItems.Any())
+            {
+                @foreach (var item in SelectedItems)
+                {
+                    @item.Name
+
+                    <br />
+                }
+            }
+            else if (FolderLevels.Count > 1)
+            {
+                @FolderLevels.Last().Path
+            }
+        </div>
+        <div style="display: flex;">
+            <FluentButton OnClick="ConfirmDeleteAsync" Appearance="Appearance.Accent">Delete</FluentButton>
+            <FluentButton Style="margin-left: 10px;" OnClick="() => IsDeleteConfirmationVisible = false">Cancel</FluentButton>
+        </div>
+        </Body>
+    </FluentPopover>
+</div>

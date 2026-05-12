@@ -1,0 +1,82 @@
+@using Refund.Components.FileBrowser
+@using Relay.Emoji
+@using Refund.Components.Emoji
+<EditForm OnValidSubmit="@OnFormSubmit" EditContext="FormContext">
+    <DataAnnotationsValidator />
+
+    <FluentDialogBody>
+        @foreach (var message in FormContext.GetValidationMessages())
+        {
+            <span>@message</span>
+        }
+        <div class="form-content">
+            <div style="width: 100%; display: flex; align-items: center; justify-content: center;">
+                <EmojiSelectionButton @bind-Glyph="Model.HeroImage"
+                                      Size="64"
+                                      ShowBorder="true"
+                                      HorizontalPosition="HorizontalPosition.Center"
+                                      VerticalPosition="VerticalPosition.Bottom"
+                                      Disabled="@Model.IsReconnectMode"/>
+            </div>
+
+            <div class="form-item">
+                <FluentTextField @bind-Value="Model.Name"
+                                 Label="Space name"
+                                 Required="true"
+                                 Immediate="true"
+                                 Autofocus="true"
+                                 AutoComplete="off"
+                                 Disabled="@Model.IsReconnectMode"/>
+                <FluentValidationMessage For="@(() => Model.Name)"/>
+
+                @if (!string.IsNullOrEmpty(ErrorMessage))
+                {
+                    <div class="error-message">@ErrorMessage</div>
+                }
+            </div>
+            <div class="form-item">
+                <FluentTextField @bind-Value="Model.Notes"
+                                 Label="Notes"
+                                 Immediate="true"
+                                 AutoComplete="off"
+                                 Disabled="@Model.IsReconnectMode"/>
+                <FluentValidationMessage For="@(() => Model.Notes)"/>
+            </div>
+
+            <div class="form-item">
+                <span>Space directory</span>
+                <FileBrowser SelectionMode="SelectionMode.SingleFolder"
+                             ShowSelectionButtons="false"
+                             Height="400"
+                             CurrentFolder="@Model.Directory"
+                             CurrentFolderChanged="@(async (val) =>
+                                                   {
+                                                       Model.Directory = val;
+                                                       StateHasChanged();
+                                                   })"
+                             CurrentFolderExpression="@(() => Model.Directory)"/>
+                <FluentValidationMessage For="@(() => Model.Directory)"/>
+
+                @if (Model.IsReconnectMode)
+                {
+                    <div class="reconnect-notice">
+                        <span>Found existing space data in this directory. You can reconnect it to the current project.</span>
+                    </div>
+                }
+            </div>
+        </div>
+    </FluentDialogBody>
+
+    <FluentDialogFooter>
+        <FluentButton Type="ButtonType.Button"
+                      Appearance="Appearance.Outline"
+                      OnClick="OnCancelClick">
+            Cancel
+        </FluentButton>
+        <FluentButton Type="ButtonType.Submit"
+                      Appearance="Appearance.Accent"
+                      Disabled="@FormContext.GetValidationMessages().Any()">
+            @(Model.IsReconnectMode ? "Reconnect" : "Create")
+        </FluentButton>
+    </FluentDialogFooter>
+</EditForm>

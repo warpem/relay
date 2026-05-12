@@ -1,0 +1,109 @@
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+
+<div class="job-parameter-display">
+    <FluentAccordion Style="row-gap: 1rem;">
+        @if (!HideFavorites && Job != null && Refund.DataModel.Job.TypeParameters[Job.GetOriginalType()].Any(p => IsFavorite(p.Name) &&
+                                                                                                IsPropertyVisible(p)))
+        {
+            <FluentAccordionItem Class="transparent" Expanded="true">
+                <HeadingTemplate>
+                    <div style="display: flex; flex-wrap: nowrap; align-items: center; font-weight: bold;">
+                        <FluentLabel Typo="Typography.H6">Favorites&nbsp;</FluentLabel>
+                        <FluentIcon Value="@(new Icons.Filled.Size20.Heart())" />
+                    </div>
+                </HeadingTemplate>
+                <ChildContent>
+                    <FluentStack Orientation="Orientation.Vertical" VerticalGap="16" Style="width: 100%; margin-bottom: 0px">
+                        @foreach (var property in Refund.DataModel.Job.TypeParameters[Job.GetOriginalType()].Where(p => IsFavorite(p.Name)))
+                        {
+                            @if (IsPropertyVisible(property))
+                            {
+                                <UiFieldView Property="@property" 
+                                             ErrorMessage="@GetError(property.Name)" 
+                                             Job="Job" 
+                                             IsDisabled="@IsDisabled"
+                                             ValueChanged="HandleParameterChanged">
+                                    <FavoriteFragment>
+                                        @if (!IsDisabled)
+                                        {
+                                            var isFavorite = IsFavorite(property.Name);
+                                            <FluentButton BackgroundColor="transparent" Color="transparent"
+                                                          Style="height: 16px;"
+                                                          Title="@(isFavorite ? "Remove from favorites" : "Add to favorites")"
+                                                          OnClick="() => HandleFavoriteToggle(property.Name)">
+                                                <FluentIcon Value="@(isFavorite ? iconHeartFilled : iconHeartRegular)" />
+                                            </FluentButton>
+                                        }
+                                    </FavoriteFragment>
+                                </UiFieldView>
+                            }
+                        }
+                    </FluentStack>
+                </ChildContent>
+            </FluentAccordionItem>
+        }
+
+        @foreach (var category in Refund.DataModel.Job.TypeParameterCategories[Job.GetOriginalType()])
+        {
+            <FluentAccordionItem Class="transparent" 
+                                 Expanded="@(!IsGroupCollapsed(category.Key))" 
+                                 ExpandedChanged="@(value => HandleGroupExpandedChanged(category.Key, value))">
+                <HeadingTemplate>
+                    <FluentLabel Typo="Typography.H6" Style="font-weight: bold;">
+                        @category.Key
+                    </FluentLabel>
+                </HeadingTemplate>
+                <ChildContent>
+                    <FluentStack Orientation="Orientation.Vertical" VerticalGap="16" Style="width: 100%; margin-bottom: 0px">
+                        @foreach (var property in category.Value)
+                        {
+                            @if ((ShowAdvanced || !Refund.DataModel.Job.TypeAdvancedParameters[Job.GetOriginalType()].Contains(property)) && 
+                                 IsPropertyVisible(property))
+                            {
+                                    var _propExposed = ShowExposureToggle && (IsPropertyExposed?.Invoke(property) == true);
+                                    var _capturedProp = property;
+                                <UiFieldView Property="property"
+                                             ErrorMessage="@GetError(property.Name)"
+                                             Job="Job"
+                                             IsDisabled="@IsDisabled"
+                                             HideLabel="@_propExposed"
+                                             ValueChanged="HandleParameterChanged">
+                                    <LabelExtra>
+                                        @if (_propExposed && GetExposedPropertyName != null)
+                                        {
+                                            <FluentTextField Value="@GetExposedPropertyName(_capturedProp)"
+                                                             ValueChanged="@(v => OnExposedPropertyNameChanged.InvokeAsync((_capturedProp, v)))"
+                                                             Placeholder="Custom name"
+                                                             Style="width: 100%; font-size: 0.8rem;" />
+                                        }
+                                    </LabelExtra>
+                                    <FavoriteFragment>
+                                        @if (ShowExposureToggle)
+                                        {
+                                            <FluentButton BackgroundColor="transparent" Color="transparent"
+                                                          Style="height: 16px;"
+                                                          Title="@(_propExposed ? "Hide from instance editor" : "Expose in instance editor")"
+                                                          OnClick="() => OnExposureToggled.InvokeAsync((property, !_propExposed))">
+                                                <FluentIcon Value="@(_propExposed ? iconExposedFilled : iconExposedRegular)" />
+                                            </FluentButton>
+                                        }
+                                        else if (!IsDisabled && !HideFavorites)
+                                        {
+                                            var isFavorite = IsFavorite(property.Name);
+                                            <FluentButton BackgroundColor="transparent" Color="transparent"
+                                                          Style="height: 16px;"
+                                                          Title="@(isFavorite ? "Remove from favorites" : "Add to favorites")"
+                                                          OnClick="() => HandleFavoriteToggle(property.Name)">
+                                                <FluentIcon Value="@(isFavorite ? iconHeartFilled : iconHeartRegular)" />
+                                            </FluentButton>
+                                        }
+                                    </FavoriteFragment>
+                                </UiFieldView>
+                            }
+                        }
+                    </FluentStack>
+                </ChildContent>
+            </FluentAccordionItem>
+        }
+    </FluentAccordion>
+</div>

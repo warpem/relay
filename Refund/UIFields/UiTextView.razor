@@ -1,0 +1,21 @@
+﻿@namespace Refund.UIFields
+@inherits UiFieldViewBase
+
+<FluentTextArea Class="borderless"
+                Rows="12"
+                @bind-Value="@ValueT"
+                Style="width: 100%"
+                Immediate="true"
+                Disabled="@IsDisabled">
+</FluentTextArea>
+
+@code
+{
+    private UiText FieldDescriptionT => (UiText)FieldDescription ?? null;
+
+    private string ValueT
+    {
+        get => (string)Value;
+        set => ValueChanged.InvokeAsync(value);
+    }
+}

@@ -1,0 +1,9 @@
+.job-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 6px 8px;
+    font-size: 0.75rem;
+}
+
+

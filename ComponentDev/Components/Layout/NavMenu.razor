@@ -1,0 +1,25 @@
+﻿@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@rendermode InteractiveServer
+
+<div class="navmenu">
+    <input type="checkbox" title="Menu expand/collapse toggle" id="navmenu-toggle" class="navmenu-icon" />
+    <label for="navmenu-toggle" class="navmenu-icon"><FluentIcon Value="@(new Icons.Regular.Size20.Navigation())" Color="Color.Fill" /></label>
+    <nav class="sitenav" aria-labelledby="main-menu">
+        <FluentNavMenu Id="main-menu" Collapsible="true" Width="250" Title="Navigation menu" @bind-Expanded="expanded" CustomToggle="true">
+            <FluentNavLink Href="/FileBrowser" Match="NavLinkMatch.All">FileBrowser</FluentNavLink>
+            <FluentNavLink Href="/FileBrowserDialog" Match="NavLinkMatch.All">FileBrowserDialog</FluentNavLink>
+            <FluentNavLink Href="/ComboButton" Match="NavLinkMatch.All">ComboButton</FluentNavLink>
+            <FluentNavLink Href="/IsosurfaceViewer" Match="NavLinkMatch.All">IsosurfaceViewer</FluentNavLink>
+            <FluentNavLink Href="/TomogramViewer" Match="NavLinkMatch.All">TomogramViewer</FluentNavLink>
+            <FluentNavLink Href="/TomogramViewerJs" Match="NavLinkMatch.All">TomogramViewerJs</FluentNavLink>
+            <FluentNavLink Href="/pluginstuff" Match="NavLinkMatch.All">Plugin Stuff</FluentNavLink>
+            <FluentNavLink Href="/emoji" Match="NavLinkMatch.All">Emoji</FluentNavLink>
+            <FluentNavLink Href="/scatterplot" Match="NavLinkMatch.All">SingleAxisScatter</FluentNavLink>
+            <FluentNavLink Href="/histogram" Match="NavLinkMatch.All">Histogram</FluentNavLink>
+        </FluentNavMenu>
+    </nav>
+</div>
+
+@code {
+    private bool expanded = true;
+}

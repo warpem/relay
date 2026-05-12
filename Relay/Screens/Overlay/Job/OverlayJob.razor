@@ -1,0 +1,46 @@
+@using Refund.Components.Jobs.ExpandedView
+@using Refund.DataModel
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+
+<div style="position: relative; 
+            width: 100%; height: 100%; 
+            display: flex; flex-direction: column;">
+    
+    <div style="display: flex; gap: 2rem; align-items: center;">
+        <div style="height: 40px; padding-left: calc(0.75rem + 40px); padding-top: 0.5rem; flex-shrink: 0;">
+            <h4>
+                @Session.Job.QualifiedName
+            </h4>
+        </div>
+        
+        @if (Session.Job.IsInteractive && 
+             Session.Job.Status == JobStatus.Running && 
+             !Session.Job.IsInteractiveFinished)
+        {
+            <FluentButton IconStart="@(new Icons.Regular.Size20.FlagCheckered())"
+                          Appearance="Appearance.Accent"
+                          Loading="@(Session.Job.IsInteractiveFinished)"
+                          OnClick="HandleFinishInteractiveClicked">
+                Finish interactive job
+            </FluentButton>
+        }
+    </div>
+    
+    <div style="position: absolute; top: 0px; right: 0px;">
+        <FluentButton IconEnd="@(new Icons.Regular.Size24.DismissSquare())"
+                      BackgroundColor="transparent"
+                      OnClick="@(_ => Session.NavigateToAsync(new()
+                               {
+                                   ProjectId = Session.ProjectId,
+                                   SpaceId = Session.SpaceId,
+                                   ViewId = Session.ViewId,
+                                   FolderId = Session.FolderId,
+                                   FactoryInstanceId = Session.FactoryInstanceId,
+                                   JobId = null,
+                                   Overlay = Session.CurrentOverlay
+                               }))">
+        </FluentButton>
+    </div>
+
+    <ExpandedJobView/>
+</div>

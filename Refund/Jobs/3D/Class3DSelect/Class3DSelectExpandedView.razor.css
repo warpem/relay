@@ -1,0 +1,36 @@
+.main-frame {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex-shrink: 0;
+    border: 2px solid transparent;
+    border-radius: 4px;
+    background: transparent;
+}
+
+.font-bold-500 {
+    font-weight: 500;
+}
+
+.font-bold-800 {
+    font-weight: 800;
+}
+
+.scroll-container {
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+}
+
+.scroll-container::-webkit-scrollbar {
+    height: 6px;
+}
+
+.scroll-container::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.scroll-container::-webkit-scrollbar-thumb {
+    background-color: rgba(0, 0, 0, 0.2);
+    border-radius: 3px;
+}

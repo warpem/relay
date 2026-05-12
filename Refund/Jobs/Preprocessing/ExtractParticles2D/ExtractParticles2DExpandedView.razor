@@ -1,0 +1,34 @@
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Refund.Components
+@using Refund.Components.ThumbnailPanel
+@using Refund.Components.MicrographViewer
+
+@if (_job == null)
+{
+    <FluentProgressRing Style="height: 70px; width: 70px;"/>
+}
+else if (_allThumbnails != null && _allThumbnails.Any())
+{
+    <div class="container">
+        <ThumbnailPanel 
+            Thumbnails="_allThumbnails"
+            SelectedThumbnailChanged="SelectedThumbnailChanged"
+            ShowStatusBar="true"
+            ThumbnailSize="128" />
+
+        @if (_selectedThumbnail != null)
+        {
+            <div class="viewer-container">
+                <MicrographViewer Width="768" 
+                                  Height="768"
+                                  MicrographPath="@(_job.ResAverageFile(_selectedName))"
+                                  ThumbnailPath="@(_job.VisThumbnail(_selectedName))"
+                                  ParticleStarPath="@(_job.ResParticlesStar(_selectedName))"
+                                  CanEditMask="false"
+                                  DefaultParticleDiameter="(double)_job.Diameter"
+                                  DefaultParticleBoxSize="(double)_job.BoxSize"
+                                  CanEditParticles="false" />
+            </div>
+        }
+    </div>
+}

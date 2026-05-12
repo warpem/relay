@@ -1,0 +1,58 @@
+@namespace Refund.UIFields
+@using Warp.Tools
+@inherits UiFieldViewBase
+
+<FluentStack>
+    <RobustFluentNumberField @bind-Value="@ValueXT" 
+                       Style="width: 33%"
+                       Class="borderless"
+                       Placeholder="No value"
+                       Min="@(FieldDescriptionT.Min.ToString())"
+                       Max="@(FieldDescriptionT.Max.ToString())"
+                       Step="@(FieldDescriptionT.StepSize.ToString())"
+                       Immediate="true"
+                       Disabled="@IsDisabled" />
+    
+    <RobustFluentNumberField @bind-Value="@ValueYT" 
+                       Style="width: 33%"
+                       Class="borderless"
+                       Placeholder="No value"
+                       Min="@(FieldDescriptionT.Min.ToString())"
+                       Max="@(FieldDescriptionT.Max.ToString())"
+                       Step="@(FieldDescriptionT.StepSize.ToString())"
+                       Immediate="true" 
+                       Disabled="@IsDisabled" />
+    
+    <RobustFluentNumberField @bind-Value="@ValueZT" 
+                       Style="width: 34%"
+                       Class="borderless"
+                       Placeholder="No value"
+                       Min="@(FieldDescriptionT.Min.ToString())"
+                       Max="@(FieldDescriptionT.Max.ToString())"
+                       Step="@(FieldDescriptionT.StepSize.ToString())"
+                       Immediate="true" 
+                       Disabled="@IsDisabled" />
+</FluentStack>
+
+@code
+{
+    private UiInt3 FieldDescriptionT => (UiInt3)FieldDescription ?? null;
+
+    private int ValueXT
+    {
+        get => ((int3)Value).X;
+        set => ValueChanged.InvokeAsync(new int3(value, ((int3)Value).Y, ((int3)Value).Z));
+    }
+
+    private int ValueYT
+    {
+        get => ((int3)Value).Y;
+        set => ValueChanged.InvokeAsync(new int3(((int3)Value).X, value, ((int3)Value).Z));
+    }
+
+    private int ValueZT
+    {
+        get => ((int3)Value).Z;
+        set => ValueChanged.InvokeAsync(new int3(((int3)Value).X, ((int3)Value).Y, value));
+    }
+}

@@ -1,0 +1,57 @@
+@using Refund.Components.ThumbnailPanel
+@using Refund.Components.TomogramViewerJs
+@using Refund.DataModel
+@using Microsoft.FluentUI.AspNetCore.Components
+
+@if (_job == null)
+{
+    <span>No job to display</span>
+}
+else if (_job.Status != JobStatus.Running && _job.Status != JobStatus.Finished)
+{
+    <span>The job isn't running or hasn't finished successfully</span>
+}
+else if (_allTomogramThumbnails != null && _allTomogramThumbnails.Any())
+{
+    <div class="container">
+        <div class="toolbar">
+            <span class="counter">@_selectedCount / @_totalCount selected</span>
+            <FluentButton Appearance="Appearance.Outline"
+                          Disabled="IsEditingDisabled"
+                          OnClick="SelectAll">
+                Select all
+            </FluentButton>
+            <FluentButton Appearance="Appearance.Outline"
+                          Disabled="IsEditingDisabled"
+                          OnClick="DeselectAll">
+                Deselect all
+            </FluentButton>
+        </div>
+
+        <div class="thumbnail-container">
+            <ThumbnailPanel @ref="_tomogramThumbnailPanel"
+                           Thumbnails="_allTomogramThumbnails"
+                           SelectedThumbnail="_selectedTomogramThumbnail"
+                           SelectedThumbnailChanged="SelectedTomogramThumbnailChanged"
+                           CheckMode="CheckMode.Binary"
+                           ThumbnailCheckChanged="ThumbnailCheckChanged"
+                           ShowStatusBar="true"
+                           ThumbnailSize="128" />
+        </div>
+
+        <div class="tomogram-viewer-container">
+            @if (_selectedTomogramPath != null)
+            {
+                <TomogramViewerJs TomogramPath="@_selectedTomogramPath"
+                                  MinWidth="512"
+                                  MinHeight="512" />
+            }
+            else
+            {
+                <div class="no-selection-message">
+                    <span>Select a tomogram to view</span>
+                </div>
+            }
+        </div>
+    </div>
+}

@@ -1,0 +1,120 @@
+.scatter-container {
+    display: flex;
+    width: 100%;
+    height: 100%;
+}
+
+/* Left side: y-axis labels + histogram */
+.y-axis-column {
+    width: 24px;
+    position: relative;
+    flex: 0 0 auto;
+}
+
+.axis-labels {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    right: 0;
+}
+
+.axis-label {
+    position: absolute;
+    right: 4px;
+    line-height: 10px;
+    font-size: 10px;
+    color: var(--text-secondary);
+}
+.axis-label.top {
+    top: 0;
+}
+.axis-label.center {
+    top: 50%;
+    transform: translateY(-50%);
+}
+.axis-label.bottom {
+    bottom: 0;
+}
+
+.histogram {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 100%;
+    height: 100%;
+}
+
+/* The main scroller for the plot */
+.plot-area {
+    flex: 1;
+    position: relative;
+    overflow: hidden; /* Hide scrollbars as we'll use mouse position to control scroll */
+}
+
+/* Container for canvas + overlays */
+.canvas-container {
+    position: relative;
+    width: 100%;
+    height: 100%;
+}
+
+/* The highlight band for RangeHighlightMin..RangeHighlightMax */
+.range-highlight {
+    position: absolute;
+    left: 0;
+    width: 100%;
+    background-color: var(--highlight-bg);
+    opacity: 0.08;
+    pointer-events: none;
+    z-index: 2;
+}
+
+.axis-line {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background-color: var(--text-secondary);
+    opacity: 0.3;
+    pointer-events: none;
+    z-index: 3;
+}
+.axis-line.top {
+    top: 0;
+}
+.axis-line.center {
+    top: 50%;
+    transform: translateY(-50%);
+}
+.axis-line.bottom {
+    bottom: 0;
+}
+
+canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 1;
+}
+
+.highlight-circle {
+    display: none;
+    position: absolute;
+    background: transparent;
+    border-radius: 50%;
+    border: 2px solid var(--highlight-border);
+    pointer-events: none;
+    z-index: 4;
+}
+
+.temp-highlight-circle {
+    display: block; /* Temp circles are always visible once created */
+}
+
+.tooltip {
+    display: none;
+    position: absolute;
+    z-index: 5;
+    pointer-events: none;
+}

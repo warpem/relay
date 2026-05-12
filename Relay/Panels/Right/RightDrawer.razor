@@ -1,0 +1,137 @@
+@using Refund.DataModel
+@using Refund.DataModel.ReadOnly
+@using Refund.Services
+@using Refund.Services.Core.DataManager
+@using Refund.Services.Core.Session
+@using Relay.Panels.Right.JobEditor
+@using Relay.Panels.Right.FactoryEditor
+
+@if (JobEditor.IsActive)
+{
+    <JobEditor />
+}
+else if (FactoryEditor.IsActive)
+{
+    <FactoryEditor />
+}
+else
+{
+    @switch (Session.CurrentMain)
+    {
+        case MainScreenType.Home:
+            @if (Selection.SelectedItems.Any())
+            {
+                <ProjectProperties @key="@("ProjectProperties")"
+                                   Projects="DataManager.GetUserProjects(Session.User).
+                                   Where(p => Selection.IsSelected(SelectionKey.ForProject(p.Id)))"/>
+            }
+            else
+            {
+                <HomeProperties @key="@("HomeProperties")"/>
+            }
+
+            break;
+
+        case MainScreenType.Project:
+            @if (Selection.SelectedItems.Any())
+            {
+                <SpaceProperties @key="@("SpaceProperties")"
+                                 Spaces="Session.Project.Spaces.Where(s => Selection.IsSelected(SelectionKey.ForSpace(s.Id)))"/>
+            }
+            else
+            {
+                <ProjectProperties @key="@("ProjectProperties")"
+                                   Projects="@([Session.Project])" />
+            }
+
+            break;
+
+        case MainScreenType.Space:
+            @if (Selection.IdsOfType(ItemType.FactoryDefinition).Any())
+            {
+                var selectedDefIds = Selection.IdsOfType(ItemType.FactoryDefinition).ToHashSet();
+                var selectedDefs = Session.Space?.FactoryDefinitions.Where(d => selectedDefIds.Contains(d.Id));
+                @if (selectedDefs?.Any() == true)
+                {
+                    <FactoryDefinitionProperties @key="@("FactoryDefinitionProperties")"
+                                                  Definitions="selectedDefs"
+                                                  IsLocked="selectedDefs.Count() == 1 && Session.Space?.FactoryInstances.Any(i => i.DefinitionId == selectedDefs.First().Id) == true" />
+                }
+            }
+            else if (Selection.SelectedItems.Any())
+            {
+                <ViewProperties @key="@("ViewProperties")"
+                                Views="Session.Space.Views.Where(v => Selection.IsSelected(SelectionKey.ForView(v.Id)))"/>
+            }
+            else
+            {
+                <SpaceProperties @key="@("SpaceProperties")"
+                                 Spaces="@([Session.Space])" />
+            }
+
+            break;
+
+        case MainScreenType.View:
+            @if (Session.Job != null)
+            {
+                <JobProperties @key="@("JobProperties")"
+                               Jobs="@([Session.Job])" />
+            }
+            else if (Selection.SelectedItems.Any())
+            {
+                var selectedFolderIds = Selection.IdsOfType(ItemType.Folder).ToList();
+                @if (selectedFolderIds.Any())
+                {
+                    var folder = Session.View?.FindFolder(selectedFolderIds[0]);
+                    @if (folder != null)
+                    {
+                        <FolderProperties @key="@("FolderProperties")"
+                                          Folder="folder" />
+                    }
+                }
+                else if (Selection.IdsOfType(ItemType.FactoryInstance).Any())
+                {
+                    var fiId = Selection.IdsOfType(ItemType.FactoryInstance).First();
+                    var fi = Session.View?.FindFactoryInstance(fiId);
+                    @if (fi != null)
+                    {
+                        <FactoryInstanceProperties @key="@("FactoryInstanceProperties")"
+                                                   FactoryInstance="fi" />
+                    }
+                }
+                else
+                {
+                    <JobProperties @key="@("JobProperties")"
+                                   Jobs="Session.Space.Jobs.Where(j => Selection.IsSelected(SelectionKey.ForJob(j.Id)))"/>
+                }
+            }
+            else if (Session.FactoryInstance != null)
+            {
+                <FactoryInstanceProperties @key="@("FactoryInstanceProperties")"
+                                            FactoryInstance="Session.FactoryInstance" />
+            }
+            else if (Session.Folder != null)
+            {
+                <FolderProperties @key="@("FolderProperties")"
+                                  Folder="Session.Folder" />
+            }
+            else
+            {
+                <ViewProperties @key="@("ViewProperties")"
+                                Views="@([Session.View])" />
+            }
+
+            break;
+
+        case MainScreenType.FactoryBuilder:
+            @* In builder mode, JobEditor shows when a sub-job is selected.
+               Otherwise show factory definition properties. *@
+            @if (Session.FactoryDefinition != null)
+            {
+                <FactoryDefinitionProperties @key="@("FactoryDefinitionProperties")"
+                                              Definitions="@([Session.FactoryDefinition])"
+                                              IsLocked="Session.Space?.FactoryInstances.Any(i => i.DefinitionId == Session.FactoryDefinition.Id) == true" />
+            }
+            break;
+    }
+}

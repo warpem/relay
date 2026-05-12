@@ -1,0 +1,20 @@
+﻿@namespace Refund.UIFields
+@inherits UiFieldViewBase
+
+<FluentTextField Class="borderless" 
+                 @bind-Value="@ValueT"
+                 Style="width: 100%"
+                 Placeholder="No value"
+                 Immediate="true"
+                 Disabled="@IsDisabled" />
+
+@code
+{
+    private UiSymmetry FieldDescriptionT => (UiSymmetry)FieldDescription ?? null;
+
+    private string ValueT
+    {
+        get => (string)Value;
+        set => ValueChanged.InvokeAsync(value);
+    }
+}

@@ -1,0 +1,48 @@
+﻿@namespace Refund.UIFields
+@using System.Globalization
+@using Warp.Tools
+@inherits UiFieldViewBase
+
+<FluentStack Style="align-items: center" HorizontalGap="5">
+    <RobustFluentNumberField Class="borderless" 
+                       @bind-Value="@ValueLowerT" Style="width: 50%"
+                       Placeholder="No value"
+                       Min="@(FieldDescriptionT.Min.ToString(CultureInfo.InvariantCulture))"
+                       Max="@(ValueUpperT.ToString(CultureInfo.InvariantCulture))"
+                       Step="@(FieldDescriptionT.StepSize.ToString(CultureInfo.InvariantCulture))"
+                       Disabled="@IsDisabled" />
+
+    <span>—</span>
+
+    <RobustFluentNumberField Class="borderless" 
+                       @bind-Value="@ValueUpperT" Style="width: 50%"
+                       Placeholder="No value"
+                       Min="@(ValueLowerT.ToString(CultureInfo.InvariantCulture))"
+                       Max="@(FieldDescriptionT.Max.ToString(CultureInfo.InvariantCulture))"
+                       Step="@(FieldDescriptionT.StepSize.ToString(CultureInfo.InvariantCulture))"
+                       Disabled="@IsDisabled" />
+</FluentStack>
+
+@code
+{
+    private UiRange FieldDescriptionT => (UiRange)FieldDescription ?? null;
+
+    private float ValueLowerT
+    {
+        get => ((float2)Value).X;
+        set => ValueChanged.InvokeAsync(new float2(value, ((float2)Value).Y));
+    }
+
+    private float ValueUpperT
+    {
+        get => ((float2)Value).Y;
+        set => ValueChanged.InvokeAsync(new float2(((float2)Value).X, value));
+    }
+
+    private string StepSizeToFormat(float stepSize)
+    {
+        var logStep = -(int)Math.Min(Math.Floor(Math.Log10((double)stepSize) + 1e-6), 0);
+
+        return $"F{logStep}";
+    }
+}

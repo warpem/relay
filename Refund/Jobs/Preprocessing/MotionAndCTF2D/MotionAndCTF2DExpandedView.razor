@@ -1,0 +1,77 @@
+@using Refund.Components.ThumbnailPanel
+@using Refund.Components.MicrographViewer
+@using Refund.Components.FourierSpace
+@using Refund.Components.SingleAxisScatter
+@using Refund.Components.Jobs
+
+@if (_job == null)
+{
+    <FluentProgressRing Style="height: 70px; width: 70px;"/>
+}
+else if (_allThumbnails != null && _allThumbnails.Any())
+{
+    <div class="container" style="height: 100%;">
+        <ThumbnailPanel @ref="_thumbnailPanel"
+                        Thumbnails="_allThumbnails"
+                        SelectedThumbnailChanged="SelectedThumbnailChanged"
+                        ShowStatusBar="true"
+                        ThumbnailSize="128" />
+        
+        <div style="position: relative; height: 100%;">
+            
+            <div style="position: absolute; top: -0.75rem; right: 0">
+                <FsMiniItem ThumbnailSize="96" GetThumbnail="@(path => _job.VisThumbnail(path))" />
+            </div>
+
+            <FluentTabs @ref="_tabs" Style="height: 100%;">
+                <FluentTab Id="tab-overview"
+                           Label="Overview"
+                           Style="padding-top: 1rem;">
+                    <div style="display: flex; flex-direction: column; gap: 2rem;">
+
+                        <div style="display: flex; flex-direction: column; gap: 1rem;">
+                            <h6>Defocus (µm)</h6>
+                            <SingleAxisScatter Points="@_pointsDefocus"
+                                               PointClicked="@HandlePointClicked"
+                                               Style="width: 100%; height: 80px;"/>
+                        </div>
+
+                        <div style="display: flex; flex-direction: column; gap: 1rem;">
+                            <h6>CTF fit resolution (Å)</h6>
+                            <SingleAxisScatter Points="@_pointsCtfRes"
+                                               PointClicked="@HandlePointClicked"
+                                               Style="width: 100%; height: 80px;"/>
+                        </div>
+
+                        <div style="display: flex; flex-direction: column; gap: 1rem;">
+                            <h6>Average frame motion in first ⅓ of exposure (Å)</h6>
+                            <SingleAxisScatter Points="@_pointsMotion"
+                                               PointClicked="@HandlePointClicked"
+                                               Style="width: 100%; height: 80px;"/>
+                        </div>
+                    </div>
+                </FluentTab>
+
+                <FluentTab Id="tab-details"
+                           Label="Details"
+                           Style="height: 100%;">
+                    @if (_selectedThumbnail != null)
+                    {
+                        <div class="visualization-container" style="width: 100%; height: 100%;">
+                            <AmplitudeSpectrumViewer
+                                MovieFilePath="@_movieFilePath"
+                                FittingRangeMin="@_job.CTFRangeMin"
+                                FittingRangeMax="@_job.CTFRangeMax"/>
+
+                            <MicrographViewer
+                                MinWidth="768"
+                                MinHeight="768"
+                                MicrographPath="@(_job.ResAverageFile(_selectedName))"
+                                ThumbnailPath="@(_job.VisThumbnail(_selectedName))"/>
+                        </div>
+                    }
+                </FluentTab>
+            </FluentTabs>
+        </div>
+    </div>
+}

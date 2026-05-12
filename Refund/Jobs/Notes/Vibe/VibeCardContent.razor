@@ -1,0 +1,21 @@
+@using Refund.Utils
+@using Relay.Emoji
+
+<div style="display: flex; justify-content: center; align-items: center; height: 100%;">
+    @if(Job.VisAvailableIteration >= 0)
+    {
+        var emoji = EmojiLibrary.FindByGlyph(Job.ProcessingVibe);
+        @if (emoji != null)
+        {
+            <FluentEmoji Value="emoji.FluentEmoji" Width="144"/>
+        }
+        else
+        {
+            <span>Unknown vibe 🤔</span>
+        }
+    }
+    else
+    {
+        <span>No vibe yet</span>
+    }
+</div>

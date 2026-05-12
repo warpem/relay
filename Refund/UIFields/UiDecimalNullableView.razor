@@ -1,0 +1,25 @@
+﻿@namespace Refund.UIFields
+@using System.Globalization
+@inherits UiFieldViewBase
+
+@* working around a weird FluentUI bug that doesn't always update the field when the value changes, so brute-forcing it with @key *@
+<RobustFluentNumberField @key="@(ValueT)"
+                   Class="borderless"
+                   @bind-Value="@ValueT"
+                   Style="width: 100%"
+                   Placeholder="No value"
+                   Min="@(FieldDescriptionT.Min.ToString(CultureInfo.InvariantCulture))"
+                   Max="@(FieldDescriptionT.Max.ToString(CultureInfo.InvariantCulture))"
+                   Step="@(FieldDescriptionT.StepSize.ToString(CultureInfo.InvariantCulture))"
+                   Disabled="@IsDisabled"/>
+
+@code
+{
+    private UiDecimalNullable FieldDescriptionT => (UiDecimalNullable)FieldDescription ?? null;
+
+    private decimal? ValueT
+    {
+        get => (decimal?)Value;
+        set => ValueChanged.InvokeAsync(value);
+    }
+}

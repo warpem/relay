@@ -1,0 +1,10 @@
+<div class="queue-card">
+    <div class="queue-header">
+        <span>@Queue.Alias</span>
+        <FluentBadge>@QueueTypeName</FluentBadge>
+    </div>
+    @foreach(var job in FilteredJobs)
+    {
+        <QueueJobCard Job="@job"/>
+    }
+</div>

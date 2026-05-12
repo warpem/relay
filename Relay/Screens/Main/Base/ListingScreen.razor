@@ -1,0 +1,38 @@
+@using Refund.Services
+@using Refund.DataModel.ReadOnly
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+
+@typeparam TItem where TItem : class, IIdentifiable, IAnnotated, IAudited
+
+@inject CardSelectionService Selection
+
+<div style="width: 100%; height: 100%;"
+     @onclick:stopPropagation="true"
+     @onclick="@(() => Selection.Clear())"
+     @oncontextmenu:preventDefault="OnContextMenu.HasDelegate"
+     @oncontextmenu="@(async (args) => await OnContextMenu.InvokeAsync(args))">
+     
+    <div class="listing-screen">
+        @if (!string.IsNullOrWhiteSpace(Title) || !string.IsNullOrWhiteSpace(CreateButtonText))
+        {
+            <div class="header">
+                <h4>@Title</h4>
+                @if (!string.IsNullOrWhiteSpace(CreateButtonText))
+                {
+                    <FluentButton Appearance="Appearance.Accent"
+                                  IconStart="@(new Icons.Regular.Size16.Add())"
+                                  OnClick="OnCreateClick">
+                        @CreateButtonText
+                    </FluentButton>
+                }
+            </div>
+        }
+
+        <div class="@(ReverseGrid ? "items-grid" : "items-grid items-grid-forward")" >
+            @foreach (var item in Items)
+            {
+                @ItemTemplate(item)
+            }
+        </div>
+    </div>
+</div>

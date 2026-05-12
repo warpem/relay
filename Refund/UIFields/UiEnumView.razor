@@ -1,0 +1,24 @@
+﻿@namespace Refund.UIFields
+@inherits UiFieldViewBase
+
+<FluentSelect @bind-Value="@ValueT"
+              Class="borderless"
+              Width="100%"
+              Items="@Options"
+              OptionText="@(i => i.Text)"
+              OptionValue="@(i => i.Value)"
+              OptionSelected="@(i => i.Selected)"
+              Disabled="@IsDisabled"/>
+
+@code
+{
+    private UiEnum FieldDescriptionT => (UiEnum)FieldDescription ?? null;
+
+    private string ValueT
+    {
+        get => Value.ToString();
+        set => ValueChanged.InvokeAsync(Enum.Parse(FieldDescriptionT.EnumType, value));
+    }
+
+    private List<Option<string>> Options => FieldDescriptionT.EnumType.GetEnumNames().Select(e => new Option<string>() { Value = e, Text = e }).ToList();
+}

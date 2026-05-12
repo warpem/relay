@@ -1,0 +1,19 @@
+.global-tooltip-container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 0;
+    height: 0;
+    pointer-events: none;
+    z-index: 10000;
+}
+
+.global-tooltip {
+    position: fixed;
+    padding: 0;
+    background-color: transparent;
+    border: none;
+    box-shadow: none;
+    pointer-events: none;
+    z-index: 10001;
+}

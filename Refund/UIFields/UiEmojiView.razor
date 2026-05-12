@@ -1,0 +1,33 @@
+@namespace Refund.UIFields
+@using Relay.Emoji
+@using EmojiInfo = Relay.Emoji.EmojiInfo
+@using Refund.Components.Emoji
+@inherits UiFieldViewBase
+
+<EmojiSelectionButton @bind-Glyph="ValueT"
+                      Size="144"
+                      HorizontalPosition="HorizontalPosition.Left"
+                      VerticalPosition="VerticalPosition.Center"
+                      HorizontalInset="false"
+                      Disabled="@IsDisabled" />
+
+@code
+{
+    private readonly string _id = Guid.NewGuid().ToString();
+    private bool _isEmojiSelectorOpen;
+    
+    private UiEmoji FieldDescriptionT => (UiEmoji)FieldDescription ?? null;
+
+    private string ValueT
+    {
+        get => (string)Value;
+        set => ValueChanged.InvokeAsync(value);
+    }
+
+    private async Task HandleProjectEmojiChanged(EmojiInfo emoji)
+    {
+        _isEmojiSelectorOpen = false;
+        ValueT = emoji.Glyph;
+        StateHasChanged();
+    }
+}

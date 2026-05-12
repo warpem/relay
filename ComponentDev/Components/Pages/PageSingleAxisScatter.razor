@@ -1,0 +1,70 @@
+@page "/scatterplot"
+@using System.Collections.ObjectModel
+@using Refund.Components.SingleAxisScatter
+@using Warp.Tools
+@using Color = System.Drawing.Color
+@using Refund.Components.GlobalTooltip
+
+<div style="display: flex; flex-direction: column; gap: 4rem;">
+    <SingleAxisScatter Points="@_points1.ToList()" Style="width: 100%; height: 100px;">
+        <TooltipTemplate>
+            <div style="width: 100px; height: 100px; background-color: white; display: flex; align-items: center; justify-content: center;">
+                @if (context != null)
+                {
+                    @context.Value.Value.Value.ToString("F3")
+                }
+            </div>
+        </TooltipTemplate>
+    </SingleAxisScatter>
+    
+    @* <SingleAxisScatter Points="@_points2.ToList()" Style="width: 100%; height: 100px;"> *@
+    @*     <TooltipTemplate> *@
+    @*         <div style="width: 100px; height: 100px; background-color: white; display: flex; align-items: center; justify-content: center;"> *@
+    @*             @if (context != null) *@
+    @*             { *@
+    @*                 @context.Value.ToString("F3") *@
+    @*             } *@
+    @*         </div> *@
+    @*     </TooltipTemplate> *@
+    @* </SingleAxisScatter> *@
+</div>
+
+@* <div id="tooltip-anchor" style="width: 100px; height: 100px; background: blue; color: white; display: flex; align-items: center; justify-content: center;"> *@
+@*     Hello! *@
+@* </div> *@
+@* *@
+@* <GlobalTooltip TargetId="tooltip-anchor" IsVisible="true"> *@
+@*     <div style="width: 100px; height: 100px; background: red; color: white; display: flex; align-items: center; justify-content: center;"> *@
+@*         Hi! *@
+@*     </div> *@
+@* </GlobalTooltip> *@
+
+@code {
+
+    ObservableCollection<ScatterPoint> _points1 = new();
+    ObservableCollection<ScatterPoint> _points2 = new();
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        
+        RandomNormal randN = new(123);
+        Random rand = new(123);
+
+        Color[] colors =
+        [
+            Color.FromArgb(100, 120, 180, 0),
+            Color.FromArgb(100, 120, 180, 0),
+            Color.FromArgb(100, 120, 180, 0),
+            Color.FromArgb(100, 120, 180, 0),
+            Color.FromArgb(100, 120, 180, 0),
+            Color.FromArgb(100, 180, 0, 0)
+        ];
+
+        for (int i = 0; i < 1000; i++)
+        {
+            _points1.Add(new ScatterPoint(randN.NextSingle(0, 10), colors[rand.Next(colors.Length)], null));
+            _points2.Add(new ScatterPoint(randN.NextSingle(0, 10), colors[rand.Next(colors.Length)], null));
+        }
+    }
+}

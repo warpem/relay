@@ -1,0 +1,64 @@
+@using Refund.Components.ThumbnailPanel
+@using Refund.Components.TomogramViewer
+@using Refund.Components.SingleAxisScatter
+@using Refund.DataModel.ReadOnly
+@using Warp
+@using Warp.Tools
+
+<div class="container">
+    <div class="thumbnail-container">
+        <ThumbnailPanel @ref="_tomogramThumbnailPanel"
+                       Thumbnails="_allTomogramThumbnails" 
+                       SelectedThumbnail="_selectedTomogramThumbnail"
+                       SelectedThumbnailChanged="SelectedTomogramThumbnailChanged"
+                       ThumbnailSize="128" />
+    </div>
+
+    <div style="height: 100%;">
+        <FluentTabs @ref="_tabs" 
+                    Style="height: 100%;">
+            
+            <FluentTab Id="@OverviewTabId" 
+                       Label="Overview" 
+                       Style="padding-top: 1rem;">
+                <div style="display: flex; flex-direction: column; gap: 1.5rem; height: 100%;">
+                    @{
+                        int particlesTotal = _processedTomograms.Select(t => t.ParticleCount ?? 0)
+                                                                .Sum();
+                        int particlesAverage = 0;
+                        if (_processedTomograms.Any())
+                            particlesAverage = (int)Math.Round(_processedTomograms.Select(t => t.ParticleCount ?? 0)
+                                                                                  .Average());
+                    }
+                    
+                    <!-- Particles per tomogram scatter plot -->
+                    <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                        <h6>Particles per Tomogram (@particlesTotal total, @particlesAverage average)</h6>
+                        <SingleAxisScatter Points="@_pointsParticleCount" 
+                                            PointClicked="OnScatterPointClicked"
+                                            Style="width: 100%; height: 80px;" />
+                    </div>
+                </div>
+            </FluentTab>
+
+            <FluentTab Id="@DetailsTabId" Label="Details" Style="height: 100%; padding-top: 1rem;">
+                <div class="tomogram-viewer-container">
+                    @if (_selectedTomogramPath != null)
+                    {
+                        <TomogramViewer TomogramPath="@_selectedTomogramPath"
+                                        Particles="@_particles"
+                                        MinWidth="512"
+                                        MinHeight="512"
+                                        CanShowParticlesControls="true"/>
+                    }
+                    else
+                    {
+                        <div class="no-selection-message">
+                            <span>Select a tomogram to view</span>
+                        </div>
+                    }
+                </div>
+            </FluentTab>
+        </FluentTabs>
+    </div>
+</div>

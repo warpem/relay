@@ -1,0 +1,65 @@
+@using Refund.Components.IsosurfaceViewer
+
+@page "/IsosurfaceViewer"
+
+<PageTitle>Isosurface Viewer Test</PageTitle>
+
+<div class="container">
+    <div class="controls">
+        <FluentCard>
+            <h2>Isosurface Viewer (WebGL2)</h2>
+            <p>Four synced viewers. Orbit one and the others follow. Toggle Sync to decouple an instance.</p>
+        </FluentCard>
+    </div>
+
+    <div class="viewer-grid">
+        <div class="viewer-cell">
+            <IsosurfaceViewer VolumePath="@VolumePath" MinWidth="400" MinHeight="400" />
+        </div>
+        @* <div class="viewer-cell"> *@
+        @*     <IsosurfaceViewer VolumePath="@VolumePath" MinWidth="300" MinHeight="250" /> *@
+        @* </div> *@
+        @* <div class="viewer-cell"> *@
+        @*     <IsosurfaceViewer VolumePath="@VolumePath" MinWidth="300" MinHeight="250" /> *@
+        @* </div> *@
+        @* <div class="viewer-cell"> *@
+        @*     <IsosurfaceViewer VolumePath="@VolumePath" MinWidth="300" MinHeight="250" /> *@
+        @* </div> *@
+    </div>
+</div>
+
+<style>
+    .container {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        height: 100vh;
+        padding: 1rem;
+        box-sizing: border-box;
+    }
+
+    .controls {
+        margin-bottom: 1rem;
+    }
+
+    .viewer-grid {
+        flex: 1;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        grid-template-rows: 1fr 1fr;
+        gap: 0.5rem;
+        min-height: 0;
+    }
+
+    .viewer-cell {
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        overflow: hidden;
+        background-color: #f5f5f5;
+        min-height: 0;
+    }
+</style>
+
+@code {
+    private string VolumePath = "";
+}

@@ -1,0 +1,34 @@
+.emoji-selector {
+    height: 400px;
+    display: grid;
+    grid-template-rows: auto 1fr;
+}
+
+.search-bar {
+    width: 100%;
+    background: var(--neutral-layer-1);
+    z-index: 2;
+}
+
+.emoji-grid-container {
+    position: relative;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+.emoji-button {
+    position: absolute;
+    width: 40px;
+    height: 40px;
+    border: none;
+    background: none;
+    cursor: pointer;
+    border-radius: 0.25rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.emoji-button:hover {
+    background: var(--neutral-layer-3);
+}

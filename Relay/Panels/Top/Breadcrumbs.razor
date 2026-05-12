@@ -1,0 +1,145 @@
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Refund.DataModel.ReadOnly
+@using Refund.Services.Core.Session
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@using Refund.Components.Jobs
+@using Relay.Screens.Main.View
+@inject ViewDragDropService DragDrop
+@inherits FluentComponentBase
+
+<div style="display: flex; align-items: center; column-gap: 8px;">
+    <a href="/" style="@($"margin-left: {(RelaySession.LeftPanelWidth - 32) / 2}px;") text-decoration: none; color: inherit;">
+        <FluentButton Id="Home"
+                      IconStart="@(new Icons.Regular.Size24.Home())"
+                      Appearance="@((Session.Project == null && Session.CurrentOverlay == OverlayScreenType.None) ?
+                                        Appearance.Accent :
+                                        null)"
+                      BackgroundColor="@((Session.Project == null && Session.CurrentOverlay == OverlayScreenType.None) ? null : "transparent")"
+                      OnClick="OnHomeButtonClick"
+                      Title="Home">
+        </FluentButton>
+    </a>
+
+    @if (Session.Project != null)
+    {
+        <ListboxButton @key="@("ProjectsListbox")"
+                       TValue="@(string)"
+                       ButtonLabel="@Session.Project.QualifiedName"
+                       ListWidth="200"
+                       ListHeight="300"
+                       ButtonMinWidth="100"
+                       ButtonAppearance="@(Session.Space == null ? Appearance.Accent : Appearance.Outline)"
+                       Href="@RelaySession.BuildUrl(new() { ProjectId = Session.Project.Id })"
+                       HrefSelector="@(id => RelaySession.BuildUrl(new() { ProjectId = int.Parse(id) }))"
+                       OnClick="@(async args => await HandleBreadcrumbClick(args, new() { ProjectId = Session.Project.Id }))"
+                       OnOptionSelected="OnProjectValueChange"
+                       Options="@(Projects.Select(p => (p.Key.ToString(), p.Value)))"/>
+
+        @if (Session.Space != null)
+        {
+            <ListboxButton @key="@("SpacesListbox")"
+                           TValue="@(string)"
+                           ButtonLabel="@Session.Space.QualifiedName"
+                           ListWidth="200"
+                           ListHeight="300"
+                           ButtonMinWidth="100"
+                           ButtonAppearance="@(Session.View == null && Session.FactoryDefinition == null ? Appearance.Accent : Appearance.Outline)"
+                           Href="@RelaySession.BuildUrl(new() { ProjectId = Session.Project.Id, SpaceId = Session.Space.Id })"
+                           HrefSelector="@(id => RelaySession.BuildUrl(new() { ProjectId = Session.Project.Id, SpaceId = int.Parse(id) }))"
+                           OnClick="@(async args => await HandleBreadcrumbClick(args, new() { ProjectId = Session.Project.Id, SpaceId = Session.Space.Id }))"
+                           OnOptionSelected="OnSpaceValueChange"
+                           Options="@(Spaces.Select(p => (p.Key.ToString(), p.Value)))"/>
+
+            @if (Session.FactoryDefinition != null)
+            {
+                <ListboxButton @key="@("FactoryDefinitionListbox")"
+                               TValue="@(string)"
+                               ButtonLabel="@Session.FactoryDefinition.QualifiedName"
+                               ListWidth="200" ListHeight="300" ButtonMinWidth="100"
+                               ButtonAppearance="Appearance.Accent"
+                               OnClick="@(async args => await HandleBreadcrumbClick(args, new() {
+                                   ProjectId = Session.Project.Id,
+                                   SpaceId = Session.Space.Id,
+                                   FactoryDefinitionId = Session.FactoryDefinition.Id }))"
+                               OnOptionSelected="OnFactoryDefinitionValueChange"
+                               Options="@(FactoryDefinitions?.Select(p => (p.Key.ToString(), p.Value))
+                                         ?? Enumerable.Empty<(string, string)>())"/>
+            }
+            else if (Session.View != null)
+            {
+                <ListboxButton @key="@("ViewsListbox")"
+                               TValue="@(string)"
+                               ButtonLabel="@Session.View.QualifiedName"
+                               ListWidth="200"
+                               ListHeight="300"
+                               ButtonMinWidth="100"
+                               ButtonAppearance="@(Session.Folder == null && Session.Job == null && Session.FactoryInstance == null ? Appearance.Accent : Appearance.Outline)"
+                               Href="@RelaySession.BuildUrl(new() { ProjectId = Session.Project.Id, SpaceId = Session.Space.Id, ViewId = Session.View.Id })"
+                               HrefSelector="@(id => RelaySession.BuildUrl(new() { ProjectId = Session.Project.Id, SpaceId = Session.Space.Id, ViewId = int.Parse(id) }))"
+                               OnClick="@(async args => await HandleBreadcrumbClick(args, new() { ProjectId = Session.Project.Id, SpaceId = Session.Space.Id, ViewId = Session.View.Id }))"
+                               OnOptionSelected="OnViewValueChange"
+                               Options="@(Views.Select(p => (p.Key.ToString(), p.Value)))"/>
+
+                @foreach (var crumb in FolderPath)
+                {
+                    var dropFolder = crumb;
+                    <div style="display: contents;"
+                         @ondragover:preventDefault="true"
+                         @ondrop="@(async args => await HandleBreadcrumbDrop(dropFolder))">
+                        <ListboxButton @key="@($"FolderListbox_{crumb.Id}")"
+                                       TValue="@(string)"
+                                       ButtonLabel="@crumb.Alias"
+                                       ListWidth="200"
+                                       ListHeight="300"
+                                       ButtonMinWidth="80"
+                                       ButtonAppearance="@(crumb.Id == Session.FolderId && Session.Job == null && Session.FactoryInstance == null ? Appearance.Accent : Appearance.Outline)"
+                                       OnClick="@(async args => await HandleBreadcrumbClick(args, new() { ProjectId = Session.Project.Id, SpaceId = Session.Space.Id, ViewId = Session.View.Id, FolderId = crumb.Id }))"
+                                       OnOptionSelected="@(async id => await OnFolderValueChange(int.Parse(id)))"
+                                       Options="@(GetSiblingFolders(crumb).Select(f => (f.Id.ToString(), f.Alias)))"/>
+                    </div>
+                }
+
+                @if (Session.FactoryInstance != null)
+                {
+                    <ListboxButton @key="@("FactoryInstanceListbox")"
+                                   TValue="@(string)"
+                                   ButtonLabel="@($"FI{Session.FactoryInstance.Id}: {Session.FactoryInstance.Definition?.Alias ?? ""}")"
+                                   ListWidth="200" ListHeight="300" ButtonMinWidth="100"
+                                   ButtonAppearance="Appearance.Accent"
+                                   OnClick="@(async args => await HandleBreadcrumbClick(args, new() {
+                                       ProjectId = Session.Project.Id,
+                                       SpaceId = Session.Space.Id,
+                                       ViewId = Session.View.Id,
+                                       FolderId = Session.FolderId,
+                                       FactoryInstanceId = Session.FactoryInstance.Id }))"
+                                   OnOptionSelected="OnFactoryInstanceValueChange"
+                                   Options="@(FactoryInstances?.Select(p => (p.Key.ToString(), p.Value))
+                                             ?? Enumerable.Empty<(string, string)>())"/>
+                }
+
+                @if (Session.Job != null)
+                {
+                    <ListboxButton @key="@("JobsListbox")"
+                                   TValue="@(ReadOnlyJob)"
+                                   ButtonLabel="@Session.Job.QualifiedName"
+                                   ListWidth="200"
+                                   ListHeight="300"
+                                   ButtonMinWidth="100"
+                                   ButtonAppearance="Appearance.Accent"
+                                   Href="@RelaySession.BuildUrl(new() { ProjectId = Session.Project.Id, SpaceId = Session.Space.Id, ViewId = Session.View.Id, FolderId = Session.FolderId, JobId = Session.Job.Id })"
+                                   HrefSelector="@(job => RelaySession.BuildUrl(new() { ProjectId = Session.Project.Id, SpaceId = Session.Space.Id, ViewId = Session.View.Id, FolderId = Session.FolderId, JobId = job?.Id }))"
+                                   OnClick="@(async args => await HandleBreadcrumbClick(args, new() { ProjectId = Session.Project.Id, SpaceId = Session.Space.Id, ViewId = Session.View.Id, FolderId = Session.FolderId, JobId = Session.Job.Id }))"
+                                   OnOptionSelected="OnJobValueChange"
+                                   Options="@(Jobs.Select(p => (p.Key, p.Value)))">
+                        <OptionTemplate>
+                            <JobLine Job="context.Value"
+                                     EnableNavigation="false"
+                                     ShowStatus="false"
+                                     NameWidth="196px"/>
+                        </OptionTemplate>
+                    </ListboxButton>
+                }
+            }
+        }
+    }
+</div>

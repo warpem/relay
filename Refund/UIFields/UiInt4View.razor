@@ -1,0 +1,74 @@
+@namespace Refund.UIFields
+@using Warp.Tools
+@inherits UiFieldViewBase
+
+<FluentStack>
+    <RobustFluentNumberField @bind-Value="@ValueXT" 
+                       Style="width: 25%"
+                       Class="borderless"
+                       Placeholder="No value"
+                       Min="@(FieldDescriptionT.Min.ToString())"
+                       Max="@(FieldDescriptionT.Max.ToString())"
+                       Step="@(FieldDescriptionT.StepSize.ToString())"
+                       Immediate="true"
+                       Disabled="@IsDisabled" />
+    
+    <RobustFluentNumberField @bind-Value="@ValueYT" 
+                       Style="width: 25%"
+                       Class="borderless"
+                       Placeholder="No value"
+                       Min="@(FieldDescriptionT.Min.ToString())"
+                       Max="@(FieldDescriptionT.Max.ToString())"
+                       Step="@(FieldDescriptionT.StepSize.ToString())"
+                       Immediate="true" 
+                       Disabled="@IsDisabled" />
+    
+    <RobustFluentNumberField @bind-Value="@ValueZT"
+                       Style="width: 25%"
+                       Class="borderless"
+                       Placeholder="No value"
+                       Min="@(FieldDescriptionT.Min.ToString())"
+                       Max="@(FieldDescriptionT.Max.ToString())"
+                       Step="@(FieldDescriptionT.StepSize.ToString())"
+                       Immediate="true" 
+                       Disabled="@IsDisabled" />
+    
+    <RobustFluentNumberField @bind-Value="@ValueWT"
+                       Style="width: 25%"
+                       Class="borderless"
+                       Placeholder="No value"
+                       Min="@(FieldDescriptionT.Min.ToString())"
+                       Max="@(FieldDescriptionT.Max.ToString())"
+                       Step="@(FieldDescriptionT.StepSize.ToString())"
+                       Immediate="true" 
+                       Disabled="@IsDisabled" />
+</FluentStack>
+
+@code
+{
+    private UiInt4 FieldDescriptionT => (UiInt4)FieldDescription ?? null;
+
+    private int ValueXT
+    {
+        get => ((int4)Value).X;
+        set => ValueChanged.InvokeAsync(new int4(value, ((int4)Value).Y, ((int4)Value).Z, ((int4)Value).W));
+    }
+
+    private int ValueYT
+    {
+        get => ((int4)Value).Y;
+        set => ValueChanged.InvokeAsync(new int4(((int4)Value).X, value, ((int4)Value).Z, ((int4)Value).W));
+    }
+    
+    private int ValueZT
+    {
+        get => ((int4)Value).Z;
+        set => ValueChanged.InvokeAsync(new int4(((int4)Value).X, ((int4)Value).Y, value, ((int4)Value).W));
+    }
+    
+    private int ValueWT
+    {
+        get => ((int4)Value).W;
+        set => ValueChanged.InvokeAsync(new int4(((int4)Value).X, ((int4)Value).Y, ((int4)Value).Z, value));
+    }
+}

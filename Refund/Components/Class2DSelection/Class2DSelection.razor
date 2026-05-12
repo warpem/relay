@@ -1,0 +1,127 @@
+@* Component for displaying Class2D image atlases generated in Bakery
+
+Class2D image atlases contain square images in one long row, example below... 
+                      +-----+-----+-----+-----+                                  
+                      |     |     |     |     |                                  
+                      |     |     |     |     |                                  
+                      +-----+-----+-----+-----+                                  
+This component renders a set of 2D classes as a grid of individual divs that fill the
+parent div.
+ - `ClassNumbersToDisplay` is an ordered list of 1-indexed class numbers to be displayed
+ - `SourceImageSidelengthPx` is the sidelength of images in the atlas in pixels
+ - `RenderedImageSidelengthPx` is the sidelength of the rendered images in pixels
+ - `Spacing` is the spacing between images in the rendered grid in pixels
+*@
+<div style="display: flex; flex-direction: column; align-items: start;">
+    @if (AllowSorting)
+    {
+        <div class="toolbar">
+            <FluentSelect Items="@SortOptions"
+                          Multiple="false"
+                          Width="140px"
+                          OptionText="@(i => i.Text)"
+                          OptionValue="@(i => i.Value)"
+                          OptionSelected="@(i => i.Selected)"
+                          SelectedOption="@SelectedSortOption"
+                          SelectedOptionChanged="@(EventCallback.Factory.Create<Option<string>?>(this, OnSortOptionChanged))"/>
+            <FluentButton Title="Switch sort direction" OnClick="ToggleSortDirection" IconEnd="@IconSort"/>
+        </div>
+    }
+    @if (ClassPositionsInAtlas != null)
+    {
+        <div class="class2d-image-grid-@(guid)">
+            @foreach (var i in ClassOrderSorted())
+            {
+                int c = ClassPositionsInAtlas[i];
+            
+                <div class="class2d-image-container-@(guid)">
+                    <div class="class2d-image-tile-@(guid)"
+                         style="@GetTileStyle(c)"/>
+                    <div class="border-overlay-@(guid) @(selectedClasses.Contains(c) ? "selected" : "")"
+                         @onclick="() => ToggleSelection(c)">
+                    </div>
+                    @if (ClassIds != null)
+                    {
+                        <span style="position: absolute; left: 7px; top: 3px; color: white;">
+                            #@ClassIds[i]
+                        </span>
+                    }
+                    @if (ClassResolutions != null)
+                    {
+                        <span style="position: absolute; right: 7px; top: 3px; color: white;">
+                            @ClassResolutions[i].ToString("F0") Å
+                        </span>
+                    }
+                    @if (ClassSizes != null)
+                    {
+                        <span style="position: absolute; left: 7px; bottom: 3px; color: white;">
+                            @((ClassSizes[i] * 100).ToString("F1")) %
+                        </span>
+                    }
+                </div>
+            }
+        </div>
+    }
+</div>
+
+<style>
+    .toolbar {
+        display: flex;
+        justify-content: space-between;
+        padding-top: 5px;
+        padding-bottom: 5px;
+    }
+    
+    .class2d-image-grid-@(guid) {
+        display: flex;
+        flex-wrap: wrap;
+    }
+
+    .class2d-image-tile-@(guid) {
+        background-image: url(@($"{classAtlasImageUrl}"));
+    }
+
+    .class2d-image-container-@(guid) {
+        position: relative;
+        margin: @($"{SpacingPx / 2}px");
+        width: @($"{RenderedImageSidelengthPx}px");
+        height: @($"{RenderedImageSidelengthPx}px");
+        border-radius: 10px;
+    }
+
+    .class2d-image-tile-@(guid) {
+        width: 100%;
+        height: 100%;
+        background-size: @($"{NImagesInFile * RenderedImageSidelengthPx}px {RenderedImageSidelengthPx}px");
+        background-position: center;
+        display: block;
+        border-radius: 10px;
+    }
+
+    .border-overlay-@(guid) {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        border: solid;
+        border-width: @($"{BorderWidthPx}px");
+        border-color: @(BorderColorUnselected);
+        border-radius: 10px;
+        box-sizing: border-box;
+    }
+
+    .border-overlay-@(guid).selected {
+        border-color: @(BorderColorSelected);
+    }
+</style>
+
+
+@if(SelectionIsMutable)
+{
+    <style>
+        .class2d-image-container-@(guid):hover {
+            box-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
+        }
+    </style>
+}

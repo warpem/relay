@@ -1,0 +1,32 @@
+.expanded-job-view {
+    width: 100%;
+    height: calc(100% - 40px);
+    display: flex;
+    flex-direction: column;
+}
+
+.content-container {
+    flex-grow: 1;
+    display: flex;
+    overflow: hidden;
+}
+
+.visualization-container {
+    height: 100%;
+    flex-grow: 1;
+    overflow: auto;
+    padding: 0.5rem 0.5rem;
+    border-left: 1px solid var(--neutral-stroke-rest);
+    border-top: 1px solid var(--neutral-stroke-rest);
+    border-top-left-radius: 4px;
+    box-sizing: border-box;
+}
+
+.error-message h5 {
+    font-weight: bold;
+}
+
+.error-message pre {
+    border-radius: 4px;
+    overflow-x: auto;
+}

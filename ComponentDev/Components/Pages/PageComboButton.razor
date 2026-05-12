@@ -1,0 +1,50 @@
+@page "/ComboButton"
+@using Refund.Components
+
+<ListboxButton TValue="@(string)" 
+               ButtonLabel="My Space"
+               Options="@_options"
+               OnClick="@OnClick"
+               OnOptionSelected="@OnValueChanged"/>
+
+@if(!string.IsNullOrWhiteSpace(_selectedValue))
+{
+    <p>Selected value: @_selectedValue</p>
+}
+
+@code {
+    private string _selectedValue = null;
+    
+    private List<(string Value, string Text)> _options = new()
+    {
+        ("1", "Option 1"),
+        ("2", "Option 2"),
+        ("3", "Option 3"),
+        ("4", "Option 4"),
+        ("5", "Option 5"),
+        ("6", "Option 6"),
+        ("7", "Option 7"),
+        ("8", "Option 8"),
+        ("9", "Option 9"),
+        ("10", "Option 10"),
+        ("11", "Option 11"),
+        ("12", "Option 12"),
+        ("13", "Option 13"),
+        ("14", "Option 14"),
+        ("15", "Option 15"),
+        ("16", "Option 16"),
+        ("17", "Option 17"),
+        ("18", "Option 18"),
+        ("19", "Option 19"),
+    };
+
+    private void OnValueChanged(string value)
+    {
+        _selectedValue = value;
+    }
+    
+    private void OnClick(MouseEventArgs eventArgs)
+    {
+        Console.WriteLine("Button clicked");
+    }
+}

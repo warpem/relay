@@ -1,0 +1,131 @@
+@using Refund.Components.ThumbnailPanel
+@using Refund.Components.TomogramViewerJs
+@using Refund.Components.Histogram
+@using Refund.DataModel
+@using Refund.Components
+
+@if (_job == null)
+{
+    <span>No job to display</span>
+}
+else if (_job.Status != JobStatus.Running && _job.Status != JobStatus.Finished)
+{
+    <span>The job isn't running or hasn't finished successfully</span>
+}
+else if (_allTomogramThumbnails != null && _allTomogramThumbnails.Any())
+{
+    <div class="container" style="position: relative;">
+        @if (_isLoadingAllParticles)
+        {
+            <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+                        display: flex; flex-direction: column; align-items: center; gap: 10px;">
+                <FluentProgressRing Style="width: 40px; height: 40px;" />
+                <div>Loading particle data...</div>
+            </div>
+        }
+
+        <div class="thumbnail-container">
+            <ThumbnailPanel @ref="_tomogramThumbnailPanel"
+                           Thumbnails="_allTomogramThumbnails"
+                           SelectedThumbnail="_selectedTomogramThumbnail"
+                           SelectedThumbnailChanged="SelectedTomogramThumbnailChanged"
+                           ShowStatusBar="true"
+                           ThumbnailSize="128" />
+        </div>
+
+        @if (!_isLoadingAllParticles)
+        {
+            <div style="height: 100%;">
+                <div style="display: flex; flex-wrap: nowrap; gap: 2rem; height: 100%; padding-top: 1rem; overflow-x: auto;">
+                    
+                    @if (_selectedTomogramThumbnail != null)
+                    {
+                        <div style="display: flex; flex-direction: column; gap: 1.5rem; min-width: 800px;">
+                            <!-- Grid layout for histograms -->
+                            <div style="display: grid; grid-template-columns: 1fr auto 1fr; gap: 0.5rem 1rem; align-items: center;">
+                                <!-- Headers -->
+                                <div style="text-align: center; font-weight: bold; grid-column: 1;">
+                                    Global<br />
+                                    @GetGlobalTotalCountsText()
+                                </div>
+                                
+                                <div style="grid-column: 2;">
+                                    <!-- Empty center header -->
+                                </div>
+                                
+                                <div style="text-align: center; font-weight: bold; grid-column: 3;">
+                                    @_selectedTomogramName<br />
+                                    @GetTomogramTotalCountsText()
+                                </div>
+                                
+                                <!-- Histogram rows -->
+                                @foreach (var _key in SelectParticles.FilterKeys)
+                                {
+                                    string key = _key;
+                                    bool localDisabled = IsEditingDisabled || IsFilterLocked(_selectedTomogramName, key);
+                                    bool globalDisabled = IsGlobalFilterDisabled(key);
+                                    
+                                    <div style="grid-column: 1; display: flex; flex-direction: column; gap: 0.5rem;">
+                                        <h6>@_histogramLabels[key]: @_globalFilterCounts[key].Original → @_globalFilterCounts[key].Filtered</h6>
+                                        <Histogram BinSizes="@_globalHistogramBins[key]"
+                                                   SecondaryBinSizes="@_globalFilteredHistogramBins[key]"
+                                                   MinRange="@_globalHistogramRanges[key].Min"
+                                                   MaxRange="@_globalHistogramRanges[key].Max"
+                                                   SelectedRangeStart="@_job.GlobalFilterSettings.Filters[key].Min"
+                                                   SelectedRangeEnd="@_job.GlobalFilterSettings.Filters[key].Max"
+                                                   RangeSelectionEnabled="true"
+                                                   SelectedRangeChanged="@(range => OnGlobalRangeChanged(key, range))"
+                                                   IsDisabled="@globalDisabled"
+                                                   Color="@(globalDisabled ? "#999" : "#0078D4")"
+                                                   SecondaryColor="@(globalDisabled ? "#999" : "#0078D4")"
+                                                   Style="width: 100%;"/>
+                                    </div>
+                                    
+                                    <div style="grid-column: 2; display: flex; justify-content: center; align-items: center;">
+                                        <ToggleIcon IsDisabled="IsEditingDisabled"
+                                                    IconToggled="_iconUnlocked"
+                                                    IconNeutral="_iconLocked"
+                                                    IsToggled="@(!IsFilterLocked(_selectedTomogramName, key))"
+                                                    IsToggledChanged="@((_) => ToggleTomogramLockState(_selectedTomogramName, key))"/>
+                                    </div>
+                                    
+                                    <div style="grid-column: 3; display: flex; flex-direction: column; gap: 0.5rem;">
+                                        <h6>@_tomogramFilterCounts[key].Original → @_tomogramFilterCounts[key].Filtered</h6>
+                                        <Histogram BinSizes="@_tomogramHistogramBins[key]"
+                                                   SecondaryBinSizes="@_tomogramFilteredHistogramBins[key]"
+                                                   MinRange="@_globalHistogramRanges[key].Min"
+                                                   MaxRange="@_globalHistogramRanges[key].Max"
+                                                   SelectedRangeStart="@GetFilterStart(_selectedTomogramName, key)"
+                                                   SelectedRangeEnd="@GetFilterEnd(_selectedTomogramName, key)"
+                                                   RangeSelectionEnabled="true"
+                                                   SelectedRangeChanged="@(range => OnTomogramRangeChanged(_selectedTomogramName, key, range))"
+                                                   IsDisabled="@localDisabled"
+                                                   Color="@(localDisabled ? "#999" : "#0078D4")"
+                                                   SecondaryColor="@(localDisabled ? "#999" : "#0078D4")"
+                                                   Style="width: 100%;"/>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    }
+
+                    <div class="tomogram-viewer-container" style="width: 100%; height: 100%;">
+                        @if (_selectedTomogramPath != null)
+                        {
+                            <TomogramViewerJs TomogramPath="@_selectedTomogramPath"
+                                              Species="@_viewerSpecies"
+                                              MinWidth="512"
+                                              MinHeight="768"/>
+                        }
+                        else
+                        {
+                            <div class="no-selection-message">
+                                <span>Select a tomogram to view</span>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}

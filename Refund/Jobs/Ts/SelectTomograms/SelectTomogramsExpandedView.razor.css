@@ -1,0 +1,41 @@
+.container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+}
+
+.toolbar {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.75rem;
+    flex-shrink: 0;
+    margin-bottom: 8px;
+}
+
+.counter {
+    font-weight: 600;
+}
+
+.thumbnail-container {
+    flex-shrink: 0;
+    margin-bottom: 12px;
+}
+
+.tomogram-viewer-container {
+    flex: 1;
+    position: relative;
+    height: 100%;
+    overflow: hidden;
+}
+
+.no-selection-message {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100%;
+    width: 100%;
+    font-size: 1.2rem;
+    color: #888;
+}

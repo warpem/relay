@@ -1,0 +1,30 @@
+@namespace Refund.UIFields
+@using Accord.Math
+@using Refund.JobResources
+@inherits UiFieldViewBase
+
+@if (AdditionalData is List<MDataSource> { Count: > 0 } sources)
+{
+    <FluentRadioGroup Class="borderless"
+                      @bind-Value="@ValueT"
+                      Orientation="Orientation.Vertical"
+                      Disabled="@IsDisabled">
+        @foreach (var source in sources)
+        {
+            <FluentRadio Value="@sources.IndexOf(source)" Label="@source.Name" />
+        }
+    </FluentRadioGroup>
+}
+else
+{
+    <span class="text-muted">No data sources available</span>
+}
+
+@code
+{
+    private int? ValueT
+    {
+        get => (int?)Value;
+        set => ValueChanged.InvokeAsync(value);
+    }
+}

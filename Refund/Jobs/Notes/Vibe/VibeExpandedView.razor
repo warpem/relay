@@ -1,0 +1,17 @@
+@using Refund.Services
+@using Relay.Emoji
+@inject ExpandedJobViewService JobViewService
+
+@if (JobViewService.CurrentJob != null && JobViewService.CurrentJob is ReadOnlyVibe)
+{
+    string vibe = ((ReadOnlyVibe)JobViewService.CurrentJob).ProcessingVibe;
+    var emoji = EmojiLibrary.FindByGlyph(vibe).FluentEmoji;
+    @if (emoji != null)
+    {
+        <FluentEmoji Value="@(emoji)" Width="100%"/>
+    }
+    else
+    {
+        <span>A very special vibe for which no emoji exists yet.</span>
+    }
+}

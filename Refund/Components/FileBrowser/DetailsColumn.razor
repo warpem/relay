@@ -1,0 +1,40 @@
+@using Refund.Components.Jobs
+@using Refund.DataModel
+<div class="details-column">
+    @if (Items.Count == 1)
+    {
+        var item = Items.First();
+        
+        @if (!item.IsDirectory)
+        {
+            @* File Preview *@
+            <FilePreview Item="@item" />
+
+            <p style="line-height: 1.8;">
+                <span style="word-wrap: break-word; white-space: normal; font-weight: bold;">@item.Name</span><br/>
+                Size: @SizeToString(item.SizeInByte)<br/>
+                Created: @item.CreationTime.ToString("s")<br/>
+                Modified: @item.LastWriteTime.ToString("s")
+
+                @if (!item.IsDirectory)
+                {
+                    <DownloadableLine Downloadable="@(new Downloadable("Download file", "", item.Path))" />
+                }
+            </p>
+        }
+        else
+        {
+            <h4 style="word-wrap: break-word; white-space: normal;">@item.Name</h4>
+            <p>Created: @item.CreationTime.ToString("s")</p>
+            <p>Modified: @item.LastWriteTime.ToString("s")</p>
+        }
+    }
+    else if (Items.Count > 1)
+    {
+        <p>@Items.Count items selected</p>
+    }
+    else
+    {
+        <p>No item selected</p>
+    }
+</div>

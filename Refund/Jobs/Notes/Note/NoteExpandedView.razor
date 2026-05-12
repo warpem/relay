@@ -1,0 +1,9 @@
+@using Refund.Services
+@using Relay.Emoji
+@inject ExpandedJobViewService JobViewService
+
+@if (JobViewService.CurrentJob is ReadOnlyNote job)
+{
+    string note = job.ProcessingNote;
+    <span>note</span>
+}

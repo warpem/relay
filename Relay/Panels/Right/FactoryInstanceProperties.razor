@@ -1,0 +1,67 @@
+@using Refund.DataModel.ReadOnly
+@using Refund.Services
+@using Refund.Services.Core.DataManager
+@using Refund.Utils
+@using Relay.Panels.Right.Actions
+@inject MenuActionService MenuActions
+
+<div style="display: flex; flex-direction: column; justify-content: flex-start; row-gap: 2rem;">
+    @if (FactoryInstance != null)
+    {
+        <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+            <div style="display: flex; column-gap: 8px; align-items: center;">
+                <span class="status-dot" style="width: 12px; height: 12px; border-radius: 6px; flex-shrink: 0;
+                    background: @Refund.Utils.JobStatusExtensions.GetStatusHexColor(FactoryInstance.AggregateStatus);"></span>
+                <h5 style="margin: 0;">
+                    FI@(FactoryInstance.Id)@(FactoryInstance.Definition != null ? $": {FactoryInstance.Definition.Alias}" : "")
+                </h5>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(FactoryInstance.Alias))
+            {
+                <h6 style="margin: 0;">@FactoryInstance.Alias</h6>
+            }
+        </div>
+
+        <div class="property-panel">
+            <div class="property-item">
+                <span class="property-title">Name</span>
+                <FluentTextField Class="property-value"
+                                 AutoComplete="off"
+                                 Value="@FactoryInstance.Alias"
+                                 ValueChanged="@HandleAliasChanged"/>
+            </div>
+
+            <div class="property-item">
+                <span class="property-title">Notes</span>
+                <FluentTextArea Class="property-value"
+                                Rows="3"
+                                Value="@FactoryInstance.Notes"
+                                ValueChanged="@HandleNotesChanged"/>
+            </div>
+
+            <div class="property-item">
+                <span class="property-title">Status</span>
+                <span class="property-value">@FactoryInstance.AggregateStatus</span>
+            </div>
+
+            <div class="property-item">
+                <span class="property-title">Sub-jobs</span>
+                <span class="property-value">@FactoryInstance.SubJobIds.Count</span>
+            </div>
+
+            <div class="property-item">
+                <span class="property-title">Last modified</span>
+                <span class="property-value">
+                    @FactoryInstance.UpdateDate.ToString("yyyy-MM-dd HH:mm")
+                    @if (FactoryInstance.UpdatedBy != null)
+                    {
+                        <text>, by </text><FluentBadge>@FactoryInstance.UpdatedBy.Name</FluentBadge>
+                    }
+                </span>
+            </div>
+        </div>
+
+        <ActionButtons Actions="@MenuActions.GetFactoryInstanceActions([FactoryInstance])"/>
+    }
+</div>

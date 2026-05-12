@@ -1,0 +1,107 @@
+@using Refund.Services
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+
+<div class="log-panel @(Service.IsLogPanelExpanded ? "expanded" : "")">
+
+    <div class="log-panel-handle">
+        <div class="handle-buttons">
+            
+            <div class="button-wrapper">
+                <FluentCounterBadge Dot="@(Service.HasNewLogs && !_showingLogs)" Color="Color.Accent" BackgroundColor="Color.Accent">
+                    <FluentButton Id="buttonStdout" 
+                                  IconStart="@(new Icons.Regular.Size24.DocumentText())"
+                                  Appearance="@(_showingLogs ?
+                                                    Appearance.Accent :
+                                                    null)"
+                                  BackgroundColor="@(_showingLogs ?
+                                                         null :
+                                                         "transparent")"
+                                  OnClick="@(_ => TogglePanel(LogSection.Output))" />
+                </FluentCounterBadge>
+                <FluentTooltip Anchor="buttonStdout" 
+                               Position="TooltipPosition.Right">
+                    Show output log
+                </FluentTooltip>
+            </div>
+            
+            @if (!string.IsNullOrEmpty(Service?.CurrentStaging))
+            {
+                <div class="button-wrapper">
+                    <FluentCounterBadge Dot="@(Service.HasNewStaging && !_showingStaging)" Color="Color.Accent" BackgroundColor="Color.Accent">
+                        <FluentButton Id="buttonStaging"
+                                      IconStart="@(new Icons.Regular.Size24.HeartPulse())"
+                                      Appearance="@(_showingStaging ?
+                                                        Appearance.Accent :
+                                                        null)"
+                                      BackgroundColor="@(_showingStaging ?
+                                                             null :
+                                                             "transparent")"
+                                      OnClick="@(_ => TogglePanel(LogSection.Staging))"/>
+                    </FluentCounterBadge>
+                    <FluentTooltip Anchor="buttonStaging"
+                                   Position="TooltipPosition.Right">
+                        Show lifecycle log
+                    </FluentTooltip>
+                </div>
+            }
+
+            @if (!string.IsNullOrEmpty(Service?.CurrentErrors))
+            {
+                <div class="button-wrapper">
+                    <FluentCounterBadge Dot="@(Service.HasNewErrors && !_showingErrors)" Color="Color.Error" BackgroundColor="Color.Error">
+                        <FluentButton Id="buttonStderr" 
+                                      IconStart="@(new Icons.Regular.Size24.Warning().WithColor(_showingErrors ? 
+                                                                                                    "white" : 
+                                                                                                    "var(--error)"))"
+                                      BackgroundColor="@(_showingErrors ?
+                                                             "var(--error)" :
+                                                             "transparent")"
+                                      OnClick="@(_ => TogglePanel(LogSection.Errors))"/>
+                        </FluentCounterBadge>
+                    <FluentTooltip Anchor="buttonStderr" Position="TooltipPosition.Right">
+                        Show error log
+                    </FluentTooltip>
+                </div>
+            }
+        </div>
+    </div>
+
+    <div class="log-panel-content">
+        <div class="panel-header">
+            <div class="section-title">
+                @(Service.CurrentSection switch
+                {
+                    LogSection.Staging => "Lifecycle Log",
+                    LogSection.Output => "Output Log",
+                    LogSection.Errors => "Error Log",
+                    _ => ""
+                })
+            </div>
+        </div>
+        <div class="log-content" @ref="_logContentElement">
+            @if (Service.CurrentSection == LogSection.Staging)
+            {
+                <pre>@Service.CurrentStaging</pre>
+            }
+            else if (Service.CurrentSection == LogSection.Output)
+            {
+                @* Get a snapshot of iterations to avoid modification during enumeration *@
+                var iterations = Service.AvailableIterations;
+                @foreach (var iteration in iterations)
+                {
+                    <div class="log-iteration">
+                        @if(iteration > 0)
+                        {
+                            <div class="iteration-header">Iteration @iteration</div>
+                        }
+                        <pre>@Service.GetLogsForIteration(iteration)</pre>
+                    </div>
+                }
+            }
+            else if (Service.CurrentSection == LogSection.Errors)
+            {
+                <pre>@Service.CurrentErrors</pre>
+            }
+        </div>
+    </div>
+</div>

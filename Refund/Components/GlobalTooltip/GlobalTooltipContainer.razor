@@ -1,0 +1,11 @@
+<div class="global-tooltip-container">
+    @foreach (var (id, tooltip) in TooltipService.ActiveTooltips)
+    {
+        <div id="tooltip-@id" class="global-tooltip" 
+             data-target-id="@tooltip.TargetElementId"
+             data-placement="@tooltip.Placement.ToString().ToLowerInvariant()"
+             data-offset="@tooltip.Offset">
+            @tooltip.Content
+        </div>
+    }
+</div>

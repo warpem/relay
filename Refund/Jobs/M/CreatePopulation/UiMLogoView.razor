@@ -1,0 +1,28 @@
+@namespace Refund.UIFields
+@using Refund.Jobs.M.CreatePopulation
+@inherits UiFieldViewBase
+
+<div style="width: 100%; display: flex; justify-content: center; align-items: center;">
+    <img src="./_content/Refund/images/mlogo.png"
+         style="max-width: 144px; max-height: 144px; filter: hue-rotate(@(ValueT)deg);" />
+</div>
+
+<FluentSlider @key="@(ValueT)" 
+              TValue="@(int)"
+              @bind-Value="@ValueT" 
+              Style="width: 100%;"
+              Min="-180"
+              Max="180"
+              Step="10"
+              Disabled="@IsDisabled" />
+
+@code
+{
+    private UiMLogo FieldDescriptionT => (UiMLogo)FieldDescription ?? null;
+
+    private int ValueT
+    {
+        get => (int)Value;
+        set => ValueChanged.InvokeAsync(value);
+    }
+}

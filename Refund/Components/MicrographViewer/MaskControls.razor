@@ -1,0 +1,27 @@
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Refund.Components.SlimTextField
+
+<div style="display: flex; align-items: center; height: 32px;">
+
+    <ToggleButton Icon="@(new Icons.Regular.Size24.Eye())" Title="Show mask"
+                  @bind-IsToggled="IsToggledShow" />
+    
+    @if (CanEditMask)
+    {
+        <ToggleButton Icon="@(new Icons.Regular.Size24.PaintBrush())" Style="margin-left: 4px;" Title="Paint mask"
+                      @bind-IsToggled="IsToggledPaint"/>
+
+        <div class="child-field">
+            <SlimTextField @bind-Value="BrushDiameter"
+                           Min="2" Max="100000" Step="2"/>
+            <span>Å</span>
+        </div>
+        
+        <FluentButton IconEnd="@(new Icons.Regular.Size24.PaintBucket())" Style="margin-left: 4px;" Title="Fill entire mask"
+                      OnClick="FillMask"/>
+
+        <FluentButton IconEnd="@(new Icons.Regular.Size24.Eraser())" Style="margin-left: 4px;" Title="Erase entire mask"
+                      OnClick="EraseMask"/>
+    }
+</div>

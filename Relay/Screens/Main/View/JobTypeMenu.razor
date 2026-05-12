@@ -1,0 +1,155 @@
+@using Refund.DataModel
+@using Refund.DataModel.ReadOnly
+@using Refund.Utils
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+
+<FluentMenu @ref="_menu"
+            Open="@Open"
+            OpenChanged="@(async (v) => await OpenChanged.InvokeAsync(v))"
+            HorizontalPosition="@HorizontalPosition"
+            VerticalPosition="@VerticalPosition"
+            Width="@Width"
+            Anchor="@Anchor"
+            Anchored="false"
+            UseMenuService="true"
+            Style="@Style"
+            KeepOpen="false"
+            @onmouseleave="async () => await OnMouseLeave.InvokeAsync()">
+    
+        @if (Type == MenuType.CreateFromPort)
+        {
+            <span style="font-size: 0.75rem; padding-left: 1rem; padding-right: 1rem; opacity: 0.5;">
+                Create and connect job
+            </span>
+        }
+        else if (Type == MenuType.CreateFromType || PortFilter == null)
+        {
+            <span style="font-size: 0.75rem; padding-left: 1rem; padding-right: 1rem; opacity: 0.5;">
+                Create
+            </span>
+        }
+        else if (Type == MenuType.ConnectToPort)
+        {
+            <span style="font-size: 0.75rem; padding-left: 1rem; padding-right: 1rem; opacity: 0.5;">
+                Connect to
+            </span>
+        }
+    <FluentDivider />
+    
+    @if (Type == MenuType.ConnectToPort)
+    {
+        if (PortFilter != null)
+        {
+            foreach (var _port in JobEditor.CurrentJob.PortsIn
+                                      .Values
+                                      .Where(p => PortFilter(p.ResourceType))
+                                      .Where(p => ConnectPortFilter == null || ConnectPortFilter(p)))
+            {
+                var port = _port;
+
+                <FluentMenuItem OnClick="() => OnPortConnected.InvokeAsync((ClickedPort, port))">
+                    <div style="display: flex; align-items: center; column-gap: 8px;">
+                        <div style="background-color: @(PortColors.Get(port.ResourceType));
+                                        width: 12px;
+                                        height: 12px;
+                                        border-radius: 6px;"></div>
+                        @port.Alias
+                    </div>
+                </FluentMenuItem>
+            }
+        }
+        else
+        {
+            <span style="padding: 0.5rem 1rem; display: block;">
+                Can't create new job while editor is open
+            </span>
+        }
+    }
+    else
+    {
+        @if (Type == MenuType.CreateFromType && ClickedPort == null)
+        {
+            @if (OnFolderRequested.HasDelegate)
+            {
+                <FluentMenuItem OnClick="() => OnFolderRequested.InvokeAsync()">
+                    <div style="display: flex; align-items: center; column-gap: 8px;">
+                        <FluentIcon Value="@(new Icons.Regular.Size16.Folder())" />
+                        Folder
+                    </div>
+                </FluentMenuItem>
+            }
+
+            @if (Definitions?.Any() == true)
+            {
+                <FluentDivider />
+                <span style="font-size: 0.75rem; padding-left: 1rem; opacity: 0.5;">Factories</span>
+                @foreach (var def in Definitions)
+                {
+                    var _def = def;
+                    <FluentMenuItem OnClick="() => OnFactorySelected.InvokeAsync(_def)">
+                        <div style="display: flex; align-items: center; column-gap: 8px; max-width: 260px;">
+                            <FluentIcon Value="@(new Icons.Regular.Size16.BuildingFactory())" Style="flex-shrink: 0;" />
+                            <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">@_def.Alias</span>
+                        </div>
+                    </FluentMenuItem>
+                }
+            }
+
+            <FluentDivider />
+        }
+
+        IEnumerable<JobTypeGroup> filteredSubgroups = TypeFilter != null ?
+                                                          Job.TypeHierarchy.Subgroups.Where(g => g.HasAnyDescendants(t => TypeFilter(t.Type))) :
+                                                          Job.TypeHierarchy.Subgroups;
+
+        IEnumerable<(string Name, Type type)> filteredTypes = TypeFilter != null ?
+                                                                  Job.TypeHierarchy.Types.Where(t => TypeFilter(t.Type)) :
+                                                                  Job.TypeHierarchy.Types;
+        
+        @if (filteredSubgroups.Any() || filteredTypes.Any())
+        {
+            @foreach (var subgroup in filteredSubgroups)
+            {
+                <JobTypeMenuGroup Group="@subgroup" Type="@Type" ClickedPort="@ClickedPort"
+                                  TypeFilter="@TypeFilter" PortFilter="@PortFilter"
+                                  OnTypeSelected="@OnTypeSelected"
+                                  OnPortSelected="@OnPortSelected" />
+            }
+
+            @foreach (var (name, _type) in filteredTypes)
+            {
+                var type = _type;
+
+                @if (Type == MenuType.CreateFromType)
+                {
+                    <FluentMenuItem Label="@(Job.TypeNames[type])" OnClick="() => OnTypeSelected.InvokeAsync(type)"/>
+                }
+                else
+                {
+                    <FluentMenuItem Label="@(Job.TypeNames[type])">
+                        <MenuItems>
+                            @foreach (var _port in Job.AllTypesPortsIn[type].Values.Where(p => PortFilter(p.ResourceType)))
+                            {
+                                var port = _port;
+
+                                <FluentMenuItem OnClick="() => OnPortSelected.InvokeAsync((type, ClickedPort, port.AsReadOnly()))">
+                                    <div style="display: flex; align-items: center; column-gap: 8px;">
+                                        <div style="background-color: @(PortColors.Get(port.ResourceType));
+                                        width: 12px;
+                                        height: 12px;
+                                        border-radius: 6px;"></div>
+                                        @port.Alias
+                                    </div>
+                                </FluentMenuItem>
+                            }
+                        </MenuItems>
+                    </FluentMenuItem>
+                }
+            }
+        }
+        else
+        {
+            <FluentMenuItem Label="No matching types" Disabled="true"/>
+        }
+    }
+</FluentMenu>

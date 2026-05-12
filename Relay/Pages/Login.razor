@@ -1,0 +1,166 @@
+@page "/login"
+
+@using Refund.Configuration.Constants
+@using Refund.Configuration
+
+<div class="login-container">
+    <svg class="metaball-svg" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+            <filter id="metaball-filter">
+                <feGaussianBlur in="SourceGraphic" stdDeviation="35" result="blur" />
+                <feColorMatrix in="blur" mode="matrix"
+                               values="1 0 0 0 0
+                                       0 1 0 0 0
+                                       0 0 1 0 0
+                                       0 0 0 25 -10"
+                               result="contrast" />
+            </filter>
+        </defs>
+    </svg>
+
+    <div class="metaballs-bg">
+        <div class="metaball metaball-1"></div>
+        <div class="metaball metaball-2"></div>
+        <div class="metaball metaball-3"></div>
+        <div class="metaball metaball-4"></div>
+        <div class="metaball metaball-5"></div>
+        <div class="metaball metaball-6"></div>
+    </div>
+
+    @if (AuthConfig.AuthenticationType == AuthenticationConfigurationConstants.AuthenticationTypeSSO)
+    {
+        <div class="sso-card">
+            <h2>Relay nice to see you!</h2>
+            
+            <FluentButton Appearance="Appearance.Accent"
+                          OnClick="@(() => NavigationManager.NavigateTo("/start-sso", forceLoad: true))">
+                Sign in via SSO
+            </FluentButton>
+        </div>
+    }
+    else
+    {
+        <div class="login-card">
+            <h2>@(_isFirstUser ? "Welcome to Relay!" : _isRegistering ? "Relay nice to meet you!" : "Relay nice to see you!")</h2>
+
+            @if (!string.IsNullOrEmpty(_errorMessage))
+            {
+                <FluentMessageBar Intent="MessageIntent.Error"
+                                  Title="@(_isRegistering ? "Registration failed" : "Sign in failed")"
+                                  Style="margin-bottom: 1rem;">
+                    @_errorMessage
+                </FluentMessageBar>
+            }
+
+            @if (_isRegistering)
+            {
+                <EditForm Model="@_registrationModel" OnValidSubmit="HandleRegistration">
+                    <DataAnnotationsValidator/>
+
+                    <div class="form-content">
+                        <FluentTextField @bind-Value="_registrationModel.Username"
+                                         Label="Username"
+                                         Required="true"
+                                         Immediate="true"
+                                         Autofocus="true"
+                                         AutoComplete="off" />
+                        <FluentValidationMessage For="@(() => _registrationModel.Username)"/>
+
+                        <FluentTextField @bind-Value="_registrationModel.Name"
+                                         Label="Name"
+                                         Required="true"
+                                         Immediate="true"/>
+                        <FluentValidationMessage For="@(() => _registrationModel.Name)"/>
+
+                        <FluentTextField @bind-Value="_registrationModel.Email"
+                                         Label="Email"
+                                         Required="true"
+                                         Type="email"
+                                         Immediate="true"
+                                         TextFieldType="TextFieldType.Email"/>
+                        <FluentValidationMessage For="@(() => _registrationModel.Email)"/>
+
+                        <FluentTextField @bind-Value="_registrationModel.Password"
+                                         Label="Password"
+                                         Required="true"
+                                         TextFieldType="TextFieldType.Password"/>
+                        <FluentValidationMessage For="@(() => _registrationModel.Password)"/>
+
+                        @if (!_isFirstUser)
+                        {
+                            <FluentTextField @bind-Value="_registrationModel.SecurityToken"
+                                             Label="Security Token"
+                                             Required="true"
+                                             AutoComplete="off" />
+                            <FluentValidationMessage For="@(() => _registrationModel.SecurityToken)"/>
+                        }
+
+                        <div class="button-row">
+                            @if (!_isFirstUser)
+                            {
+                                <FluentButton Type="ButtonType.Button"
+                                              Appearance="Appearance.Outline"
+                                              OnClick="@(() => _isRegistering = false)">
+                                    Back to Login
+                                </FluentButton>
+                            }
+
+                            <FluentButton Type="ButtonType.Submit"
+                                          Appearance="Appearance.Accent"
+                                          Loading="@_isLoading">
+                                @(_isFirstUser ? "Create Admin Account" : "Create Account")
+                            </FluentButton>
+                        </div>
+                    </div>
+                </EditForm>
+            }
+            else
+            {
+                <EditForm Model="@_loginModel"
+                          OnValidSubmit="HandleNativeLogin"
+                          @onkeydown="@HandleLoginKeyPress">
+                    <DataAnnotationsValidator/>
+
+                    <div class="form-content">
+                        <FluentTextField @bind-Value="_loginModel.Username"
+                                         Label="Username"
+                                         Required="true"
+                                         Immediate="true"
+                                         Autofocus="true"
+                                         AutoComplete="off"/>
+                        <FluentValidationMessage For="@(() => _loginModel.Username)"/>
+
+                        <FluentTextField @bind-Value="_loginModel.Password"
+                                         Label="Password"
+                                         Required="true"
+                                         Immediate="true"
+                                         AutoComplete="off"
+                                         Type="password"/>
+                        <FluentValidationMessage For="@(() => _loginModel.Password)"/>
+
+                        <FluentCheckbox @bind-Value="_loginModel.RememberMe"
+                                        Label="Remember me"/>
+
+                        <div class="button-row">
+                            <FluentButton Type="ButtonType.Submit"
+                                          Appearance="Appearance.Accent"
+                                          Loading="@_isLoading">
+                                Sign in
+                            </FluentButton>
+                        </div>
+                    </div>
+                </EditForm>
+            }
+
+            @if (!_isRegistering && !_isFirstUser)
+            {
+                <div class="mode-switch">
+                    <FluentButton OnClick="@(() => _isRegistering = true)"
+                                  Appearance="Appearance.Stealth">
+                        Need an account? Register here
+                    </FluentButton>
+                </div>
+            }
+        </div>
+    }
+</div>

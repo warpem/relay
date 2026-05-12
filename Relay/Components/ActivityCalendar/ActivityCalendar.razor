@@ -1,0 +1,49 @@
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@implements IAsyncDisposable
+
+<div class="activity-calendar">
+    @if (_isLoading)
+    {
+        <div class="loading-container">
+            <FluentProgressRing />
+        </div>
+    }
+    else
+    {
+        <div class="calendar-container">
+            @* Previous Month *@
+            @* <div class="calendar-month"> *@
+            @*     <div class="month-header"> *@
+            @*         <div class="button-spacer"> *@
+            @*             <FluentIcon Value="@(new Icons.Filled.Size16.ChevronLeft())" OnClick="@MoveToPreviousMonth"/> *@
+            @*         </div> *@
+            @*         <span class="month-label">@_previousMonth.ToString("MMM \\'yy")</span> *@
+            @*         <div class="button-spacer"></div> *@
+            @*     </div> *@
+            @*     <CalendarGrid Month="@_previousMonth" *@
+            @*                   ActivityData="@_activityData" *@
+            @*                   MaxActivity="@_maxActivity" /> *@
+            @* </div> *@
+
+            @* Current Month *@
+            <div class="calendar-month">
+                <div class="month-header">
+                    <div class="button-spacer">
+                        <FluentIcon Value="@(new Icons.Filled.Size16.ChevronLeft())" OnClick="@MoveToPreviousMonth"/>
+                    </div>
+                    <span class="month-label">@_currentMonth.ToString("MMM \\'yy")</span>
+                    <div class="button-spacer">
+                        @if (_currentMonth.Month != DateTime.Now.Month || _currentMonth.Year != DateTime.Now.Year)
+                        {
+                            <FluentIcon Value="@(new Icons.Filled.Size16.ChevronRight())" OnClick="@MoveToNextMonth"/>
+                        }
+                    </div>
+                </div>
+                <CalendarGrid Month="@_currentMonth"
+                              ActivityData="@_activityData"
+                              MaxActivity="@_maxActivity" />
+            </div>
+        </div>
+    }
+</div>

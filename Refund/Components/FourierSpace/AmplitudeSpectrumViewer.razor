@@ -1,0 +1,82 @@
+@using Microsoft.JSInterop
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject IJSRuntime JsRuntime
+
+<div class="container @(_isLoading ? "loading" : "")">
+    @if (_isLoading)
+    {
+        <div class="loading-overlay">
+            <FluentProgressRing Style="width: 70px; height: 70px;" />
+        </div>
+    }
+    else
+    {
+        @if (IsTiltSeriesMode)
+        {
+            <div class="tilt-slider-container">
+                <FluentSlider TValue="int"
+                              Embedded="true"
+                              Min="0"
+                              Max="@(Math.Max(0, _tiltCount - 1))"
+                              Step="1"
+                              Value="@_currentTiltIndex"
+                              ValueChanged="HandleTiltIndexChanged"
+                              Immediate="true">
+                    <FluentSliderLabel Position="0">
+                        @_tiltAngles.First().ToString("F1") °
+                    </FluentSliderLabel>
+                    <FluentSliderLabel Position="@_zeroTiltIndex">
+                        @_tiltAngles[_zeroTiltIndex].ToString("F1") °
+                    </FluentSliderLabel>
+                    <FluentSliderLabel Position="@(_tiltAngles.Length - 1)">
+                        @_tiltAngles.Last().ToString("F1") °
+                    </FluentSliderLabel>
+                </FluentSlider>
+            </div>
+        }
+
+        <div class="chart-container" style="opacity: @(_isLoading ? "0" : "1")">
+            <canvas @ref="_canvasReference"
+                    class="chart"
+                    style="width: 512px; aspect-ratio: 2/1;"
+                    width="512">
+            </canvas>
+
+            <div class="custom-tooltip" style="opacity: 0">
+                <div class="tooltip-title"></div>
+                <table>
+                    <tbody>
+                    <tr>
+                        <td>
+                            <span class="custom-tooltip-bullet" style="background: rgb(0, 191, 255)"></span>
+                            Experimental
+                        </td>
+                        <td class="experimental-value"></td>
+                    </tr>
+                    <tr>
+                        <td>
+                            <span class="custom-tooltip-bullet" style="background: rgb(255, 20, 147)"></span>
+                            Fitted
+                        </td>
+                        <td class="fitted-value"></td>
+                    </tr>
+                    <tr>
+                        <td>
+                            <span class="custom-tooltip-bullet" style="background: rgb(211, 211, 211)"></span>
+                            Quality
+                        </td>
+                        <td class="quality-value"></td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <img src="@_imageSource"
+             class="power-spectrum"
+             width="512px"
+             height="512px"
+             style="opacity: @(_isLoading ? "0" : "1")"
+             alt="Power spectrum visualization"/>
+    }
+</div>

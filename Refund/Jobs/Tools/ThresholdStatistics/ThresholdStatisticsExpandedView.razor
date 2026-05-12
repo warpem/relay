@@ -1,0 +1,55 @@
+@using Refund.Components.Histogram
+@using Refund.DataModel
+
+@if (_job == null)
+{
+    <span>No job to display</span>
+}
+else if (_job.Status != JobStatus.Running && _job.Status != JobStatus.Finished)
+{
+    <span>The job isn't running or hasn't finished successfully</span>
+}
+else if (_isLoading)
+{
+    <div class="loading-container">
+        <FluentProgressRing Style="width: 40px; height: 40px;" />
+        <div>Loading column data...</div>
+    </div>
+}
+else if (_job.NumericalColumnNames.Length == 0)
+{
+    <span>No numerical columns found in the input STAR file</span>
+}
+else
+{
+    <div class="container">
+        <div class="total-header">
+            <h5>@_totalOriginal &rarr; @_totalFiltered particles</h5>
+        </div>
+
+        <div class="histogram-grid">
+            @foreach (var col in _job.NumericalColumnNames)
+            {
+                string column = col;
+                bool disabled = IsEditingDisabled;
+                var counts = GetColumnCounts(column);
+
+                <div class="histogram-item">
+                    <h6>@column: @counts.Original &rarr; @counts.Filtered</h6>
+                    <Histogram BinSizes="@GetBins(column)"
+                               SecondaryBinSizes="@GetFilteredBins(column)"
+                               MinRange="@GetMinRange(column)"
+                               MaxRange="@GetMaxRange(column)"
+                               SelectedRangeStart="@GetSelectedStart(column)"
+                               SelectedRangeEnd="@GetSelectedEnd(column)"
+                               RangeSelectionEnabled="true"
+                               SelectedRangeChanged="@(range => OnRangeChanged(column, range))"
+                               IsDisabled="@disabled"
+                               Color="@(disabled ? "#999" : "#0078D4")"
+                               SecondaryColor="@(disabled ? "#999" : "#0078D4")"
+                               Style="width: 100%;"/>
+                </div>
+            }
+        </div>
+    </div>
+}

@@ -1,0 +1,33 @@
+@typeparam TValue where TValue : new()
+@using System.Globalization
+
+@*
+    Drop-in replacement for FluentNumberField that works around a FAST web component bug
+    where disabled number fields fail to display non-integer values.
+    When disabled, renders a FluentTextField instead.
+    See: https://github.com/microsoft/fast/issues/5950
+*@
+
+@if (Disabled)
+{
+    <FluentTextField Value="@ValueAsString"
+                     Class="@Class"
+                     Style="@Style"
+                     Placeholder="@Placeholder"
+                     Disabled="true" />
+}
+else
+{
+    <FluentNumberField TValue="TValue"
+                       Value="@Value"
+                       ValueChanged="@ValueChanged"
+                       Class="@Class"
+                       Style="@Style"
+                       Placeholder="@Placeholder"
+                       Min="@Min"
+                       Max="@Max"
+                       Step="@Step"
+                       Immediate="@Immediate"
+                       ImmediateDelay="@ImmediateDelay"
+                       AutoComplete="@AutoComplete" />
+}

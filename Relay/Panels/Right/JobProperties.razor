@@ -1,0 +1,269 @@
+@using Refund.Services
+@using Refund.Services.Core.DataManager
+@using Refund.Services.Core.Session
+@using Refund.Utils
+@using Refund.Components.FileBrowser
+@using Relay.Panels.Right.Actions
+@using Refund.Components.Jobs
+@using Refund.DataModel
+@using Relay.Panels.Right.JobEditor
+@using IconSize = Refund.Utils.IconSize
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@inject JobEditorService JobEditor
+@inject MenuActionService MenuActions
+
+@if (Jobs.Count() == 1)
+{
+    var job = Jobs.First();
+
+    <div style="display: flex; flex-direction: column; gap: 0.5rem; height: 100%;">
+
+        <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+            <div style="display: flex; column-gap: 8px; align-items: center;">
+                <div style="width: 24px; height: 24px; flex-shrink: 0;">
+                    <FluentIcon Value="@job.GetStatusIcon(IconSize.Size24).WithStatusColor(job)"
+                                Title="@(job.Status.ToString())"/>
+                </div>
+
+                <h5 class="job-name">@job.QualifiedName</h5>
+            </div>
+            
+            @if (!string.IsNullOrWhiteSpace(job.Alias))
+            {
+                <h6>@job.TypeName</h6>
+            }
+        </div>
+
+        <FluentTabs Style="height: 100%; padding: 0;">
+            <FluentTab Label="Details" Style="padding: 0.5rem 0; height: 100%;">
+                <div style="display: flex; flex-direction: column; justify-content: space-between; gap: 0.5rem; height: 100%;">
+                    <div style="width: 100%; height: 100%;">
+                        <div class="property-panel">
+
+                            <div class="property-item">
+                                <span class="property-title">Name</span>
+                                <FluentTextField Class="property-value"
+                                                 AutoComplete="off"
+                                                 Value="@job.Alias"
+                                                 ValueChanged="@HandleJobAliasChanged"/>
+                            </div>
+
+                            <div class="property-item">
+                                <span class="property-title">Notes</span>
+                                <FluentTextArea Class="property-value"
+                                                Rows="5"
+                                                Value="@job.Notes"
+                                                ValueChanged="@HandleJobNotesChanged"/>
+                            </div>
+
+                            <div class="property-item">
+                                <span class="property-title">Directory</span>
+                                <div class="property-value" style="display: flex; flex-wrap: nowrap; align-items: center; gap: 2px;">
+                                    <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0;" title="@job.DirectoryPath">@job.DirectoryPath</div>
+                                    <FluentButton BackgroundColor="transparent" Color="transparent"
+                                                  Title="Copy to clipboard"
+                                                  Style="height: 16px; flex-shrink: 0; padding: 0; margin: 0; min-width: 16px;"
+                                                  OnClick="@HandlePathCopyClicked">
+                                        <FluentIcon Value="@(new Icons.Regular.Size16.Copy())" />
+                                    </FluentButton>
+                                    <FluentButton BackgroundColor="transparent" Color="transparent"
+                                                  Title="Browse folder"
+                                                  Style="height: 16px; flex-shrink: 0; padding: 0; margin: 0; min-width: 16px;"
+                                                  OnClick="@HandleBrowseFolderClicked">
+                                        <FluentIcon Value="@(new Icons.Regular.Size16.FolderOpen())" />
+                                    </FluentButton>
+                                </div>
+                            </div>
+
+                            <div class="property-item">
+                                <span class="property-title">Last modified</span>
+                                <span class="property-value">
+                                    @job.UpdateDate.ToString("yyyy-MM-dd HH:mm:ss"), by <FluentBadge>@job.UpdatedBy.Name</FluentBadge>
+                                </span>
+                            </div>
+
+                            @if (job.QueueId.HasValue)
+                            {
+                                <div class="property-item">
+                                    <span class="property-title">Queue</span>
+                                    <span class="property-value">@GetQueueDisplayName(job.QueueId.Value)</span>
+                                </div>
+                            }
+
+                            @if (job.GetParents().Any())
+                            {
+                                <div class="property-item">
+                                    <span class="property-title">Parents</span>
+                                    <div style="display: flex; flex-direction: column; gap: 0.1rem;">
+                                        @foreach (var _parent in job.GetParents())
+                                        {
+                                            var parent = _parent;
+
+                                            <JobLine Job="parent"
+                                                     IncludeSpace="false"
+                                                     ShowStatus="false"
+                                                     NameWidth="150px"
+                                                     PreviewPosition="TooltipPosition.Left"/>
+                                        }
+                                    </div>
+                                </div>
+                            }
+
+                            @if (job.GetChildren().Any())
+                            {
+                                <div class="property-item">
+                                    <span class="property-title">Children</span>
+                                    <div style="display: flex; flex-direction: column; gap: 0.1rem;">
+                                        @foreach (var _child in job.GetChildren())
+                                        {
+                                            var child = _child;
+
+                                            <JobLine Job="child"
+                                                     IncludeSpace="false"
+                                                     ShowStatus="false"
+                                                     NameWidth="150px"
+                                                     PreviewPosition="TooltipPosition.Left"/>
+                                        }
+                                    </div>
+                                </div>
+                            }
+
+                            <div class="property-item">
+                                <span class="property-title">Timeline</span>
+                                <div class="timeline">
+                                    @{
+                                        var (visibleEvents, collapsedCount) = GetTimelineEvents(job);
+                                        var createdEvent = visibleEvents.FirstOrDefault(e => e.Type == EventType.Created);
+                                        var otherEvents = visibleEvents.Where(e => e.Type != EventType.Created).ToList();
+                                    }
+                                    
+                                    @* Always show Created event first *@
+                                    @if (createdEvent != null)
+                                    {
+                                        <div class="timeline-item">
+                                            <div class="timeline-event-header">
+                                                <span class="timeline-event-text">
+                                                    @GetEventDisplayText(createdEvent.Type)
+                                                </span>
+                                                <span class="timeline-event-timestamp">
+                                                    @createdEvent.Timestamp.ToString("yyyy-MM-dd HH:mm:ss")
+                                                </span>
+                                            </div>
+                                            @if (createdEvent.Author != null)
+                                            {
+                                                <div class="timeline-event-author">
+                                                    by <FluentBadge>@createdEvent.Author.Name</FluentBadge>
+                                                </div>
+                                            }
+                                        </div>
+                                    }
+                                    
+                                    @* Show expand link in the middle if there are collapsed events *@
+                                    @if (collapsedCount > 0)
+                                    {
+                                        <div class="timeline-expand-link" @onclick="ToggleTimelineExpansion">
+                                            Expand @collapsedCount hidden events
+                                        </div>
+                                    }
+                                    
+                                    @* Show events after the most recent clearing *@
+                                    @foreach (var evt in otherEvents)
+                                    {
+                                        <div class="timeline-item">
+                                            <div class="timeline-event-header">
+                                                <span class="timeline-event-text">
+                                                    @GetEventDisplayText(evt.Type)
+                                                </span>
+                                                <span class="timeline-event-timestamp">
+                                                    @evt.Timestamp.ToString("yyyy-MM-dd HH:mm:ss")
+                                                </span>
+                                            </div>
+                                            @if (evt.Author != null)
+                                            {
+                                                <div class="timeline-event-author">
+                                                    by <FluentBadge>@evt.Author.Name</FluentBadge>
+                                                </div>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <ActionButtons Actions="@MenuActions.GetJobActions(Jobs)"/>
+                </div>
+            </FluentTab>
+
+            @if (job.Status != JobStatus.Building)
+            {
+                <FluentTab Label="Parameters" Style="padding: 0.5rem 0; height: 100%;">
+                    <div style="height: 100%; overflow-y: auto;">
+                        <JobPortDisplay Job="@job"
+                                        IsDisabled="true"
+                                        GetPortErrors="@GetNoPortErrors"
+                                        OnEdgeRemoved="@HandleEdgeRemoved" />
+                        
+                        <JobParameterDisplay Job="@job"
+                                             IsDisabled="true"
+                                             ShowAdvanced="true"
+                                             GetError="@GetNoError"
+                                             ValueChanged="@HandleParameterChanged"/>
+                    </div>
+                </FluentTab>
+            }
+
+            @if (_iterationsWithResults.Any())
+            {
+                <FluentTab Label="Results">
+                    <div style="padding: 0.5rem 0; height: 100%;"
+                         class="property-panel">
+                        <div class="property-item">
+                            <span class="property-title">Results for iteration</span>
+                            <FluentCombobox TOption="@(int)"
+                                            Items="@_iterationsWithResults"
+                                            Width="100%"
+                                            Multiple="false"
+                                            SelectedOption="@_resultIteration"
+                                            SelectedOptionChanged="HandleResultIterationChanged">
+                                <OptionTemplate Context="item">
+                                    @item
+                                </OptionTemplate>
+                            </FluentCombobox>
+                        </div>
+                        
+                        @if (_portsWithDownloadables.Any())
+                        {
+                            <div style="display: flex; flex-direction: column; gap: 1rem;">
+                                @foreach (var port in _portsWithDownloadables)
+                                {
+                                    var downloadables = port.GetResource(_resultIteration).GetDownloadables();
+                                    
+                                    <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                                        <span class="property-title">@port.Alias</span>
+                                        
+                                        @foreach (var downloadable in downloadables)
+                                        {
+                                            <DownloadableLine Downloadable="@downloadable"/>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        }
+                        else
+                        {
+                        <span>No downloadable results available.</span>
+                        }
+                    </div>
+                </FluentTab>
+            }
+        </FluentTabs>
+
+    </div>
+}
+else if (Jobs.Count() > 1)
+{
+    <h5>@Jobs.Count() jobs selected</h5>
+    
+    <ActionButtons Actions="@MenuActions.GetJobActions(Jobs)" />
+}

@@ -1,0 +1,90 @@
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Refund.Components
+@using Refund.Components.IsosurfaceViewer
+
+@implements IAsyncDisposable
+
+@if (_job == null)
+{
+    <FluentProgressRing Style="height: 70px; width: 70px;"/>
+}
+else
+{
+    <div style="width: 100%; overflow: auto; display: flex; flex-direction: column; gap: 1rem;">
+        <div style="display: flex; gap: 1rem; align-items: center;">
+            
+            <FluentSwitch @bind-Value="@_isMaskChecked">
+                Mask
+            </FluentSwitch>
+
+            <FluentButton OnClick="@(ExportClasses)"
+                          Disabled="@(!_selectedClasses.Any())"
+                          Appearance="Appearance.Accent">
+                Export selection
+            </FluentButton>
+        </div>
+
+        <div style="width: 100%; height: 100%; display: flex; overflow: auto;" class="scroll-container">
+            @for (var c = 0; c < _job.NClasses; c++)
+            {
+                var currentClass = c;
+                var selectedStyle = _selectedClasses.Contains(currentClass) ?
+                                        "border-color: var(--accent-fill-rest); box-shadow: 0px 0px 8px 0px rgba(0, 0, 0, 0.25);" :
+                                        "";
+
+                <div style="margin: 0.25rem; height: 100%; padding: 0.5rem; @selectedStyle"
+                     class="main-frame"
+                     @onclick="() => SetSelected(currentClass)">
+                    @if (_class3DModels != null && _class3DModels.Length > c)
+                    {
+                        <div style="width: 100%; display: flex; justify-content: space-between;">
+                                <span>
+                                    #@(_class3DModels[c].Id)
+                                </span>
+                            @if (_class3DModels[c].Resolution.HasValue)
+                            {
+                                <span>@(_class3DModels[c].Resolution.Value.ToString("F1")) Å</span>
+                            }
+                            else
+                            {
+                                <span>?? Å</span>
+                            }
+                            @if (_class3DModels[c].Distribution.HasValue)
+                            {
+                                <span>@((_class3DModels[c].Distribution.Value * 100).ToString("F1")) %</span>
+                            }
+                            else
+                            {
+                                <span>?? %</span>
+                            }
+                        </div>
+                    }
+                    @if (File.Exists(_job.VisMap3d(_expandedViewService.CurrentVisIteration, c + 1)))
+                    {
+                        <div style="max-width: 200px; max-height: 250px; margin-top: 0.3rem;">
+                            <IsosurfaceViewer MinWidth="200" MinHeight="250" 
+                                              MiniMode="true"
+                                              VolumePath="@_job.VisMap3d(_expandedViewService.CurrentVisIteration, c + 1)" />
+                        </div>
+                    }
+                    <MapOrthosliceDisplay
+                        MapOrthoslicesPath="@(_job.VisFilteredSlices(_expandedViewService.CurrentVisIteration, c + 1))"
+                        RenderedImageSidelengthPx="200"
+                        BorderWidthPx="0"
+                        SpacingPx="5"
+                        IsVerticalLayout/>
+                    <div style="display: flex; flex-direction: column; gap: 5px; margin-top: 5px;">
+                        <ServerImage ServerPath="@_job.VisFsc(_expandedViewService.CurrentVisIteration, c + 1)"
+                                     width="200"/>
+                        <ServerImage
+                            ServerPath="@_job.VisAngularDistribution(_expandedViewService.CurrentVisIteration, c + 1)"
+                            width="200"/>
+                        <ServerImage
+                            ServerPath="@_job.VisFourierSampling(_expandedViewService.CurrentVisIteration, c + 1)"
+                            width="200"/>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+}

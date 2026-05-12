@@ -1,0 +1,65 @@
+@inherits FluentComponentBase
+
+<div>
+    <FluentButton Id="@_id"
+                  OnClick="@(_ => _confirmationOpen = true)"
+                  ChildContent="@ChildContent"
+                  @attributes="AdditionalAttributes">
+    </FluentButton>
+
+    @if (_confirmationOpen)
+    {
+        <div class="popover-no-padding popover-no-shadow">
+            <FluentPopover AnchorId="@_id"
+                           @bind-Open="@_confirmationOpen"
+                           HorizontalPosition="@GetHorizontalPosition()"
+                           VerticalPosition="@GetVerticalPosition()"
+                           HorizontalInset="false"
+                           Style="background-color: transparent;">
+                <Body>
+                <div class="confirm-container @GetContainerClass()">
+                    @* Left arrow (for Right position) *@
+                    @if (ShowLeftArrow)
+                    {
+                        <svg class="arrow-left" width="12" height="14" viewBox="0 0 12 14" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M 12 0 L 0 7 L 12 14 Z" />
+                        </svg>
+                    }
+                    
+                    @* Top arrow (for Bottom position) *@
+                    @if (ShowTopArrow)
+                    {
+                        <svg class="arrow-top" width="14" height="12" viewBox="0 0 14 12" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M 0 12 L 7 0 L 14 12 Z" />
+                        </svg>
+                    }
+                    
+                    <div class="confirm-button">
+                        <FluentButton BackgroundColor="var(--error)"
+                                      Color="white"
+                                      OnClick="HandleClick">
+                            Yes, I'm really sure
+                        </FluentButton>
+                    </div>
+
+                    @* Right arrow (for Left position) *@
+                    @if (ShowRightArrow)
+                    {
+                        <svg class="arrow-right" width="12" height="14" viewBox="0 0 12 14" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M 0 0 L 12 7 L 0 14 Z"/>
+                        </svg>
+                    }
+                    
+                    @* Bottom arrow (for Top position) *@
+                    @if (ShowBottomArrow)
+                    {
+                        <svg class="arrow-bottom" width="14" height="12" viewBox="0 0 14 12" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M 0 0 L 7 12 L 14 0 Z"/>
+                        </svg>
+                    }
+                </div>
+                </Body>
+            </FluentPopover>
+        </div>
+    }
+</div>

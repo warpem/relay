@@ -1,0 +1,7 @@
+﻿.activity-square {
+    width: 2.5rem;
+    height: 2.5rem;
+    dominant-baseline: central;
+    text-anchor: middle;
+    font-size: 0.5rem;
+}

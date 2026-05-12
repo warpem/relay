@@ -1,0 +1,48 @@
+.factory-panel {
+    display: flex;
+    flex-direction: column;
+    width: 220px;
+    min-width: 220px;
+    border-right: 1px solid var(--neutral-stroke-divider-rest);
+    overflow-y: auto;
+}
+
+.factory-panel.collapsed {
+    width: 40px;
+    min-width: 40px;
+}
+
+.factory-panel-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.factory-panel-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.factory-count {
+    font-size: 0.75rem;
+    opacity: 0.6;
+    margin-left: auto;
+}
+
+.factory-panel-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px;
+    overflow-y: auto;
+}
+
+.factory-panel-empty {
+    font-size: 0.8rem;
+    opacity: 0.5;
+    text-align: center;
+    padding: 16px 8px;
+}

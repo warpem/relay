@@ -1,0 +1,42 @@
+.folder-card {
+    border-radius: 8px;
+    background: var(--neutral-layer-2);
+    border: 1px solid var(--neutral-stroke-rest);
+    position: relative;
+    user-select: none;
+}
+
+.folder-card-content {
+    display: grid;
+    grid-template-rows: auto auto auto 1fr;
+    height: 100%;
+    padding: 10px 8px 8px;
+    gap: 2px;
+    justify-items: center;
+    align-content: start;
+    overflow: hidden;
+}
+
+.folder-card-title {
+    font-weight: 600;
+    font-size: 13px;
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    max-width: 100%;
+    word-break: break-word;
+}
+
+.folder-minimap-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+.folder-minimap {
+    display: block;
+}

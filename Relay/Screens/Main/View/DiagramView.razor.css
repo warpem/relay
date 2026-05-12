@@ -1,0 +1,30 @@
+.diagram-viewport {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    position: relative;
+    cursor: grab;
+}
+
+.diagram-viewport ::deep .card-common,
+.diagram-viewport ::deep .folder-card,
+.diagram-viewport ::deep .port-dot {
+    cursor: default;
+}
+
+.diagram-canvas {
+    position: absolute;
+    transform-origin: 0 0;
+    will-change: transform;
+}
+
+.diagram-edges {
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+}
+
+.diagram-edges path {
+    stroke-width: max(2, calc(1 * var(--inv-zoom, 1)));
+}

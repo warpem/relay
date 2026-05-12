@@ -1,0 +1,71 @@
+.port-dot {
+    width: 16px;
+    height: 16px;
+    border-radius: 8px;
+    position:  relative;
+    background-color: var(--neutral-fill-layer-rest);
+    border: 2px solid var(--neutral-fill-layer-rest);
+}
+
+.port-dot.enabled{
+    cursor: pointer;    
+}
+
+.port-dot.enabled:hover {
+    outline: 2px solid var(--neutral-base-color);
+}
+
+.port-dot.disabled {
+    cursor: not-allowed;
+    opacity: 0.3;
+}
+
+.port-tooltip {
+    position: absolute;
+    left: 18px;
+    top: -2px;
+    height: 16px;
+    line-height: 16px;
+    font-size: 9pt;
+    border-radius: 4px;
+    background-color: var(--neutral-fill-layer-rest);
+    text-wrap: nowrap;
+    z-index: 99;
+    padding-left: 2px;
+    padding-right: 2px;
+}
+
+.port-dots-container {
+    position: absolute;
+    right: -8px;
+    top: 30px;
+    display: flex;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    row-gap: 6px;
+    z-index: 2;
+}
+
+.job-alias {
+    position: absolute;
+    left: 0;
+    right: 0;
+    padding: 2px 8px;
+    background: linear-gradient(to right,
+        rgb(from var(--neutral-fill-layer-rest) r g b / 85%) 66.7%,
+        transparent 100%);
+    font-size: 0.75rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    z-index: 1;
+}
+
+.fade-on-hover {
+    opacity: 1;
+    transition: opacity 0.3s ease;
+}
+
+.fade-on-hover:hover {
+    opacity: 0.0;
+}

@@ -1,0 +1,14 @@
+@using Refund.Services
+
+<img src="@CacheBustedUrl()" @attributes="AdditionalAttributes" />
+
+@code
+{
+    private string CacheBustedUrl()
+    {
+        var url = FileService.GetUrl(ServerPath);
+        if (File.Exists(ServerPath))
+            return $"{url}?v={File.GetLastWriteTimeUtc(ServerPath).Ticks}";
+        return url;
+    }
+}

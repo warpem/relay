@@ -1,0 +1,39 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8"/>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+        <base href="/"/>
+
+        <link href="_content/Microsoft.FluentUI.AspNetCore.Components/css/reboot.css" rel="stylesheet"/>
+
+        <link href="css/app.css" rel="stylesheet"/>
+        <link href="css/color-icons-fonts.css" rel="stylesheet"/>
+        <link href="_content/Refund/css/refund.css" rel="stylesheet"/>
+
+
+        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+        <script src="https://cdn.plot.ly/plotly-2.18.2.min.js"></script>
+        <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.1/jquery.min.js"></script>
+        <script src="_content/Refund/js/refund.js"></script>
+        <script src="_content/Refund/js/relaySession.js"></script>
+        <script src="_content/Refund/js/prism.js"></script>
+        <script src="js/app.js"></script>
+        <script src="js/diagramInterop.js"></script>
+
+        <HeadOutlet @rendermode="@InteractiveServer"/>
+        <link href="Relay.styles.css" rel="stylesheet"/>
+    </head>
+
+    <body style="overflow-x: hidden; overflow-y: hidden; background-color: var(--neutral-layer-2)!important;">
+        <Routes @rendermode="@InteractiveServer"/>
+
+        <div id="blazor-error-ui" style="display: none">
+            An unhandled error has occurred.
+            <a href="" class="reload">Reload</a>
+            <a class="dismiss">🗙</a>
+        </div>
+
+        <script src="_framework/blazor.web.js" autostart="true"></script>
+    </body>
+</html>

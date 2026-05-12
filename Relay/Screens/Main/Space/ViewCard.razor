@@ -1,0 +1,24 @@
+@using Refund.DataModel.ReadOnly
+@using Refund.Services
+@using Relay.Screens.Main.Base
+
+@inject MenuActionService MenuActions
+
+@inherits ListingCardLogic<ReadOnlyView>
+
+<ListingCard TItem="ReadOnlyView"
+             Item="@Item"
+             IsSelected="@IsSelected"
+             OnClick="@OnClick"
+             OnNavigate="@HeaderClick"
+             NavigationUrl="@NavigationUrl"
+             GetContextMenuActions="GetContextMenuActions">
+    <ExtraDetails>
+        @if (Item.Jobs.Any())
+        {
+            <span class="detail-text">
+                @Item.Jobs.Count @(Item.Jobs.Count == 1 ? "job" : "jobs")
+            </span>
+        }
+    </ExtraDetails>
+</ListingCard>

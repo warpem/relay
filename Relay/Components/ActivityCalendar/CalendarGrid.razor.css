@@ -1,0 +1,64 @@
+.calendar-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.weekday-header {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 0.25rem;
+    margin-bottom: 0.5rem;
+}
+
+.weekday-label {
+    text-align: center;
+    font-size: 0.875rem;
+    color: #666;
+}
+
+.week-row {
+    display: flex;
+    column-gap: 2px;
+    width: 124px;
+}
+
+.day-cell {
+    background-color: #f0f0f0;
+    border-radius: 4px;
+    width: 16px;
+    height: 16px;
+}
+
+.other-month {
+    opacity: 0;
+}
+
+.future-date {
+    background-color: transparent;
+    border: 1px dashed #ccc;
+    cursor: default;
+}
+
+.tooltip-content {
+    padding: 0.5rem;
+    min-width: 200px;
+}
+
+.date-header {
+    font-weight: 500;
+    margin-bottom: 0.5rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid #eee;
+}
+
+.job-item {
+    font-size: 0.875rem;
+    padding: 0.25rem 0;
+}
+
+.no-jobs {
+    font-size: 0.875rem;
+    color: #666;
+    font-style: italic;
+}

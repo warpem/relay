@@ -1,0 +1,26 @@
+.listing-screen {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    padding: 1rem;
+}
+
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: start;
+}
+
+.items-grid {
+    display: flex;
+    gap: 1.5rem;
+    flex-wrap: wrap-reverse;
+    justify-content: flex-start;
+    align-items: flex-end;
+    user-select: none;
+}
+
+.items-grid.items-grid-forward {
+    flex-wrap: wrap;
+    align-items: flex-start;
+}

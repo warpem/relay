@@ -1,0 +1,32 @@
+.view-heading {
+    display: inline-block;
+    vertical-align: top;
+}
+
+.title {
+    font-size: 1rem;
+    font-weight: 900;
+}
+
+.view-heading .details {
+    line-height: 0.875rem;
+}
+
+.owner {
+    font-weight: 600;
+    font-size: 0.75rem;
+}
+
+.created {
+    font-weight: 400;
+    font-size: 0.75rem;
+    color: var(--neutral-fill-strong-rest);
+}
+
+.view-header {
+    gap: 0.5rem;
+}
+
+.view-header:hover {
+    background-color: var(--neutral-layer-2);
+}

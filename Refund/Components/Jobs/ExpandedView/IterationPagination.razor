@@ -1,0 +1,61 @@
+
+@if (Service?.CurrentJob?.IsIterative == true && Service.AvailableIterations.Any())
+{
+    <div class="iteration-pagination">
+        @foreach (var iteration in GetVisibleIterations())
+        {
+            if (iteration == -1)
+            {
+                <div class="iteration-ellipsis">...</div>
+            }
+            else
+            {
+                var metadata = Service.IterationMetadata.GetValueOrDefault(iteration);
+                var isSelected = Service.CurrentIteration == iteration ||
+                                 (Service.CurrentIteration == Service.CurrentJob.LogsAvailableIteration &&
+                                  iteration == Service.CurrentJob.VisAvailableIteration);
+
+                if (metadata.hasVis)
+                {
+                    <div class="iteration-item @(isSelected ? "selected" : "")"
+                         @onclick="() => OnIterationClick(iteration)">
+
+                        <div class="iteration-number">
+                            @iteration
+                        </div>
+                        <div class="iteration-dots">
+                            @if (metadata.hasResults)
+                            {
+                                <div class="dot @(isSelected ? "selected" : "")" title="Has results">R</div>
+                            }
+                            @if (metadata.hasVis)
+                            {
+                                <div class="dot @(isSelected ? "selected" : "")" title="Has visualizations">V</div>
+                            }
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="iteration-item-unavailable">
+                        <div class="iteration-number" style="opacity: 0.7;">
+                            @iteration
+                        </div>
+                        <div style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;">
+                            <FluentProgressRing Width="32"
+                                                Color="@(iteration < Service.CurrentJob.LogsAvailableIteration ?
+                                                             "var(--success-normal)" :
+                                                             null)" />
+                        </div>
+                        <div class="iteration-dots">
+                            @if (metadata.hasResults)
+                            {
+                                <div class="dot @(isSelected ? "selected" : "")" title="Has results">R</div>
+                            }
+                        </div>
+                    </div>
+                }
+            }
+        }
+    </div>
+}

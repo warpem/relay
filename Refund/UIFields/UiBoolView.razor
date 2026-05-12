@@ -1,0 +1,26 @@
+@namespace Refund.UIFields
+@inherits UiFieldViewBase
+
+<FluentSelect Class="borderless" 
+              @bind-Value="@ValueT"
+              Width="100%"
+              Items="@Options"
+              OptionText="@(i => i.Text)"
+              OptionValue="@(i => i.Value)"
+              OptionSelected="@(i => i.Selected)"
+              Disabled="@IsDisabled" />
+
+@code
+{
+    private string? ValueT
+    {
+        get => (bool)Value ? "Yes" : "No";
+        set => ValueChanged.InvokeAsync(value == "Yes");
+    }
+
+    private List<Option<string>> Options => new()
+    {
+        new Option<string>() {Value = "Yes", Text = "Yes" },
+        new Option<string>() {Value = "No", Text = "No" },
+    };
+}

@@ -1,0 +1,109 @@
+@using Refund.DataModel
+@using Refund.Utils
+@using Relay.Panels.Right.Actions
+@using Refund.Components.Jobs
+@using IconSize = Refund.Utils.IconSize
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+
+<div class="job-card @("card-common" + (_isSelected ? " selected" : ""))"
+     id="@($"job-card-{_id}")"
+     @onmouseup="HandleMouseUp"
+     @onclick="HandleClick"
+     @ondblclick="HandleDoubleClick">
+    
+    <div style="position: relative;">
+        <JobLine Job="Job" EnableNavigation="false" FontSize="0.75rem" NameWidth="188px" IconSize="IconSize.Size20" AllowMultiline="true" IncludeProject="true" IncludeSpace="true" ShowStatus="false"/>
+        
+        @if (Job.QueueType != JobQueueType.Local)
+        {
+            <FluentBadge Style="position: absolute; top: 0; right: -2px;">@Job.QueueType.ToString()</FluentBadge>
+        }
+    </div>
+    
+    <div style="display: flex; flex-wrap: wrap;">
+        <span>@Job.GetMostRecentEvent(EventType.Created).Timestamp.ToString("yyyy-MM-dd HH:mm"),&nbsp;</span>
+        <span style="display: flex; flex-wrap: nowrap;">by&nbsp;<FluentBadge>@Job.GetMostRecentEvent(EventType.Created).Author.Name</FluentBadge></span>
+    </div>
+    
+    <div style="display: flex; flex-wrap: nowrap; align-items: center; gap: 3px;">
+        @{
+            var relevantEvent = Job.GetMostRecentEvent(Job.Status.ToEventType());
+
+            // For settled states, we're interested in how long in took to settle,
+            // not when it was settled
+            var previousEvent = Job.Status switch
+            {
+                JobStatus.Finished => Job.GetMostRecentEvent(EventType.RunningStarted), 
+                JobStatus.Aborted => Job.GetMostRecentEvent(EventType.RunningStarted),
+                JobStatus.Failed => Job.GetMostRecentEvent(EventType.RunningStarted),
+                _ => null
+            };
+        }
+
+        @if (relevantEvent != null)
+        {
+            @if (Job.Status != JobStatus.Building)
+            {
+                <FluentIcon Value="@(new Icons.Regular.Size12.Timer())"/>
+            }
+
+            @if (Job.Status == JobStatus.Finished && previousEvent != null)
+            {
+                <span>Finished in </span>
+                @((relevantEvent.Timestamp - previousEvent.Timestamp).ToStringAdaptive())
+            }
+            else if (Job.Status == JobStatus.Aborting && previousEvent != null)
+            {
+                <span>Aborting for </span>
+                <DurationText Timestamp="@relevantEvent.Timestamp"/>
+            }
+            else if (Job.Status == JobStatus.Aborted && previousEvent != null)
+            {
+                <span>Aborted after </span>
+                @((relevantEvent.Timestamp - previousEvent.Timestamp).ToStringAdaptive())
+                ;
+            }
+            else if (Job.Status == JobStatus.Failed && previousEvent != null)
+            {
+                <span>Failed after </span>
+                @((relevantEvent.Timestamp - previousEvent.Timestamp).ToStringAdaptive())
+            }
+            else if (Job.Status == JobStatus.Waiting)
+            {
+                <span>Waiting for </span>
+                <DurationText Timestamp="@relevantEvent.Timestamp"/>
+            }
+            else if (Job.Status == JobStatus.Staging)
+            {
+                <span>Queued for </span>
+
+                <DurationText Timestamp="@relevantEvent.Timestamp"/>
+            }
+            else if (Job.Status == JobStatus.Clearing)
+            {
+                <span>Clearing for </span>
+
+                <DurationText Timestamp="@relevantEvent.Timestamp"/>
+            }
+            else if (Job.Status.IsUnsettled())
+            {
+                <span>Running for </span>
+
+                <DurationText Timestamp="@relevantEvent.Timestamp"/>
+            }
+        }
+    </div>
+
+    <FluentMenu Anchor="@($"job-card-{_id}")" Trigger="MouseButton.Right"
+                Anchored="false" OpenChanged="HandleContextMenu">
+        <span style="font-size: 0.75rem; padding: 0 1rem; opacity: 0.5; max-width: 200px;">
+            @Job.QualifiedName
+        </span>
+        <FluentDivider/>
+
+        @if (_contextMenuActions != null)
+        {
+            <ActionMenuLevel Actions="@_contextMenuActions"/>
+        }
+    </FluentMenu>
+</div>

@@ -1,0 +1,31 @@
+{
+  "iisSettings": {
+    "windowsAuthentication": false,
+    "anonymousAuthentication": true,
+    "iisExpress": {
+      "applicationUrl": "http://localhost:41314",
+      "sslPort": 0
+    }
+  },
+  "profiles": {
+    "Relay": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "workingDirectory": "%RELAY_WORKING_DIR%",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "PATH": "%BAKERY_ENV_BIN_DIR%:%PATH%"
+      },
+      "applicationUrl": "http://localhost:5001",
+      "dotnetRunMessages": true,
+      "hotReloadProfile": "aspnetcore"
+    },
+    "IIS Express": {
+      "commandName": "IISExpress",
+      "launchBrowser": true,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    }
+  }
+}

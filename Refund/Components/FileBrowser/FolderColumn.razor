@@ -1,0 +1,35 @@
+@using Microsoft.FluentUI.AspNetCore.Components
+
+@if (IsLoading)
+{
+    <div class="loading-container">
+        <FluentProgressRing />
+    </div>
+}
+else
+{
+    <div class="folder-column">
+        @foreach (var item in SortedFolders)
+        {
+            <div class="item @GetItemCssClass(item)"
+                 @onclick="(e) => OnItemClicked(e, item)">
+                <div style="width: 16px; height: 16px; display: flex;">
+                    <FluentIcon Value="@(IsSelected(item) ? IconFolderSelected : IconFolder)"/>
+                </div>
+                <span class="item-label">@item.Name</span>
+            </div>
+        }
+
+        @foreach (var item in SortedFiles)
+        {
+            <div class="item @GetItemCssClass(item)"
+                 style="@(!IsItemClickable(item) ? "cursor: default;" : "")"
+                 @onclick="(e) => OnItemClicked(e, item)">
+                <div style="width: 16px; height: 16px; display: flex;">
+                    <FluentIcon Value="@(IsSelected(item) ? IconFileSelected : IconFile)"/>
+                </div>
+                <span class="item-label">@item.Name</span>
+            </div>
+        }
+    </div>
+}

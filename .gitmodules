@@ -1,0 +1,9 @@
+[submodule "Emoji/fluentui-emoji"]
+	path = Emoji/fluentui-emoji
+	url = https://github.com/microsoft/fluentui-emoji.git
+[submodule "ElkSharp"]
+	path = ElkSharp
+	url = https://github.com/warpem/elksharp.git
+[submodule "Warp"]
+	path = Warp
+	url = https://github.com/warpem/warp.git

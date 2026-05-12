@@ -1,0 +1,145 @@
+﻿@using Refund.Components.MicrographViewer
+@using Refund.Components.SlimTextField
+
+@namespace Refund.Components.TomogramViewer
+
+<div id="@elementId" @ref="containerElement" class="tomogram-viewer-container"
+     style="position: relative; width: 100%; height: 100%; min-width: @(MinWidth)px; min-height: @(MinHeight)px; 
+            display: flex; flex-direction: column; overflow: hidden;">
+
+    <!-- Controls toolbar -->
+    <FluentToolbar style="border-radius: 4px; padding: 4px; flex-shrink: 0; height: 52px; background: white; margin-bottom: 10px;">
+        <div style="display:flex;flex-direction:column;">
+            <span class="menu-header">Coordinates</span>
+            <div style="display: flex; gap: 4px; align-items: center;">
+                <div style="display: flex; justify-content: flex-end; align-items: center; background: white;
+                            min-width: 50px; height: 32px; border: #efefef 1px solid; padding: 0 4px; border-radius: 4px;">
+                    <SlimTextField Value="@ViewPoint.X"
+                                   OnValueChange="@((v) => OnViewPointXChanged((int)v))"
+                                   Min="0" Max="@(volDims.X - 1)" DebounceInterval="50" />
+                </div>
+                <div style="display: flex; justify-content: flex-end; align-items: center; background: white;
+                            min-width: 50px; height: 32px; border: #efefef 1px solid; padding: 0 4px; border-radius: 4px;">
+                    <SlimTextField Value="@ViewPoint.Y"
+                                   OnValueChange="@((v) => OnViewPointYChanged((int)v))"
+                                   Min="0" Max="@(volDims.Y - 1)" DebounceInterval="50" />
+                </div>
+                <div style="display: flex; justify-content: flex-end; align-items: center; background: white;
+                            min-width: 50px; height: 32px; border: #efefef 1px solid; padding: 0 4px; border-radius: 4px;">
+                    <SlimTextField Value="@ViewPoint.Z"
+                                   OnValueChange="@((v) => OnViewPointZChanged((int)v))"
+                                   Min="0" Max="@(volDims.Z - 1)" DebounceInterval="50" />
+                </div>
+            </div>
+        </div>
+
+        <div class="menu-separator"></div>
+
+        <div style="display:flex;flex-direction:column;">
+            <span class="menu-header">Zoom</span>
+            <ZoomControls ZoomLevel="@ZoomLevel" OnZoomChanged="OnZoomChanged" OnFitToViewport="OnFitToViewport"
+                          IsToggledScale="@ShowScaleBar" OnIsToggledScaleChanged="OnScaleBarToggled" />
+        </div>
+
+        @if (CanShowParticlesControls)
+        {
+            <div class="menu-separator"></div>
+            <div style="display:flex;flex-direction:column;">
+                <span class="menu-header">Particles</span>
+                <ParticleControls IsToggledPicking="@IsPickingParticles"
+                                  ParticleDiameter="@ParticleDiameter"
+                                  ParticleBoxSize="@ParticleBoxSize"
+                                  ParticleColor="@ParticleColor"
+                                  ParticleShape="@ParticleShape"
+                                  CanPickParticles="true"
+                                  CanControlParticleDisplay="true"
+                                  OnParticleSettingsChanged="OnParticleSettingsChanged" />
+            </div>
+        }
+    </FluentToolbar>
+
+    <div style="display: flex; flex-direction: row; position: relative;
+            justify-content: center; align-items: flex-end; column-gap: 10px;
+            flex-grow: 1; overflow: hidden;" >
+
+        <!-- Left side: XZ on top, XY on bottom -->
+        <div style="display: flex; flex-direction: column; row-gap: 10px;">
+            <!-- XZ Panel (top) -->
+            <TomogramSliceViewer @ref="xzViewer" 
+                                 Id="@($"{elementId}-xz")"
+                                 SliceData="@XZSlice"
+                                 VolDims="@volDims"
+                                 Width="@SlicePanelDimsXZ.X"
+                                 Height="@SlicePanelDimsXZ.Y"
+                                 MinIntensity="@minIntensity"
+                                 MaxIntensity="@maxIntensity"
+                                 IsLoading="@IsLoadingVolume"
+                                 PlaneType="PlaneType.XZ"
+                                 ViewPoint="@ViewPoint"
+                                 TranslateX="@TranslateX"
+                                 TranslateY="@TranslateYXZ"
+                                 Zoom="@ZoomLevel"
+                                 PixelSize="@PixelSize"
+                                 OnMouseWheelCoordinateChange="delta => OnMouseWheelCoordinateChange(PlaneType.XZ, delta)"
+                                 OnSliceClick="(v) => OnSliceClickXZ(v.X, v.Y)"
+                                 Particles3D="@Particles"
+                                 ParticleDiameter="@ParticleDiameter"
+                                 ParticleBoxSize="@ParticleBoxSize"
+                                 ParticleColor="@ParticleColor"
+                                 ParticleStrokeWidth="@ParticleStrokeWidth"
+                                 ParticleShape="@ParticleShape" />
+
+            <!-- XY Panel (bottom) -->
+            <TomogramSliceViewer @ref="xyViewer" 
+                                 Id="@($"{elementId}-xy")"
+                                 SliceData="@(IsLoadingVolume ? (IsLoadingCentralSlice ? null : centralSliceBuffer) : XYSlice)"
+                                 VolDims="@volDims"
+                                 Width="@SlicePanelDimsXY.X"
+                                 Height="@SlicePanelDimsXY.Y"
+                                 MinIntensity="@minIntensity"
+                                 MaxIntensity="@maxIntensity"
+                                 IsLoading="@IsLoadingCentralSlice"
+                                 PlaneType="PlaneType.XY"
+                                 ViewPoint="@ViewPoint"
+                                 TranslateX="@TranslateX"
+                                 TranslateY="@TranslateYXY"
+                                 Zoom="@ZoomLevel"
+                                 PixelSize="@PixelSize"
+                                 OnMouseWheelCoordinateChange="delta => OnMouseWheelCoordinateChange(PlaneType.XY, delta)"
+                                 OnSliceClick="(v) => OnSliceClickXY(v.X, v.Y)"
+                                 Particles3D="@Particles"
+                                 ParticleDiameter="@ParticleDiameter"
+                                 ParticleBoxSize="@ParticleBoxSize"
+                                 ParticleColor="@ParticleColor"
+                                 ParticleStrokeWidth="@ParticleStrokeWidth"
+                                 ParticleShape="@ParticleShape" />
+        </div>
+
+        <!-- Right side: ZY Panel -->
+        <TomogramSliceViewer @ref="zyViewer" 
+                             Id="@($"{elementId}-zy")"
+                             SliceData="@ZYSlice"
+                             VolDims="@volDims"
+                             Width="@SlicePanelDimsZY.X"
+                             Height="@SlicePanelDimsZY.Y"
+                             MinIntensity="@minIntensity"
+                             MaxIntensity="@maxIntensity"
+                             IsLoading="@IsLoadingVolume"
+                             PlaneType="PlaneType.ZY"
+                             ViewPoint="@ViewPoint"
+                             TranslateX="@TranslateXZY"
+                             TranslateY="@TranslateYZY"
+                             Zoom="@ZoomLevel"
+                             PixelSize="@PixelSize"
+                             OnMouseWheelCoordinateChange="delta => OnMouseWheelCoordinateChange(PlaneType.ZY, delta)"
+                             OnSliceClick="(v) => OnSliceClickZY(v.X, v.Y)"
+                             Particles3D="@Particles"
+                             ParticleDiameter="@ParticleDiameter"
+                             ParticleBoxSize="@ParticleBoxSize"
+                             ParticleColor="@ParticleColor"
+                             ParticleStrokeWidth="@ParticleStrokeWidth"
+                             ParticleShape="@ParticleShape" />
+
+
+    </div>
+</div>

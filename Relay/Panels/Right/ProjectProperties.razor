@@ -1,0 +1,139 @@
+@using Refund.DataModel.ReadOnly
+@using Refund.Services
+@using Refund.Services.Core.DataManager
+@using Refund.Services.Core.Session
+@using Refund.Components.SlimTextField
+@using Refund.DataModel
+@using Relay.Emoji
+@using Relay.Panels.Right.Actions
+@using Refund.Components.Emoji
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@inject MenuActionService MenuActions
+
+<div style="display: flex; flex-direction: column; justify-content: flex-start; row-gap: 2rem;">
+    @if (Projects.Count() == 1)
+    {
+        var project = Projects.First();
+        
+        <div class="property-panel">
+            <h5>@project.QualifiedName</h5>
+            
+            <div class="property-item">
+                <span class="property-title">Name</span>
+                <FluentTextField Class="property-value"
+                                 AutoComplete="off"
+                                 Value="@project.Alias"
+                                 ValueChanged="@HandleProjectAliasChanged" />
+                @if (!string.IsNullOrEmpty(_aliasValidationError))
+                {
+                    <div style="display: flex; flex-wrap: nowrap; font-size: 0.75rem; color: var(--error); gap: 0.3rem;">
+                        <FluentIcon Value="@(new Icons.Filled.Size12.ErrorCircle().WithColor("var(--error)"))" />
+                        <span>@_aliasValidationError</span>
+                    </div>
+                }
+            </div>
+
+            <div class="property-item">
+                <span class="property-title">Icon</span>
+                <EmojiSelectionButton Glyph="@project.HeroImage"
+                                      GlyphChanged="@HandleProjectEmojiChanged"
+                                      Size="64"
+                                      HorizontalPosition="HorizontalPosition.Left"
+                                      VerticalPosition="VerticalPosition.Center"
+                                      HorizontalInset="false" />
+            </div>
+
+            <div class="property-item">
+                <span class="property-title">Notes</span>
+                <FluentTextArea Class="property-value"
+                                Rows="5"
+                                Value="@project.Notes" 
+                                ValueChanged="@HandleProjectNotesChanged" />
+            </div>
+            
+            <div class="property-item">
+                <span class="property-title">Created</span>
+                <span class="property-value">
+                    @project.GetMostRecentEvent(EventType.Created).Timestamp.ToString("yyyy-MM-dd HH:mm"), by 
+                    <FluentBadge>
+                        @project.GetMostRecentEvent(EventType.Created).Author.Name
+                    </FluentBadge>
+                </span>
+            </div>
+
+            <div class="property-item">
+                <span class="property-title">Last modified</span>
+                <span class="property-value">@project.UpdateDate.ToString("yyyy-MM-dd HH:mm"), by <FluentBadge>@project.UpdatedBy.Name</FluentBadge></span>
+            </div>
+            
+            <div class="property-item">
+                <span class="property-title">Members</span>
+                <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+                    <FluentBadge Appearance="Appearance.Neutral">
+                        @project.Owner.Name
+                    </FluentBadge>
+                    @foreach (var _member in project.Members)
+                    {
+                        var member = _member;
+                        @if (Session.User.Role == UserRole.Admin || 
+                             Session.User == project.Owner)
+                        {
+                            <FluentBadge @key="member.Id" 
+                                         Appearance="Appearance.Neutral" 
+                                         OnDismissClick="@(async () => await HandleMemberDismissed(member))">
+                                @member.Name
+                            </FluentBadge>
+                        }
+                        else
+                        {
+                            <FluentBadge @key="member.Id"
+                                         Appearance="Appearance.Neutral">
+                                @member.Name
+                            </FluentBadge>
+                        }
+                    }
+                    @if (Session.User.Role == UserRole.Admin ||
+                         Session.User == project.Owner)
+                    {
+                        <FluentIcon id="add-member" 
+                                    Value="@(new Icons.Filled.Size20.AddSquare())"
+                                    Color="Color.Accent"
+                                    OnClick="ShowUserMenu"/>
+
+                        <div class="popover-no-padding popover-round-corners">
+                            <FluentPopover AnchorId="add-member"
+                                           HorizontalPosition="HorizontalPosition.Left"
+                                           VerticalPosition="VerticalPosition.Bottom"
+                                           @bind-Open="_isUserMenuOpen"
+                                           Style="margin-top: 4px;">
+                                <Body>
+                                    <FilteredListbox TValue="@(int)" 
+                                                     ListWidth="150"
+                                                     ListHeight="300"
+                                                     Options="@(DataManager.Users.Where(u => !project.Members.Contains(u) && 
+                                                                                             u != project.Owner)
+                                                                           .Select(u => (u.Id, u.Name)))"
+                                                     SelectedOptionChanged="@(async v => await HandleMemberAdded(v))" />
+                                </Body>
+                            </FluentPopover>
+                        </div>
+                    }
+                </div>
+            </div>
+            
+            @{
+                int njobs = project.Spaces.Select(s => s.Jobs.Count).Sum();
+                int nviews = project.Spaces.Select(s => s.Views.Count).Sum();
+                int nspaces = project.Spaces.Count;
+            }
+            <span class="property-title">@njobs jobs in @nviews views, @nspaces spaces</span>
+        </div>
+    }
+    else if (Projects.Count() > 1)
+    {
+        <h5>@Projects.Count() projects selected</h5>
+    }
+    
+    <ActionButtons Actions="@MenuActions.GetProjectActions(Projects)" />
+    
+</div>

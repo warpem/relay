@@ -1,0 +1,24 @@
+﻿@namespace Refund.UIFields
+@inherits UiFieldViewBase
+
+<RobustFluentNumberField @key="@(ValueT)" 
+                   TValue="@(int?)"
+                   @bind-Value="@ValueT" 
+                   Style="width: 100%;"
+                   Class="borderless"
+                   Placeholder="No value"
+                   Min="@(FieldDescriptionT.Min.ToString())"
+                   Max="@(FieldDescriptionT.Max.ToString())"
+                   Step="@(FieldDescriptionT.StepSize.ToString())"
+                   Disabled="@IsDisabled" />
+
+@code
+{
+    private UiIntNullable FieldDescriptionT => (UiIntNullable)FieldDescription ?? null;
+
+    private int? ValueT
+    {
+        get => Value == null ? null : (int?)Value;
+        set => ValueChanged.InvokeAsync(value);
+    }
+}

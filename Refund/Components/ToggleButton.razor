@@ -1,0 +1,10 @@
+@if (ChildContent != null)
+{
+    <FluentButton OnClick="Toggle" Appearance="@ButtonAppearance" IconEnd="@IconColor" Style="@Style" Title="@Title">
+        @ChildContent
+    </FluentButton>
+}
+else
+{
+    <FluentButton OnClick="Toggle" Appearance="@ButtonAppearance" IconEnd="@IconColor" Style="@Style" Title="@Title" />
+}

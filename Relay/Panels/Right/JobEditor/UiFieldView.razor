@@ -1,0 +1,84 @@
+@using System.Reflection
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Refund.DataModel
+@using Refund.UIFields
+@using Typography = Microsoft.FluentUI.AspNetCore.Components.Typography
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+
+
+<div class="@(!string.IsNullOrWhiteSpace(ErrorMessage) ? "error" : string.Empty)"
+     id="@UniqueId.ToString()"
+     style="display: grid; grid-template-columns: 1fr auto; width: 100%; row-gap: 2px;">
+
+    @* Top-left: label or custom name editor *@
+    <div>
+        @if (!HideLabel)
+        {
+            <div style="font-weight: 500;
+                @(!Equals(GetValue, GetDefaultValue) ?
+                      "color: var(--accent-fill-rest);" :
+                      "")">
+                @(!string.IsNullOrWhiteSpace(CustomLabel) ? CustomLabel : _uiField.FullLabel)
+            </div>
+        }
+        @if (LabelExtra != null)
+        {
+            @LabelExtra
+        }
+    </div>
+
+    @* Top-right: reset to default *@
+    <div style="margin-right: -6px; justify-self: end;">
+        @if (!IsDisabled && !Equals(GetValue, GetDefaultValue))
+        {
+            <FluentButton BackgroundColor="transparent" Color="transparent"
+                          Title="Reset to default"
+                          Style="height: 16px;"
+                          OnClick="@(async (_) => await HandleValueChanged(GetDefaultValue))">
+                <FluentIcon Value="@(new Icons.Filled.Size16.Backspace())" />
+            </FluentButton>
+        }
+    </div>
+
+    @* Bottom-left: input field *@
+    <div>
+        @{
+            var parameters = new Dictionary<string, object>
+            {
+                { nameof(UiFieldViewBase.FieldDescription), _uiField },
+                { nameof(UiFieldViewBase.Class), CssInputClasses },
+                { nameof(UiFieldViewBase.Value), GetValue },
+                { nameof(UiFieldViewBase.DefaultValue), GetDefaultValue },
+                { nameof(UiFieldViewBase.AdditionalData), GetAdditionalData },
+                { nameof(UiFieldViewBase.ValueChanged), EventCallback.Factory.Create<object>(this, HandleValueChanged) },
+                { nameof(UiFieldViewBase.IsDisabled), IsDisabled }
+            };
+
+            <DynamicComponent Type="@_uiField.ViewType" Parameters="@parameters"/>
+        }
+    </div>
+
+    @* Bottom-right: favorite / expose button *@
+    <div style="margin-right: -6px; justify-self: end; display: flex; align-items: center;">
+        @if (FavoriteFragment != null)
+        {
+            @FavoriteFragment
+        }
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_uiField.HelpText))
+    {
+        <FluentTooltip Anchor="@UniqueId.ToString()"
+                       AutoUpdateMode="AutoUpdateMode.Auto"
+                       UseTooltipService="true"
+                       MaxWidth="300px"
+                       Position="TooltipPosition.Start">
+            @_uiField.HelpText
+        </FluentTooltip>
+    }
+</div>
+
+@if (!string.IsNullOrWhiteSpace(ErrorMessage))
+{
+    <span style="color: var(--error);"> @ErrorMessage </span>
+}

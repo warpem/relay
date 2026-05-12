@@ -1,0 +1,65 @@
+@using Refund.DataModel
+@using Refund.DataModel.ReadOnly
+@using Refund.Services
+@using Relay.Panels.Right.Actions
+@using Relay.Screens.Main.View
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+
+<div class="view-screen-container">
+    <div class="builder-toolbar">
+        <FluentButton Title="Zoom to fit"
+                      IconEnd="@(new Icons.Regular.Size20.ZoomFit())"
+                      OnClick="@(() => DiagramService.RequestZoomToFit())" />
+        <FluentButton Title="Reset layout"
+                      IconEnd="@(new Icons.Regular.Size20.ArrowClockwise())"
+                      OnClick="@(() => DiagramService.RequestRelayout())" />
+
+    </div>
+
+    <div class="view-screen-content">
+        <DiagramView Layout="@GetDiagramLayout()"
+                     Items="@GetItems()"
+                     OnItemClick="@HandleItemClick"
+                     OnItemDoubleClick="@HandleItemDoubleClick"
+                     OnPortClick="@HandlePortClicked"
+                     OnContextMenu="@OnContextMenu"
+                     OnBackgroundClick="@(() => Selection.Clear())"
+                     OnCardContextMenu="@HandleCardContextMenu" />
+
+        <JobTypeMenu Open="@_jobTypeMenuOpen"
+                     OpenChanged="@HandleJobTypeMenuOpenChanged"
+                     TypeFilter="@GetJobTypeFilter()"
+                     PortFilter="@GetPortFilter()"
+                     ConnectPortFilter="@GetConnectPortFilter()"
+                     Type="@GetMenuType()"
+                     ClickedPort="@_clickedPort"
+                     Style="@($"position: absolute; " +
+                              $"left: {_clickedPosition?.X ?? 0}px; " +
+                              $"top: {_clickedPosition?.Y ?? 0}px;")"
+                     OnTypeSelected="@HandleTypeSelected"
+                     OnPortSelected="@HandlePortSelected"
+                     OnPortConnected="@HandlePortConnected" />
+
+        @if (_cardContextMenuOpen && _cardContextMenuActions != null)
+        {
+            <div style="position: fixed; inset: 0; z-index: 999;"
+                 @onclick="@CloseCardContextMenu"
+                 @oncontextmenu="@CloseCardContextMenu"
+                 @oncontextmenu:preventDefault="true">
+            </div>
+            <div style="position: fixed;
+                        left: @(_cardContextMenuX)px;
+                        top: @(_cardContextMenuY)px;
+                        z-index: 1000;">
+                <FluentMenu Open="@_cardContextMenuOpen"
+                             OpenChanged="@(v => { if (!v) CloseCardContextMenu(); })">
+                    <span style="font-size: 0.75rem; padding: 0 1rem; opacity: 0.5; max-width: 200px;">
+                        @_cardContextMenuHeader
+                    </span>
+                    <FluentDivider />
+                    <ActionMenuLevel Actions="_cardContextMenuActions"/>
+                </FluentMenu>
+            </div>
+        }
+    </div>
+</div>

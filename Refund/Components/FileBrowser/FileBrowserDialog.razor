@@ -1,0 +1,19 @@
+@using Microsoft.FluentUI.AspNetCore.Components
+
+
+<FluentDialogBody>
+    <FileBrowser SelectionMode="@Content.SelectionMode"
+                 ShowFiles="@Content.ShowFiles"
+                 ShowFolders="@Content.ShowFolders"
+                 AllowedExtensions="@Content.AllowedExtensions"
+                 TopLevelFolder="@Content.TopLevelFolder"
+                 CurrentFolder="@Content.CurrentFolder"
+                 OnSelectionConfirmed="@SelectionConfirmed"
+                 OnSelectionCanceled="@SelectionCanceled"
+                 ShowSelectionButtons="@Content.ShowSelectionButtons"
+                 CurrentFolderChanged="@HandleCurrentFolderChanged" />
+</FluentDialogBody>
+
+<FluentDialogFooter>
+    
+</FluentDialogFooter>

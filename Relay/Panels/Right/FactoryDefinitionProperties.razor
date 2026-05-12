@@ -1,0 +1,60 @@
+@using Refund.DataModel
+@using Refund.DataModel.ReadOnly
+@using Refund.Services
+@using Refund.Services.Core.DataManager
+@using Relay.Panels.Right.Actions
+@inject MenuActionService MenuActions
+
+<div style="display: flex; flex-direction: column; justify-content: flex-start; row-gap: 2rem;">
+    @if (Definitions.Count() == 1)
+    {
+        var definition = Definitions.First();
+        <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+            <h5 style="margin: 0;">@definition.QualifiedName</h5>
+
+            @if (IsLocked)
+            {
+                <FluentBadge Appearance="Appearance.Lightweight" Color="Color.Warning">
+                    Read-only — instances exist
+                </FluentBadge>
+            }
+        </div>
+
+        <div class="property-panel">
+            <div class="property-item">
+                <span class="property-title">Name</span>
+                <FluentTextField Class="property-value"
+                                 AutoComplete="off"
+                                 Value="@definition.Alias"
+                                 ValueChanged="@HandleAliasChanged"/>
+            </div>
+
+            <div class="property-item">
+                <span class="property-title">Sub-jobs</span>
+                <span class="property-value">@definition.SubJobs.Count</span>
+            </div>
+
+            <div class="property-item">
+                <span class="property-title">Exposed properties</span>
+                <span class="property-value">@definition.ExposedProperties.Count</span>
+            </div>
+
+            <div class="property-item">
+                <span class="property-title">Exposed inputs</span>
+                <span class="property-value">@definition.ExposedPortsIn.Count</span>
+            </div>
+
+            <div class="property-item">
+                <span class="property-title">Exposed outputs</span>
+                <span class="property-value">@definition.ExposedPortsOut.Count</span>
+            </div>
+        </div>
+
+        <ActionButtons Actions="@MenuActions.GetFactoryDefinitionActions(Definitions)"/>
+    }
+    else if (Definitions.Count() > 1)
+    {
+        <h5>@Definitions.Count() factory definitions selected</h5>
+        <ActionButtons Actions="@MenuActions.GetFactoryDefinitionActions(Definitions)"/>
+    }
+</div>

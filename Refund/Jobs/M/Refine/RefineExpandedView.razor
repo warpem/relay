@@ -1,0 +1,18 @@
+@using Refund.Components.IsosurfaceViewer
+@if (_job == null)
+{
+    <span>No job available to display.</span>
+}
+else
+{
+    if (_job.VisAvailableIteration >= 0)
+        foreach (var species in _job.GetPopulation(0).Species)
+        {
+            if (File.Exists(species.DenoisedMapPath))
+            {
+                <div style="max-width: 500px; max-height: 500px;">
+                    <IsosurfaceViewer MinHeight="500" MinWidth="500" VolumePath="@species.DenoisedMapPath"/>
+                </div>
+            }
+        }
+}

@@ -1,0 +1,68 @@
+﻿@using Refund.Jobs
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+
+<div class="d-flex align-items-center justify-content-between">
+    <FluentButton OnClick="@SetCalendarStartDate">
+        <FluentIcon Value="@(new Icons.Filled.Size20.ChevronLeft())"></FluentIcon>
+    </FluentButton>
+    @(Month.ToString("MMMM yyyy"))
+    <FluentButton OnClick="@SetCalendarEndDate">
+        <FluentIcon Value="@(new Icons.Filled.Size20.ChevronRight())"></FluentIcon>
+    </FluentButton>
+</div>
+
+@{
+    var idPostfix = 0;
+
+    @for(var week = _startDate; week <= _endDataRange; week = week.AddDays(7))
+    {
+        <div>
+            @for(var i = 0; i < System.Globalization.DateTimeFormatInfo.CurrentInfo.DayNames.Length; i++)
+            {
+                var day = week.AddDays(i);
+                var id = $"week-day-{idPostfix++}";
+                var currentMonthColor = DateTime.Now.Month == day.Month ? Color.Accent : Color.Disabled;
+
+                if(day < _startDataRange || day > _endDataRange)
+                {
+                    <svg viewBox="0 0 24 24"
+                         class="activity-square"
+                         style="fill: transparent;">
+                        <g style="fill:whitesmoke;">
+                            <text x="50%" y="50%">@day.Day</text>
+                        </g>
+                    </svg>
+                }
+                else
+                {
+                    <svg viewBox="0 0 24 24"
+                         class="activity-square"
+                         style="@($"{GetColor(day)}")">
+                        <FluentIcon Id="@id"
+                                    Value="@RecentActivityUtils.GetFluentIcon(_activitiesByDate, day)"
+                                    Color="@(currentMonthColor)"/>
+                        <g style="@($"fill:{GetTextColor(day)};")">
+                            <text x="50%" y="50%">@day.Day</text>
+                        </g>
+                    </svg>
+
+                    <FluentTooltip Anchor="@id" Position="TooltipPosition.Left">
+                        @if(_activitiesByDate.TryGetValue(day, out var value))
+                        {
+                            foreach(var job in value)
+                            {
+                                <JobView Job="@job" ShowStatus="false"/>
+                            }
+                        }
+                        else
+                        {
+                            <FluentLabel Class="text-truncate no-activity-text">
+                                No Activity
+                            </FluentLabel>
+                        }
+                    </FluentTooltip>
+                }
+            }
+        </div>
+    }
+}

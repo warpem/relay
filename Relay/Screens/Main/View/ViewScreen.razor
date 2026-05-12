@@ -1,0 +1,109 @@
+@using Refund.DataModel
+@using Refund.DataModel.ReadOnly
+@using Refund.Services
+@using Relay.Panels.Right.Actions
+@using Relay.Screens.Main.Base
+@inherits ListingScreenLogic<IViewItem>
+
+<div class="view-screen-container">
+    <ViewToolbar CanMoveLeft="@CanMoveLeft"
+                 CanMoveRight="@CanMoveRight"
+                 OnMoveLeft="@HandleMoveLeft"
+                 OnMoveRight="@HandleMoveRight"
+                 IsBrowseMode="@IsBrowseMode" />
+
+    <div class="view-screen-content"
+         @ondragover:preventDefault="@(!IsBrowseMode)"
+         @ondrop="HandleBackgroundDrop">
+        @if (DiagramService.ViewMode == ViewMode.List)
+        {
+            <ListingScreen TItem="IViewItem"
+                           Title="@GetTitle()"
+                           CreateButtonText="@GetCreateButtonText()"
+                           Items="@GetItems()"
+                           ReverseGrid="@SortingService.IsAscending"
+                           OnCreateClick="@ShowCreateDialogAsync"
+                           OnContextMenu="@OnContextMenu">
+                <ItemTemplate>
+                    @if (context is ReadOnlyJob job)
+                    {
+                        <JobCard @key="job.QualifiedName"
+                                 Job="job"
+                                 OnClick="@(async args => await HandleItemClicked(context, args))"
+                                 OnDoubleClick="@(async args => await ItemDoubleClickedAsync(job, args))"
+                                 OnMiddleClick="@(async args => await HandleMiddleClick(job, args))"
+                                 OnPortClick="@HandlePortClicked"/>
+                    }
+                    else if (context is ReadOnlyFolder folder)
+                    {
+                        <FolderCard @key="folder.QualifiedName"
+                                    Folder="folder"
+                                    OnClick="@(async args => await HandleItemClicked(context, args))"
+                                    OnDoubleClick="@(async args => await HandleFolderDoubleClick(folder, args))"/>
+                    }
+                    else if (context is ReadOnlyFactoryInstance factoryInstance)
+                    {
+                        <FactoryCard @key="factoryInstance.QualifiedName"
+                                     Instance="factoryInstance"
+                                     Mode="FactoryCard.FactoryCardMode.Instance"
+                                     OnClick="@(async args => await HandleItemClicked(context, args))"
+                                     OnDoubleClick="@(async args => await HandleFactoryInstanceDoubleClick(factoryInstance, args))" />
+                    }
+                </ItemTemplate>
+            </ListingScreen>
+        }
+        else
+        {
+            <DiagramView Layout="@GetDiagramLayout()"
+                         Items="@GetItems()"
+                         OnItemClick="@HandleDiagramItemClick"
+                         OnItemDoubleClick="@HandleDiagramDoubleClick"
+                         OnPortClick="@HandlePortClicked"
+                         OnContextMenu="@OnContextMenu"
+                         OnBackgroundClick="@(() => Selection.Clear())"
+                         OnCardContextMenu="@HandleCardContextMenu" />
+        }
+
+        @if (!IsBrowseMode)
+        {
+            <JobTypeMenu Open="@_jobTypeMenuOpen"
+                         OpenChanged="@HandleJobTypeMenuOpenChanged"
+                         TypeFilter="@GetJobTypeFilter()"
+                         PortFilter="@GetPortFilter()"
+                         Type="@GetMenuType()"
+                         ClickedPort="@_clickedPort"
+                         Style="@($"position: absolute; " +
+                                  $"left: {_clickedPosition?.X ?? 0}px; " +
+                                  $"top: {_clickedPosition?.Y ?? 0}px;")"
+                         OnTypeSelected="@HandleMenuTypeSelected"
+                         OnPortSelected="@HandlePortSelected"
+                         OnPortConnected="@HandlePortConnected"
+                         OnFolderRequested="@HandleFolderCreation"
+                         Definitions="@FactoryDefinitions"
+                         OnFactorySelected="@HandleFactorySelected"/>
+        }
+
+        @if (_cardContextMenuOpen && _cardContextMenuActions != null)
+        {
+            @* Full-screen overlay to capture clicks outside the menu *@
+            <div style="position: fixed; inset: 0; z-index: 999;"
+                 @onclick="@CloseCardContextMenu"
+                 @oncontextmenu="@CloseCardContextMenu"
+                 @oncontextmenu:preventDefault="true">
+            </div>
+            <div style="position: fixed;
+                        left: @(_cardContextMenuX)px;
+                        top: @(_cardContextMenuY)px;
+                        z-index: 1000;">
+                <FluentMenu Open="@_cardContextMenuOpen"
+                             OpenChanged="@(v => { if (!v) CloseCardContextMenu(); })">
+                    <span style="font-size: 0.75rem; padding: 0 1rem; opacity: 0.5; max-width: 200px;">
+                        @_cardContextMenuHeader
+                    </span>
+                    <FluentDivider />
+                    <ActionMenuLevel Actions="_cardContextMenuActions"/>
+                </FluentMenu>
+            </div>
+        }
+    </div>
+</div>

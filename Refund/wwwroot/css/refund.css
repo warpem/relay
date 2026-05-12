@@ -1,0 +1,91 @@
+h5 {
+    margin-bottom: 0;
+}
+
+h6 {
+    margin-bottom: 0;
+}
+
+fluent-button.no-right-border::part(control) {
+    border-right: 0;
+}
+
+fluent-button.no-left-border::part(control) {
+    border-left: 0;
+}
+
+.popover-no-shadow fluent-anchored-region {
+    --elevation-shadow-flyout: none !important;
+}
+
+.popover-no-padding fluent-anchored-region .fluent-popover-content {
+    padding: 0 !important;
+    line-height: 0 !important;
+}
+
+.popover-round-corners fluent-anchored-region div {
+    border-radius: 4px;
+}
+
+fluent-tooltip::part(tooltip) {
+    padding: 8px !important;
+}
+
+fluent-accordion-item.transparent::part(region) {
+    background-color: transparent !important;
+}
+
+fluent-select.borderless::part(control) {
+    border: none !important;
+}
+
+fluent-number-field.borderless::part(root) {
+    border: none !important;
+}
+
+fluent-text-field.borderless::part(root) {
+    border: none !important;
+}
+
+.filtered-list-container fluent-option {
+    padding-left: 0;
+    padding-right: 0;
+}
+
+.code-editor pre code .token.relayvariable,
+.code-editor pre code .token.comment .token.relayvariable {
+    display: inline-block;
+    margin: 0 -3px;
+    padding: 0 3px;
+    line-height: 1.5;
+    border-radius: 8px;
+    color: var(--accent-fill-active) !important;
+    background-color: var(--neutral-layer-2);
+}
+
+.single-axis-scatter {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    --text-secondary: #757575;
+    --highlight-bg: #0078d4;
+    --highlight-border: #a0a0a0;
+}
+
+/* Dark theme overrides */
+:root[data-theme="dark"] .single-axis-scatter {
+    --text-secondary: #a0a0a0;
+    --highlight-bg: #2b88d8;
+    --highlight-border: #a0a0a0;
+}
+
+/* SingleAxisScatter point highlighting */
+.temp-highlight-circle {
+    display: block;
+    position: absolute;
+    background: transparent;
+    border-radius: 50%;
+    border: 2px solid var(--highlight-border);
+    pointer-events: none;
+    z-index: 4;
+}

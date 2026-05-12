@@ -1,0 +1,52 @@
+.confirm-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.confirm-container.horizontal-layout {
+    flex-direction: row;
+    flex-wrap: nowrap;
+}
+
+.confirm-container.vertical-layout {
+    flex-direction: column;
+    flex-wrap: nowrap;
+}
+
+.confirm-button {
+    border-radius: 4px;
+    background-color: var(--error);
+}
+
+.arrow-left {
+    width: 12px;
+    height: 14px;
+    fill: var(--error);
+    flex-shrink: 0;
+    margin-right: -1px; /* Negative margin to connect to button */
+}
+
+.arrow-right {
+    width: 12px;
+    height: 14px;
+    fill: var(--error);
+    flex-shrink: 0;
+    margin-left: -1px; /* Negative margin to connect to button */
+}
+
+.arrow-top {
+    width: 14px;
+    height: 12px;
+    fill: var(--error);
+    flex-shrink: 0;
+    margin-bottom: -1px; /* Negative margin to connect to button */
+}
+
+.arrow-bottom {
+    width: 14px;
+    height: 12px;
+    fill: var(--error);
+    flex-shrink: 0;
+    margin-top: -1px; /* Negative margin to connect to button */
+}

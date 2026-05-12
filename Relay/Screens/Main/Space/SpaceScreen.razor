@@ -1,0 +1,58 @@
+@using Refund.DataModel.ReadOnly
+@using Relay.Screens.Main.Base
+@using Relay.Screens.Main.View
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+
+@inherits ListingScreenLogic<ReadOnlyView>
+
+<div style="width: 100%; height: 100%; display: flex; flex-direction: column;">
+    <FluentTabs Style="height: 100%;" Class="tab-h100">
+        <FluentTab Label="Views">
+            <ListingScreen TItem="ReadOnlyView"
+                           Title="@GetTitle()"
+                           CreateButtonText="@GetCreateButtonText()"
+                           Items="@GetItems()"
+                           OnCreateClick="@ShowCreateDialogAsync">
+                <ItemTemplate>
+                    <ViewCard @key="context.QualifiedName"
+                              Item="context"
+                              IsSelected="@(Selection.IsSelected(GetSelectionKey(context)))"
+                              OnClick="@(async args => await HandleItemClicked(context, args))" />
+                </ItemTemplate>
+            </ListingScreen>
+        </FluentTab>
+
+        <FluentTab Label="Factory Definitions">
+            <div class="fd-tab">
+                <div class="fd-header">
+                    <h4>Factory Definitions</h4>
+                    <FluentButton Appearance="Appearance.Accent"
+                                  IconStart="@(new Icons.Regular.Size16.Add())"
+                                  OnClick="HandleCreateFactory">
+                        New factory
+                    </FluentButton>
+                </div>
+
+                @if (FactoryDefinitions.Any())
+                {
+                    <div class="fd-grid"
+                         @onclick:stopPropagation="true"
+                         @onclick="@(() => Selection.Clear())">
+                        @foreach (var def in FactoryDefinitions)
+                        {
+                            <FactoryCard @key="@($"FD{def.Id}")"
+                                         Definition="def"
+                                         Mode="FactoryCard.FactoryCardMode.Definition"
+                                         OnClick="@(async args => await HandleFdCardClicked(def, args))"
+                                         OnDoubleClick="@(async _ => await HandleDefinitionDoubleClick(def))" />
+                        }
+                    </div>
+                }
+                else
+                {
+                    <div class="fd-empty">No factory definitions yet</div>
+                }
+            </div>
+        </FluentTab>
+    </FluentTabs>
+</div>

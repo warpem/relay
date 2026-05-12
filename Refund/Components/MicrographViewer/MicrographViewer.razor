@@ -1,0 +1,155 @@
+@using Microsoft.FluentUI.AspNetCore.Components
+
+<div id="@elementId" @ref="containerElement" class="micrograph-viewer-container"
+     style="position: relative; width: 100%; height: 100%; min-width: @(MinWidth)px; min-height: @(MinHeight)px; 
+            display: flex; align-items: flex-start; justify-content: center; overflow: hidden;">
+
+    <!-- Inner container with aspect ratio preserved - max dimensions control total size -->
+    <div class="micrograph-viewer" style="position: relative; width: 100%; height: 100%; 
+                                          max-width: @(Width)px; max-height: @(Height)px; overflow: hidden;">
+
+        <!-- Viewport for the micrograph image -->
+        <div @ref="viewportRef" style="width: 100%; height: 100%; overflow: hidden; position: relative;"
+             @onmousedown="OnMouseDown" @onmouseup="OnMouseUp" @onmousemove="OnMouseMove" @onwheel="OnMouseWheel"
+             @onmouseover="OnMouseOver" @onmouseout="OnMouseOut">
+
+            @if (!isLoading)
+            {
+                <svg style="width: 100%; height: 100%; cursor: @(isPanning ? "grabbing" : "default");">
+                    <filter id="recolorme" color-interpolation-filters="sRGB">
+                        <feColorMatrix type="matrix" values="1 0 0 0 0
+                                                             0 0 0 0 0
+                                                             0 0 0 0 0
+                                                             1 0 0 0 0"/>
+                    </filter>
+
+                    <!-- Apply transformations for zooming and panning -->
+                    <g transform="translate(@translateX, @translateY) scale(@ZoomLevel)">
+
+                        @if (LowerMipmap != null && !string.IsNullOrWhiteSpace(LowerMipmap.ImageBase64))
+                        {
+                            <!-- Lower mipmap level (higher resolution) -->
+                            <image href="@LowerMipmap.ImageBase64"
+                                   width="@micrographDims.X" height="@micrographDims.Y"
+                                   opacity="@(1.0 - mipmapBlendFactor)"/>
+                                   
+                            @if (UpperMipmap != null && UpperMipmap != LowerMipmap && 
+                                 !string.IsNullOrWhiteSpace(UpperMipmap.ImageBase64) && 
+                                 mipmapBlendFactor > 0)
+                            {
+                                <!-- Upper mipmap level (lower resolution) with blend opacity -->
+                                <image href="@UpperMipmap.ImageBase64"
+                                       width="@micrographDims.X" height="@micrographDims.Y"
+                                       opacity="@mipmapBlendFactor"/>
+                            }
+                        }
+
+                        @if (showMask && !string.IsNullOrWhiteSpace(maskImageBase64))
+                        {
+                            <!-- Mask Image -->
+                            <image href="@maskImageBase64"
+                                   width="@micrographDims.X" height="@micrographDims.Y" style="opacity:0.2; filter:url(#recolorme);"/>
+                        }
+
+                        <!-- Circles representing particle positions -->
+                        @if (showParticles && particlePositions != null)
+                        {
+                            foreach (var pos in particlePositions)
+                            {
+                                if ((particleShape&ParticleShapes.Circle) != 0)
+                                {
+                                    <circle cx="@pos.X" cy="@pos.Y" r="@((float)particleDiameter / pixelSize / 2)"
+                                            stroke="@particleColor" stroke-width="@(particleStrokeWidth / ZoomLevel)" fill="none"/>
+                                }
+                            }
+
+                            foreach (var pos in particlePositions)
+                            {
+                                if ((particleShape&ParticleShapes.Square) != 0)
+                                {
+                                    <rect x="@(pos.X - (float)particleBoxSize / pixelSize / 2)"
+                                          y="@(pos.Y - (float)particleBoxSize / pixelSize / 2)"
+                                          width="@((float)particleBoxSize / pixelSize)"
+                                          height="@((float)particleBoxSize / pixelSize)"
+                                          stroke="@particleColor" stroke-width="@(particleStrokeWidth / ZoomLevel)" fill="none"/>
+                                }
+                            }
+                        }
+                    </g>
+                    @if (showScaleBar)
+                    {
+                        <g transform="translate(0, 0) scale(1)">
+                            <rect x="@(Width - scaleBarDims.X - 10)"
+                                  y="@(Height - scaleBarDims.Y - 10)"
+                                  width="@(scaleBarDims.X)"
+                                  height="@(scaleBarDims.Y)"
+                                  fill="black"
+                                  stroke="white" stroke-width="2"/>
+
+                            <text x="@(Width - scaleBarDims.X / 2 - 10)"
+                                  y="@(Height - scaleBarDims.Y / 2 - 10 + 1)"
+                                  dominant-baseline="middle" text-anchor="middle" fill="white" font-size="14">
+                                @scaleBarLabel
+                            </text>
+                        </g>
+                    }
+                </svg>
+            }
+            else
+            {
+                <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);">
+                    <FluentProgressRing Style="width: 70px; height: 70px;"/>
+                </div>
+            }
+        </div>
+
+        <div @onmouseover="OnMouseOver" @onmouseout="OnMouseOut" style="display: @(showControls ? "block" : "none")">
+
+            <FluentToolbar style="border-radius: 4px; padding: 4px; position: absolute; top: 10px; left: 10px;">
+
+                <div style="display: flex; flex-direction: column;">
+                    <span class="menu-header">Zoom</span>
+                    <ZoomControls ZoomLevel="@ZoomLevel" IsToggledScale="@showScaleBar" OnIsToggledScaleChanged="OnScaleBarToggled"
+                                  OnZoomChanged="OnZoomChanged" OnFitToViewport="OnFitToViewport"/>
+                </div>
+
+                @if (!string.IsNullOrWhiteSpace(ParticleStarPath))
+                {
+                    <div class="menu-separator"></div>
+
+                    <div style="display: flex; flex-direction: column;">
+                        <span class="menu-header">Particles</span>
+                        <ParticleControls IsToggledPicking="isPickingParticles" ParticleDiameter="@particleDiameter"
+                                          ParticleBoxSize="@particleBoxSize" ParticleColor="@particleColor"
+                                          ParticleShape="@particleShape" CanPickParticles="@CanEditParticles"
+                                          CanControlParticleDisplay="@CanControlParticleDisplay"
+                                          OnParticleSettingsChanged="@(a => OnParticleSettingsChanged(a))"/>
+                    </div>
+                }
+
+                @if (CanEditMask || !string.IsNullOrWhiteSpace(maskImageBase64))
+                {
+                    <div class="menu-separator"></div>
+
+                    <div style="display: flex; flex-direction: column;">
+                        <span class="menu-header">Mask</span>
+                        <MaskControls IsToggledShow="showMask" IsToggledPaint="@isPaintingMask" BrushDiameter="@maskBrushDiameter"
+                                      CanEditMask="@CanEditMask"
+                                      OnMaskSettingsChanged="@(a => OnMaskSettingsChanged(a))"/>
+                    </div>
+                }
+            </FluentToolbar>
+
+            <!-- Mini-Map in the bottom left corner -->
+            <div style="position: absolute; bottom: 10px; left: 10px;">
+                <MiniMap ThumbnailImageBase64="@thumbnailImageBase64"
+                         ViewportRectangle="@ViewportRectangle"
+                         ThumbnailWidth="@thumbnailDims.X"
+                         ThumbnailHeight="@thumbnailDims.Y"
+                         MicrographWidth="@micrographDims.X"
+                         MicrographHeight="@micrographDims.Y"
+                         OnMiniMapClick="@(a => OnMiniMapClick(a.X, a.Y))"/>
+            </div>
+        </div>
+    </div>
+</div>

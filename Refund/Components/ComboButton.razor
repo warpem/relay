@@ -1,0 +1,70 @@
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+
+<div style="display: inline-flex; align-items: center; width: 100%;">
+
+    @if (!string.IsNullOrEmpty(Href))
+    {
+        <a href="@Href" style="text-decoration: none; color: inherit;">
+            <FluentButton Id="@MainButtonId"
+                          IconStart="@IconStart"
+                          IconEnd="@IconEnd"
+                          Loading="@Loading"
+                          Disabled="@Disabled"
+                          Appearance="@Appearance"
+                          OnClick="@HandlePrimaryClick"
+                          Style="@($"border-top-right-radius: 0; border-bottom-right-radius: 0; {Style ?? ""}")"
+                          Class="no-right-border">
+                <span style="@($"white-space: nowrap; overflow: hidden; " +
+                               $"text-overflow: ellipsis; display: block; " +
+                               $"max-width: {ButtonMaxWidth}px; min-width: {ButtonMinWidth}px; " +
+                               $"text-align: left;")">
+                    @ChildContent
+                </span>
+            </FluentButton>
+        </a>
+    }
+    else
+    {
+        <FluentButton Id="@MainButtonId"
+                      IconStart="@IconStart"
+                      IconEnd="@IconEnd"
+                      Loading="@Loading"
+                      Disabled="@Disabled"
+                      Appearance="@Appearance"
+                      OnClick="@HandlePrimaryClick"
+                      Style="@($"border-top-right-radius: 0; border-bottom-right-radius: 0; {Style ?? ""}")"
+                      Class="no-right-border">
+            <span style="@($"white-space: nowrap; overflow: hidden; " +
+                           $"text-overflow: ellipsis; display: block; " +
+                           $"max-width: {ButtonMaxWidth}px; min-width: {ButtonMinWidth}px; " +
+                           $"text-align: left;")">
+                @ChildContent
+            </span>
+        </FluentButton>
+    }
+
+    <FluentButton Id="@DropdownButtonId"
+                  IconStart="@(VerticalPosition == VerticalPosition.Top ?
+                                   new Icons.Regular.Size16.ChevronUp() :
+                                   new Icons.Regular.Size16.ChevronDown())"
+                  Appearance="@Appearance"
+                  Color="@Color"
+                  BackgroundColor="@BackgroundColor"
+                  Disabled="@Disabled"
+                  OnClick="@OnDropdownButtonClick"
+                  Class="@(OnClick.HasDelegate ? "" : "no-left-border")"
+                  Style="border-top-left-radius: 0; border-bottom-left-radius: 0;">
+    </FluentButton>
+
+    <div class="popover-no-padding popover-round-corners">
+        <FluentPopover AnchorId="@DropdownButtonId"
+                       @bind-Open="IsOpen"
+                       HorizontalPosition="@HorizontalPosition"
+                       VerticalPosition="@VerticalPosition"
+                       AutoFocus="@AutoFocus">
+            <Body>
+                @MenuContent
+            </Body>
+        </FluentPopover>
+    </div>
+</div>

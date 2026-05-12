@@ -1,0 +1,133 @@
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Refund.DataModel.ReadOnly
+@using Refund.Utils
+
+@if (Job.PortsIn.Any())
+{
+    <div class="right-panel-ports">
+        @foreach (var portIn in Job.PortsIn.Values)
+        {
+            var _portIn = portIn;
+            var internalConns = GetInternalConnections?.Invoke(portIn.Name);
+            var externalConns = GetExternalConnections?.Invoke(portIn.Name);
+            var realEdgeCount = portIn.Edges.Count;
+            var internalCount = internalConns?.Count ?? 0;
+            var externalCount = externalConns?.Count ?? 0;
+            var totalConnections = realEdgeCount + internalCount + externalCount;
+            var isActive = portIn.IsActive() || internalCount > 0 || externalCount > 0;
+            var opacity = isActive ? "1.0" : "0.4";
+            var portErrors = IsDisabled ? new List<string>() : GetPortErrors(portIn.Name);
+            var isExposed = ShowExposureToggle && (IsPortExposed?.Invoke(_portIn) == true);
+            var hasConnections = totalConnections > 0;
+
+            <div style="display: flex; align-items: flex-start; opacity: @opacity;">
+                <div class="right-panel-port-circles" style="@(isExposed ? "margin-top: 7px;" : "")">
+                    <svg>
+                        <circle cx="8" cy="8" r="8" fill="@PortColors.Get(portIn.ResourceType)" />
+                    </svg>
+                </div>
+
+                <FluentStack Orientation="Orientation.Vertical" VerticalGap="2" Style="flex: 1;">
+
+                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                        @if (isExposed && GetExposedPortName != null)
+                        {
+                            <FluentTextField Value="@GetExposedPortName(_portIn)"
+                                             ValueChanged="@(v => OnExposedPortNameChanged.InvokeAsync((_portIn, v)))"
+                                             Placeholder="Custom name"
+                                             Style="flex: 1; font-size: 0.8rem;" />
+                        }
+                        else
+                        {
+                            <FluentLabel Typo="Typography.H6" Style="@(portErrors.Any() ? "color: var(--error-normal);" : "")">
+                                <span>@portIn.Alias (@totalConnections / @GetPortRequirementText(portIn))</span>
+                            </FluentLabel>
+                        }
+                        @if (ShowExposureToggle)
+                        {
+                            <FluentButton BackgroundColor="transparent" Color="transparent"
+                                          Disabled="@(hasConnections && !isExposed)"
+                                          Style="height: 16px;"
+                                          Title="@(isExposed ? "Disconnect from instance editor" : (hasConnections ? "Disconnect edges first" : "Expose in instance editor"))"
+                                          OnClick="() => OnExposureToggled.InvokeAsync((_portIn, !isExposed))">
+                                <FluentIcon Value="@(isExposed ? iconExposedFilled : iconExposedRegular)" />
+                            </FluentButton>
+                        }
+                    </div>
+
+                    @if (!isExposed)
+                    {
+                        <div class="right-panel-port-connection">
+                            @foreach (var _edge in portIn.Edges)
+                            {
+                                var edge = _edge;
+
+                                <div style="display: flex; align-items: center; column-gap: 3px;">
+                                    <div>
+                                        J@($"{edge.Source.Job.Id}")→@(edge.Source.Alias)
+                                    </div>
+                                    @if (!IsDisabled)
+                                    {
+                                        <FluentButton BackgroundColor="transparent"
+                                                      Color="transparent"
+                                                      OnClick="() => HandleEdgeRemoved(edge)">
+                                            <FluentIcon Value="@iconDeleteEdge"></FluentIcon>
+                                        </FluentButton>
+                                    }
+                                </div>
+                            }
+                            @if (internalConns != null)
+                            {
+                                @foreach (var conn in internalConns)
+                                {
+                                    var capturedConn = conn;
+                                    var capturedPortName = portIn.Name;
+                                    <div style="display: flex; align-items: center; column-gap: 3px;">
+                                        <div>Sub-job @conn.sourceJobId→@conn.sourcePortName</div>
+                                        @if (!IsDisabled)
+                                        {
+                                            <FluentButton BackgroundColor="transparent"
+                                                          Color="transparent"
+                                                          OnClick="() => OnInternalEdgeRemoved.InvokeAsync((capturedPortName, capturedConn.sourceJobId, capturedConn.sourcePortName))">
+                                                <FluentIcon Value="@iconDeleteEdge"></FluentIcon>
+                                            </FluentButton>
+                                        }
+                                    </div>
+                                }
+                            }
+                            @if (externalConns != null)
+                            {
+                                @foreach (var conn in externalConns)
+                                {
+                                    var capturedConn = conn;
+                                    var capturedPortName = portIn.Name;
+                                    <div style="display: flex; align-items: center; column-gap: 3px;">
+                                        <div style="opacity: 0.7;">Ext. J@(conn.externalJobId)→@(conn.externalPort)</div>
+                                        @if (!IsDisabled)
+                                        {
+                                            <FluentButton BackgroundColor="transparent"
+                                                          Color="transparent"
+                                                          OnClick="() => OnExternalEdgeRemoved.InvokeAsync((capturedPortName, capturedConn.externalJobId, capturedConn.externalPort))">
+                                                <FluentIcon Value="@iconDeleteEdge"></FluentIcon>
+                                            </FluentButton>
+                                        }
+                                    </div>
+                                }
+                            }
+                        </div>
+                    }
+
+                    @if (portErrors.Any())
+                    {
+                        <ul style="color: var(--error-normal); margin: 0; padding-left: 16px; font-size: 12px;">
+                            @foreach (var error in portErrors)
+                            {
+                                <li>@error</li>
+                            }
+                        </ul>
+                    }
+                </FluentStack>
+            </div>
+        }
+    </div>
+}

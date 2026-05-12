@@ -1,0 +1,75 @@
+.container {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    position: relative;
+    min-height: 768px;
+}
+
+.tilt-slider-container {
+    width: 100%;
+    max-width: 512px;
+    padding: 0.5rem 1rem;
+    margin-bottom: 0.5rem;
+}
+
+.chart-container {
+    position: relative;
+    width: fit-content;
+    transition: opacity 0.3s ease;
+}
+
+.chart {
+    display: block;
+}
+
+.power-spectrum {
+    -webkit-mask-image: radial-gradient(at top left, black 69.8%, transparent 70%);
+    mask-image: radial-gradient(at top left, black 69.8%, transparent 70%);
+    transition: opacity 0.3s ease;
+}
+
+.loading-overlay {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 10;
+}
+
+.custom-tooltip {
+    position: absolute;
+    top: 0;
+    right: 0;
+    background: rgba(0, 0, 0, 0.3);
+    color: white;
+    border-radius: 3px;
+    pointer-events: none;
+    padding: 0.5rem;
+    width: 150px;
+    font-size: 12px;
+}
+
+.tooltip-title {
+    width: 100%;
+    text-align: center;
+}
+
+.custom-tooltip table {
+    margin: 0 0;
+    width: 100%;
+    font-size: 12px;
+}
+
+.custom-tooltip td {
+    padding: 0 0.25rem;
+    font-size: 12px;
+}
+
+.custom-tooltip-bullet {
+    display: inline-block;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    margin-right: 0.25rem;
+}

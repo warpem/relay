@@ -1,0 +1,27 @@
+.fd-tab {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    padding: 1rem;
+}
+
+.fd-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: start;
+}
+
+.fd-grid {
+    display: flex;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    align-items: flex-start;
+    user-select: none;
+}
+
+.fd-empty {
+    font-size: 0.85rem;
+    opacity: 0.5;
+    padding: 2rem;
+}

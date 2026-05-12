@@ -1,0 +1,12 @@
+<OverlayBase>
+    <div class="queue-container no-select">
+        <QueueCard Queue="@DataManager.LocalQueue"/>
+        @foreach(var queue in DataManager.ClusterQueues)
+        {
+            <QueueCard Queue="@queue"/>
+        }
+    </div>
+    <div class="bottom-fade" />
+    <div class="right-fade" />
+    <div class="right-fade-button" />
+</OverlayBase>

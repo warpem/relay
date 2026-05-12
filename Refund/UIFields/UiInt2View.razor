@@ -1,0 +1,42 @@
+@namespace Refund.UIFields
+@using Warp.Tools
+@inherits UiFieldViewBase
+
+<FluentStack>
+    <RobustFluentNumberField @bind-Value="@ValueXT" 
+                       Style="width: 50%"
+                       Class="borderless"
+                       Placeholder="No value"
+                       Min="@(FieldDescriptionT.Min.ToString())"
+                       Max="@(FieldDescriptionT.Max.ToString())"
+                       Step="@(FieldDescriptionT.StepSize.ToString())"
+                       Immediate="true"
+                       Disabled="@IsDisabled" />
+    
+    <RobustFluentNumberField @bind-Value="@ValueYT" 
+                       Style="width: 50%"
+                       Class="borderless"
+                       Placeholder="No value"
+                       Min="@(FieldDescriptionT.Min.ToString())"
+                       Max="@(FieldDescriptionT.Max.ToString())"
+                       Step="@(FieldDescriptionT.StepSize.ToString())"
+                       Immediate="true" 
+                       Disabled="@IsDisabled" />
+</FluentStack>
+
+@code
+{
+    private UiInt2 FieldDescriptionT => (UiInt2)FieldDescription ?? null;
+
+    private int ValueXT
+    {
+        get => ((int2)Value).X;
+        set => ValueChanged.InvokeAsync(new int2(value, ((int2)Value).Y));
+    }
+
+    private int ValueYT
+    {
+        get => ((int2)Value).Y;
+        set => ValueChanged.InvokeAsync(new int2(((int2)Value).X, value));
+    }
+}

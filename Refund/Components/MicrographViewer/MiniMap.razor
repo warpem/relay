@@ -1,0 +1,32 @@
+<div @ref="miniMapDiv"
+     style="position: relative; cursor: pointer; 
+            width: @(ThumbnailWidth)px; 
+            height: @(ThumbnailHeight)px;
+            max-width: 140px; max-height: 140px;
+            box-shadow: 0 0 10px black;"
+     @onclick="OnClick">
+    
+    <img src="@ThumbnailImageBase64" 
+         style="position: absolute; top: 0; left: 0;
+                width: 100%; height: 100%;"/>
+    
+    <svg style="position: absolute; top: 0; left: 0; 
+                width: 100%; height: 100%;">
+        
+        <rect x="@(ViewportRectX + 1)" y="@(ViewportRectY + 1)" width="@(ViewportRectWidth - 2)" height="@(ViewportRectHeight - 2)"
+              stroke="#026AC4" fill="none" stroke-width="2"/>
+    </svg>
+</div>
+
+@* Component-specific JavaScript *@
+<script>
+    window.getElementBoundingClientRect = (element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+            left: rect.left,
+            top: rect.top,
+            width: rect.width,
+            height: rect.height
+        };
+    };
+</script>

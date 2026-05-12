@@ -1,0 +1,83 @@
+@using Accord.Math
+@using Microsoft.FluentUI.AspNetCore.Components
+
+<div id="@elementId" @ref="containerElement" class="tilt-stack-viewer-container"
+     style="position: relative; width: 100%; height: 100%; min-width: @(MinWidth)px; min-height: @(MinHeight)px;
+     display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden;">
+
+    <!-- Inner container with aspect ratio preserved - max dimensions control total size -->
+    <div class="tilt-stack-viewer" style="position: relative; width: 100%; display: flex; flex-direction: column;
+        max-width: @(Width)px; max-height: @(Height)px; overflow: hidden;">
+
+        <!-- Controls panel with fixed height -->
+        <div style="flex: 0 0 auto; padding: 15px 10px 15px 10px; display: flex; flex-wrap: nowrap; align-items: center; gap: 2rem;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <span style="text-wrap: nowrap;">Overlaid tilts:</span>
+                <FluentNumberField TValue="@(int)"
+                                   Min="1"
+                                   Max="@(Math.Max(1, ImagePaths.Length).ToString())"
+                                   Step="2"
+                                   Value="@OverlayCount"
+                                   ValueChanged="HandleOverlayCountChanged"
+                                   Style="width: 80px;"/>
+            </div>
+            
+            <div style="width: 100%;">
+                <FluentSlider TValue="@(int)"
+                              Min="0"
+                              Max="@(Math.Max(0, ImagePaths.Length - 1))"
+                              Step="1"
+                              Value="@CurrentImageIndex"
+                              ValueChanged="HandleTiltIndexChanged"
+                              Style="flex-grow: 1;">
+                    <FluentSliderLabel Position="0">
+                        @TiltAngles.First().ToString("F1") °
+                    </FluentSliderLabel>
+                    @if (ZeroTiltIndex != null)
+                    {
+                        <FluentSliderLabel Position="@ZeroTiltIndex.Value">
+                            @TiltAngles[ZeroTiltIndex.Value].ToString("F1") °
+                        </FluentSliderLabel>
+                    }
+                    else
+                    {
+                        float lowestTilt = TiltAngles.OrderBy(a => Math.Abs(a)).First();
+                        int lowestIndex = TiltAngles.IndexOf(lowestTilt);
+                        
+                        <FluentSliderLabel Position="@lowestIndex">
+                            @lowestTilt.ToString("F1") °
+                        </FluentSliderLabel>
+                    }
+                    <FluentSliderLabel Position="@(TiltAngles.Length - 1)">
+                        @TiltAngles.Last().ToString("F1") °
+                    </FluentSliderLabel>
+                </FluentSlider>
+            </div>
+        </div>
+
+        <!-- Viewport for the tilt images - takes remaining space -->
+        <div @ref="viewportRef" style="flex: 1; min-height: 0; overflow: hidden; position: relative;">
+            @{
+                var (viewBoxWidth, viewBoxHeight, viewBoxOffsetX, viewBoxOffsetY) = ViewBoxDimensions;
+                var viewBoxStr = $"{-viewBoxOffsetX} {-viewBoxOffsetY} {viewBoxWidth} {viewBoxHeight}";
+            }
+            <svg style="width: 100%; height: 100%;" viewBox="@viewBoxStr" preserveAspectRatio="xMidYMid meet">
+                @for (int i = 0; i < ImagePaths.Length; i++)
+                {
+                    var visible = (i == CurrentImageIndex) ||
+                                      (OverlayCount > 1 && IsInOverlayRange(i));
+
+                    var style = visible ? 
+                                    (GetImageOpacity(i) != 1f ? $"mix-blend-mode: overlay; opacity: {GetImageOpacity(i)}" : "") : 
+                                    "display: none;";
+
+                    <image href="@FileService.GetUrl(ImagePaths[i])"
+                           x="0" y="0"
+                           width="@ImageDimensions.X" height="@ImageDimensions.Y"
+                           style="@style"
+                           transform="rotate(@GetRotation(i), @(ImageDimensions.X / 2), @(ImageDimensions.Y / 2)) translate(@GetTranslateX(i), @GetTranslateY(i))"/>
+                }
+            </svg>
+        </div>
+    </div>
+</div>

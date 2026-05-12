@@ -1,0 +1,14 @@
+@using Microsoft.AspNetCore.Hosting
+@using Refund.Components
+
+<div style="display: flex; justify-content: center; align-items: center; width: 288px; height: 144px;">
+    @if(Job.VisAvailableIteration >= 0)
+    {
+        <img src="./_content/Refund/images/mlogo.png"
+             style="max-width: 144px; max-height: 144px; filter: hue-rotate(@(Job.HueShift)deg);" />
+    }
+    else
+    {
+        <span>No results yet</span>
+    }
+</div>

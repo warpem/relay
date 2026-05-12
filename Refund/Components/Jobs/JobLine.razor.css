@@ -1,0 +1,38 @@
+.job-line {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    width: 100%;
+}
+
+.navigation {
+    cursor: pointer;
+}
+
+.navigation:hover {
+    background-color: var(--neutral-layer-2);
+}
+
+.job-info {
+    display: flex;
+    flex-direction: column;
+    flex-grow: 0;
+    flex-wrap: nowrap;
+    margin-right: 0.6rem;
+}
+
+.job-name {
+    margin-left: 0.25rem;
+    flex-shrink: 0;
+}
+
+.status-text {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 0.25rem;
+    color: var(--neutral-foreground-hint);
+    font-size: 0.75rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}

@@ -1,0 +1,36 @@
+<div class="expanded-job-view">
+    @if (Service.CurrentJob.IsIterative)
+    {
+        <div style="padding-left: 40px;">
+            <IterationPagination/>
+        </div>
+    }
+
+    <div class="content-container">
+        @if (Service?.CurrentJob != null)
+        {
+            var key = Service.CurrentJob.Space.Project.Id + "-" + Service.CurrentJob.Space.Id + "-" + Service.CurrentJob.Id;
+            <LogPanel/>
+
+            <div class="visualization-container">
+                @if (Service.CurrentJob.ExpandedViewType != null)
+                {
+                    <ErrorBoundary>
+                        <ChildContent>
+                            <DynamicComponent @key="@key" Type="@Service.CurrentJob.ExpandedViewType"/>
+                        </ChildContent>
+                        <ErrorContent>
+                            <div class="error-message">
+                                <h5>An error occurred while rendering this job's expanded view:</h5>
+                                <div>
+                                    <p><strong>Message:</strong> @context.Message</p>
+                                    <pre>@context.StackTrace</pre>
+                                </div>
+                            </div>
+                        </ErrorContent>
+                    </ErrorBoundary>
+                }
+            </div>
+        }
+    </div>
+</div>

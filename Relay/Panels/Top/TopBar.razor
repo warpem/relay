@@ -1,0 +1,38 @@
+@using Refund.Services.Core.Session
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+
+<div style="display: flex; 
+            align-items: center; 
+            justify-content: space-between; 
+            width: 100%; 
+            height: 100%;">
+    
+    <Breadcrumbs/>
+
+    <div style="display: flex; align-items: center; gap: 1rem;">
+        <div style="display: flex; align-items: center; gap: 0.3rem;">
+            <FluentIcon Value="@(new Icons.Regular.Size20.Person())" />
+            <span>@Session.User.Name</span>
+        </div>
+
+        <FluentButton Id="Theme"
+                      IconEnd="@(Session.ColorTheme == ColorTheme.Light ?
+                                     new Icons.Regular.Size20.WeatherSunny().WithColor(Color.Warning) :
+                                     new Icons.Regular.Size20.WeatherMoon())"
+                      BackgroundColor="transparent"
+                      Color="transparent"
+                      Title="@(Session.ColorTheme == ColorTheme.Light ?
+                                   "Switch to dark theme" :
+                                   "Switch to light theme")"
+                      OnClick="OnThemeButtonClick">
+        </FluentButton>
+
+        <FluentButton IconEnd="@(new Icons.Regular.Size20.PanelRight())"
+                      BackgroundColor="transparent"
+                      Color="transparent"
+                      Title="@(Session.IsRightPanelExpanded() ? "Collapse right panel" : "Expand right panel")"
+                      Style="margin-right: 8px;"
+                      OnClick="OnToggleRightPanel">
+        </FluentButton>
+    </div>
+</div>

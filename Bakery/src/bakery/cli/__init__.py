@@ -1,0 +1,38 @@
+from ._cli import cli
+
+# subcommands of 'bakery' are just python functions decorated with cli.command()
+# import those subcommands here
+from .map_orthoslice_atlas import map_orthoslice_atlas
+from .mask_orthoslice_atlas import mask_orthoslice_atlas
+from .mask_orthoslice_isoline_atlas import mask_orthoslice_isoline_atlas
+from .xy_slice import xy_slice
+from .orientation_and_fourier_sampling import orientation_and_fourier_sampling
+from .fsc import fsc
+from .particle_image_atlas import particle_image_atlas
+from .class2d_image_atlas import class2d_image_atlas
+from .orientation_and_fourier_sampling_class3d import orientation_and_fourier_sampling_class3d
+from .class2d_job_card import class2d_job_card
+from .class3d_fsc_per_class import class3d_fsc_per_class
+from .postprocess3d_fsc_and_guinier import postprocess3d_fsc_and_guinier
+from .motion_and_ctf_job_card import motion_and_ctf_job_card
+from .boxnet_inference_2d_job_card import boxnet_inference_2d_job_card
+from .initial_reference_3d_job_card import initial_reference_3d_job_card
+from .class3d_job_card import class3d_job_card
+from .postprocess3d_job_card import postprocess3d_job_card
+from .refine3d_job_card import refine3d_job_card
+from .import_map_3d_job_card import import_map_3d_job_card
+from .import_particles_job_card import import_particles_job_card
+from .ts_etomo_job_card import ts_etomo_job_card
+from .ts_ctf_job_card import ts_ctf_job_card
+from .ts_reconstruct_job_card import ts_reconstruct_job_card
+from .ts_ctf_card_view import ts_ctf_card_view
+from .ts_select_particles_job_card import ts_select_particles_job_card
+from .ts_template_match_job_card import ts_template_match_job_card
+from .ts_export_particles_job_card import ts_export_particles_job_card
+from .import_fs_job_card import import_fs_job_card
+from .m_species_job_card import m_species_job_card
+from .m_refine_job_card import m_refine_job_card
+
+import matplotlib
+
+matplotlib.use('Agg')

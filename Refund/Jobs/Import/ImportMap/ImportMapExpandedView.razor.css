@@ -1,0 +1,30 @@
+.importmap-view-container {
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+    gap: 2rem;
+    overflow: auto;
+}
+
+.controls-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 1rem;
+}
+
+.visualization-section {
+    padding-bottom: 0.5rem;
+}
+
+.visualizations-column {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2rem;
+    padding-bottom: 0.5rem;
+}
+
+.visualization-item {
+    flex-shrink: 0;
+}

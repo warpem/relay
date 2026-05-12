@@ -1,0 +1,63 @@
+﻿@using Refund.Components.FileBrowser
+@using Refund.Services.Core.Session
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+
+@namespace Refund.UIFields
+
+@inherits UiFieldViewBase
+@inject IDialogService DialogService
+@inject RelaySession Session
+
+<FluentStack HorizontalGap="0">
+    <div style="width: 100%">
+        <FluentTextField @bind-Value="@ValueT"
+                         Class="borderless"
+                         Immediate="true"
+                         Style="width: 100%"
+                         Placeholder="Use button to browse"
+                         Disabled="@IsDisabled" />
+    </div>
+
+    <FluentButton IconEnd="@(new Icons.Filled.Size16.Folder())"
+                  Title="Browse"
+                  Style="margin-bottom: 4px; width: 40px"
+                  OnClick="@OnBrowserButtonClick"
+                  Disabled="@IsDisabled" />
+</FluentStack>
+
+@code
+{
+    private UiPath FieldDescriptionT => (UiPath)FieldDescription ?? null;
+
+    private string ValueT
+    {
+        get => (string)Value;
+        set => ValueChanged.InvokeAsync(value);
+    }
+    
+    private async Task HandleDialog(DialogResult result)
+    {
+        if (result.Cancelled)
+        {
+            return;
+        }
+        if (result.Data is not null)
+        {
+            List<FileSystemItem> selectedItems = result.Data as List<FileSystemItem>;
+            if (selectedItems.Any())
+                ValueT = selectedItems.First().Path;
+            
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnBrowserButtonClick()
+    {
+        await FileBrowserDialog.Show(DialogService, this, HandleDialog, "Select a file", 
+                                     selectionMode: FieldDescriptionT.SelectionMode,
+                                     allowedExtensions: FieldDescriptionT.FileExtensions.Any()
+                                                            ? FieldDescriptionT.FileExtensions.ToArray()
+                                                            : null,
+                                     currentFolder: Session?.Space?.RootDirectory);
+    }
+}

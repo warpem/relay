@@ -1,0 +1,35 @@
+@using Relay.Emoji
+<div class="@(Disabled ? "emoji-button-disabled" : "")">
+    <div id="@_id" 
+         style="@(ShowBorder ? "border: 1px solid var(--accent-base-color); border-radius: 10px; padding: 0.5rem;" : "")">
+        @{
+            var emoji = EmojiLibrary.FindByGlyph(Glyph)?.FluentEmoji;
+
+            @if (emoji == null)
+            {
+                <FluentButton OnClick="@(_ => OpenEmojiSelector())" Disabled="@Disabled">
+                    Select
+                </FluentButton>
+            }
+            else
+            {
+                <FluentEmoji Value="emoji" Width="@(Size?.ToString())"
+                             OnClick="@(_ => OpenEmojiSelector())"/>
+            }
+        }
+    </div>
+
+    <div class="popover-no-padding">
+        <FluentPopover AnchorId="@_id"
+                       HorizontalPosition="@HorizontalPosition"
+                       VerticalPosition="@VerticalPosition"
+                       HorizontalInset="HorizontalInset"
+                       @bind-Open="@_isEmojiSelectorOpen">
+            <Body>
+                <div style="width: 316px;">
+                    <EmojiSelector OnEmojiSelected="@HandleEmojiChanged"/>
+                </div>
+            </Body>
+        </FluentPopover>
+    </div>
+</div>

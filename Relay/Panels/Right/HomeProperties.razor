@@ -1,0 +1,62 @@
+@using Refund.DataModel
+@using Refund.DataModel.ReadOnly
+@using Refund.Services.Core.DataManager
+@using Refund.Services.Core.Session
+@inject DataManager DataManager
+@inject RelaySession Session
+
+<div class="property-panel">
+    <h5>Oh Relay?</h5>
+
+    @if (DataManager.GetUserProjects(Session.User).Any())
+    {
+        var projects = DataManager.GetUserProjects(Session.User);
+
+        {
+            var earliestProject = projects.OrderBy(p => p.GetMostRecentEvent(EventType.Created).Timestamp).First();
+            var age = DateTime.Now - earliestProject.GetMostRecentEvent(EventType.Created).Timestamp;
+            var years = age.Days / 365;
+            var months = (age.Days % 365) / 30;
+            var days = (age.Days % 365) % 30;
+
+            var ageParts = new List<string>();
+            if (years > 0) ageParts.Add($"{years} year{(years != 1 ? "s" : "")}");
+            if (months > 0) ageParts.Add($"{months} month{(months != 1 ? "s" : "")}");
+            if (days > 0) ageParts.Add($"{days} day{(days != 1 ? "s" : "")}");
+
+            var ageString = string.Join(", ", ageParts);
+
+            <div class="property-item">
+                <span class="property-title">Oldest project</span>
+                <span class="property-value">@earliestProject.QualifiedName</span>
+                <span class="property-value">
+                    @ageString by 
+                    <FluentBadge>
+                        @earliestProject.GetMostRecentEvent(EventType.Created).Author.Name
+                    </FluentBadge>
+                </span>
+            </div>
+        }
+
+        {
+            var biggestProject = projects.OrderBy(p => p.Spaces.Select(s => s.Jobs.Count).Sum()).Last();
+
+            <div class="property-item">
+                <span class="property-title">Biggest project</span>
+                <span class="property-value">@biggestProject.QualifiedName</span>
+                <span class="property-value">@biggestProject.Spaces.Select(s => s.Jobs.Count).Sum() jobs</span>
+            </div>
+        }
+
+        {
+            int nprojects = projects.Count;
+            int nspaces = projects.Select(p => p.Spaces.Count).Sum();
+            int nviews = projects.Select(p => p.Spaces.Select(s => s.Views.Count).Sum()).Sum();
+            int njobs = projects.Select(p => p.Spaces.Select(s => s.Jobs.Count).Sum()).Sum();
+
+            <div class="property-item">
+                <span class="property-title">@njobs jobs in @nviews views, @nspaces spaces, @nprojects projects</span>
+            </div>
+        }
+    }
+</div>

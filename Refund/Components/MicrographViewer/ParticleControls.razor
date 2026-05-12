@@ -1,0 +1,47 @@
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@using Refund.Components.SlimTextField
+
+<div style="display: flex; align-items: center; height: 32px;">
+
+    @if (CanPickParticles)
+    {
+        <ToggleButton Icon="@(new Icons.Regular.Size24.HandPoint())" Style="margin-right: 4px;" Title="Pick particles"
+                      @bind-IsToggled="IsToggledPicking"/>
+    }
+    
+    <ToggleButton Icon="@(new Icons.Regular.Size24.Circle())" Title="Show particles"
+                  @bind-IsToggled="IsToggledCircles" />
+    
+    <div class="child-field">
+        @if (CanControlParticleDisplay)
+        {
+            <SlimTextField @bind-Value="ParticleDiameter"
+                           OnValueChange="(_) => OnSettingChanged()"
+                           Min="2" Max="100000" Step="2"/>
+            <span>Å</span>
+        }
+        else
+        {
+            <span>@ParticleDiameter Å</span>
+        }
+    </div>
+
+    <ToggleButton Icon="@(new Icons.Regular.Size24.Square())" Style="margin-left: 4px;" Title="Show particle boxes"
+                  @bind-IsToggled="IsToggledSquares"/>
+    
+    <div class="child-field">
+        @if (CanControlParticleDisplay)
+        {
+            <SlimTextField @bind-Value="ParticleBoxSize"
+                           OnValueChange="(_) => OnSettingChanged()"
+                           Min="2" Max="100000" Step="2"/>
+            <span>Å</span>
+        }
+        else
+        {
+            <span>@ParticleBoxSize Å</span>
+        }
+    </div>
+    
+    <input type="color" style="margin-left: 8px; margin-right: 4px; width: 24px; height: 24px;" title="Shape color" @bind="ParticleColor" />
+</div>

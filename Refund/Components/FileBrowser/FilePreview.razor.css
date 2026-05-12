@@ -1,0 +1,31 @@
+.preview-frame {
+    width: 240px;
+    min-height: 240px;
+    height: auto;
+    border: 1px solid #ccc;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.preview-frame img {
+    max-width: 100%;
+    max-height: 100%;
+}
+
+.preview-frame pre {
+    font-family: monospace;
+    font-size: 7pt;
+    margin: 0;
+    line-height: 1.05;
+    width: 240px;
+    height: 240px;
+}
+
+.tab-content {
+    width: 100%;
+    height: 200px;
+}

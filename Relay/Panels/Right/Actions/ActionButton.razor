@@ -1,0 +1,81 @@
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+
+@if (Action.BorderColor != null)
+{
+    <style>
+        @($"#{_id}::part(control) {{ border-color: {Action.BorderColor}; }}")
+    </style>
+}
+
+<div id="@_id" style="width: 100%;">
+    @if (!Action.SubActions.Any())
+    {
+        <FluentButton Disabled="@Action.IsDisabled"
+                      Appearance="@Action.Appearance"
+                      BackgroundColor="@Action.BackgroundColor"
+                      Color="@Action.TextColor"
+                      IconStart="@Action.IconLarge"
+                      Style="width: 100%;"
+                      OnClick="@HandlePrimaryClick">
+            @Action.Name
+        </FluentButton>
+    }
+    else
+    {
+        <FluentButton Disabled="@Action.IsDisabled"
+                      Appearance="@Action.Appearance"
+                      BackgroundColor="@Action.BackgroundColor"
+                      Color="@Action.TextColor"
+                      IconStart="@Action.IconLarge"
+                      IconEnd="@(new Icons.Regular.Size16.ChevronDown())"
+                      Style="width: 100%;"
+                      OnClick="@(() => _menuOpen = !_menuOpen)">
+            @Action.Name
+        </FluentButton>
+        <FluentMenu Anchor="@_id" @bind-Open="_menuOpen"
+                    VerticalThreshold="200">
+            <ActionMenuLevel Actions="Action.SubActions" />
+        </FluentMenu>
+    }
+
+    @if (Action.IsDisabled)
+    {
+        <FluentTooltip Anchor="@_id"
+                       Position="TooltipPosition.Left"
+                       MaxWidth="300px"
+                       HideTooltipOnCursorLeave="false">
+            @Action.DisabledBecause
+        </FluentTooltip>
+    }
+
+    @if (Action.NeedsConfirmation)
+    {
+        <div class="popover-no-padding popover-no-shadow">
+            <FluentPopover AnchorId="@_id"
+                           @bind-Open="@_confirmationOpen"
+                           HorizontalPosition="HorizontalPosition.Left"
+                           VerticalPosition="VerticalPosition.Center"
+                           HorizontalInset="false"
+                           FixedPlacement="true"
+                           Style="background-color: transparent;">
+                <Body>
+                    <div style="display: flex; flex-wrap: nowrap; align-items: center;">
+                        <div style="border-radius: 4px; background-color: var(--error);">
+                            <FluentButton BackgroundColor="var(--error)"
+                                          Color="var(--neutral-fill-rest)"
+                                          OnClick="@Action.Action">
+                                Yes, I'm really sure
+                            </FluentButton>
+                        </div>
+
+                        <svg style="width: 12px; height: 14px; 
+                                    fill: var(--error);"
+                             viewBox="0 0 12 14" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M 0 0 L 12 7 L 0 14 Z" />
+                        </svg>
+                    </div>
+                </Body>
+            </FluentPopover>
+        </div>
+    }
+</div>

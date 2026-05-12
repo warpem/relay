@@ -1,0 +1,24 @@
+﻿@using Microsoft.JSInterop;
+
+<span id="skinny-drop-down-@(_id)" class="position-relative" tabindex="0">
+    @if(!string.IsNullOrWhiteSpace(Value))
+    {
+        <span class="skinny-drop-down d-inline" @onclick="ShowPopup">
+            <span>@Value</span>
+            <span>▾</span>
+        </span>
+    }
+    else
+    {
+        <span class="skinny-drop-down d-flex" @onclick="ShowPopup" style="width:100px">
+            <span></span>
+            <span>▾</span>
+        </span>
+    }
+    <span class="popup">
+        @foreach(string option in Values)
+        {
+            <div @onclick="async _ => await UpdateValue(option)">@option</div>
+        }
+    </span>
+</span>

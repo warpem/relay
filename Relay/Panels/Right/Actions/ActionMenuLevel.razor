@@ -1,0 +1,83 @@
+
+@foreach (var action in Actions)
+{
+    @if (action.SubActions.Any())
+    {
+        <FluentMenuItem Style="@GetItemStyle(action)">
+            <MenuItems>
+                <ActionMenuLevel Actions="action.SubActions" />
+            </MenuItems>
+            
+            <ChildContent>
+                <span class="menu-item-label">@action.Name</span>
+                @if (action.IconSmall != null)
+                {
+                    <span slot="start" style="height: 16px;">
+                        <FluentIcon Value="@action.IconSmall"/>
+                    </span>
+                }
+            </ChildContent>
+        </FluentMenuItem>
+    }
+    else
+    {
+        @if (action.IsDisabled)
+        {
+            <FluentMenuItem Style="@GetItemStyle(action)">
+                <MenuItems>
+                    <div style="padding: 0.4rem 1rem; max-width: 200px; text-wrap: pretty;">
+                        @action.DisabledBecause
+                    </div>
+                </MenuItems>
+
+                <ChildContent>
+                    <span class="menu-item-label">@action.Name</span>
+                    @if (action.IconSmall != null)
+                    {
+                        <span slot="start" style="height: 16px;">
+                            <FluentIcon Value="@action.IconSmall"/>
+                        </span>
+                    }
+                </ChildContent>
+            </FluentMenuItem>
+        }
+        else if (action.NeedsConfirmation)
+        {
+            <FluentMenuItem Style="@GetItemStyle(action)">
+                <MenuItems>
+                    <FluentMenuItem Label="I'm sure"
+                                    Style="color: var(--warning);">
+                        <MenuItems>
+                            <FluentMenuItem Label="Yes, I'm really sure"
+                                            OnClick="@action.Action"
+                                            Style="color: var(--error);" />
+                        </MenuItems>
+                    </FluentMenuItem>
+                </MenuItems>
+
+                <ChildContent>
+                    <span class="menu-item-label">@action.Name</span>
+                    @if (action.IconSmall != null)
+                    {
+                        <span slot="start" style="height: 16px;">
+                        <FluentIcon Value="@action.IconSmall"/>
+                    </span>
+                    }
+                </ChildContent>
+            </FluentMenuItem>
+        }
+        else
+        {
+            <FluentMenuItem OnClick="@action.Action"
+                            Style="@GetItemStyle(action)">
+                <span class="menu-item-label">@action.Name</span>
+                @if (action.IconSmall != null)
+                {
+                    <span slot="start" style="height: 16px;">
+                        <FluentIcon Value="@action.IconSmall"/>
+                    </span>
+                }
+            </FluentMenuItem>
+        }
+    }
+}

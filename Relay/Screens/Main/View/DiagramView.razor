@@ -1,0 +1,82 @@
+@using Refund.DataModel
+@using Refund.DataModel.ReadOnly
+@using Refund.Services
+@using Refund.Utils
+
+<div class="diagram-viewport" @ref="_viewport"
+     @onclick:stopPropagation="true"
+     @onclick="@HandleBackgroundClick"
+     @oncontextmenu:preventDefault="OnContextMenu.HasDelegate"
+     @oncontextmenu="@HandleContextMenu">
+    <div class="diagram-canvas" @ref="_canvas">
+        @if (Layout != null && Layout.Nodes.Count > 0)
+        {
+            @* Edge SVG layer *@
+            <svg class="diagram-edges"
+                 width="@F(Layout.GraphWidth)" height="@F(Layout.GraphHeight)"
+                 viewBox="0 0 @F(Layout.GraphWidth) @F(Layout.GraphHeight)">
+                @foreach (var edge in Layout.Edges)
+                {
+                    <path d="@GetEdgePath(edge)"
+                          fill="none"
+                          stroke="@PortColors.Get(edge.ResourceType)"
+                          opacity="0.7" />
+                }
+            </svg>
+
+            @* Node layer *@
+            @foreach (var item in Items)
+            {
+                var node = GetNode(item);
+                @if (node is { } n)
+                {
+                    <div style="position: absolute; left: @F(n.X)px; top: @F(n.Y)px;">
+                        @if (item is ReadOnlyJob job)
+                        {
+                            <JobCard @key="job.QualifiedName"
+                                     Job="job"
+                                     DiagramMode="true"
+                                     DiagramWidth="@n.Width"
+                                     DiagramHeight="@n.Height"
+                                     OnClick="@(async args => await OnItemClick.InvokeAsync((item, args)))"
+                                     OnDoubleClick="@(async args => await OnItemDoubleClick.InvokeAsync((item, args)))"
+                                     OnPortClick="@OnPortClick"
+                                     OnDiagramContextMenu="@OnCardContextMenu" />
+                        }
+                        else if (item is ReadOnlyFolder folder)
+                        {
+                            <FolderCard @key="folder.QualifiedName"
+                                        Folder="folder"
+                                        DiagramMode="true"
+                                        DiagramWidth="@n.Width"
+                                        DiagramHeight="@n.Height"
+                                        OnClick="@(async args => await OnItemClick.InvokeAsync((item, args)))"
+                                        OnDoubleClick="@(async args => await OnItemDoubleClick.InvokeAsync((item, args)))"
+                                        OnDiagramContextMenu="@OnCardContextMenu" />
+                        }
+                        else if (item is ReadOnlyFactoryInstance factoryInstance)
+                        {
+                            <FactoryCard @key="factoryInstance.QualifiedName"
+                                         Instance="factoryInstance"
+                                         Mode="FactoryCard.FactoryCardMode.Instance"
+                                         DiagramMode="true"
+                                         DiagramWidth="@n.Width"
+                                         DiagramHeight="@n.Height"
+                                         OnClick="@(async args => await OnItemClick.InvokeAsync((item, args)))"
+                                         OnDoubleClick="@(async args => await OnItemDoubleClick.InvokeAsync((item, args)))"
+                                         OnPortClick="@OnPortClick"
+                                         OnDiagramContextMenu="@OnCardContextMenu" />
+                        }
+                    </div>
+                }
+            }
+        }
+        else
+        {
+            <div style="display: flex; align-items: center; justify-content: center;
+                        width: 100%; height: 100%; opacity: 0.5;">
+                Right-click to add a job
+            </div>
+        }
+    </div>
+</div>

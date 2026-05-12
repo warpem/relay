@@ -1,0 +1,139 @@
+@using Refund.Components.ThumbnailPanel
+@using Refund.Components.MicrographViewer
+@using Refund.Components.FourierSpace
+@using Refund.Components.SingleAxisScatter
+@using Refund.Components.TiltStackViewer
+@using Refund.Components.Jobs
+@using Refund.Components
+@using Warp.Tools
+
+@if (_job == null)
+{
+    <span>No job to display</span>
+}
+else if (_allTsThumbnails != null && _allTsThumbnails.Any())
+{
+    <div class="container" style="height: 100%;">
+        <div style="display: flex; flex-direction: column; gap: 0.0rem;">
+            <ThumbnailPanel @ref="_tsThumbnailPanel"
+                            Thumbnails="_allTsThumbnails"
+                            SelectedThumbnailChanged="SelectedTsThumbnailChanged"
+                            ShowStatusBar="true"
+                            ThumbnailSize="128"
+                            ThumbnailCheckChanged="TsThumbnailCheckChanged" />
+        </div>
+
+        <div style="position: relative; height: 100%;">
+
+            <div style="position: absolute; top: -0.75rem; right: 0">
+                <TsMiniItem ThumbnailSize="96" GetThumbnail="@(path => _micrographs.ToThumbnailPath(path))"/>
+                <FsMiniItem ThumbnailSize="96" GetThumbnail="@(path => _micrographs.ToThumbnailPath(path))"/>
+            </div>
+
+            <FluentTabs @ref="_tabs"
+                        Style="height: 100%;">
+                <FluentTab Id="@OverviewTabId"
+                           Label="Overview"
+                           Style="padding-top: 1rem;">
+                    <div style="display: flex; flex-direction: column; gap: 1.5rem;">
+
+                        <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                            <h6>Number of tilts</h6>
+                            <SingleAxisScatter Points="@_pointsTsNTilts"
+                                               PointClicked="@HandleTsPointClicked"
+                                               Style="width: 100%; height: 80px;"/>
+                        </div>
+
+                        <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                            <h6>Min and max tilt angle (°)</h6>
+                            <SingleAxisScatter PointsCollections="@_pointsTsCollectionTilt"
+                                               PointClicked="@HandleTsPointClicked"
+                                               Style="width: 100%; height: 80px;"/>
+                        </div>
+
+                        <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                            <h6>@(_pointsTsCollectionAxis.Count > 1 ? "Min, average, and max tilt axis angle" : "Tilt axis angle") (°)</h6>
+                            <SingleAxisScatter PointsCollections="@_pointsTsCollectionAxis"
+                                               PointClicked="@HandleTsPointClicked"
+                                               Style="width: 100%; height: 80px;"/>
+                        </div>
+
+                        <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                            <h6>Min, average, and max shift in X (Å)</h6>
+                            <SingleAxisScatter PointsCollections="@_pointsTsCollectionShiftX"
+                                               PointClicked="@HandleTsPointClicked"
+                                               Style="width: 100%; height: 80px;"/>
+                        </div>
+
+                        <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                            <h6>Min, average, and max shift in Y (Å)</h6>
+                            <SingleAxisScatter PointsCollections="@_pointsTsCollectionShiftY"
+                                               PointClicked="@HandleTsPointClicked"
+                                               Style="width: 100%; height: 80px;"/>
+                        </div>
+                    </div>
+                </FluentTab>
+
+                <FluentTab Id="@TsTabId"
+                           Label="Tilt series details" 
+                           Style="height: 100%; padding-top: 1rem;">
+                    @if (_selectedTsThumbnail != null)
+                    {
+                        <div style="display: flex; flex-wrap: nowrap; gap: 2rem; height: 100%;">
+                            
+                            <div style="display: flex; flex-direction: column; gap: 1.5rem; width: 400px;">
+                                <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                                    <h6>Tilt angle (°)</h6>
+                                    <SingleAxisScatter Points="@_pointsFsTiltAngle"
+                                                       Style="width: 100%; height: 80px;"/>
+                                </div>
+                                
+                                <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                                    <h6>Accumulated exposure (e⁻/Å²)</h6>
+                                    <SingleAxisScatter Points="@_pointsFsExposure"
+                                                       Style="width: 100%; height: 80px;"/>
+                                </div>
+                            
+                                <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                                    <h6>Tilt axis angle (°)</h6>
+                                    <SingleAxisScatter Points="@_pointsFsAxis"
+                                                       Style="width: 100%; height: 80px;"/>
+                                </div>
+                            
+                                <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                                    <h6>Shift in X (Å)</h6>
+                                    <SingleAxisScatter Points="@_pointsFsShiftX"
+                                                       Style="width: 100%; height: 80px;"/>
+                                </div>
+                            
+                                <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                                    <h6>Shift in Y (Å)</h6>
+                                    <SingleAxisScatter Points="@_pointsFsShiftY"
+                                                       Style="width: 100%; height: 80px;"/>
+                                </div>
+                            
+                                <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                                    <h6>Remaining field of view (%)</h6>
+                                    <SingleAxisScatter Points="@_pointsFsFov"
+                                                       Style="width: 100%; height: 80px;"/>
+                                </div>
+                            </div>
+                            
+                            <div class="visualization-container" style="width: 100%; height: 100%; margin-top: -3rem;">
+                                <TiltStackViewer ImagePaths="@_micrographThumbnailPaths"
+                                                 TiltAngles="@_tiltAngles"
+                                                 ZeroTiltIndex="@_zeroTiltIndex"
+                                                 AxisAngles="@_axisAngles"
+                                                 AxisShiftsX="@_axisShiftsX"
+                                                 AxisShiftsY="@_axisShiftsY"
+                                                 MinWidth="512"
+                                                 MinHeight="512" />
+                            </div>
+                        </div>
+                    }
+                </FluentTab>
+                
+            </FluentTabs>
+        </div>
+    </div>
+}

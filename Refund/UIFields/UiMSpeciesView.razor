@@ -1,0 +1,28 @@
+@using Refund.JobResources
+@inherits UiFieldViewBase
+
+@if (AdditionalData is List<MSpecies> { Count: > 0 } species)
+{
+    <FluentRadioGroup Class="borderless"
+                      @bind-Value="@ValueT"
+                      Orientation="Orientation.Vertical"
+                      Disabled="@IsDisabled">
+        @foreach (var s in species)
+        {
+            <FluentRadio Value="@species.IndexOf(s)" Label="@s.Name" />
+        }
+    </FluentRadioGroup>
+}
+else
+{
+    <span class="text-muted">No species available</span>
+}
+
+@code
+{
+    private int? ValueT
+    {
+        get => (int?)Value;
+        set => ValueChanged.InvokeAsync(value);
+    }
+}

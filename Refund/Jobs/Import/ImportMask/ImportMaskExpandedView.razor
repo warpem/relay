@@ -1,0 +1,26 @@
+@using Refund.Components
+@using Refund.Components.IsosurfaceViewer
+
+@implements IAsyncDisposable
+
+@if (_job == null)
+{
+    <span>No job available to display.</span>
+}
+else
+{
+    if (_job.VisAvailableIteration >= 0 && File.Exists(_job.ResMaskPath))
+    {
+        <div class="importmap-view-container">
+            <!-- Orthoslices in horizontal row -->
+            <div style="max-width: 500px; max-height: 500px;">
+                <IsosurfaceViewer MinHeight="500" MinWidth="500" VolumePath="@_job.ResMaskPath"/>
+            </div>
+            
+            <MapOrthosliceDisplay MapOrthoslicesPath="@_job.VisLargePath"
+                                  RenderedImageSidelengthPx="250"
+                                  BorderWidthPx="0"
+                                  SpacingPx="5" />
+        </div>
+    }
+}

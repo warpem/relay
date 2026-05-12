@@ -1,0 +1,131 @@
+@using Refund.DataModel
+@using Refund.DataModel.ReadOnly
+@using Refund.Services
+@using Refund.Services.Core.DataManager
+@using Refund.Utils
+@using Relay.Panels.Right.Actions
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+
+<div class="factory-card @(Selection.IsSelected(SelectionKey) ? "selected" : "")"
+     id="@($"factory-{(Mode == FactoryCardMode.Instance ? $"fi-{Instance?.Id}" : $"fd-{Definition?.Id}")}")"
+     style="width: @(DiagramMode ? DiagramWidth : VisualProvider.GetWidth(1))px;
+            height: @(DiagramMode ? DiagramHeight : VisualProvider.GetHeight(HeightSquares))px;
+            @(Mode == FactoryCardMode.Instance && Instance?.ColorTag != null ? $"background-color: color-mix(in srgb, {Instance.ColorTag} 40%, var(--neutral-fill-layer-rest));" : "")"
+     @onclick:stopPropagation="true" @onclick="HandleClick"
+     @ondblclick:stopPropagation="true" @ondblclick="HandleDoubleClick"
+     @onmouseover="@(() => _showTooltips = true)"
+     @onmouseleave="@(() => _showTooltips = false)"
+     @oncontextmenu:stopPropagation="true"
+     @oncontextmenu:preventDefault="@DiagramMode"
+     @oncontextmenu="HandleRightClick">
+
+    @* Header *@
+    <div class="factory-header">
+        @if (Mode == FactoryCardMode.Instance)
+        {
+            <FluentIcon Value="@Refund.Utils.JobStatusExtensions.GetStatusIcon(AggregateStatus, Refund.Utils.IconSize.Size16).WithStatusColor(AggregateStatus)" Class="status-icon" />
+        }
+        <span class="factory-name">@DisplayName</span>
+    </div>
+
+    @* Alias label — only shown when instance has a custom alias *@
+    @if (ShowTypeLabel)
+    {
+        <div class="factory-type-label">@Instance.Alias</div>
+    }
+
+    @* Minimap *@
+    @{ var cardLayout = ResolvedDefinition?.CardLayout; }
+    @if (cardLayout is { Nodes.Count: > 0 })
+    {
+        var (svgW, svgH) = GetCardMinimapSize(cardLayout);
+        <div class="factory-minimap-container">
+            <svg viewBox="0 0 @F(cardLayout.GraphWidth) @F(cardLayout.GraphHeight)"
+                 class="factory-minimap" width="@F(svgW)" height="@F(svgH)">
+                @foreach (var edge in cardLayout.Edges)
+                {
+                    <path d="@GetCardEdgePath(edge)" fill="none"
+                          stroke="var(--neutral-foreground-rest)" stroke-width="1" opacity="0.4"/>
+                }
+                @foreach (var node in cardLayout.Nodes)
+                {
+                    <circle cx="@F(node.X + node.Width / 2)" cy="@F(node.Y + node.Height / 2)"
+                            r="5" fill="@GetCardNodeColor(node)"/>
+                }
+            </svg>
+        </div>
+    }
+
+    @* Exposed port dots - Instance mode *@
+    @if (Mode == FactoryCardMode.Instance && ResolvedDefinition != null)
+    {
+        @* Input ports (left side) - diagram view only *@
+        @if (DiagramMode)
+        {
+            <div class="factory-port-dots-container factory-port-dots-left">
+                @foreach (var port in ResolvedDefinition.ExposedPortsIn)
+                {
+                    var capturedPort = port;
+                    <div class="factory-port-dot"
+                         style="background: @GetPortColor(capturedPort); border: 0;">
+                        <div class="factory-port-dot"
+                             style="background: @GetPortColor(capturedPort); position: absolute; left: 0; top: 0;"
+                             @onclick="@(async e => await HandleExposedPortClick(e, capturedPort, true))"
+                             @onclick:stopPropagation="true">
+                        </div>
+                        @if (_showTooltips)
+                        {
+                            <div class="port-tooltip"
+                                 style="border: solid 1px @GetPortColor(capturedPort);
+                                        left: auto; right: calc(100% + 2px);">
+                                @capturedPort.CustomName
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+
+        @* Output ports (right side) - always visible *@
+        <div class="factory-port-dots-container factory-port-dots-right">
+            @foreach (var port in ResolvedDefinition.ExposedPortsOut)
+            {
+                var capturedPort = port;
+                <div class="factory-port-dot"
+                     style="background: @GetPortColor(capturedPort); border: 0;">
+                    <div class="factory-port-dot"
+                         style="background: @GetPortColor(capturedPort); position: absolute; left: 0; top: 0;"
+                         @onclick="@(async e => await HandleExposedPortClick(e, capturedPort, false))"
+                         @onclick:stopPropagation="true">
+                    </div>
+                    @if (_showTooltips)
+                    {
+                        <div class="port-tooltip"
+                             style="border: solid 1px @GetPortColor(capturedPort);">
+                            @capturedPort.CustomName
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+
+    @if (!DiagramMode)
+    {
+        <FluentMenu Anchor="@($"factory-{(Mode == FactoryCardMode.Instance ? $"fi-{Instance?.Id}" : $"fd-{Definition?.Id}")}")"
+                    Trigger="MouseButton.Right"
+                    Anchored="false" OpenChanged="HandleContextMenu">
+            <span style="font-size: 0.75rem; padding: 0 1rem; opacity: 0.5;
+                        display: block; max-width: 250px; overflow: hidden;
+                        text-overflow: ellipsis; white-space: nowrap;">
+                @_contextMenuHeader
+            </span>
+            <FluentDivider />
+
+            @if (_contextMenuActions != null)
+            {
+                <ActionMenuLevel Actions="_contextMenuActions"/>
+            }
+        </FluentMenu>
+    }
+</div>

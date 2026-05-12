@@ -1,0 +1,26 @@
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+
+<div style="display: flex; align-items: center; height: 32px;">
+    <FluentButton IconEnd="@(new Icons.Regular.Size20.ZoomOut())"
+                  Title="Zoom out"
+                  OnClick="ZoomOut"/>
+    
+    <label style="margin-left: 6px; margin-right: 6px;">@(Math.Round(ZoomLevel * 100))%</label>
+    
+    <FluentButton IconEnd="@(new Icons.Regular.Size20.ZoomIn())"
+                  Title="Zoom in"
+                  OnClick="ZoomIn"/>
+
+    <FluentButton Style="margin-left: 4px;"
+                  IconEnd="@(new Icons.Regular.Size20.ArrowExpand())"
+                  Title="Fit viewport"
+                  OnClick="FitToViewport"/>
+
+    <FluentButton Style="margin-left: 4px;"
+                  IconEnd="@(new Icons.Regular.Size20.RatioOneTo())"
+                  Title="Original size"
+                  OnClick="FitToOriginal"/>
+    
+    <ToggleButton Icon="@(new Icons.Regular.Size24.Ruler())" Style="margin-left: 4px;" Title="Show scale bar"
+                  @bind-IsToggled="IsToggledScale" />
+</div>

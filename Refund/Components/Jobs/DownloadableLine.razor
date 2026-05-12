@@ -1,0 +1,13 @@
+<div style="display: flex; align-items: center; column-gap: 0.25rem; cursor: @(_downloading ? "default" : "pointer"); opacity: @(_downloading ? "0.5" : "1"); pointer-events: @(_downloading ? "none" : "auto");" @onclick="HandleClick">
+    @if (_downloading)
+    {
+        <FluentProgressRing Style="width: 16px; height: 16px;" />
+    }
+    else
+    {
+        <FluentIcon Value="@_downloadIcon" />
+    }
+    <span>
+        @Downloadable.Name
+    </span>
+</div>

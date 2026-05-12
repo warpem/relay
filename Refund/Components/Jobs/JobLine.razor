@@ -1,0 +1,174 @@
+@using Refund.DataModel
+@using Refund.Components
+@using Refund.Utils
+
+@if (EnableNavigation)
+{
+    <a href="@_navigationUrl" style="text-decoration: none; color: inherit;"
+       @onclick="HandleNavigableClick" @onclick:stopPropagation="true">
+        <div>
+            <div id="@_id" class="job-line navigation"
+                 @onmouseenter="HandleMouseEnter"
+                 @onmouseleave="HandleMouseLeave">
+
+                <div class="job-info"
+                     style="width: @(NameWidth); @(!AllowMultiline ? "white-space: nowrap;" : "")">
+
+                    <div style="display: flex; flex-wrap: nowrap; align-items: center;">
+                        <div style="display: flex; flex-shrink: 0; align-items: center; justify-content: center; width: @((int)IconSize)px; height: @((int)IconSize)px;">
+                            <FluentIcon Value="@Job.GetStatusIcon(IconSize).WithStatusColor(Job)"/>
+                        </div>
+                        <div class="job-name"
+                             style="font-size: @(FontSize);
+                                        @(!AllowMultiline ? "white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" : "")">
+                            <b>@(IncludeProject ? $"P{Job.Space.Project.Id} " : "")@(IncludeSpace ? $"S{Job.Space.Id} " : "")J@(Job.Id) </b>
+                            @if (!AllowMultiline)
+                            {
+                                <span>&nbsp;</span> @Job.TypeName
+                            }
+                        </div>
+                    </div>
+
+                    @if (AllowMultiline)
+                    {
+                        <div>
+                            @Job.TypeName
+                        </div>
+                    }
+                </div>
+
+                @if (ShowStatus)
+                {
+                    DateTime? timeStamp = GetRelevantTimestamp(Job);
+
+                    <div class="status-text">
+                        @if (timeStamp != null)
+                        {
+                            @if (Job.Status.IsUnsettled() || Job.Status == JobStatus.Building)
+                            {
+                                <span>@Job.Status for </span>
+                                <DurationText Timestamp="@timeStamp.Value"/>
+                            }
+                            else
+                            {
+                                <span>@Job.Status @FormatTimestamp(timeStamp.Value)</span>
+                            }
+                        }
+                        else
+                        {
+                            <span>@Job.Status</span>
+                        }
+                    </div>
+                }
+            </div>
+
+            @if (ShowPreview)
+            {
+                <FluentTooltip Anchor="@_id"
+                               Position="@PreviewPosition"
+                               Class="minimal-padding"
+                               MaxWidth="10000px">
+                    <DynamicTooltipContent Subscription="_tooltipSubscription">
+                        <div style="width: @(_job.CardSquareCount.X * 96)px; height: @(_job.CardSquareCount.Y * 96)px;">
+                            @if (Job.CardViewType != null)
+                            {
+                                <div style="width: 100%;
+                                    height: 100%;
+                                    display: flex;
+                                    align-items: center;
+                                    justify-content: center;
+                                    @PreviewScaling">
+                                    <DynamicComponent Type="@Job.CardViewType" Parameters="_previewParams"/>
+                                </div>
+                            }
+                        </div>
+                    </DynamicTooltipContent>
+                </FluentTooltip>
+            }
+        </div>
+    </a>
+}
+else
+{
+    <div>
+        <div id="@_id" class="job-line"
+             @onclick="HandleClick"
+             @onmouseenter="HandleMouseEnter"
+             @onmouseleave="HandleMouseLeave">
+
+            <div class="job-info"
+                 style="width: @(NameWidth); @(!AllowMultiline ? "white-space: nowrap;" : "")">
+
+                <div style="display: flex; flex-wrap: nowrap; align-items: center;">
+                    <div style="display: flex; flex-shrink: 0; align-items: center; justify-content: center; width: @((int)IconSize)px; height: @((int)IconSize)px;">
+                        <FluentIcon Value="@Job.GetStatusIcon(IconSize).WithStatusColor(Job)"/>
+                    </div>
+                    <div class="job-name"
+                         style="font-size: @(FontSize);
+                                    @(!AllowMultiline ? "white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" : "")">
+                        <b>@(IncludeProject ? $"P{Job.Space.Project.Id} " : "")@(IncludeSpace ? $"S{Job.Space.Id} " : "")J@(Job.Id) </b>
+                        @if (!AllowMultiline)
+                        {
+                            <span>&nbsp;</span> @Job.TypeName
+                        }
+                    </div>
+                </div>
+
+                @if (AllowMultiline)
+                {
+                    <div>
+                        @Job.TypeName
+                    </div>
+                }
+            </div>
+
+            @if (ShowStatus)
+            {
+                DateTime? timeStamp = GetRelevantTimestamp(Job);
+
+                <div class="status-text">
+                    @if (timeStamp != null)
+                    {
+                        @if (Job.Status.IsUnsettled() || Job.Status == JobStatus.Building)
+                        {
+                            <span>@Job.Status for </span>
+                            <DurationText Timestamp="@timeStamp.Value"/>
+                        }
+                        else
+                        {
+                            <span>@Job.Status @FormatTimestamp(timeStamp.Value)</span>
+                        }
+                    }
+                    else
+                    {
+                        <span>@Job.Status</span>
+                    }
+                </div>
+            }
+        </div>
+
+        @if (ShowPreview)
+        {
+            <FluentTooltip Anchor="@_id"
+                           Position="@PreviewPosition"
+                           Class="minimal-padding"
+                           MaxWidth="10000px">
+                <DynamicTooltipContent Subscription="_tooltipSubscription">
+                    <div style="width: @(_job.CardSquareCount.X * 96)px; height: @(_job.CardSquareCount.Y * 96)px;">
+                        @if (Job.CardViewType != null)
+                        {
+                            <div style="width: 100%;
+                                height: 100%;
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
+                                @PreviewScaling">
+                                <DynamicComponent Type="@Job.CardViewType" Parameters="_previewParams"/>
+                            </div>
+                        }
+                    </div>
+                </DynamicTooltipContent>
+            </FluentTooltip>
+        }
+    </div>
+}

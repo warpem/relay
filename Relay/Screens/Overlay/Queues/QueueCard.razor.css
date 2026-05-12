@@ -1,0 +1,17 @@
+.queue-card {
+    flex-grow: 0;
+    flex-shrink: 0;
+    flex-basis: auto;
+    gap: 0.75rem;
+    width: 200px;
+    display: flex;
+    flex-direction: column;
+    flex-wrap: nowrap;
+}
+
+.queue-header {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    padding-left: 3px;
+}

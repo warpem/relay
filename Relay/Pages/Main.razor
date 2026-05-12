@@ -1,0 +1,50 @@
+@page "/"
+@page "/P{ProjectId}"
+@page "/P{ProjectId}/S{SpaceId}"
+@page "/P{ProjectId}/S{SpaceId}/V{ViewId}"
+@page "/P{ProjectId}/S{SpaceId}/V{ViewId}/F{FolderId:int}"
+@page "/P{ProjectId}/S{SpaceId}/V{ViewId}/F{FolderId:int}/J{JobId}"
+@page "/P{ProjectId}/S{SpaceId}/V{ViewId}/J{JobId}"
+@page "/P{ProjectId}/S{SpaceId}/FD{FactoryDefinitionId}"
+@page "/P{ProjectId}/S{SpaceId}/V{ViewId}/FI{FactoryInstanceId:int}"
+@page "/P{ProjectId}/S{SpaceId}/V{ViewId}/F{FolderId:int}/FI{FactoryInstanceId:int}"
+@using Refund.Services.Core.Session
+@using Relay.Screens.Main.Home
+@using Relay.Screens.Main.Project
+@using Relay.Screens.Main.Space
+@using Relay.Screens.Main.View
+@using Relay.Screens.Main.FactoryBuilder
+@inject RelaySession Session
+
+<div style="width: 100%; height: 100%;">
+    @switch (Session.CurrentMain)
+    {
+        case MainScreenType.Home:
+            <PageTitle>Relay</PageTitle>
+            <HomeScreen @key="@("ScreenHome")" />
+            break;
+
+        case MainScreenType.Project:
+            <PageTitle>@(Session.Project?.QualifiedName)</PageTitle>
+            <ProjectScreen @key="@("ScreenProject")" />
+            break;
+
+        case MainScreenType.Space:
+            <PageTitle>P@(Session.Project?.Id)/@(Session.Space?.QualifiedName)</PageTitle>
+            <SpaceScreen @key="@("ScreenSpace")" />
+            break;
+
+        case MainScreenType.View:
+            @if (Session.Job == null)
+            {
+                <PageTitle>P@(Session.Project?.Id)/S@(Session.Space?.Id)/@(Session.View?.QualifiedName)</PageTitle>
+            }
+            <ViewScreen @key="@("ScreenView")" />
+            break;
+
+        case MainScreenType.FactoryBuilder:
+            <PageTitle>P@(Session.Project?.Id)/S@(Session.Space?.Id)/@(Session.FactoryDefinition?.Alias)</PageTitle>
+            <FactoryBuilderScreen @key="@("ScreenFactoryBuilder")" />
+            break;
+    }
+</div>

@@ -1,0 +1,66 @@
+@using System.IO
+@using Microsoft.JSInterop
+@using Refund.Services
+
+@inject FileService FileService
+@inject IJSRuntime JsRuntime
+
+<div class="thumbnail" @onclick="OnThumbnailClicked" @ref="ThumbnailElement"
+     style="left:@(PositionLeft)px; width: @(ThumbnailSize + 4)px; height: @(ThumbnailSize + 4)px;">
+    @if (ShowIndex)
+    {
+        <div class="thumbnail-number">@(Data.Index + 1)</div>
+    }
+
+    @if (IsLoaded)
+    {
+        <img src="@FileService.GetUrl(Data.ImagePath)" alt="@Path.GetFileName(Data.ImagePath)"
+             title="@($"{Path.GetFileName(Data.ImagePath)}, {StatusLabelMapping.GetLabel(Data.Status)}")"
+             style="max-width: 100%; max-height: 100%;"
+             @onmouseenter="OnMouseEnter" @onmouseleave="OnMouseLeave"/>
+    }
+    else
+    {
+        <div class="loading-animation" style="width: @(ThumbnailSize + 4)px; height: @(ThumbnailSize + 4)px;">Loading...</div>
+    }
+    
+    @if (HasAnimation)
+    {
+        <img class="thumbnail-animation" @ref="AnimationElement" style="display: none; pointer-events: none;" />
+    }
+
+    @if (ShowStatus && Data.Status != null)
+    {
+        <div class="status-dot" style="background-color:@StatusColorMapping.GetColor(Data.Status.Value);"></div>
+    }
+
+    @if (IsSelected)
+    {
+        <div class="selection-highlight" style="width: @(ThumbnailSize)px; height: @(ThumbnailSize)px; pointer-events: none;"></div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(Data.Label1))
+    {
+        <div class="label1">@Data.Label1</div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(Data.Label2))
+    {
+        <div class="label2">@Data.Label2</div>
+    }
+
+    @if (CheckMode == CheckMode.Ternary)
+    {
+        <FluentCheckbox ThreeState="true" 
+                        CheckState="Data.Check" 
+                        CheckStateChanged="OnCheckChanged"
+                        Style="position: absolute; left: 0; bottom: 0;"/>
+    }
+    else if (CheckMode == CheckMode.Binary)
+    {
+        <FluentCheckbox Value="Data.Check.Value"
+                        ValueChanged="OnCheckChanged"
+                        Style="position: absolute; left: 0; bottom: 0;"
+                        @onclick:stopPropagation="true" />
+    }
+</div>

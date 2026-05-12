@@ -1,0 +1,123 @@
+﻿@using Warp.Tools
+@using static Refund.Components.MicrographViewer.MicrographViewer
+
+@namespace Refund.Components.TomogramViewer
+
+<div id="@Id" style="position:relative; width: @(Width)px; height: @(Height)px; overflow: hidden; border: 1px solid #bbb;"
+     @onmousedown="OnMouseDown" @onmouseup="OnMouseUp" @onmousemove="OnMouseMove"
+     @onwheel="OnMouseWheel">
+
+    @if (IsLoading)
+    {
+        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);">
+            <FluentProgressRing Style="width: 40px; height: 40px;" />
+        </div>
+    }
+    else
+    {
+        <!-- Main SVG for particles and slice image -->
+        <svg style="width: 100%; height: 100%; background: #fff;">
+            <g transform="translate(@TranslateX, @TranslateY) scale(@Zoom)">
+
+                @if (SliceData != null)
+                {
+                    <image href="@CurrentSliceImage" width="@(SliceWidth)" height="@(SliceHeight)" />
+                }
+
+                @if (Particles3D != null && ParticleShape != 0)
+                {
+                    @foreach (var p in Particles3D)
+                    {
+                        // Compute intersection:
+                        // Determine slice axis:
+                        // XY plane: Z fixed; coords: X horizontal, Y vertical
+                        // XZ plane: Y fixed; coords: X horizontal, Z vertical
+                        // ZY plane: X fixed; coords: Z horizontal, Y vertical
+
+                        // Particle radius:
+                        float sphereRadius = (float)ParticleDiameter / (2 * PixelSize);
+                        float cubeHalf = (float)ParticleBoxSize / (2 * PixelSize);
+
+                        // 3D pos:
+                        float px = p.Position.X;
+                        float py = p.Position.Y;
+                        float pz = p.Position.Z;
+
+                        float2 planePos;
+                        float intersectionSize;
+
+                        float d;
+
+                        if (PlaneType == PlaneType.XY)
+                        {
+                            // slice at Z
+                            // sphere intersection:
+                            // radius_in_slice = sqrt(R^2 - (Z-Zp)^2), if abs(Z-Zp)<R else no intersection
+                            d = ViewPoint.Z - pz;
+                            planePos = new float2(px, py);
+                        }
+                        else if (PlaneType == PlaneType.XZ)
+                        {
+                            d = ViewPoint.Y - py;
+                            planePos = new float2(px, pz);
+                        }
+                        else // ZY plane
+                        {
+                            d = ViewPoint.X - px;
+                            planePos = new float2(pz, py);
+                        }
+
+                        planePos.Y = SliceHeight - 1 - planePos.Y;
+
+                        if (Math.Abs(d) > sphereRadius) 
+                            continue;
+                        intersectionSize = MathF.Sqrt(sphereRadius * sphereRadius - d * d);
+
+                        float r = intersectionSize;
+                        float cx = planePos.X;
+                        float cy = planePos.Y;
+
+                        // Draw shape:
+                        @if ((ParticleShape & ParticleShapes.Circle) != 0)
+                        {
+                            <circle cx="@cx" cy="@cy" r="@r" stroke="@ParticleColor" stroke-width="@(ParticleStrokeWidth / Zoom)" fill="none" />
+                        }
+
+                        @if ((ParticleShape & ParticleShapes.Square) != 0)
+                        {
+                            <rect x="@(cx - cubeHalf)" y="@(cy - cubeHalf)" width="@(2 * cubeHalf)" height="@(2 * cubeHalf)" 
+                                  stroke="@ParticleColor" stroke-width="@(ParticleStrokeWidth / Zoom)" fill="none" />
+                        }
+                    }
+                }
+            </g>
+        </svg>
+        
+        <!-- Overlay SVG for preview elements and crosshairs -->
+        <svg id="@($"{Id}-overlay")" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;">
+            <g transform="translate(@TranslateX, @TranslateY) scale(@Zoom)">
+                <!-- Preview circle for particle picking mode -->
+                <circle id="@($"{Id}-preview-circle")" 
+                        fill="none"
+                        stroke="@ParticleColor"
+                        stroke-width="@(2 / Zoom)"
+                        stroke-dasharray="2,2"
+                        visibility="hidden"
+                        cx="0" cy="0" r="0" />
+                
+                <!-- Crosshair lines -->
+                <line id="@($"{Id}-crosshair-h")"
+                      stroke="#00BFFF"
+                      stroke-width="@(1 / Zoom)"
+                      visibility="hidden"
+                      x1="0" y1="0" x2="0" y2="0" />
+                      
+                <line id="@($"{Id}-crosshair-v")"
+                      stroke="#00BFFF"
+                      stroke-width="@(1 / Zoom)" 
+                      visibility="hidden"
+                      x1="0" y1="0" x2="0" y2="0" />
+            </g>
+        </svg>
+    }
+</div>

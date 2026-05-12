@@ -1,0 +1,11 @@
+@if (IsDisabled)
+{
+    <FluentIcon Value="@IconDisabled" 
+                Style="@Style" />
+}
+else
+{
+    <FluentIcon OnClick="@Toggle" 
+                Value="@IconActive" 
+                Style="@Style" />
+}

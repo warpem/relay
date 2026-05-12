@@ -1,0 +1,49 @@
+﻿::deep .skinny-drop-down {
+    border-bottom: 2px lightblue solid;
+    color: #4695E7;
+    padding-left: 0px;
+    position: relative;
+    bottom: -1px;
+    cursor: pointer;
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    justify-content: space-between;
+    white-space: nowrap;
+}
+
+    ::deep .skinny-drop-down:focus-visible {
+        outline: none;
+        background-color: #f0f8ffaa;
+        border-bottom: 2px blue solid;
+    }
+
+    ::deep .skinny-drop-down.invalid {
+        background-color: lightcoral !important;
+    }
+
+.popup {
+    position: absolute;
+    top: 18.5px;
+    left: 0;
+    display: none;
+    flex-direction: column;
+    background-color: white;
+    border: 2px gray solid;
+    border-top: none;
+    border-bottom-left-radius: 3px;
+    border-bottom-right-radius: 3px;
+    z-index: 10;
+    align-items: stretch;
+    white-space: nowrap;
+}
+
+    ::deep .popup > div {
+        border-bottom: lightgray 1px solid;
+        padding: 0px 3px;
+    }
+
+        ::deep .popup > div:hover {
+            background-color: lightblue;
+            cursor: pointer;
+        }

@@ -1,0 +1,60 @@
+@using Microsoft.JSInterop
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+
+<div style="width: 100%;">
+    @if (ShowStatusBar)
+    {
+        <!-- Status Bar Container -->
+        <div class="status-bar-container" style="position: relative; width: 100%; height:@(StatusBarsHeight)px;">
+            @for (int barIndex = 0; barIndex < StatusBars.Count; barIndex++)
+            {
+                var bar = StatusBars[barIndex];
+                int thisIndex = barIndex;
+                <div class="status-bar" style="top:@(barIndex * 12)px;" @onclick="(e => OnStatusBarClicked(e, thisIndex))">
+                    @foreach (var segment in bar.Segments)
+                    {
+                        <div class="status-segment" style="left: @(segment.Left)px; width: @(segment.Width)px; background-color: @(segment.Color);"></div>
+                    }
+                </div>
+            }
+            <!-- Highlight overlay -->
+            @foreach (var highlight in HighlightSegments)
+            {
+                <div class="status-highlight" style="top: @(highlight.BarIndex * 12)px; left: @(highlight.Left)px; width: @(highlight.Width)px; height: 8px; border: 1px solid black;"></div>
+            }
+        </div>
+    }
+
+    <!-- Thumbnail Panel -->
+    <div class="thumbnail-panel" @ref="thumbnailPanelElement">
+        <FluentButton IconEnd="@(new Icons.Filled.Size24.ArrowLeft())"
+                      Title="Previous"
+                      OnClick="ScrollLeft"
+                      Style=@($"margin-right: 8px; margin-top: -9px; height: {ThumbnailSize}px;") />
+
+        <!-- Thumbnail Container -->
+        <div class="thumbnail-container" style="height: @(ThumbnailSize + 14)px;" @ref="thumbnailContainer"
+             @onscroll="OnScroll" @onwheel="OnWheel" @onwheel:preventDefault>
+            <!-- Spacer div to set total width -->
+            <div style="width:@TotalWidthPx; position: absolute; height: @(ThumbnailSize + 4)px"></div>
+
+            @foreach (var item in VisibleItems)
+            {
+                <Thumbnail @key="item.Data.ImagePath"
+                           Data="item.Data"
+                           ThumbnailSize="ThumbnailSize"
+                           IsSelected="item.IsSelected"
+                           OnSelected="OnThumbnailSelected"
+                           PositionLeft="item.PositionLeft"
+                           CheckMode="CheckMode"
+                           CheckChanged="OnThumbnailCheckChanged" />
+            }
+        </div>
+
+        <FluentButton IconEnd="@(new Icons.Filled.Size24.ArrowRight())"
+                      Title="Next"
+                      OnClick="ScrollRight"
+                      Style=@($"margin-left: 8px; margin-top: -9px; height: {ThumbnailSize}px;") />
+    </div>
+</div>

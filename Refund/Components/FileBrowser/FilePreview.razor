@@ -1,0 +1,42 @@
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Refund.Components.IsosurfaceViewer
+
+<div class="preview-frame">
+    @if (IsPreviewLoading)
+    {
+        <FluentProgressRing />
+    }
+    else if (IsEmFile)
+    {
+        <FluentTabs @bind-ActiveTabId="_activePreviewTab" Style="width: 100%; height: 100%;">
+            <FluentTab Label="Slice" Id="tab-slice">
+                <div class="tab-content">
+                    <SlicePreviewJs FilePath="@Item.Path" />
+                </div>
+            </FluentTab>
+            <FluentTab Label="3D" Id="tab-3d">
+                <div class="tab-content">
+                    <IsosurfaceViewer VolumePath="@Item.Path"
+                                      MiniMode="true"
+                                      MinWidth="220"
+                                      MinHeight="200" />
+                </div>
+            </FluentTab>
+        </FluentTabs>
+    }
+    else if (PreviewContent != null)
+    {
+        @if (IsImageFile)
+        {
+            <ServerImage ServerPath="@PreviewContent" />
+        }
+        else if (IsTextFile)
+        {
+            <pre>@PreviewContent</pre>
+        }
+    }
+    else
+    {
+        <p>No preview available.</p>
+    }
+</div>

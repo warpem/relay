@@ -1,0 +1,35 @@
+@using Refund.Components.ThumbnailPanel
+@using Refund.Components.TomogramViewerJs
+
+@if (_job == null)
+{
+    <span>No job to display</span>
+}
+else if (_allTomogramThumbnails != null && _allTomogramThumbnails.Any())
+{
+    <div class="container">
+        <div class="thumbnail-container">
+            <ThumbnailPanel @ref="_tomogramThumbnailPanel"
+                           Thumbnails="_allTomogramThumbnails"
+                           SelectedThumbnail="_selectedTomogramThumbnail"
+                           SelectedThumbnailChanged="SelectedTomogramThumbnailChanged"
+                           ShowStatusBar="true"
+                           ThumbnailSize="128" />
+        </div>
+
+        <div class="tomogram-viewer-container">
+            @if (_selectedTomogramPath != null)
+            {
+                <TomogramViewerJs TomogramPath="@_selectedTomogramPath"
+                                  MinWidth="512"
+                                  MinHeight="512" />
+            }
+            else
+            {
+                <div class="no-selection-message">
+                    <span>Select a tomogram to view</span>
+                </div>
+            }
+        </div>
+    </div>
+}

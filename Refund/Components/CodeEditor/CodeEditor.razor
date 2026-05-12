@@ -1,0 +1,16 @@
+@using Microsoft.AspNetCore.Components.Forms
+@using Refund.Services.Core.Session
+@inherits InputBase<string>
+
+<div class="code-editor @CssClass" @attributes="AdditionalAttributes">
+    <pre aria-hidden="true" @ref="preElement" style="margin: 0 !important;">
+        <code @ref="codeElement" class="language-@Language"></code>
+    </pre>
+    <textarea @ref="textareaElement"
+              class="code-editor-textarea"
+              placeholder="@Placeholder"
+              disabled="@IsDisabled"
+              wrap="off"
+              spellcheck="false"
+              data-ms-editor="false"></textarea>
+</div>

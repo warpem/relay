@@ -1,0 +1,36 @@
+@using Refund.Components.FileBrowser
+@inject IDialogService DialogService
+
+@page "/FileBrowserDialog"
+
+<FluentButton OnClick="OpenDialogAsync">Open</FluentButton>
+
+@code{
+
+    private async Task OpenDialogAsync()
+    {
+        await FileBrowserDialog.Show(DialogService,
+                                     this,
+                                     HandleDialog,
+                                     "Select a file",
+                                     selectionMode: SelectionMode.MultipleFiles);
+    }
+
+    private async Task HandleDialog(DialogResult result)
+    {
+        if (result.Cancelled)
+        {
+            await Task.Run(() => Console.WriteLine("Dialog cancelled"));
+            return;
+        }
+        if (result.Data is not null)
+        {
+            List<FileSystemItem> selectedItems = result.Data as List<FileSystemItem>;
+            await Task.Run(() =>
+            {
+                foreach (var item in selectedItems)
+                    Console.WriteLine(item.Path);
+            });
+        }
+    }
+}

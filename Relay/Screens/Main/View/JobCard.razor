@@ -1,0 +1,341 @@
+@using Refund.Utils
+@using Refund.DataModel
+@using Refund.Services
+@using Refund.Services.Core.DataManager
+@using Refund.Services.Core.Session
+@using Relay.Panels.Right.Actions
+@using Refund.Components.Jobs
+@using IconSize = Refund.Utils.IconSize
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@inject DataManager DataManager
+@inject JobEditorService JobEditor
+@inject CardSelectionService Selection
+@inject MenuActionService MenuActions
+@inject Refund.Services.Core.Session.RelaySession Session
+
+@{
+    bool fadeOut = false;
+
+    if (JobEditor.IsActive && Session.CurrentMain != MainScreenType.FactoryBuilder)
+    {
+        if (Job.PortsOut.Values.All(po => !JobEditor.CurrentJob.PortsIn.Values.Any(pi => pi.ResourceType == po.ResourceType)) ||
+            Job.Space != JobEditor.CurrentJob.Space)
+            fadeOut = true;
+    }
+    else if (Selection.SelectedItems.Any() &&
+             !Selection.IsSelected(SelectionKey.ForJob(Job.Id)) &&
+             !_relationParent.Any() &&
+             !_relationChild.Any())
+    {
+        fadeOut = true;
+    }
+}
+
+<div id="@($"card-{_job.Id}")" 
+     class="@("card-common" + (Selection.IsSelected(SelectionKey.ForJob(Job.Id)) ? " selected" : ""))"
+     style="width: @(DiagramMode ? DiagramWidth : VisualProvider.GetWidth(Job.CardSquareCount.X))px;
+            height: @(DiagramMode ? DiagramHeight : VisualProvider.GetHeight(Job.CardSquareCount.Y))px;
+            position: relative;
+            opacity: @(fadeOut ? "0.5" : "1");
+            @(Job.ColorTag != null ? $"background-color: color-mix(in srgb, {Job.ColorTag} 40%, var(--neutral-fill-layer-rest));" : "")"
+     @onmouseover="@(OnMouseOver)"
+     @onmouseleave="@(OnMouseLeave)"
+     @onmouseup="@HandleMouseUp"
+     @onclick:stopPropagation="true"
+     @onclick:preventDefault="true"
+     @onclick="@(async args => await OnClick.InvokeAsync(args))"
+     @ondblclick:stopPropagation="true"
+     @ondblclick:preventDefault="true"
+     @ondblclick="@(async args => await OnDoubleClick.InvokeAsync(args))"
+     @oncontextmenu:stopPropagation="true"
+     @oncontextmenu:preventDefault="@DiagramMode"
+     @oncontextmenu="@HandleRightClick"
+     draggable="@(DiagramMode ? "false" : "true")"
+     @ondragstart="HandleDragStart"
+     @ondragend="HandleDragEnd">
+
+    @* Header *@
+    <div style="height: @(VisualProvider.JobCardHeaderHeight)px; 
+                padding-left: 4px;
+                padding-top: 4px;
+                display: flex;
+                width: 100%;">
+        <JobLine Job="@Job"
+                 EnableNavigation="false"
+                 ShowStatus="false" 
+                 ShowPreview="false"
+                 NameWidth="@($"{VisualProvider.GetWidth(Job.CardSquareCount.X) - 10 - 14}px")"
+                 IconSize="IconSize.Size20"
+                 FontSize="12px" />
+        
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(Job.Alias))
+    {
+        <div class="job-alias" style="top: @(VisualProvider.JobCardHeaderHeight)px;">
+            @Job.Alias
+        </div>
+    }
+
+    @{
+        double originalWidth = VisualProvider.GetWidth(Job.CardSquareCount.X);
+        double scaleFactor = DiagramMode && originalWidth > DiagramWidth
+            ? (DiagramWidth - VisualProvider.JobCardWidthOffset) / (originalWidth - VisualProvider.JobCardWidthOffset)
+            : 1.0;
+        double contentHeight = VisualProvider.JabCardContentSquareSideLength * Job.CardSquareCount.Y;
+    }
+
+    @if (DiagramMode)
+    {
+        <div style="position: absolute; left: -6px; top: 30px;
+                    display: flex; flex-direction: column; gap: 6px; align-items: center;">
+            @foreach (var port in Job.PortsIn.Values)
+            {
+                <div class="port-dot" style="border: 0;">
+                    <div class="port-dot"
+                         style="background-color: @(PortColors.Get(port.ResourceType));
+                                position: absolute; left: 0; top: 0;">
+                    </div>
+                    @if (_showTooltips)
+                    {
+                        <div class="port-tooltip"
+                             style="border: solid 1px @PortColors.Get(port.ResourceType);
+                                    left: auto; right: calc(100% + 2px);">
+                            @port.Alias
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+
+    <div style="@($"display: flex; flex-direction: column; " +
+                  $"justify-content: center; " +
+                  $"height: {contentHeight * scaleFactor}px;")">
+        <div class="port-dots-container">
+
+            @foreach(var _port in Job.PortsOut.Values)
+            {
+                var port = _port;
+                string id = $"j{Job.Id}-{port.Name}";
+
+                bool isEnabled = true;
+                if (Session.CurrentMain != MainScreenType.FactoryBuilder &&
+                    JobEditor.IsActive && (JobEditor.CurrentJob == Job ||
+                                           JobEditor.CurrentJob.PortsIn.Values.All(p => p.ResourceType != port.ResourceType)))
+                    isEnabled = false;
+
+                <div class="port-dot" style="border: 0;">
+                    <div id="@id"
+                         class="port-dot @(isEnabled ? "enabled" : "disabled")"
+                         style="background-color: @(PortColors.Get(port.ResourceType));
+                            position:  absolute; left: 0; top: 0;"
+                         @onclick="@(async e => await HandlePortClick(e, Job, port))"
+                         @onclick:stopPropagation="true">
+                    </div>
+
+                    @if (_showTooltips && isEnabled)
+                    {
+                        <div class="port-tooltip"
+                             style="border: solid 1px @PortColors.Get(port.ResourceType);">
+                            @port.Alias
+                        </div>
+                    }
+                </div>
+            }
+
+        </div>
+
+        <div style="overflow: hidden; height: @(contentHeight * scaleFactor)px;">
+            <div style="@(scaleFactor < 1 ? $"width: {originalWidth}px; height: {contentHeight}px; transform: scale({scaleFactor}); transform-origin: top left;" : $"height: {contentHeight}px;")">
+                <div style="position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;">
+                    @if (Job.Status == JobStatus.Building)
+                    {
+                        <div style="padding: 0.15rem 0.5rem;
+                                    border-radius: 14px;
+                                    background-color: @(JobEditor.CurrentJob == Job ? "var(--accent-fill-rest)" : "transparent");
+                                    color: @(JobEditor.CurrentJob == Job ? "var(--neutral-fill-layer-rest)" : "inherit");">
+                            <span>Building</span>
+                        </div>
+                    }
+                    else if (Job.CardViewType != null)
+                    {
+                        <DynamicComponent Type="@Job.CardViewType" Parameters="_componentParams"/>
+                    }
+                    else
+                    {
+                        <BasicJobCardContent Job="@Job"/>
+                    }
+
+                    @if (_relationParent.Any() || _relationChild.Any())
+                    {
+                        <div class="fade-on-hover"
+                             style="position: absolute;
+                                    top: 0; left: 0; width: 100%; height: 100%;
+                                    display: flex; align-items: center; justify-content: center;
+                                    font-size: 0.75rem;">
+                            <div class="card-common selected"
+                                 style="display: flex; align-items: flex-start; justify-content: space-evenly; column-gap: 1rem;
+                                        padding: 0.25rem 0.5rem; margin: 1rem;
+                                        outline-width: 1px;">
+                                @if (_relationParent.Any())
+                                {
+                                    <div style="display: flex; flex-direction: column; align-items: flex-start; flex-wrap: nowrap;">
+                                        <div style="font-weight: bold;">Parent of:</div>
+                                        <div>
+                                            @(string.Join(", ", _relationParent.Take(15)))
+                                        </div>
+                                        @if (_relationParent.Count > 15)
+                                        {
+                                            <div>+@(_relationParent.Count - 15) more</div>
+                                        }
+                                    </div>
+                                }
+
+                                @if (_relationChild.Any())
+                                {
+                                    <div style="display: flex; flex-direction: column; align-items: flex-start; flex-wrap: nowrap;">
+                                        <div style="font-weight: bold;">Child of:</div>
+                                        <div>
+                                            @(string.Join(", ", _relationChild.Take(15)))
+                                        </div>
+                                        @if (_relationChild.Count > 15)
+                                        {
+                                            <div>+@(_relationChild.Count - 15) more</div>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    @* Running job info footer *@
+    <div style="width: 100%; height: @(VisualProvider.JobCardFooterHeight)px; padding: 0 10px;
+                font-size: 0.75rem; display: flex; align-items: center; justify-content: space-between;">
+
+        <div style="height: 100%; display: flex; flex-wrap: nowrap; align-items: center; gap: 3px;">
+            
+            @{
+                var relevantEvent = Job.GetMostRecentEvent(Job.Status.ToEventType());
+
+                // For settled states, we're interested in how long in took to settle,
+                // not when it was settled
+                var previousEvent = Job.Status switch
+                {
+                    JobStatus.Finished => Job.GetMostRecentEvent(EventType.RunningStarted), 
+                    JobStatus.Aborted => Job.GetMostRecentEvent(EventType.RunningStarted),
+                    JobStatus.Failed => Job.GetMostRecentEvent(EventType.RunningStarted),
+                    _ => null
+                };
+            }
+
+            @if (relevantEvent != null)
+            {
+                @if (Job.Status != JobStatus.Building)
+                {
+                    <FluentIcon Value="@(new Icons.Regular.Size12.Timer())"/>
+                }
+
+                @if (Job.Status == JobStatus.Finished && previousEvent != null)
+                {
+                    <span>Finished in </span>
+                    @((relevantEvent.Timestamp - previousEvent.Timestamp).ToStringAdaptive())
+                }
+                else if (Job.Status == JobStatus.Aborting && previousEvent != null)
+                {
+                    <span>Aborting for </span>
+                    <DurationText Timestamp="@relevantEvent.Timestamp"/>
+                }
+                else if (Job.Status == JobStatus.Aborted && previousEvent != null)
+                {
+                    <span>Aborted after </span>
+                    @((relevantEvent.Timestamp - previousEvent.Timestamp).ToStringAdaptive())
+                }
+                else if (Job.Status == JobStatus.Failed && previousEvent != null)
+                {
+                    <span>Failed after </span>
+                    @((relevantEvent.Timestamp - previousEvent.Timestamp).ToStringAdaptive())
+                }
+                else if (Job.Status == JobStatus.Waiting)
+                {
+                    <span>Waiting for </span>
+                    <DurationText Timestamp="@relevantEvent.Timestamp"/>
+                }
+                else if (Job.Status == JobStatus.Staging)
+                {
+                    <span>Queued for </span>
+
+                    <DurationText Timestamp="@relevantEvent.Timestamp"/>
+                }
+                else if (Job.Status == JobStatus.Clearing)
+                {
+                    <span>Clearing for </span>
+
+                    <DurationText Timestamp="@relevantEvent.Timestamp"/>
+                }
+                else if (Job.Status.IsUnsettled())
+                {
+                    <span>Running for </span>
+
+                    <DurationText Timestamp="@relevantEvent.Timestamp"/>
+                }
+            }
+        </div>
+
+        @if (Job is ReadOnlyWarpJob warpJob && warpJob.NItemsTotal > 0)
+        {
+            <div style="display: flex; align-items: center; gap: 3px;">
+                <FluentIcon Value="@(new Icons.Filled.Size12.CheckmarkCircle().WithColor("#13a10e"))" />
+                <span style="color: #13a10e;">
+                    @warpJob.NItemsProcessed/@warpJob.NItemsTotal
+                </span>
+
+                @if (warpJob.NItemsFailed > 0)
+                {
+                    <FluentIcon Value="@(new Icons.Filled.Size12.ErrorCircle().WithColor("var(--error)"))" Style="margin-left: 4px;" />
+                    <span style="color: var(--error);">    
+                        @warpJob.NItemsFailed
+                    </span>
+                }
+            </div>
+        }
+
+        @if (Job.Status == JobStatus.Running && Job.TimeRemaining != null)
+        {
+            <div style="display: flex; align-items: center; gap: 3px;">
+                <FluentIcon Value="@(new Icons.Regular.Size16.ArrowStepInRight())" />
+                @Job.TimeRemaining.Value.ToStringAdaptive()
+            </div>
+        }
+    </div>
+
+    @if (!DiagramMode)
+    {
+        <FluentMenu Anchor="@($"card-{_job.Id}")" Trigger="MouseButton.Right"
+                    Anchored="false" OpenChanged="HandleContextMenu">
+            <span style="font-size: 0.75rem; padding: 0 1rem; opacity: 0.5; max-width: 200px;">
+                @_contextMenuHeader
+            </span>
+            <FluentDivider />
+
+            @if (_contextMenuActions != null)
+            {
+                <ActionMenuLevel Actions="_contextMenuActions"/>
+            }
+        </FluentMenu>
+    }
+
+    @if (_isDragging && _dragCount > 1)
+    {
+        <div style="position: absolute; top: 4px; right: 4px;
+                    background: var(--accent-fill-rest); color: white;
+                    border-radius: 10px; padding: 2px 8px;
+                    font-size: 11px; font-weight: 600; pointer-events: none;">
+            +@(_dragCount - 1) more
+        </div>
+    }
+</div>

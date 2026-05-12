@@ -1,0 +1,20 @@
+@using Refund.Utils
+@using Relay.Emoji
+
+<div style="display: flex; justify-content: center; 
+            align-items: flex-start; height: 100%;">
+    @if(Job.VisAvailableIteration >= 0)
+    {
+        <div style="width: 144px; height: 144px; 
+                    padding: 0px; overflow: auto;">
+            <pre style="font-size: 0.75rem; line-height: 1.5;
+                        font-family: var(--body-font);">
+                @Job.ProcessingNote
+            </pre>
+        </div>
+    }
+    else
+    {
+        <span>No notes yet</span>
+    }
+</div>
