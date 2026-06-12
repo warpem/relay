@@ -218,3 +218,4 @@ Relay/wwwroot/js/volstar.js
 .aider*
 .superpowers/
 .worktrees/
+.DS_Store
