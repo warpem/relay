@@ -477,6 +477,9 @@ public class ClusterQueue : JobQueue
         string[] requiredModules,
         string scriptPath)
     {
+        // Unlike the Job-based path, worker scripts have no {{job_id}} to substitute —
+        // a pool worker is not a Relay Job. Any {{job_id}} in the template is dropped by
+        // ProcessSubmissionScript's unmatched-tag cleanup.
         string script = ProcessSubmissionScript(
             SubmissionScriptTemplate.ReplaceRegex("{{\\s*command\\s*}}", command),
             resourceValues,
@@ -668,9 +671,16 @@ public class ClusterQueue : JobQueue
                 "Add a command that prints one active job ID per line (e.g. squeue -u $USER -h -o \"%i\").");
 
         string output = await ExecuteOnCluster(ListJobsTemplate);
-        return output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                     .ToHashSet();
+        return ParseJobIds(output);
     }
+
+    /// <summary>
+    /// Parses scheduler stdout (one job ID per line) into a set of IDs.
+    /// Handles both \n and \r\n line endings; blank lines are ignored.
+    /// </summary>
+    internal static HashSet<string> ParseJobIds(string output) =>
+        output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+              .ToHashSet();
 
     /// <summary>
     /// Cancels all provided cluster job IDs in a single scheduler call.
