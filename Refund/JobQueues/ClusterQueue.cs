@@ -350,79 +350,29 @@ public class ClusterQueue : JobQueue
             {
                 try
                 {
-                    
-                    JobUpdateCallback(job, (j) =>
+                    JobUpdateCallback(job, j =>
                     {
                         j.DirectoryName = j.Id.ToString();
                         j.Status = JobStatus.Staging;
                     });
-                    
-                    // Make super sure we're not deleting the parent space directory
-                    if (Directory.Exists(job.DirectoryPath) && 
-                        !string.IsNullOrWhiteSpace(job.DirectoryName) &&
-                        !Path.GetFullPath(job.DirectoryPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-                             .Equals(Path.GetFullPath(job.Space.RootDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), 
-                                     StringComparison.OrdinalIgnoreCase))
-                        Directory.Delete(job.DirectoryPath, true);
 
-                    Directory.CreateDirectory(job.DirectoryPath);
-                    cts.Token.ThrowIfCancellationRequested();
-                    
-                    Directory.CreateDirectory(job.RelayResultsDirectoryPath);
-                    
-                    job.Stage();
-                    cts.Token.ThrowIfCancellationRequested();
-                    
-                    string scriptPath = Path.Combine(job.DirectoryPath, "submit.sh");
-                    
-                    Dictionary<string, string> arguments = job.ComposeCommandArguments();
-                    string commandName = job.CommandName;
-
-                    StringBuilder jobCommand = new StringBuilder();
-                    jobCommand.AppendLine($"cd {job.RunDirectory}\n");
-                    jobCommand.Append(job.CommandPrefix);
-                    jobCommand.Append($"{commandName} {string.Join(" ", arguments.Select(kv => string.IsNullOrWhiteSpace(kv.Value) ?
-                                                                                                   $"--{kv.Key}" :
-                                                                                                   $"--{kv.Key} {kv.Value}"))}");
-                    jobCommand.AppendLine(job.CommandSuffix);
-                    
-                    // Use the new template processing method
-                    string script = ProcessSubmissionScript(SubmissionScriptTemplate
-                                                            .ReplaceRegex("{{\\s*command\\s*}}", jobCommand.ToString())
-                                                            .ReplaceRegex("{{\\s*job_id\\s*}}", job.Id.ToString()),
-                                                            job,
-                                                            customValues);
-                    
-                    await File.WriteAllTextAsync(scriptPath, script);
-
-                    await job.WriteToLifecycleLog($"Written following submission script to {scriptPath}:\n\n" +
-                                                  $"{script}\n\n");
-                    
-                    string clusterCommand = SubmitJobTemplate.ReplaceRegex("{{\\s*script_path_abs\\s*}}", scriptPath);
-                    
+                    string scriptPath = await PrepareAndWriteScript(job, customValues);
                     cts.Token.ThrowIfCancellationRequested();
 
                     lock (Sync)
                         JobsInLimbo.Add(job);
-                    
-                    await job.WriteToLifecycleLog($"Executing {clusterCommand}");
-                    
-                    string output = await ExecuteOnCluster(clusterCommand);
-                    await job.WriteToLifecycleLog(output);
-                    
-                    string jobId = ParseClusterJobId(output);
+
+                    await job.WriteToLifecycleLog($"Submitting script: {scriptPath}");
+
+                    string jobId = await SubmitScript(scriptPath);
                     await job.WriteToLifecycleLog($"Parsed cluster job ID: {jobId}");
-                    
-                    JobUpdateCallback(job, (j) =>
-                    {
-                        j.ClusterJobId = jobId;
-                    });
+
+                    JobUpdateCallback(job, j => { j.ClusterJobId = jobId; });
                 }
                 catch (Exception exc)
                 {
                     await job.WriteToErrorLog($"Job {job.Id} cancelled before it went to cluster:\n{exc}");
-
-                    JobUpdateCallback(job, (j) => j.Status = JobStatus.Failed);
+                    JobUpdateCallback(job, j => j.Status = JobStatus.Failed);
                 }
                 finally
                 {
@@ -438,11 +388,70 @@ public class ClusterQueue : JobQueue
     }
 
     /// <summary>
+    /// Prepares the submission script for a job and writes it to disk.
+    /// Returns the absolute path to the written script.
+    /// </summary>
+    private async Task<string> PrepareAndWriteScript(Job job, Dictionary<string, string> customValues = null)
+    {
+        job.DirectoryName = job.Id.ToString();
+
+        if (Directory.Exists(job.DirectoryPath) &&
+            !string.IsNullOrWhiteSpace(job.DirectoryName) &&
+            !Path.GetFullPath(job.DirectoryPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                 .Equals(Path.GetFullPath(job.Space.RootDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                         StringComparison.OrdinalIgnoreCase))
+            Directory.Delete(job.DirectoryPath, true);
+
+        Directory.CreateDirectory(job.DirectoryPath);
+        Directory.CreateDirectory(job.RelayResultsDirectoryPath);
+
+        job.Stage();
+
+        string scriptPath = Path.Combine(job.DirectoryPath, "submit.sh");
+
+        Dictionary<string, string> arguments = job.ComposeCommandArguments();
+        string commandName = job.CommandName;
+
+        StringBuilder jobCommand = new StringBuilder();
+        jobCommand.AppendLine($"cd {job.RunDirectory}\n");
+        jobCommand.Append(job.CommandPrefix);
+        jobCommand.Append($"{commandName} {string.Join(" ", arguments.Select(kv => string.IsNullOrWhiteSpace(kv.Value) ?
+                                                                                   $"--{kv.Key}" :
+                                                                                   $"--{kv.Key} {kv.Value}"))}");
+        jobCommand.AppendLine(job.CommandSuffix);
+
+        string script = ProcessSubmissionScript(
+            SubmissionScriptTemplate
+                .ReplaceRegex("{{\\s*command\\s*}}", jobCommand.ToString())
+                .ReplaceRegex("{{\\s*job_id\\s*}}", job.Id.ToString()),
+            job.GetResourceValues(),
+            job.RequiredModules,
+            customValues);
+
+        await File.WriteAllTextAsync(scriptPath, script);
+        await job.WriteToLifecycleLog($"Written following submission script to {scriptPath}:\n\n{script}\n\n");
+
+        return scriptPath;
+    }
+
+    /// <summary>
+    /// Submits a pre-written script to the cluster scheduler.
+    /// Returns the cluster job ID assigned by the scheduler.
+    /// </summary>
+    public async Task<string> SubmitScript(string scriptPath)
+    {
+        string clusterCommand = SubmitJobTemplate.ReplaceRegex("{{\\s*script_path_abs\\s*}}", scriptPath);
+        string output = await ExecuteOnCluster(clusterCommand);
+        return ParseClusterJobId(output);
+    }
+
+    /// <summary>
     /// Processes a cluster submission script template by replacing placeholders with actual values
     /// and handling conditional blocks based on job requirements.
     /// </summary>
     /// <param name="scriptTemplate">The template for the submission script</param>
-    /// <param name="job">The job being submitted</param>
+    /// <param name="resourceValues">Job resource values used to substitute placeholders</param>
+    /// <param name="requiredModules">Modules required by the job, used to resolve conditional blocks</param>
     /// <param name="customValues">Optional dictionary of custom variable values to override defaults</param>
     /// <returns>The processed script with all placeholders replaced and conditional blocks resolved</returns>
     /// <remarks>
@@ -453,12 +462,15 @@ public class ClusterQueue : JobQueue
     /// - Custom variables defined in the CustomVariables dictionary
     /// - Job-specific resource values from the job's GetResourceValues method
     /// </remarks>
-    protected string ProcessSubmissionScript(string scriptTemplate, Job job, Dictionary<string, string> customValues = null)
+    protected string ProcessSubmissionScript(
+        string scriptTemplate,
+        Dictionary<string, string> resourceValues,
+        string[] requiredModules,
+        Dictionary<string, string> customValues = null)
     {
         string result = scriptTemplate;
 
         // Replace resource values first
-        var resourceValues = job.GetResourceValues();
         foreach (var kvp in resourceValues)
         {
             // Create a regex pattern that allows for any number of spaces between braces and name
@@ -501,7 +513,7 @@ public class ClusterQueue : JobQueue
                 if (openBlock.module != null)
                 {
                     // If module is required by job, keep the block (without tags)
-                    if (job.RequiredModules.Contains(closingModule))
+                    if (requiredModules.Contains(closingModule))
                     {
                         result = result.Remove(blockStart, blockEnd - blockStart + 2);  // Remove closing tag
                         result = result.Remove(openBlock.start, openBlock.end - openBlock.start + 2);  // Remove opening tag
