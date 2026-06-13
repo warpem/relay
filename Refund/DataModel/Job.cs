@@ -1624,6 +1624,40 @@ public interface ILocalJob
 
 public interface IClusterJob { }
 
+/// <summary>
+/// Implemented by WarpTools GPU jobs that maintain a fleet of short-lived cluster
+/// worker jobs alongside the single Manager cluster job.
+/// </summary>
+public interface IPooledJob
+{
+    /// <summary>ID of the ClusterQueue to use for worker pool submissions. -1 means local/no pool.</summary>
+    int PoolQueueId { get; }
+
+    /// <summary>Target number of simultaneously running worker jobs.</summary>
+    int PoolSize { get; }
+
+    /// <summary>
+    /// Maximum total worker submissions across the job's lifetime.
+    /// Circuit-breaker against sick-worker replacement spirals.
+    /// </summary>
+    int PoolSubmissionCap { get; }
+
+    /// <summary>Memory in GB to request per worker cluster job.</summary>
+    int WorkerMemoryGb { get; }
+
+    /// <summary>CPU cores to request per worker cluster job.</summary>
+    int WorkerCoreCount { get; }
+
+    /// <summary>Required cluster modules for worker jobs (e.g. ["gpu", "warp"]).</summary>
+    string[] WorkerRequiredModules { get; }
+
+    /// <summary>
+    /// Full command string for a worker assigned to the given GPU device index.
+    /// Example: "WarpWorker2 --task_dir /data/1/tasks --device 2"
+    /// </summary>
+    string GetWorkerCommand(int deviceIndex);
+}
+
 public enum JobStatus
 {
     Building = 0,

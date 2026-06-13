@@ -201,7 +201,7 @@ public abstract class WarpJob : Job
 }
 
 [GenerateReadOnly]
-public abstract class WarpJobGpu : WarpJob
+public abstract class WarpJobGpu : WarpJob, IPooledJob
 {
     public override int GpuCount => NGpus;
     
@@ -225,15 +225,57 @@ public abstract class WarpJobGpu : WarpJob
     [RelayProperty]
     public virtual int PerDevice { get; set; } = 2;
 
+    // TODO(Task 7): add [UiQueue] attribute once UiQueue exists.
+    [RelayProperty]
+    public int PoolQueueId { get; set; } = -1;
+
+    [UiFieldGroup("Resources", 999)]
+    [UiInt("pool_size", "Pool size",
+           min: 1,
+           helpText: "Target number of simultaneous GPU worker jobs in the pool. " +
+                     "Only used when a pool queue is set.")]
+    [RelayProperty]
+    public int PoolSize { get; set; } = 8;
+
+    /// <summary>Number of alive pool workers at last daemon tick. Updated by QueueRepository.</summary>
+    [RelayProperty]
+    [Clearable]
+    public int PoolWorkersAlive { get; set; }
+
+    /// <summary>Total worker submissions since this job started. Updated by QueueRepository.</summary>
+    [RelayProperty]
+    [Clearable]
+    public int PoolWorkersSubmitted { get; set; }
+
     /// <summary>
     /// Gets the modules that this job can utilize if available.
     /// Includes the base supported modules plus "warp".
     /// </summary>
     public override string[] SupportedModules => base.SupportedModules.Concat(["gpu"]).ToArray();
-    
+
     /// <summary>
     /// Gets the modules that must be available for this job to run.
     /// Includes the base required modules plus "warp".
     /// </summary>
     public override string[] RequiredModules => base.RequiredModules.Concat(["gpu"]).ToArray();
+
+    public override Dictionary<string, string> ComposeCommandArguments()
+    {
+        var result = base.ComposeCommandArguments();
+        if (PoolQueueId > 0)
+            result["external_provisioner"] = "";
+        return result;
+    }
+
+    // IPooledJob
+    // PoolQueueId and PoolSize satisfy the interface implicitly via the public
+    // [RelayProperty] auto-properties above. Only the derived/computed members are
+    // implemented explicitly here.
+    int IPooledJob.PoolSubmissionCap          => PoolSize * 2;
+    int IPooledJob.WorkerMemoryGb             => MemoryPerWorker;
+    int IPooledJob.WorkerCoreCount            => 2;
+    string[] IPooledJob.WorkerRequiredModules => RequiredModules;
+
+    string IPooledJob.GetWorkerCommand(int deviceIndex) =>
+        $"WarpWorker2 --task_dir {Path.Combine(DirectoryPath, "tasks")} --device {deviceIndex}";
 }
