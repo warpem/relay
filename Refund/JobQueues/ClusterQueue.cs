@@ -364,7 +364,9 @@ public class ClusterQueue : JobQueue
 
                     await job.WriteToLifecycleLog($"Submitting script: {scriptPath}");
 
-                    string jobId = await SubmitScript(scriptPath);
+                    string rawOutput = null;
+                    string jobId = await SubmitScript(scriptPath, o => rawOutput = o);
+                    await job.WriteToLifecycleLog(rawOutput);
                     await job.WriteToLifecycleLog($"Parsed cluster job ID: {jobId}");
 
                     JobUpdateCallback(job, j => { j.ClusterJobId = jobId; });
@@ -437,11 +439,13 @@ public class ClusterQueue : JobQueue
     /// <summary>
     /// Submits a pre-written script to the cluster scheduler.
     /// Returns the cluster job ID assigned by the scheduler.
+    /// The raw scheduler output is returned via the optional out-style callback for logging.
     /// </summary>
-    public async Task<string> SubmitScript(string scriptPath)
+    public async Task<string> SubmitScript(string scriptPath, Action<string> onRawOutput = null)
     {
         string clusterCommand = SubmitJobTemplate.ReplaceRegex("{{\\s*script_path_abs\\s*}}", scriptPath);
         string output = await ExecuteOnCluster(clusterCommand);
+        onRawOutput?.Invoke(output);
         return ParseClusterJobId(output);
     }
 
