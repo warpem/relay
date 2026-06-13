@@ -114,13 +114,13 @@ Calls `ProcessSubmissionScript(SubmissionScriptTemplate, resourceValues, require
 
 ### 4.4 New template fields
 
-Two new optional `[RelayProperty]` fields:
+Two new `[RelayProperty]` fields. They are optional for regular (non-pooled) use but **required** when a queue is used as a pool queue — validated at job submission time (see §11):
 
 ```csharp
 /// <summary>
 /// Command that returns one active cluster job ID per line for the submitting user.
+/// Required when this queue is used as a pool queue.
 /// Example SLURM: squeue -u $USER -h -o "%i"
-/// If empty, pool falls back to individual CheckStatus calls per worker.
 /// </summary>
 [RelayProperty]
 public string ListJobsTemplate { get; set; } = "";
@@ -128,8 +128,8 @@ public string ListJobsTemplate { get; set; } = "";
 /// <summary>
 /// Command to cancel multiple jobs in one call.
 /// Supports {{job_ids}} placeholder (space-separated IDs).
+/// Required when this queue is used as a pool queue.
 /// Example SLURM: scancel {{job_ids}}
-/// If empty, pool falls back to individual AbortJob calls.
 /// </summary>
 [RelayProperty]
 public string CancelManyJobsTemplate { get; set; } = "";
@@ -139,14 +139,15 @@ public string CancelManyJobsTemplate { get; set; } = "";
 
 ```csharp
 // Returns the set of currently active cluster job IDs for this queue's user.
-// Uses ListJobsTemplate if set; otherwise returns null (caller falls back).
-public async Task<HashSet<string>?> ListActiveJobIds()
+// Throws if ListJobsTemplate is not configured.
+public async Task<HashSet<string>> ListActiveJobIds()
 
-// Cancels all provided IDs in one call (CancelManyJobsTemplate) or loops AbortJob.
+// Cancels all provided IDs in one call via CancelManyJobsTemplate.
+// Throws if CancelManyJobsTemplate is not configured.
 public async Task CancelJobs(IEnumerable<string> jobIds)
 ```
 
-`ListActiveJobIds` uses the existing `ExecuteOnCluster` and `_clusterCommandSemaphore`. It splits output by newline, trims whitespace, and returns the set. Returns `null` (not empty set) when `ListJobsTemplate` is unset — callers distinguish "unset" from "zero alive".
+`ListActiveJobIds` uses the existing `ExecuteOnCluster` and `_clusterCommandSemaphore`. It splits output by newline, trims whitespace, and returns the set. Because the templates are validated before the pool ever ticks, neither method needs a fallback path.
 
 ---
 
@@ -273,11 +274,7 @@ Called once per daemon tick while the Manager's `ClusterJobStatus == Running`. R
 
 ```
 1. active = await _poolQueue.ListActiveJobIds()
-   if active == null:
-       // ListJobsTemplate not configured — fall back to individual checks.
-       // ReconcileIndividually calls CheckStatus concurrently on each known
-       // submitted ID and returns the subset still Pending or Running.
-       active = await ReconcileIndividually(_submittedIds, _poolQueue)
+   // Templates guaranteed non-empty — validated at submission time (§11).
 
 2. _aliveIds = _submittedIds ∩ active   // filter to this pool's workers only
 
@@ -349,6 +346,28 @@ The WarpTools Manager reports sick-worker counts on stdout, which Relay already 
 private readonly ConcurrentDictionary<Job, WorkerPool> _workerPools = new();
 ```
 
+### Validation in `HandleWaitingState`
+
+Before submitting a pooled job to the cluster, `HandleWaitingState` validates the pool queue configuration and fails the job early with a clear message if either batch template is missing:
+
+```csharp
+if (job is IPooledJob pooledJob && pooledJob.PoolQueueId > 0)
+{
+    var poolQueue = FindQueue(pooledJob.PoolQueueId) as ClusterQueue;
+    if (poolQueue == null)
+        throw new Exception($"Pool queue {pooledJob.PoolQueueId} not found. " +
+                            "Select a valid pool queue in the job settings.");
+    if (string.IsNullOrWhiteSpace(poolQueue.ListJobsTemplate))
+        throw new Exception($"Pool queue \"{poolQueue.Alias}\" has no List Jobs template configured. " +
+                            "Add a ListJobsTemplate (e.g. \"squeue -u $USER -h -o \\\"%i\\\"\") before using it as a pool queue.");
+    if (string.IsNullOrWhiteSpace(poolQueue.CancelManyJobsTemplate))
+        throw new Exception($"Pool queue \"{poolQueue.Alias}\" has no Cancel Many Jobs template configured. " +
+                            "Add a CancelManyJobsTemplate (e.g. \"scancel {{job_ids}}\") before using it as a pool queue.");
+}
+```
+
+This runs inside the existing `try/catch` in `HandleWaitingState` which already writes the exception to the job's error log and marks it Failed.
+
 ### `GetOrCreatePool(Job job)`
 
 ```csharp
@@ -357,13 +376,15 @@ private WorkerPool GetOrCreatePool(Job job)
     return _workerPools.GetOrAdd(job, j =>
     {
         var pooledJob = (IPooledJob)j;
-        var poolQueue = (ClusterQueue)FindQueue(pooledJob.PoolQueueId)
-                        ?? throw new Exception($"Pool queue {pooledJob.PoolQueueId} not found");
+        var poolQueue = (ClusterQueue)FindQueue(pooledJob.PoolQueueId)!;
         var pool = new WorkerPool(poolQueue, pooledJob);
         pool.Initialize();
         return pool;
     });
 }
+```
+
+Templates are guaranteed non-empty by the validation above — no second check needed here.
 ```
 
 ### Re-adoption in `LoadQueues`
@@ -449,7 +470,7 @@ The queue picker field (`PoolQueueId`) renders in the job configurator using the
 | Relay restart + Manager already dead | Manager's `ClusterJobStatus` is `Finished`/`Failed` on first daemon tick → `HandleJobCompletion` → `pool.Dissolve()`. Workers already orphaned by manager heartbeat stall (30 s) will have self-exited before this runs. |
 | `pool_state.json` missing on restart | `WorkerPool.Initialize()` starts fresh — no `_submittedIds`, no cap history. Workers that are still running are invisible to the pool; they self-terminate when Manager heartbeat resumes (or stalls). New workers are submitted as needed. Worst case: brief over-provisioning until orphaned workers exit. |
 | Pool queue deleted while job is running | `GetOrCreatePool` would fail to `FindQueue`. Guard: validate `PoolQueueId` is still present in `DeleteClusterQueue` and refuse deletion if any running job references that queue. |
-| `ListJobsTemplate` not configured on queue | `ListActiveJobIds()` returns `null`; `WorkerPool.Tick()` falls back to `ReconcileIndividually()` which checks each known alive ID via the existing `CheckStatus`. No batching, but correct. |
+| `ListJobsTemplate` or `CancelManyJobsTemplate` not configured on pool queue | Caught at job submission time (`HandleWaitingState`) — job fails immediately with a clear error message. The pool never starts. |
 
 ---
 
