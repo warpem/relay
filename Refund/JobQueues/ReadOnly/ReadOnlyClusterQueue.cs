@@ -75,7 +75,13 @@ public sealed class ReadOnlyClusterQueue : ReadOnlyJobQueue
     /// Gets the template for generating the job submission script sent to the cluster.
     /// </summary>
     public string SubmissionScriptTemplate => _queue.SubmissionScriptTemplate;
-    
+
+    /// <summary>Gets the command template for listing all active job IDs.</summary>
+    public string ListJobsTemplate => _queue.ListJobsTemplate;
+
+    /// <summary>Gets the command template for cancelling multiple jobs at once.</summary>
+    public string CancelManyJobsTemplate => _queue.CancelManyJobsTemplate;
+
     /// <summary>
     /// Gets the custom variables that can be used in the submission script template.
     /// Returns a read-only view of the dictionary to prevent modifications.

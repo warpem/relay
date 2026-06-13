@@ -144,7 +144,24 @@ public class ClusterQueue : JobQueue
     /// </remarks>
     [RelayProperty]
     public string SubmissionScriptTemplate { get; set; } = "";
-    
+
+    /// <summary>
+    /// Command that returns one active cluster job ID per line for the submitting user.
+    /// Required when this queue is used as a pool queue for WarpTools GPU jobs.
+    /// Example SLURM: squeue -u $USER -h -o "%i"
+    /// </summary>
+    [RelayProperty]
+    public string ListJobsTemplate { get; set; } = "";
+
+    /// <summary>
+    /// Command to cancel multiple jobs in one call.
+    /// Supports {{job_ids}} placeholder (space-separated IDs).
+    /// Required when this queue is used as a pool queue for WarpTools GPU jobs.
+    /// Example SLURM: scancel {{job_ids}}
+    /// </summary>
+    [RelayProperty]
+    public string CancelManyJobsTemplate { get; set; } = "";
+
     /// <summary>
     /// Custom variables that can be used in the submission script template.
     /// Keys are variable names, values are tuples containing description and default value.
@@ -450,6 +467,27 @@ public class ClusterQueue : JobQueue
     }
 
     /// <summary>
+    /// Builds and writes a worker submission script without requiring a full Job object.
+    /// Used by WorkerPool to prepare a reusable script before any workers are submitted.
+    /// Returns the absolute path to the written script file.
+    /// </summary>
+    public string BuildWorkerScript(
+        string command,
+        Dictionary<string, string> resourceValues,
+        string[] requiredModules,
+        string scriptPath)
+    {
+        string script = ProcessSubmissionScript(
+            SubmissionScriptTemplate.ReplaceRegex("{{\\s*command\\s*}}", command),
+            resourceValues,
+            requiredModules);
+
+        Directory.CreateDirectory(Path.GetDirectoryName(scriptPath)!);
+        File.WriteAllText(scriptPath, script);
+        return scriptPath;
+    }
+
+    /// <summary>
     /// Processes a cluster submission script template by replacing placeholders with actual values
     /// and handling conditional blocks based on job requirements.
     /// </summary>
@@ -618,6 +656,42 @@ public class ClusterQueue : JobQueue
         });
     }
     
+    /// <summary>
+    /// Returns the set of currently active cluster job IDs by executing ListJobsTemplate.
+    /// Throws if ListJobsTemplate is not configured.
+    /// </summary>
+    public async Task<HashSet<string>> ListActiveJobIds()
+    {
+        if (string.IsNullOrWhiteSpace(ListJobsTemplate))
+            throw new InvalidOperationException(
+                $"Queue \"{Alias}\" has no ListJobsTemplate configured. " +
+                "Add a command that prints one active job ID per line (e.g. squeue -u $USER -h -o \"%i\").");
+
+        string output = await ExecuteOnCluster(ListJobsTemplate);
+        return output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                     .ToHashSet();
+    }
+
+    /// <summary>
+    /// Cancels all provided cluster job IDs in a single scheduler call.
+    /// Throws if CancelManyJobsTemplate is not configured.
+    /// </summary>
+    public async Task CancelJobs(IEnumerable<string> jobIds)
+    {
+        if (string.IsNullOrWhiteSpace(CancelManyJobsTemplate))
+            throw new InvalidOperationException(
+                $"Queue \"{Alias}\" has no CancelManyJobsTemplate configured. " +
+                "Add a command using {{job_ids}} placeholder (e.g. scancel {{job_ids}}).");
+
+        var ids = jobIds.ToList();
+        if (ids.Count == 0)
+            return;
+
+        string command = CancelManyJobsTemplate.ReplaceRegex(
+            "{{\\s*job_ids\\s*}}", string.Join(" ", ids));
+        await ExecuteOnCluster(command);
+    }
+
     /// <summary>
     /// Executes a command on the cluster and returns the output.
     /// Uses semaphore throttling to limit concurrent cluster operations.
