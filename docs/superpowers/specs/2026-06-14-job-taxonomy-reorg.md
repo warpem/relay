@@ -204,8 +204,16 @@ stay under `Jobs/M/`. Drop the two empty placeholder dirs
 - **Leaf segment:** short human-readable verb/noun describing the job
   (`Classify 3D`, `Peak alignment`). Sentence-case, no camelCase identifiers.
 - **Folder/namespace:** legal PascalCase identifiers mirroring the structural
-  path (`FrameSeries`, `MotionCtf`, `Classes3D`). The `_2D`/`_3D`
-  underscore-prefix hacks go away because the new top levels start with letters.
+  path (`MotionCtf`, `Classes3D`). The `_2D`/`_3D` underscore-prefix hacks go
+  away because the new top levels start with letters.
+- **Top-level folder/namespace names use the terse `Fs`/`Ts` convention** (not
+  `FrameSeries`/`TiltSeries`). `Refund.Jobs.TiltSeries` would collide with the
+  `Warp.TiltSeries` type, which is referenced unqualified in ~17 job files
+  (namespace shadows the type). `Fs`/`Ts` are collision-free and match the
+  codebase's original convention. The menu **category strings stay
+  `Frame-series.*` / `Tilt-series.*`** — only the namespace/folder is terse.
+  Final top level: `Jobs/Fs`, `Jobs/Ts`, `Jobs/Refinement`, `Jobs/M`,
+  `Jobs/Common`.
 
 ## Mechanics & impact
 
@@ -235,7 +243,14 @@ contract for "has a local code path" and (2) a config-aware runtime resolver for
 
 - Leaf display strings are first-draft; expect light bikeshedding during
   implementation. Structure (top-level + stage) is the locked part.
-- `Ctf` folder doubling (`Jobs/TiltSeries/Ctf/Ctf/`) is awkward; could flatten to
-  `Jobs/TiltSeries/Ctf/` if the single-job-per-leaf-folder convention is relaxed.
+- `Ctf` folder doubling resolved by flattening: the CTF job lives directly in
+  `Jobs/Ts/Ctf/` (namespace `Refund.Jobs.Ts.Ctf`).
+- `InitialReference` referenced `Class3DSelect` via shared-parent namespace
+  resolution; after the move it needs an explicit namespace alias
+  (`using Class3DSelect = Refund.Jobs.Refinement.Classes3D.Class3DSelect;`).
+- `PopulateTypes()` is not idempotent (it never clears `DefaultValues`), so a
+  second `PopulateStatic()` throws. Worked around test-side: registry-populating
+  test classes share a non-parallel `JobRegistry` collection and guard on
+  `Job.Types.Count`. The production non-idempotency is left as a known latent bug.
 - Confirm nothing keys off the literal old `TypeCategory` strings (e.g. tests,
   saved layouts, docs) beyond the reflection registry before renaming.
