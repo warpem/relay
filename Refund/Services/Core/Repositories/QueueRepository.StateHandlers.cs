@@ -184,11 +184,7 @@ public partial class QueueRepository
     private async Task HandleJobCompletion(Job job, JobQueue queue, bool isLocalQueue, ClusterJobStatus clusterStatus)
     {
         // Dissolve the worker pool (if any) before finalizing the job.
-        if (_workerPools.TryRemove(job, out var pool))
-        {
-            try { await pool.Dissolve(); }
-            catch (Exception ex) { _logger.Error(ex, "Error dissolving worker pool for job {JobId}", job.Id); }
-        }
+        await DissolvePool(job);
 
         // Update the job status based on the cluster status
         _jobUpdateCallback(job, j =>
@@ -305,11 +301,7 @@ public partial class QueueRepository
             await job.WriteToLifecycleLog($"Job aborted with status {clusterStatus}");
 
             // Dissolve the worker pool (if any) before finalizing the abort.
-            if (_workerPools.TryRemove(job, out var pool))
-            {
-                try { await pool.Dissolve(); }
-                catch (Exception ex) { _logger.Error(ex, "Error dissolving worker pool for job {JobId}", job.Id); }
-            }
+            await DissolvePool(job);
 
             // Aggregate any remaining stderr into error.txt before marking as aborted
             try

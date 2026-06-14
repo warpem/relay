@@ -34,6 +34,21 @@ public partial class QueueRepository
     }
 
     /// <summary>
+    /// Dissolves and removes the worker pool for a job, if one exists.
+    /// No-op for non-pooled jobs or jobs whose pool was already dissolved.
+    /// Dissolution failures are logged but never propagate — they must not block
+    /// the job's state machine from advancing to a terminal state.
+    /// </summary>
+    private async Task DissolvePool(Job job)
+    {
+        if (_workerPools.TryRemove(job, out var pool))
+        {
+            try { await pool.Dissolve(); }
+            catch (Exception ex) { _logger.Error(ex, "Error dissolving worker pool for job {JobId}", job.Id); }
+        }
+    }
+
+    /// <summary>
     /// Re-adopts worker pools for pooled jobs that were Running or Staging at shutdown.
     /// Called from LoadQueues after all jobs are restored. The first Tick reconciles
     /// the live worker set from the scheduler; pool_state.json supplies prior submitted IDs.
