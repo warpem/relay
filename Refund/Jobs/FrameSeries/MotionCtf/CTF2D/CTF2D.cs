@@ -8,7 +8,7 @@ using System.IO;
 using System.Threading;
 using Warp.Tools;
 
-namespace Refund.Jobs.Preprocessing.CTF2D;
+namespace Refund.Jobs.FrameSeries.MotionCtf.CTF2D;
 
 /// <summary>
 /// Provides Contrast Transfer Function (CTF) estimation functionality for cryo-EM micrographs.

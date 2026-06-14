@@ -1,4 +1,4 @@
-namespace Refund.Jobs.Preprocessing.Motion2D;
+namespace Refund.Jobs.FrameSeries.MotionCtf.Motion2D;
 
 /// <summary>
 /// Defines the file structure and naming conventions for the Motion2D job.

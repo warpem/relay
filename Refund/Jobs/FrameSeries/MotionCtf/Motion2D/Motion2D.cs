@@ -4,7 +4,7 @@ using Refund.JobResources;
 using Refund.UIFields;
 using Warp.Tools;
 
-namespace Refund.Jobs.Preprocessing.Motion2D;
+namespace Refund.Jobs.FrameSeries.MotionCtf.Motion2D;
 
 [GenerateReadOnly]
 public class Motion2D : WarpJobGpu, IClusterJob

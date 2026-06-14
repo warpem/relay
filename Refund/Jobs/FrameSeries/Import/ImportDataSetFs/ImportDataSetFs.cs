@@ -7,7 +7,7 @@ using Refund.Utils;
 using Warp.Headers;
 using Warp.Tools;
 
-namespace Refund.Jobs.Import.ImportDataSetFs;
+namespace Refund.Jobs.FrameSeries.Import.ImportDataSetFs;
 
 [GenerateReadOnly]
 public class ImportDataSetFs : Job, ILocalJob

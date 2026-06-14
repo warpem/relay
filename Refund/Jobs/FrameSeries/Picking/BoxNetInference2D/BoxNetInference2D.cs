@@ -2,12 +2,12 @@ using System.Text.Json;
 using Refund.DataModel;
 using Refund.DataModel.ReadOnly;
 using Refund.JobResources;
-using Refund.Jobs.Preprocessing.MotionAndCTF2D;
+using Refund.Jobs.FrameSeries.MotionCtf.MotionAndCTF2D;
 using Refund.Utils;
 using Warp;
 using Warp.Tools;
 
-namespace Refund.Jobs.Preprocessing.BoxNetInference2D;
+namespace Refund.Jobs.FrameSeries.Picking.BoxNetInference2D;
 
 [GenerateReadOnly]
 public class BoxNetInference2D : WarpJobGpu, IClusterJob

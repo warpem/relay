@@ -8,7 +8,7 @@ using Warp;
 using Warp.Tools;
 using WarpHelper = Warp.Tools.Helper;
 
-namespace Refund.Jobs.Preprocessing.MotionAndCTF2D;
+namespace Refund.Jobs.FrameSeries.MotionCtf.MotionAndCTF2D;
 
 /// <summary>
 /// A preprocessing job that performs both motion correction and CTF estimation on 2D electron microscopy images.

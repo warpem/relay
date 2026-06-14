@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 
-namespace Refund.Jobs.Preprocessing.CTF2D;
+namespace Refund.Jobs.FrameSeries.MotionCtf.CTF2D;
 
 /// <summary>
 /// Provides file management utilities for the CTF2D job, defining standard output file structures
