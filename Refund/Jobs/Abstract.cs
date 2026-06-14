@@ -225,7 +225,10 @@ public abstract class WarpJobGpu : WarpJob, IPooledJob
     [RelayProperty]
     public virtual int PerDevice { get; set; } = 2;
 
-    // TODO(Task 7): add [UiQueue] attribute once UiQueue exists.
+    [UiFieldGroup("Resources", 999)]
+    [UiQueue("Pool Queue",
+             helpText: "Cluster queue for the GPU worker pool. Leave as Local (no pool) to run workers on this machine.",
+             dataDelegateName: nameof(GetAvailableQueues))]
     [RelayProperty]
     public int PoolQueueId { get; set; } = -1;
 
