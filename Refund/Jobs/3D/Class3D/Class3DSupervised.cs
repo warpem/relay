@@ -43,7 +43,7 @@ public class Class3DSupervised : Class3D
     /// during job creation through Class3DExpandedView. It uniquely identifies this job
     /// type in the system's job type registry.
     /// </remarks>
-    public override string TypeCategory => "3D.Class3DSupervised";
+    public override string TypeCategory => "Refinement.3D classes.Supervised 3D";
 
     /// <summary>
     /// The full display name for this job type to be shown in the UI.

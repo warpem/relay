@@ -28,7 +28,7 @@ public class MotionAndCTF2D : WarpJobGpu, IClusterJob
     /// <summary>
     /// The category path for job type selection in the UI.
     /// </summary>
-    public override string TypeCategory => "Pre-processing.MotionCTF";
+    public override string TypeCategory => "Frame-series.Motion & CTF.Motion and CTF";
 
     /// <summary>
     /// The full display name of this job type.

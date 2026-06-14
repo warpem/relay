@@ -20,7 +20,7 @@ public class ExtractParticles : WarpJobGpu, IClusterJob
 {
     public override string TypeGuid => "a3cc57ee-0308-4181-bc9c-2675874e354d";
     
-    public override string TypeCategory => "Tilt-series.ExtractParticles";
+    public override string TypeCategory => "Tilt-series.Extraction.Extract particles";
 
     public override string TypeName => "Extract particles";
 

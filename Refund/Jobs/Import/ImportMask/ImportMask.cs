@@ -16,7 +16,7 @@ public class ImportMask : Job, ILocalJob
 
     public override string TypeGuid => "c860dddc-1af1-4227-88df-28653793910f";
 
-    public override string TypeCategory => "Import.Mask";
+    public override string TypeCategory => "Common.Import.Mask";
 
     public override string TypeName => "Import mask";
 

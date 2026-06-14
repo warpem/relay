@@ -11,7 +11,7 @@ public class Motion2D : WarpJobGpu, IClusterJob
 {
     public override int2 CardSquareCount { get; set; } = new int2(2, 1);
     public override string TypeGuid => "d0aa29ff-0397-4c7e-b239-fe9426b8b10e";
-    public override string TypeCategory => "Preprocessing.Motion2D";
+    public override string TypeCategory => "Frame-series.Motion & CTF.Motion";
     public override string TypeName => "Motion correction";
     public override string TypeNameShort => "Motion2D";
     public override string TypeDescription => "Motion correction on 2D images";

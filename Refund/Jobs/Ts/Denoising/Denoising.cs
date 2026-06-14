@@ -19,7 +19,7 @@ public class Denoising : WarpJobGpu, IClusterJob
 {
     public override string TypeGuid => "ef2ac481-e330-4f3c-9238-8f5e270e2d58";
     
-    public override string TypeCategory => "Tilt-series.Denoising";
+    public override string TypeCategory => "Tilt-series.Reconstruction.Denoising";
 
     public override string TypeName => "Denoise tomograms";
 

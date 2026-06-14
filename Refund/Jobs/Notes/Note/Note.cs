@@ -35,7 +35,7 @@ public class Note : Job, ILocalJob
     /// For example, this category is used when another component calls:
     /// <code>await _dataManager.CreateJob(_session.User, view, jobType.TypeCategory, original);</code>
     /// </summary>
-    public override string TypeCategory => "Notes.Note";
+    public override string TypeCategory => "Common.Notes.Note";
 
     /// <summary>
     /// The full display name of this job type.

@@ -22,7 +22,7 @@ public class AlignEtomo : WarpJobGpu, IClusterJob
 {
     public override string TypeGuid => "21478107-44d8-4a21-b9b7-acead263bed3";
 
-    public override string TypeCategory => "Tilt-series.Alignment.AlignEtomoPatchTracking";
+    public override string TypeCategory => "Tilt-series.Alignment.Etomo patch tracking";
 
     public override string TypeName => "Etomo alignment";
 

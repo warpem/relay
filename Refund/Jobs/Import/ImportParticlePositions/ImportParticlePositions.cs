@@ -25,7 +25,7 @@ public class ImportParticlePositions : LocalJob, ILocalJob
     /// <summary>
     /// Gets the category of this job type for organization in the UI and type registration.
     /// </summary>
-    public override string TypeCategory => "Import.ParticlePositions";
+    public override string TypeCategory => "Common.Import.Particle positions";
 
     /// <summary>
     /// Gets the full name of this job type for display in menus and the UI.

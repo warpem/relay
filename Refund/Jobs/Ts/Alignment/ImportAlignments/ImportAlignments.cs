@@ -22,7 +22,7 @@ public class ImportAlignments : WarpJob, IClusterJob
 {
     public override string TypeGuid => "fe02ae31-db05-4928-9196-87eacb6601b6";
 
-    public override string TypeCategory => "Tilt-series.Alignment.ImportAlignments";
+    public override string TypeCategory => "Tilt-series.Alignment.Import alignments";
 
     public override string TypeName => "Import alignments";
 

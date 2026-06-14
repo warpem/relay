@@ -26,7 +26,7 @@ public class Refine3D : RelionJob, IClusterJob
     /// Used in the data repository when creating new jobs of this type or cloning
     /// existing jobs.
     /// </summary>
-    public override string TypeCategory => "3D.Refine3D";
+    public override string TypeCategory => "Refinement.3D refinement.Refine 3D";
 
     /// <summary>
     /// Full display name for the job type. Used in the UI for job creation,

@@ -15,7 +15,7 @@ public class ExtractParticles2D : WarpJobGpu, IClusterJob
 {
     public override int2 CardSquareCount { get; set; } = new int2(2, 1);
     public override string TypeGuid => "21f9daa1-3e5a-4f04-94b4-63204b1c74b5";
-    public override string TypeCategory => "2D.ExtractParticles";
+    public override string TypeCategory => "Frame-series.Extraction.Extract particles";
     public override string TypeName => "Extract particles";
     public override string TypeNameShort => "Extract particles";
     public override string TypeDescription => "Extract and export particles from 2D micrographs";

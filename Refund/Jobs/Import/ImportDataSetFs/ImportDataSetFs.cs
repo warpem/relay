@@ -13,7 +13,7 @@ namespace Refund.Jobs.Import.ImportDataSetFs;
 public class ImportDataSetFs : Job, ILocalJob
 {
     public override string TypeGuid => "56b8f795-1010-4cbb-9b43-208e8c879f09";
-    public override string TypeCategory => "Import.DataSetFs";
+    public override string TypeCategory => "Frame-series.Import.Frame series";
 
     public override string TypeName => "Frame-series data set";
 

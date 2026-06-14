@@ -34,7 +34,7 @@ public class Class2DSelect : Job, ILocalJob
     /// <summary>
     /// The category path for this job type in the job creation menu
     /// </summary>
-    public override string TypeCategory => "2D.Class2DSelect";
+    public override string TypeCategory => "Refinement.2D classes.Select 2D classes";
     
     /// <summary>
     /// The full descriptive name of this job type

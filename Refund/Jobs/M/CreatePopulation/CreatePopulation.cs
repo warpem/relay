@@ -22,7 +22,7 @@ public class CreatePopulation : LocalJob, ILocalJob
     /// <summary>
     /// Gets the category of this job type for organization in the UI and type registration.
     /// </summary>
-    public override string TypeCategory => "M.CreatePopulation";
+    public override string TypeCategory => "M.Create population";
 
     /// <summary>
     /// Gets the full name of this job type for display in menus and the UI.

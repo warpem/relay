@@ -18,7 +18,7 @@ public class DeselectTilts : WarpJob, ILocalJob
 {
     public override string TypeGuid => "97d2bfde-f719-47fe-96a4-525b3bf54249";
 
-    public override string TypeCategory => "Tilt-series.DeselectTilts";
+    public override string TypeCategory => "Tilt-series.Selection.Deselect tilts";
 
     public override string TypeName => "Deselect tilts";
 

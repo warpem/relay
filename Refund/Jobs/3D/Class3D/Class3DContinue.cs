@@ -18,7 +18,7 @@ public class Class3DContinue : Class3D
 {
     public override string TypeGuid => "b47118e4-06c7-470f-a9f4-577048d0232c";
 
-    public override string TypeCategory => "3D.Class3DContinue";
+    public override string TypeCategory => "Refinement.3D classes.Continue 3D";
 
     public override string TypeName => "Continue 3D classification";
 

@@ -23,7 +23,7 @@ public class AlignMiss : WarpJobGpu, IClusterJob
 {
     public override string TypeGuid => "94136ed6-ce7c-4688-8c06-e655f14129f3";
 
-    public override string TypeCategory => "Tilt-series.Alignment.AlignMissPatchTracking";
+    public override string TypeCategory => "Tilt-series.Alignment.MISS patch tracking";
 
     public override string TypeName => "MissAlignment";
 

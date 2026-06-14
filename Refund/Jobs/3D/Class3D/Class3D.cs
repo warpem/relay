@@ -41,7 +41,7 @@ public class Class3D : RelionJob, IClusterJob
     /// during job creation through Class3DExpandedView. It uniquely identifies this job
     /// type in the system's job type registry.
     /// </remarks>
-    public override string TypeCategory => "3D.Class3D";
+    public override string TypeCategory => "Refinement.3D classes.Classify 3D";
 
     /// <summary>
     /// The full display name for this job type to be shown in the UI.

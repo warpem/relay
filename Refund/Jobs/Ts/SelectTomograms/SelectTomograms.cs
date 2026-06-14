@@ -16,7 +16,7 @@ public class SelectTomograms : WarpJob, ILocalJob
 {
     public override string TypeGuid => "a3f8c1d2-7e5b-4a9f-b6c3-2d1e0f9a8b7c";
 
-    public override string TypeCategory => "Tilt-series.SelectTomograms";
+    public override string TypeCategory => "Tilt-series.Selection.Select tomograms";
 
     public override string TypeName => "Tomogram selection";
 

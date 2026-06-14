@@ -21,7 +21,7 @@ public class CreateMask : RelionJob, IClusterJob
     /// <summary>
     /// The category path for job type selection in the UI.
     /// </summary>
-    public override string TypeCategory => "Tools.Create mask";
+    public override string TypeCategory => "Refinement.Masks.Create mask";
     
     /// <summary>
     /// The full display name of this job type.

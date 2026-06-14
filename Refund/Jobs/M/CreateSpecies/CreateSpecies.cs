@@ -22,7 +22,7 @@ public class CreateSpecies : WarpJobGpu, IClusterJob
     /// <summary>
     /// Gets the category of this job type for organization in the UI and type registration.
     /// </summary>
-    public override string TypeCategory => "M.CreateSpecies";
+    public override string TypeCategory => "M.Create species";
 
     /// <summary>
     /// Gets the full name of this job type for display in menus and the UI.

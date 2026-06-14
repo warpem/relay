@@ -33,7 +33,7 @@ public class Refine : WarpJobGpu, IClusterJob
     /// <summary>
     /// Gets the category of this job type for organization in the UI and type registration.
     /// </summary>
-    public override string TypeCategory => "M.MRefinement";
+    public override string TypeCategory => "M.Refine";
 
     /// <summary>
     /// Gets the full name of this job type for display in menus and the UI.

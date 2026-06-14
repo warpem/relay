@@ -32,7 +32,7 @@ public class CTF2D : WarpJobGpu, IClusterJob
     /// The job category used for job creation, type mapping, and organization.
     /// Referenced by DataRepository.CloneJob and other creation workflows to identify the job type.
     /// </summary>
-    public override string TypeCategory => "Preprocessing.CTF2D";
+    public override string TypeCategory => "Frame-series.Motion & CTF.CTF";
     
     /// <summary>
     /// The human-readable name displayed in the UI for this job type.

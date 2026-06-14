@@ -22,7 +22,7 @@ public class StackTilts : WarpJobGpu, IClusterJob
 {
     public override string TypeGuid => "9907836e-9757-4c00-9c01-59b68de62ae0";
 
-    public override string TypeCategory => "Tilt-series.Alignment.StackTilts";
+    public override string TypeCategory => "Tilt-series.Alignment.Stack tilts";
 
     public override string TypeName => "Create tilt stack";
 

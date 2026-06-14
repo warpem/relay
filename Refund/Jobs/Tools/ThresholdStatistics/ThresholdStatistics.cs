@@ -20,7 +20,7 @@ public class ThresholdStatistics : LocalJob, ILocalJob
 {
     public override string TypeGuid => "a1c3e5f7-2b4d-6e8f-0a1c-3e5f7b9d1e3f";
 
-    public override string TypeCategory => "Tools.Threshold statistics";
+    public override string TypeCategory => "Common.Tools.Threshold statistics";
 
     public override string TypeName => "Threshold statistics";
 

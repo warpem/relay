@@ -14,7 +14,7 @@ public class BoxNetInference2D : WarpJobGpu, IClusterJob
 {
     public override int2 CardSquareCount { get; set; } = new int2(2, 1);
     public override string TypeGuid => "2ae4d014-7b22-40df-b6cf-dbff8d0e4243";
-    public override string TypeCategory => "2D.BoxNetInference";
+    public override string TypeCategory => "Frame-series.Picking.BoxNet";
     public override string TypeName => "BoxNet particle picking";
     public override string TypeNameShort => "BoxNetInference";
     public override string TypeDescription => "Particle picking and segmentation in 2D micrographs using BoxNet";

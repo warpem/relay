@@ -22,7 +22,7 @@ public class AutoLevel : WarpJobGpu, IClusterJob
 {
     public override string TypeGuid => "79885498-1325-4aac-8ffe-2066f7cbdac0";
 
-    public override string TypeCategory => "Tilt-series.Alignment.AutoLevel";
+    public override string TypeCategory => "Tilt-series.Alignment.Auto-level";
 
     public override string TypeName => "Auto-level";
 

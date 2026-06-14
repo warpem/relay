@@ -21,7 +21,7 @@ public class TemplateMatch : WarpJobGpu, IClusterJob
 {
     public override string TypeGuid => "b44eae53-19e2-4c67-bd59-b9c7b3f52f2e";
     
-    public override string TypeCategory => "Tilt-series.TemplateMatch";
+    public override string TypeCategory => "Tilt-series.Picking.Template matching";
 
     public override string TypeName => "Template matching";
 

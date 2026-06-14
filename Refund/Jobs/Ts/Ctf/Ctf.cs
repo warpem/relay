@@ -21,7 +21,7 @@ namespace Refund.Jobs.Ts.Ctf;
 public class Ctf : WarpJobGpu, IClusterJob
 {
     public override string TypeGuid => "5b6053ff-f377-458c-99dc-bdf8e3b92699";
-    public override string TypeCategory => "Tilt-series.CTF";
+    public override string TypeCategory => "Tilt-series.CTF.CTF";
 
     public override string TypeName => "CTF estimation";
 

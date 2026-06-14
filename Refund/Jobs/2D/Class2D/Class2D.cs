@@ -31,7 +31,7 @@ public class Class2D : RelionJob, IClusterJob
     /// <summary>
     /// The category path for this job type in the job creation menu
     /// </summary>
-    public override string TypeCategory => "2D.Class2D";
+    public override string TypeCategory => "Refinement.2D classes.Classify 2D";
 
     /// <summary>
     /// The full descriptive name of this job type

@@ -23,7 +23,7 @@ public class GetSpecies : LocalJob, ILocalJob
     /// <summary>
     /// Gets the category of this job type for organization in the UI and type registration.
     /// </summary>
-    public override string TypeCategory => "M.GetSpecies";
+    public override string TypeCategory => "M.Get species";
 
     /// <summary>
     /// Gets the full name of this job type for display in menus and the UI.

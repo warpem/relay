@@ -18,7 +18,7 @@ public class EstimateWeights : WarpJobGpu, IClusterJob
     /// <summary>
     /// Gets the category of this job type for organization in the UI and type registration.
     /// </summary>
-    public override string TypeCategory => "M.EstimateWeights";
+    public override string TypeCategory => "M.Estimate weights";
 
     /// <summary>
     /// Gets the full name of this job type for display in menus and the UI.

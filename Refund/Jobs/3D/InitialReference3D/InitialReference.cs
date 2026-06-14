@@ -15,7 +15,7 @@ namespace Refund.Jobs._3D.InitialReference3D;
 public class InitialReference : RelionJob, IClusterJob
 {
     public override string TypeGuid => "bb1636d7-cd2c-423b-b410-8bb324d9cfa2";
-    public override string TypeCategory => "3D.InitialReference";
+    public override string TypeCategory => "Refinement.Initial model.Initial reference";
 
     public override string TypeName => "Initial reference";
 

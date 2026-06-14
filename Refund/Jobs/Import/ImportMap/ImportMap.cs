@@ -33,7 +33,7 @@ public class ImportMap : Job, ILocalJob
     /// <summary>
     /// Gets the category of this job type for organization in the UI and type registration.
     /// </summary>
-    public override string TypeCategory => "Import.Map";
+    public override string TypeCategory => "Common.Import.Map";
 
     /// <summary>
     /// Gets the full name of this job type for display in menus and the UI.

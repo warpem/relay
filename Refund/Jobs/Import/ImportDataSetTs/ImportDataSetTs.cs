@@ -14,7 +14,7 @@ public class ImportDataSetTs : WarpJob, IClusterJob
 {
     public override string TypeGuid => "8275ebaf-ae30-432b-bacf-8fc4d4dab549";
     
-    public override string TypeCategory => "Import.DataSetTs";
+    public override string TypeCategory => "Tilt-series.Import.Tilt series";
 
     public override string TypeName => "Tilt-series data set";
 

@@ -24,7 +24,7 @@ public class ModifySpecies : LocalJob, ILocalJob
     /// <summary>
     /// Gets the category of this job type for organization in the UI and type registration.
     /// </summary>
-    public override string TypeCategory => "M.ModifySpecies";
+    public override string TypeCategory => "M.Modify species";
 
     /// <summary>
     /// Gets the full name of this job type for display in menus and the UI.

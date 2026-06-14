@@ -22,7 +22,7 @@ public class CreateDataSource : WarpJob, IClusterJob
     /// <summary>
     /// Gets the category of this job type for organization in the UI and type registration.
     /// </summary>
-    public override string TypeCategory => "M.CreateDataSource";
+    public override string TypeCategory => "M.Create data source";
 
     /// <summary>
     /// Gets the full name of this job type for display in menus and the UI.

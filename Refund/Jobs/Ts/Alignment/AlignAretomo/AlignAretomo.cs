@@ -23,7 +23,7 @@ public class AlignAretomo : WarpJobGpu, IClusterJob
 {
     public override string TypeGuid => "b189fd92-ec29-489c-b70a-01f43eb62a9c";
 
-    public override string TypeCategory => "Tilt-series.Alignment.AlignAretomo";
+    public override string TypeCategory => "Tilt-series.Alignment.AreTomo";
 
     public override string TypeName => "AreTomo 2";
 

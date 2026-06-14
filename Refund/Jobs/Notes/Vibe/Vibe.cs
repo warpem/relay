@@ -37,7 +37,7 @@ public class Vibe : Job, ILocalJob
     /// or when cloning jobs:
     /// <code>clone = space.CreateJob(original.TypeCategory, original, view);</code>
     /// </summary>
-    public override string TypeCategory => "Notes.Vibe";
+    public override string TypeCategory => "Common.Notes.Vibe";
 
     /// <summary>
     /// The full display name of this job type.

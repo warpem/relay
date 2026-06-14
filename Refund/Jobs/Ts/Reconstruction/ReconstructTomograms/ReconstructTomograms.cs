@@ -19,7 +19,7 @@ public class ReconstructTomograms : WarpJobGpu, IClusterJob
 {
     public override string TypeGuid => "24b1cc22-2a52-477a-b4c7-19fac71f669f";
     
-    public override string TypeCategory => "Tilt-series.Reconstruction.Reconstruct";
+    public override string TypeCategory => "Tilt-series.Reconstruction.Tomograms";
 
     public override string TypeName => "Reconstruct tomograms";
 

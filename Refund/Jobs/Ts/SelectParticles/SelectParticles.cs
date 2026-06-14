@@ -67,7 +67,7 @@ public class SelectParticles : WarpJob, ILocalJob
 {
     public override string TypeGuid => "dfb781a9-e18d-4a80-8eff-b5d50b56c994";
     
-    public override string TypeCategory => "Tilt-series.SelectParticles";
+    public override string TypeCategory => "Tilt-series.Selection.Select particles";
 
     public override string TypeName => "Particle selection";
 

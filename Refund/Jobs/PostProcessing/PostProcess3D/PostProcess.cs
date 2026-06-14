@@ -41,7 +41,7 @@ public class  PostProcess : RelionJob, IClusterJob
     /// <summary>
     /// The category path for job type selection in the UI.
     /// </summary>
-    public override string TypeCategory => "PostProcessing.PostProcess3D";
+    public override string TypeCategory => "Refinement.Post-process.Post-process";
     
     /// <summary>
     /// The full display name of this job type.

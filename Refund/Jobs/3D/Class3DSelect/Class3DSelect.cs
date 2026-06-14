@@ -35,7 +35,7 @@ public class Class3DSelect : Job, ILocalJob
     /// <summary>
     /// Unique type category identifier used in job creation, cloning, and type registration.
     /// </summary>
-    public override string TypeCategory => "3D.Class3DSelect";
+    public override string TypeCategory => "Refinement.3D classes.Select 3D classes";
     
     /// <summary>
     /// User-friendly name shown in the application interface.
