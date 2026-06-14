@@ -78,6 +78,11 @@ public partial class QueueRepository
     /// Maps jobs to their finalization tasks to avoid duplicate finalization.
     /// </summary>
     private readonly ConcurrentDictionary<Job, Task> _finalizationTasks = new();
+
+    /// <summary>
+    /// Active worker pools keyed by their Manager job. One pool per running pooled job.
+    /// </summary>
+    private readonly ConcurrentDictionary<Job, WorkerPool> _workerPools = new();
     
     /// <summary>
     /// Semaphore to limit concurrent progress tracking operations
@@ -196,6 +201,12 @@ public partial class QueueRepository
 
             _logger.Information("Successfully loaded {LocalJobCount} local jobs and {ClusterQueueCount} cluster queues from {StatePath}",
                 _localQueue.QueuedJobs.Count, _clusterQueues.Count, Path.GetFullPath(_statePath));
+
+            // Re-adopt worker pools for any pooled jobs that were running at shutdown.
+            var pooledJobsToReadopt = _localQueue.QueuedJobs
+                .Concat(_clusterQueues.SelectMany(q => q.QueuedJobs))
+                .ToList();
+            ReAdoptPools(pooledJobsToReadopt);
         }
         catch (Exception ex)
         {

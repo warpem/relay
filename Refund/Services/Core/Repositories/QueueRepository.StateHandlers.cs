@@ -31,6 +31,24 @@ public partial class QueueRepository
             {
                 await job.WriteToLifecycleLog($"Staging started");
 
+                // If this is a pooled job, the pool queue must exist and have the batch
+                // templates configured before we submit the Manager. Fail fast otherwise.
+                if (job is IPooledJob pooledJob && pooledJob.PoolQueueId > 0)
+                {
+                    if (FindQueue(pooledJob.PoolQueueId) is not ClusterQueue poolQueue)
+                        throw new InvalidOperationException(
+                            $"Pool queue {pooledJob.PoolQueueId} not found. " +
+                            "Select a valid pool queue in the job settings.");
+                    if (string.IsNullOrWhiteSpace(poolQueue.ListJobsTemplate))
+                        throw new InvalidOperationException(
+                            $"Pool queue \"{poolQueue.Alias}\" has no List Jobs template configured. " +
+                            "Add a ListJobsTemplate (e.g. \"squeue -u $USER -h -o \\\"%i\\\"\") before using it as a pool queue.");
+                    if (string.IsNullOrWhiteSpace(poolQueue.CancelManyJobsTemplate))
+                        throw new InvalidOperationException(
+                            $"Pool queue \"{poolQueue.Alias}\" has no Cancel Many Jobs template configured. " +
+                            "Add a CancelManyJobsTemplate (e.g. \"scancel {{job_ids}}\") before using it as a pool queue.");
+                }
+
                 // Transition to Staging state
                 _jobUpdateCallback(job, j =>
                 {
@@ -132,6 +150,25 @@ public partial class QueueRepository
         {
             // Job is still running - track its progress
             await TrackJobProgress(job);
+
+            // If this is a pooled job, maintain its worker fleet.
+            if (job is IPooledJob pooledJob && pooledJob.PoolQueueId > 0)
+            {
+                try
+                {
+                    var (alive, submitted) = await GetOrCreatePool(job).Tick();
+                    _jobUpdateCallback(job, j =>
+                    {
+                        ((WarpJobGpu)j).PoolWorkersAlive = alive;
+                        ((WarpJobGpu)j).PoolWorkersSubmitted = submitted;
+                    });
+                }
+                catch (Exception ex)
+                {
+                    _logger.Error(ex, "Error ticking worker pool for job {JobId}", job.Id);
+                    await job.WriteToLifecycleLog($"Worker pool tick error: {ex.Message}");
+                }
+            }
         }
     }
 
@@ -146,6 +183,13 @@ public partial class QueueRepository
     /// <returns>A task representing the asynchronous operation</returns>
     private async Task HandleJobCompletion(Job job, JobQueue queue, bool isLocalQueue, ClusterJobStatus clusterStatus)
     {
+        // Dissolve the worker pool (if any) before finalizing the job.
+        if (_workerPools.TryRemove(job, out var pool))
+        {
+            try { await pool.Dissolve(); }
+            catch (Exception ex) { _logger.Error(ex, "Error dissolving worker pool for job {JobId}", job.Id); }
+        }
+
         // Update the job status based on the cluster status
         _jobUpdateCallback(job, j =>
         {
@@ -259,6 +303,13 @@ public partial class QueueRepository
             (DateTime.Now - job.GetMostRecentEvent().Timestamp).TotalSeconds > 30)
         {
             await job.WriteToLifecycleLog($"Job aborted with status {clusterStatus}");
+
+            // Dissolve the worker pool (if any) before finalizing the abort.
+            if (_workerPools.TryRemove(job, out var pool))
+            {
+                try { await pool.Dissolve(); }
+                catch (Exception ex) { _logger.Error(ex, "Error dissolving worker pool for job {JobId}", job.Id); }
+            }
 
             // Aggregate any remaining stderr into error.txt before marking as aborted
             try
