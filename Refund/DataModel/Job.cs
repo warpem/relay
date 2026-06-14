@@ -1630,7 +1630,10 @@ public interface IClusterJob { }
 /// </summary>
 public interface IPooledJob
 {
-    /// <summary>ID of the ClusterQueue to use for worker pool submissions. -1 means local/no pool.</summary>
+    /// <summary>
+    /// ID of the ClusterQueue to use for worker pool submissions.
+    /// Valid cluster queue IDs are >= 1; any value &lt; 1 (default -1) means no pool / local mode.
+    /// </summary>
     int PoolQueueId { get; }
 
     /// <summary>Target number of simultaneously running worker jobs.</summary>
