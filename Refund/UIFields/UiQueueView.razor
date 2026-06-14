@@ -1,0 +1,44 @@
+@namespace Refund.UIFields
+@inherits UiFieldViewBase
+
+<FluentSelect Class="borderless"
+              @bind-Value="@ValueT"
+              Width="100%"
+              Items="@Options"
+              OptionText="@(o => o.Text)"
+              OptionValue="@(o => o.Value)"
+              OptionSelected="@(o => o.Selected)"
+              Disabled="@IsDisabled" />
+
+@code
+{
+    private int CurrentId => Value is int i ? i : -1;
+
+    private string? ValueT
+    {
+        get => CurrentId.ToString();
+        set => ValueChanged.InvokeAsync(value != null ? int.Parse(value) : -1);
+    }
+
+    private List<Option<string>> Options
+    {
+        get
+        {
+            var current = CurrentId;
+            var options = new List<Option<string>>
+            {
+                new() { Value = "-1", Text = "Local (no pool)", Selected = current == -1 }
+            };
+
+            if (AdditionalData is List<(int id, string alias)> queues)
+                options.AddRange(queues.Select(q => new Option<string>
+                {
+                    Value    = q.id.ToString(),
+                    Text     = string.IsNullOrWhiteSpace(q.alias) ? $"Queue {q.id}" : q.alias,
+                    Selected = q.id == current,
+                }));
+
+            return options;
+        }
+    }
+}
