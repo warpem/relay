@@ -7,7 +7,7 @@ using Refund.Utils;
 using Warp;
 using Warp.Tools;
 
-namespace Refund.Jobs.Import.ImportParticles;
+namespace Refund.Jobs.Common.Import.ImportParticles;
 
 /// <summary>
 /// Job for importing particle datasets into the system.

@@ -3,7 +3,7 @@ using Refund.DataModel.ReadOnly;
 using Refund.UIFields;
 using Warp.Tools;
 
-namespace Refund.Jobs.Notes.Note;
+namespace Refund.Jobs.Common.Notes.Note;
 
 /// <summary>
 /// A documentation job that allows users to add text notes within a workflow.

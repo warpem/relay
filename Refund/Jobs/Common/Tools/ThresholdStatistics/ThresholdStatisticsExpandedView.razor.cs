@@ -11,7 +11,7 @@ using Refund.Services.Core.DataManager;
 using Refund.Services.Core.Session;
 using Warp;
 
-namespace Refund.Jobs.Tools.ThresholdStatistics;
+namespace Refund.Jobs.Common.Tools.ThresholdStatistics;
 
 public partial class ThresholdStatisticsExpandedView : IAsyncDisposable
 {

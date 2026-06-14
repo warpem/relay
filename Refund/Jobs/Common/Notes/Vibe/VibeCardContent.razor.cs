@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Components;
 using Refund.DataModel.ReadOnly;
 
-namespace Refund.Jobs.Notes.Vibe;
+namespace Refund.Jobs.Common.Notes.Vibe;
 
 /// <summary>
 /// Component responsible for rendering the Vibe job as a card in the workflow view.

@@ -6,21 +6,20 @@ using Refund.Jobs.Fs.MotionCtf.MotionAndCTF2D;
 
 namespace Refund.Tests.JobQueues;
 
+[Collection("JobRegistry")]
 public class WorkerPoolTests
 {
     private static readonly object _populateLock = new();
-    private static bool _populated;
 
-    // Job.PopulateStatic() is not idempotent (it Add()s into static dictionaries),
-    // so register concrete job types exactly once per process.
+    // Job.PopulateStatic() is not idempotent (it Add()s into static dictionaries), so register
+    // concrete job types exactly once per process. Keyed off the shared registry state so this
+    // is a no-op if another test class (e.g. JobTaxonomyTests) already populated it.
     private static void EnsurePopulated()
     {
         lock (_populateLock)
         {
-            if (_populated)
-                return;
-            Job.PopulateStatic();
-            _populated = true;
+            if (Job.Types.Count == 0)
+                Job.PopulateStatic();
         }
     }
 

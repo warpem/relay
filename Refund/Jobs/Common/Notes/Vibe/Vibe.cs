@@ -3,7 +3,7 @@ using Refund.DataModel.ReadOnly;
 using Refund.UIFields;
 using Warp.Tools;
 
-namespace Refund.Jobs.Notes.Vibe;
+namespace Refund.Jobs.Common.Notes.Vibe;
 
 /// <summary>
 /// A documentation job that allows users to add an emoji-based mood or "vibe" indicator

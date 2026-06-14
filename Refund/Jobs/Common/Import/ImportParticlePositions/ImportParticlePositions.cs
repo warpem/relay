@@ -9,7 +9,7 @@ using Refund.Utils;
 using Warp;
 using Warp.Tools;
 
-namespace Refund.Jobs.Import.ImportParticlePositions;
+namespace Refund.Jobs.Common.Import.ImportParticlePositions;
 
 [GenerateReadOnly]
 public class ImportParticlePositions : LocalJob, ILocalJob

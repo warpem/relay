@@ -4,9 +4,9 @@ using Refund.DataModel.ReadOnly;
 using Refund.Jobs.Refinement.Refinement3D.Refine3D;
 using Refund.Services;
 
-namespace Refund.Jobs.Import.ImportMap;
+namespace Refund.Jobs.Common.Import.ImportMask;
 
-public partial class ImportMapExpandedView
+public partial class ImportMaskExpandedView
 {
     /// <summary>
     /// Service for managing expanded job view state
@@ -21,7 +21,7 @@ public partial class ImportMapExpandedView
     /// <summary>
     /// The Refine3D job currently being viewed
     /// </summary>
-    private ReadOnlyImportMap _job;
+    private ReadOnlyImportMask _job;
 
     /// <summary>
     /// Initializes the component and sets up event handlers
@@ -46,9 +46,9 @@ public partial class ImportMapExpandedView
     private async Task HandleJobChanged(ReadOnlyJob job)
     {
         // Check if this is a Refine3D job
-        if (job is ReadOnlyImportMap importMap)
+        if (job is ReadOnlyImportMask importMask)
         {
-            _job = importMap;
+            _job = importMask;
         }
         else
         {

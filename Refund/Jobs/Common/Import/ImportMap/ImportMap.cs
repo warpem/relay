@@ -7,7 +7,7 @@ using Refund.Utils;
 using Warp.Headers;
 using Warp.Tools;
 
-namespace Refund.Jobs.Import.ImportMap;
+namespace Refund.Jobs.Common.Import.ImportMap;
 
 /// <summary>
 /// Job for importing 3D density maps into the system.

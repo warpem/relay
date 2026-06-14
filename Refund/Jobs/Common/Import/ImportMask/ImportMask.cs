@@ -7,7 +7,7 @@ using Refund.Utils;
 using Warp.Headers;
 using Warp.Tools;
 
-namespace Refund.Jobs.Import.ImportMask;
+namespace Refund.Jobs.Common.Import.ImportMask;
 
 [GenerateReadOnly]
 public class ImportMask : Job, ILocalJob

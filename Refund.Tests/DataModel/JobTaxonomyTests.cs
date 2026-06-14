@@ -2,6 +2,7 @@ using Refund.DataModel;
 
 namespace Refund.Tests.DataModel;
 
+[Collection("JobRegistry")]
 public class JobTaxonomyTests
 {
     // PopulateTypes() is not idempotent (DefaultValues is never cleared), so a second

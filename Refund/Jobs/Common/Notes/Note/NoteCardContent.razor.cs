@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Components;
 using Refund.DataModel.ReadOnly;
 
-namespace Refund.Jobs.Notes.Note;
+namespace Refund.Jobs.Common.Notes.Note;
 
 /// <summary>
 /// Component for displaying a Note job in the workflow card view.

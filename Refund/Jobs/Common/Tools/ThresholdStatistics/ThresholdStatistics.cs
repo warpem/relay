@@ -8,7 +8,7 @@ using Serilog;
 using Warp;
 using Warp.Tools;
 
-namespace Refund.Jobs.Tools.ThresholdStatistics;
+namespace Refund.Jobs.Common.Tools.ThresholdStatistics;
 
 /// <summary>
 /// Interactive job for general-purpose particle filtering by thresholding any numerical column
