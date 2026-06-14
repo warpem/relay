@@ -62,6 +62,27 @@ public class WorkerPoolTests
     }
 
     [Fact]
+    public void WarpJobGpu_PoolFields_RoundTripJson()
+    {
+        EnsurePopulated();
+
+        // Pool fields are [RelayProperty] ints handled by RelayBase.WriteToJson /
+        // ReadFromJson via reflection; a bare instance round-trips them fine.
+        var job = new MotionAndCTF2D { PoolQueueId = 3, PoolSize = 16 };
+        var node = new JsonObject();
+        job.WriteToJson(node);
+
+        // RelayBase.ReadFromJson(JsonNode) deserializes the [RelayProperty] fields.
+        // (Job adds an extra ReadFromJson(JsonNode, users) overload for UpdatedBy/Events,
+        // but the pool fields live on the base reflection path.)
+        var job2 = new MotionAndCTF2D();
+        job2.ReadFromJson(node);
+
+        Assert.Equal(3, job2.PoolQueueId);
+        Assert.Equal(16, job2.PoolSize);
+    }
+
+    [Fact]
     public void WarpJobGpu_PoolWorkersAlive_DefaultsToZero()
     {
         var job = new MotionAndCTF2D();
