@@ -65,11 +65,21 @@ public partial class QueueRepository
             if (FindQueue(pooledJob.PoolQueueId) is not ClusterQueue poolQueue)
                 continue;
 
-            var pool = new WorkerPool(poolQueue, pooledJob);
-            pool.Initialize();   // loads pool_state.json if present
-            _workerPools[job] = pool;
+            // Fault-isolate each re-adoption: one job whose Initialize throws (e.g. an
+            // inaccessible job directory or malformed pool queue) must not abort re-adoption
+            // of the remaining pooled jobs.
+            try
+            {
+                var pool = new WorkerPool(poolQueue, pooledJob);
+                pool.Initialize();   // loads pool_state.json if present
+                _workerPools[job] = pool;
 
-            _logger.Information("Re-adopted worker pool for job {JobId} from disk", job.Id);
+                _logger.Information("Re-adopted worker pool for job {JobId} from disk", job.Id);
+            }
+            catch (Exception ex)
+            {
+                _logger.Error(ex, "Failed to re-adopt worker pool for job {JobId}", job.Id);
+            }
         }
     }
 }

@@ -179,7 +179,11 @@ public partial class QueueRepository
                     break;
 
                 default:
-                    // For any other state (Finished, Failed, etc.), remove the job from the queue
+                    // For any other state (Finished, Failed, etc.), remove the job from the queue.
+                    // Dissolve any worker pool first so a pooled job leaving the queue never
+                    // strands its fleet (no-op for non-pooled jobs / already-dissolved pools).
+                    await DissolvePool(job);
+
                     if (isLocalQueue)
                         DequeueLocalJob(job);
                     else
@@ -192,6 +196,12 @@ public partial class QueueRepository
             // Log error and to job's error file
             _logger.Error(ex, "Error processing job {JobId} in {QueueType}", job.Id, queue.GetType().Name);
             await job.WriteToErrorLog($"Error processing job {job.Id} in {queue.GetType().Name}: {ex.Message}");
+
+            // Dissolve any worker pool before failing the job. A transient cluster outage can
+            // make CheckStatus/TrackJobProgress throw for a Running pooled job; without this the
+            // job would be marked Failed and dequeued while its GPU worker fleet keeps running
+            // (orphaned). DissolvePool swallows its own errors and is a no-op for non-pooled jobs.
+            await DissolvePool(job);
 
             // On error, try to transition the job to Failed state
             try
