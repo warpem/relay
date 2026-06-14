@@ -192,8 +192,42 @@ public class WorkerPoolTests
             // Tick returns the cumulative totalSubmissions (same contract as the cap test).
             // Restored total was 2; this tick submits 2 fresh workers -> cumulative total 4.
             var (_, total) = await pool2.Tick();
-            Assert.Equal(2, fakeQueue2.SubmitScriptCalls);   // 2 fresh workers submitted this tick
+            // total == 4 is the load-bearing assertion: without restore, _totalSubmissions would
+            // start at 0 and end at 2 here, not 4. SubmitScriptCalls == 2 passes with OR without
+            // restore (a fresh pool with an empty queue also submits 2), so it does not alone prove
+            // persistence — see WorkerPool_ReAdoption_DoesNotResubmitStillAliveWorkers for that.
+            Assert.Equal(2, fakeQueue2.SubmitScriptCalls);
             Assert.Equal(4, total);                          // cumulative total resumed from restored 2
+        }
+        finally { Directory.Delete(tmpDir, true); }
+    }
+
+    [Fact]
+    public async Task WorkerPool_ReAdoption_DoesNotResubmitStillAliveWorkers()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tmpDir);
+        try
+        {
+            // First run: submit 2 workers, persist their IDs.
+            var q1 = new FakePoolQueue();
+            var pool1 = new WorkerPool(q1, new FakePooledJob(tmpDir, poolQueueId: 1, poolSize: 2));
+            pool1.Initialize();
+            await pool1.Tick();   // submits IDs 100, 101 (FakePoolQueue._nextId starts at 100)
+
+            // Restart: new pool loads submitted_ids {100,101}; new queue still reports them alive.
+            // Depends on FakePoolQueue's deterministic ID scheme (100, 101, ...).
+            var q2 = new FakePoolQueue();
+            q2.SeedActive(new[] { "100", "101" });
+            var pool2 = new WorkerPool(q2, new FakePooledJob(tmpDir, poolQueueId: 1, poolSize: 2));
+            pool2.Initialize();
+
+            var (alive, _) = await pool2.Tick();
+
+            // Restored IDs are recognized as alive -> deficit 0 -> no new submissions.
+            // This is what proves the persisted submitted_ids SET is restored and used.
+            Assert.Equal(2, alive);
+            Assert.Equal(0, q2.SubmitScriptCalls);
         }
         finally { Directory.Delete(tmpDir, true); }
     }
@@ -227,6 +261,12 @@ internal class FakePoolQueue : IPoolQueue
     public HashSet<string> CancelledIds { get; } = new();
 
     public FakePoolQueue(bool alwaysEmpty = false) { _alwaysEmpty = alwaysEmpty; }
+
+    /// <summary>Seeds pre-existing active IDs so a "restart" queue can report prior workers as alive.</summary>
+    public void SeedActive(IEnumerable<string> ids)
+    {
+        foreach (var id in ids) _submitted.Add(id);
+    }
 
     public Task<string> SubmitScript(string scriptPath)
     {

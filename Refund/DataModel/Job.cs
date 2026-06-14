@@ -1630,6 +1630,9 @@ public interface IClusterJob { }
 /// </summary>
 public interface IPooledJob
 {
+    /// <summary>The job's working directory (where pool_state.json, worker_logs/, and the worker script live).</summary>
+    string DirectoryPath { get; }
+
     /// <summary>
     /// ID of the ClusterQueue to use for worker pool submissions.
     /// Valid cluster queue IDs are >= 1; any value &lt; 1 (default -1) means no pool / local mode.

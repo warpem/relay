@@ -28,19 +28,7 @@ public class WorkerPool
     {
         _poolQueue = poolQueue;
         _job       = job;
-        _jobDir    = GetJobDirectory(job);
-    }
-
-    // WorkerPool is constructed with WarpJobGpu (a Job) in production, but tests pass a
-    // standalone IPooledJob. Both expose DirectoryPath, so resolve it generically.
-    private static string GetJobDirectory(IPooledJob job)
-    {
-        if (job is Job j)
-            return j.DirectoryPath;
-        var prop = job.GetType().GetProperty("DirectoryPath");
-        return prop?.GetValue(job) as string
-               ?? throw new InvalidOperationException(
-                   "IPooledJob implementation must be a Job or expose a DirectoryPath property.");
+        _jobDir    = job.DirectoryPath;
     }
 
     /// <summary>
