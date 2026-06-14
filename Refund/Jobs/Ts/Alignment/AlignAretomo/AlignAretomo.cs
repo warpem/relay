@@ -12,7 +12,7 @@ using Warp;
 using Warp.Tools;
 using WarpHelper = Warp.Tools.Helper;
 
-namespace Refund.Jobs.Ts.Alignment.AlignAreTomo;
+namespace Refund.Jobs.Ts.Alignment.AlignAretomo;
 
 /// <summary>
 /// Job that creates tilt series stacks and runs Etomo patch tracking to obtain tilt series alignments.

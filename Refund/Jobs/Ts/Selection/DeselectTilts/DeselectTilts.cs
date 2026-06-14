@@ -11,7 +11,7 @@ using Warp;
 using Warp.Tools;
 using WarpHelper = Warp.Tools.Helper;
 
-namespace Refund.Jobs.Ts.DeselectTilts;
+namespace Refund.Jobs.Ts.Selection.DeselectTilts;
 
 [GenerateReadOnly]
 public class DeselectTilts : WarpJob, ILocalJob

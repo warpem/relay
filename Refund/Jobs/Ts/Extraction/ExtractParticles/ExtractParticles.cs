@@ -9,7 +9,7 @@ using Warp;
 using Warp.Tools;
 using WarpHelper = Warp.Tools.Helper;
 
-namespace Refund.Jobs.Ts.ExtractParticles;
+namespace Refund.Jobs.Ts.Extraction.ExtractParticles;
 
 /// <summary>
 /// Job that extracts particles from tilt series as 2D image stacks or 3D volumes.

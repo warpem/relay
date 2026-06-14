@@ -11,7 +11,7 @@ using Refund.Services.Core.Session;
 using Refund.Utils;
 using ProcessingStatus = Refund.Components.ThumbnailPanel.ProcessingStatus;
 
-namespace Refund.Jobs.Ts.Denoising;
+namespace Refund.Jobs.Ts.Reconstruction.Denoising;
 
 public partial class DenoisingExpandedView : IAsyncDisposable
 {

@@ -12,7 +12,7 @@ using Warp.Headers;
 using Warp.Tools;
 using WarpHelper = Warp.Tools.Helper;
 
-namespace Refund.Jobs.Ts.SelectParticles;
+namespace Refund.Jobs.Ts.Selection.SelectParticles;
 
 /// <summary>
 /// Represents a filter setting for a single parameter

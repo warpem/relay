@@ -18,7 +18,7 @@ using Warp.Tools;
 using ProcessingStatus = Refund.Components.ThumbnailPanel.ProcessingStatus;
 using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons;
 
-namespace Refund.Jobs.Ts.SelectParticles;
+namespace Refund.Jobs.Ts.Selection.SelectParticles;
 
 public partial class SelectParticlesExpandedView : IAsyncDisposable
 {

@@ -7,14 +7,14 @@ using Refund.Components.SingleAxisScatter;
 using Refund.Components.ThumbnailPanel;
 using Refund.DataModel.ReadOnly;
 using Refund.JobResources;
-using Refund.Jobs.Ts.DeselectTilts;
+using Refund.Jobs.Ts.Selection.DeselectTilts;
 using Refund.Services;
 using Refund.Services.Core.DataManager;
 using Refund.Services.Core.Session;
 using Refund.Utils;
 using Color = System.Drawing.Color;
 
-namespace Refund.Jobs.Ts.DeselectTilts;
+namespace Refund.Jobs.Ts.Selection.DeselectTilts;
 
 public partial class DeselectTiltsExpandedView : IAsyncDisposable
 {

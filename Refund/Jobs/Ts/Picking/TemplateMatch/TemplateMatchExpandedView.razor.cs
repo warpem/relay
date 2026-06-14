@@ -17,7 +17,7 @@ using Warp.Headers;
 using Warp.Tools;
 using ProcessingStatus = Refund.Components.ThumbnailPanel.ProcessingStatus;
 
-namespace Refund.Jobs.Ts.TemplateMatch;
+namespace Refund.Jobs.Ts.Picking.TemplateMatch;
 
 public partial class TemplateMatchExpandedView : IAsyncDisposable
 {

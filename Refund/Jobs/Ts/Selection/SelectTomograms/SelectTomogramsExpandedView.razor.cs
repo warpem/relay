@@ -14,7 +14,7 @@ using Warp.Tools;
 using WarpHelper = Warp.Tools.Helper;
 using ProcessingStatus = Refund.Components.ThumbnailPanel.ProcessingStatus;
 
-namespace Refund.Jobs.Ts.SelectTomograms;
+namespace Refund.Jobs.Ts.Selection.SelectTomograms;
 
 public partial class SelectTomogramsExpandedView : IAsyncDisposable
 {

@@ -5,7 +5,7 @@ using Microsoft.FluentUI.AspNetCore.Components;
 using Refund.DataModel;
 using Refund.DataModel.ReadOnly;
 using Refund.JobResources;
-using Refund.Jobs.Ts.SelectParticles;
+using Refund.Jobs.Ts.Selection.SelectParticles;
 using Refund.Services;
 using Refund.Services.Core.DataManager;
 using Refund.Services.Core.Session;

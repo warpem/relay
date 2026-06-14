@@ -20,7 +20,7 @@ using ProcessingStatus = Refund.Components.ThumbnailPanel.ProcessingStatus;
 using Color = System.Drawing.Color;
 using WarpHelper = Warp.Tools.Helper;
 
-namespace Refund.Jobs.Ts.ExtractParticles;
+namespace Refund.Jobs.Ts.Extraction.ExtractParticles;
 
 public partial class ExtractParticlesExpandedView : IAsyncDisposable
 {

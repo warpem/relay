@@ -2,7 +2,7 @@ using System.Globalization;
 using Refund.DataModel;
 using Refund.DataModel.ReadOnly;
 using Refund.JobResources;
-using Refund.Jobs.Ts.SelectParticles;
+using Refund.Jobs.Ts.Selection.SelectParticles;
 using Refund.Utils;
 using Serilog;
 using Warp;

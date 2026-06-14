@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace Refund.Jobs.Ts.ExtractParticles;
+namespace Refund.Jobs.Ts.Extraction.ExtractParticles;
 
 /// <summary>
 /// Represents statistics about extracted particles.

@@ -8,7 +8,7 @@ using Warp;
 using Warp.Tools;
 using WarpHelper = Warp.Tools.Helper;
 
-namespace Refund.Jobs.Ts.Denoising;
+namespace Refund.Jobs.Ts.Reconstruction.Denoising;
 
 /// <summary>
 /// Job that reconstructs tomograms from tilt series.

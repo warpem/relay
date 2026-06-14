@@ -9,7 +9,7 @@ using Warp;
 using Warp.Tools;
 using WarpHelper = Warp.Tools.Helper;
 
-namespace Refund.Jobs.Ts.SelectTomograms;
+namespace Refund.Jobs.Ts.Selection.SelectTomograms;
 
 [GenerateReadOnly]
 public class SelectTomograms : WarpJob, ILocalJob

@@ -10,7 +10,7 @@ using Warp;
 using Warp.Tools;
 using WarpHelper = Warp.Tools.Helper;
 
-namespace Refund.Jobs.Ts.TemplateMatch;
+namespace Refund.Jobs.Ts.Picking.TemplateMatch;
 
 /// <summary>
 /// Job that performs template matching on reconstructed tomograms.

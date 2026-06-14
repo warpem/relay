@@ -7,7 +7,7 @@ using Refund.UIFields;
 using Warp.Tools;
 using WarpHelper = Warp.Tools.Helper;
 
-namespace Refund.Jobs.Import.ImportDataSetTs;
+namespace Refund.Jobs.Ts.Import.ImportDataSetTs;
 
 [GenerateReadOnly]
 public class ImportDataSetTs : WarpJob, IClusterJob
