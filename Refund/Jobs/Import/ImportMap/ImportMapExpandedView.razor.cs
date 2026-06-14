@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Components;
 using Microsoft.FluentUI.AspNetCore.Components;
 using Refund.DataModel.ReadOnly;
-using Refund.Jobs._3D.Refine3D;
+using Refund.Jobs.Refinement.Refinement3D.Refine3D;
 using Refund.Services;
 
 namespace Refund.Jobs.Import.ImportMap;

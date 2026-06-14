@@ -1,12 +1,16 @@
 using Microsoft.AspNetCore.Components;
 using Microsoft.FluentUI.AspNetCore.Components;
 using Refund.DataModel.ReadOnly;
-using Refund.Jobs.Refinement.Refinement3D.Refine3D;
 using Refund.Services;
 
-namespace Refund.Jobs.Import.ImportMask;
+namespace Refund.Jobs.Refinement.Refinement3D.Refine3D;
 
-public partial class ImportMaskExpandedView
+/// <summary>
+/// Component for the expanded view of a Refine3D job.
+/// Displays the refined map visualizations including orthoslices,
+/// FSC plots, and angular distribution.
+/// </summary>
+public partial class Refine3DExpandedView
 {
     /// <summary>
     /// Service for managing expanded job view state
@@ -21,7 +25,7 @@ public partial class ImportMaskExpandedView
     /// <summary>
     /// The Refine3D job currently being viewed
     /// </summary>
-    private ReadOnlyImportMask _job;
+    private ReadOnlyRefine3D _job;
 
     /// <summary>
     /// Initializes the component and sets up event handlers
@@ -46,9 +50,9 @@ public partial class ImportMaskExpandedView
     private async Task HandleJobChanged(ReadOnlyJob job)
     {
         // Check if this is a Refine3D job
-        if (job is ReadOnlyImportMask importMask)
+        if (job is ReadOnlyRefine3D refine3D)
         {
-            _job = importMask;
+            _job = refine3D;
         }
         else
         {

@@ -1,8 +1,8 @@
 using Microsoft.AspNetCore.Components;
 using Refund.DataModel;
 using Refund.DataModel.ReadOnly;
-using Refund.Jobs._2D.Class2D;
-using Refund.Jobs._3D.Refine3D;
+using Refund.Jobs.Refinement.Classes2D.Class2D;
+using Refund.Jobs.Refinement.Refinement3D.Refine3D;
 using Refund.Jobs.Fs.MotionCtf.Motion2D;
 using Refund.Services.Core.DataManager;
 using Refund.Services.Core.Session;

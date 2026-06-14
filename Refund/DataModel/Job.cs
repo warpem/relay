@@ -6,7 +6,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Refund.Components.Jobs;
 using Refund.DataModel.ReadOnly;
-using Refund.Jobs._2D.Class2D;
+using Refund.Jobs.Refinement.Classes2D.Class2D;
 using Refund.UIFields;
 using Refund.Utils;
 using Serilog;
