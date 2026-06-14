@@ -2,13 +2,13 @@ using System.Text.Json;
 using Refund.DataModel;
 using Refund.DataModel.ReadOnly;
 using Refund.JobResources;
-using Refund.Jobs.FrameSeries.MotionCtf.MotionAndCTF2D;
+using Refund.Jobs.Fs.MotionCtf.MotionAndCTF2D;
 using Refund.UIFields;
 using Refund.Utils;
 using Warp;
 using Warp.Tools;
 
-namespace Refund.Jobs.FrameSeries.Extraction.ExtractParticles2D;
+namespace Refund.Jobs.Fs.Extraction.ExtractParticles2D;
 
 [GenerateReadOnly]
 public class ExtractParticles2D : WarpJobGpu, IClusterJob

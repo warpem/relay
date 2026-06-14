@@ -2,7 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Refund.DataModel;
 using Refund.JobQueues;
-using Refund.Jobs.FrameSeries.MotionCtf.MotionAndCTF2D;
+using Refund.Jobs.Fs.MotionCtf.MotionAndCTF2D;
 
 namespace Refund.Tests.JobQueues;
 

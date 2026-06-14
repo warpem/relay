@@ -4,7 +4,7 @@ using Refund.Components.ThumbnailPanel;
 using Refund.DataModel.ReadOnly;
 using Refund.Services;
 
-namespace Refund.Jobs.FrameSeries.Extraction.ExtractParticles2D;
+namespace Refund.Jobs.Fs.Extraction.ExtractParticles2D;
 
 public partial class ExtractParticles2DExpandedView : IAsyncDisposable
 {

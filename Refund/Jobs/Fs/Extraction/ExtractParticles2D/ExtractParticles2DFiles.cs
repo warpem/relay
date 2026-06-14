@@ -1,4 +1,4 @@
-namespace Refund.Jobs.FrameSeries.Extraction.ExtractParticles2D;
+namespace Refund.Jobs.Fs.Extraction.ExtractParticles2D;
 
 public class ExtractParticles2DFiles
 {

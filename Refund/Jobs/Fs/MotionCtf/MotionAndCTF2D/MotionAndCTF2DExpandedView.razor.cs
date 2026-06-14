@@ -8,7 +8,7 @@ using Refund.Services;
 using Refund.Utils;
 using Color = System.Drawing.Color;
 
-namespace Refund.Jobs.FrameSeries.MotionCtf.MotionAndCTF2D;
+namespace Refund.Jobs.Fs.MotionCtf.MotionAndCTF2D;
 
 public partial class MotionAndCTF2DExpandedView : IAsyncDisposable
 {
