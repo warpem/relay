@@ -31,7 +31,7 @@ namespace Refund.JobQueues;
 ///    to prevent external code from modifying configuration
 ///    through the QueueRepository serialization
 /// </remarks>
-public class ClusterQueue : JobQueue
+public class ClusterQueue : JobQueue, IPoolQueue
 {
     private static readonly ConditionalWeakTable<ClusterQueue, ReadOnlyClusterQueue> ReadOnlyCache = new();
     
@@ -465,6 +465,13 @@ public class ClusterQueue : JobQueue
         onRawOutput?.Invoke(output);
         return ParseClusterJobId(output);
     }
+
+    /// <summary>
+    /// Explicit IPoolQueue implementation. The public SubmitScript carries an optional
+    /// onRawOutput callback (Task 1's raw-output logging), so its signature does not
+    /// satisfy the parameterless-callback interface contract directly; this forwards to it.
+    /// </summary>
+    Task<string> IPoolQueue.SubmitScript(string scriptPath) => SubmitScript(scriptPath);
 
     /// <summary>
     /// Builds and writes a worker submission script without requiring a full Job object.
