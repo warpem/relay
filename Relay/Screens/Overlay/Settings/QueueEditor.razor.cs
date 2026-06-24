@@ -176,6 +176,11 @@ public partial class QueueEditor
         return ["job_id"];
     }
 
+    private IEnumerable<string> GetCancelManyJobsTemplateVariables()
+    {
+        return ["job_ids"];
+    }
+
     private async Task InsertSubmissionScriptVariable(string variable)
     {
         if (_selectedQueue == null)

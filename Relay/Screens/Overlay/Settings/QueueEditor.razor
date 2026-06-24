@@ -216,6 +216,43 @@
                                 <FluentTextField Value="@_selectedQueue.AbortJobTemplate"
                                                  ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.AbortJobTemplate)))" />
                             </div>
+
+                            <div class="settings-field">
+                                <span>List jobs command template</span>
+
+                                <div class="setting-variable-chips">
+                                    Required only for queues used as GPU worker pools.
+                                    Should return one active job ID per line, e.g.
+                                    <span style="font-family: monospace;">squeue -u $USER -h -o "%i"</span>
+                                </div>
+
+                                <FluentTextField Value="@_selectedQueue.ListJobsTemplate"
+                                                 ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.ListJobsTemplate)))" />
+                            </div>
+
+                            <div class="settings-field">
+                                <span>Cancel many jobs command template</span>
+
+                                <div class="setting-variable-chips">
+                                    Required only for queues used as GPU worker pools.
+                                    Available variables:
+
+                                    @foreach (var _variable in GetCancelManyJobsTemplateVariables())
+                                    {
+                                        var variable = _variable;
+
+                                        <FluentBadge Style="font-family: monospace; font-size: 10px;"
+                                                     Appearance="Appearance.Neutral"
+                                                     Circular="true"
+                                                     OnClick="() => InsertSettingVariable(variable, nameof(_selectedQueue.CancelManyJobsTemplate))">
+                                            {{ @variable }}
+                                        </FluentBadge>
+                                    }
+                                </div>
+
+                                <FluentTextField Value="@_selectedQueue.CancelManyJobsTemplate"
+                                                 ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.CancelManyJobsTemplate)))" />
+                            </div>
                         </div>
                     </FluentTab>
                     
