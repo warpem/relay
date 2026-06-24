@@ -49,16 +49,6 @@ Relay loads configuration from two sources:
 1. **Built-in defaults** — `Relay/appsettings.json` (ships with the application)
 2. **Local overrides** — `relay.json` in the working directory (your site-specific settings)
 
-Create a `relay.json` in the directory where you'll run Relay:
-
-```json
-{
-  "Relay": {
-    "ProjectsPath": "/path/to/your/projects"
-  }
-}
-```
-
 ### Authentication
 
 Relay supports two authentication modes:
