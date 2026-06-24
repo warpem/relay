@@ -94,6 +94,15 @@
         }
     </div>
 
+    @if (Job is ReadOnlyWarpJobGpu gpuJob && gpuJob.PoolQueueId > 0)
+    {
+        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 3px;">
+            <FluentIcon Value="@(new Icons.Regular.Size12.Server())"/>
+            <span>Pool: @gpuJob.PoolWorkersAlive / @gpuJob.PoolSize workers</span>
+            <FluentBadge>@gpuJob.PoolWorkersSubmitted submitted</FluentBadge>
+        </div>
+    }
+
     <FluentMenu Anchor="@($"job-card-{_id}")" Trigger="MouseButton.Right"
                 Anchored="false" OpenChanged="HandleContextMenu">
         <span style="font-size: 0.75rem; padding: 0 1rem; opacity: 0.5; max-width: 200px;">
