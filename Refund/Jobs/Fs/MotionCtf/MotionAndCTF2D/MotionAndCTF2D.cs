@@ -59,7 +59,9 @@ public class MotionAndCTF2D : WarpJobGpu, IClusterJob
     /// </summary>
     public override Type ExpandedViewType => typeof(MotionAndCTF2DExpandedView);
 
-    public override int CoreCount => NGpus * PerDevice * 6;
+    // When pooled, defer to the base Manager (CPU-only) core profile; otherwise scale by the
+    // GPUs/workers this job runs locally.
+    public override int CoreCount => IsPooled ? base.CoreCount : NGpus * PerDevice * 6;
 
     #region Parameters
 

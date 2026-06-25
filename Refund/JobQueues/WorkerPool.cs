@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Serilog;
 using Refund.DataModel;
 
 namespace Refund.JobQueues;
@@ -13,6 +14,7 @@ public class WorkerPool
     private readonly IPoolQueue _poolQueue;
     private readonly IPooledJob _job;
     private readonly string     _jobDir;
+    private readonly ILogger    _log;
 
     private readonly HashSet<string> _submittedIds = new();
     private          HashSet<string> _aliveIds     = new();
@@ -29,6 +31,7 @@ public class WorkerPool
         _poolQueue = poolQueue;
         _job       = job;
         _jobDir    = job.DirectoryPath;
+        _log       = Log.ForContext<WorkerPool>().ForContext("PoolDir", _jobDir);
     }
 
     /// <summary>
@@ -42,19 +45,34 @@ public class WorkerPool
         Directory.CreateDirectory(WorkerLogsDir);
 
         _workerScriptPath = WorkerScriptPath;
+        // Must supply every variable the submission-script template expects (mirroring the
+        // Manager's Job.GetResourceValues + job_id substitution). A missing variable is stripped
+        // to an empty value, producing a malformed directive — e.g. an empty "#SBATCH -J " makes
+        // SLURM swallow the following "-p", orphaning the partition name. Each worker is one GPU;
+        // %j lets SLURM give each worker its own log file under worker_logs/.
         var resourceValues = new Dictionary<string, string>
         {
-            { "n_cores",        _job.WorkerCoreCount.ToString() },
-            { "memory_gb",      _job.WorkerMemoryGb.ToString() },
-            { "n_gpus",         "1" },
-            { "gpu_memory_gb",  _job.WorkerMemoryGb.ToString() },
-            { "worker_log_dir", WorkerLogsDir },
+            { "job_id",        $"{Path.GetFileName(_jobDir)}-worker" },
+            { "n_processes",   "1" },
+            { "n_cores",       _job.WorkerCoreCount.ToString() },
+            { "memory_gb",     _job.WorkerMemoryGb.ToString() },
+            { "n_gpus",        "1" },
+            { "gpu_memory_gb", _job.WorkerMemoryGb.ToString() },
+            { "std_out",       Path.Combine(WorkerLogsDir, "%j.out") },
+            { "std_err",       Path.Combine(WorkerLogsDir, "%j.err") },
+            { "run_directory", _jobDir },
         };
         _poolQueue.BuildWorkerScript(
             _job.GetWorkerCommand(0), resourceValues, _job.WorkerRequiredModules, _workerScriptPath);
 
         LoadState();
         _initialized = true;
+
+        _log.Information(
+            "Worker pool initialized: poolQueueId={PoolQueueId} target={Target} workerCmd={WorkerCmd} " +
+            "scriptPath={ScriptPath} restoredSubmittedIds={Restored} totalSubmissions={Total}",
+            _job.PoolQueueId, _job.PoolSize, _job.GetWorkerCommand(0),
+            _workerScriptPath, _submittedIds.Count, _totalSubmissions);
     }
 
     /// <summary>
@@ -73,12 +91,20 @@ public class WorkerPool
         int canSubmit = Math.Max(0, _job.PoolSubmissionCap - _totalSubmissions);
         int toSubmit  = Math.Min(deficit, canSubmit);
 
+        _log.Information(
+            "Worker pool tick: target={Target} schedulerActive={SchedulerActive} ours={Submitted} " +
+            "alive={Alive} deficit={Deficit} capRemaining={CapRemaining} submitting={ToSubmit}",
+            _job.PoolSize, active.Count, _submittedIds.Count, _aliveIds.Count,
+            deficit, canSubmit, toSubmit);
+
         for (int i = 0; i < toSubmit; i++)
         {
             string id = await _poolQueue.SubmitScript(_workerScriptPath);
             _submittedIds.Add(id);
             _aliveIds.Add(id);
             _totalSubmissions++;
+            _log.Information("Worker pool submitted worker {Index}/{ToSubmit}: clusterJobId={ClusterJobId}",
+                i + 1, toSubmit, id);
         }
 
         SaveState();
@@ -91,6 +117,8 @@ public class WorkerPool
     /// </summary>
     public async Task Dissolve()
     {
+        _log.Information("Worker pool dissolving: cancelling {Count} alive workers", _aliveIds.Count);
+
         if (_aliveIds.Count > 0)
             await _poolQueue.CancelJobs(_aliveIds);
 

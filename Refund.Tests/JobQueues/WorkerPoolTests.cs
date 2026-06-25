@@ -93,11 +93,14 @@ public class WorkerPoolTests
     [Fact]
     public void WarpJobGpu_GetWorkerCommand_FormatsCommandWithDeviceIndex()
     {
-        var job = new MotionAndCTF2D();
+        // GetWorkerCommand cd's to RunDirectory (Space.RootDirectory), so a Space is required.
+        var job = MakeJobWithSpace();
         var cmd = ((IPooledJob)job).GetWorkerCommand(2);
         Assert.Contains("WarpWorker2", cmd);
+        Assert.Contains("--queue-dir ", cmd);   // WarpWorker2's flag (NOT the Manager's --task_dir)
         Assert.Contains("--device 2", cmd);
-        Assert.Contains("tasks", cmd);
+        Assert.Contains("--log-dir ", cmd);
+        Assert.Contains("cd ", cmd);            // runs from the job's working directory, like the Manager
     }
 
     [Fact]

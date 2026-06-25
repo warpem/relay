@@ -484,9 +484,10 @@ public class ClusterQueue : JobQueue, IPoolQueue
         string[] requiredModules,
         string scriptPath)
     {
-        // Unlike the Job-based path, worker scripts have no {{job_id}} to substitute —
-        // a pool worker is not a Relay Job. Any {{job_id}} in the template is dropped by
-        // ProcessSubmissionScript's unmatched-tag cleanup.
+        // The caller (WorkerPool) supplies every template variable in resourceValues — including
+        // job_id, std_out/std_err, n_processes — so no separate {{job_id}} substitution is needed
+        // here. Any template variable NOT in resourceValues is stripped to empty by
+        // ProcessSubmissionScript's unmatched-tag cleanup, which can yield a malformed directive.
         string script = ProcessSubmissionScript(
             SubmissionScriptTemplate.ReplaceRegex("{{\\s*command\\s*}}", command),
             resourceValues,
