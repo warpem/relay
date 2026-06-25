@@ -316,7 +316,11 @@ public class ClusterQueue : JobQueue, IPoolQueue
                 "custom",
                 (output) =>
                 {
-                    if (JobStatusParseTemplatePending == null || JobStatusParseTemplateRunning == null || JobStatusParseTemplateFailed == null)
+                    // Treat empty templates as "not configured" — otherwise string.Contains("")
+                    // matches every line and misclassifies all output as Pending.
+                    if (string.IsNullOrEmpty(JobStatusParseTemplatePending) ||
+                        string.IsNullOrEmpty(JobStatusParseTemplateRunning) ||
+                        string.IsNullOrEmpty(JobStatusParseTemplateFailed))
                         return null;
 
                     if (output.Contains(JobStatusParseTemplatePending)) return ClusterJobStatus.Pending;
@@ -668,27 +672,75 @@ public class ClusterQueue : JobQueue, IPoolQueue
     }
     
     /// <summary>
-    /// Returns the set of currently active cluster job IDs by executing ListJobsTemplate.
+    /// Returns the currently active cluster jobs (id → status) by executing ListJobsTemplate.
     /// Throws if ListJobsTemplate is not configured.
     /// </summary>
-    public async Task<HashSet<string>> ListActiveJobIds()
+    /// <remarks>
+    /// The list command should print one job per line with the job ID as the first
+    /// whitespace-separated token and the scheduler state somewhere on the same line, e.g.
+    /// SLURM: <c>squeue -u $USER -h -o "%i %T"</c>. The state token is classified with the same
+    /// per-scheduler parsers used for single-job status, so the user-configurable status patterns
+    /// (JobStatusParseTemplate*) apply here too. A line carrying only an ID (no recognizable
+    /// state) maps to <see cref="ClusterJobStatus.Unknown"/>, which callers treat as alive-pending.
+    /// </remarks>
+    public async Task<Dictionary<string, ClusterJobStatus>> ListActiveJobs()
     {
         if (string.IsNullOrWhiteSpace(ListJobsTemplate))
             throw new InvalidOperationException(
                 $"Queue \"{Alias}\" has no ListJobsTemplate configured. " +
-                "Add a command that prints one active job ID per line (e.g. squeue -u $USER -h -o \"%i\").");
+                "Add a command that prints one active job per line as \"<id> <state>\" " +
+                "(e.g. squeue -u $USER -h -o \"%i %T\").");
 
         string output = await ExecuteOnCluster(ListJobsTemplate);
-        return ParseJobIds(output);
+        return ParseActiveJobs(output);
     }
 
     /// <summary>
-    /// Parses scheduler stdout (one job ID per line) into a set of IDs.
-    /// Handles both \n and \r\n line endings; blank lines are ignored.
+    /// Parses scheduler stdout (one job per line, ID first, state following) into an id → status map.
+    /// Handles both \n and \r\n line endings; blank lines are ignored. Lines with only an ID classify
+    /// as Unknown.
     /// </summary>
-    internal static HashSet<string> ParseJobIds(string output) =>
-        output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-              .ToHashSet();
+    internal Dictionary<string, ClusterJobStatus> ParseActiveJobs(string output)
+    {
+        var result = new Dictionary<string, ClusterJobStatus>();
+
+        foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var tokens = line.Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
+            if (tokens.Length == 0)
+                continue;
+
+            string id   = tokens[0];
+            string rest = tokens.Length > 1 ? string.Join(' ', tokens.Skip(1)) : "";
+            result[id]  = ClassifyState(rest);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Classifies a scheduler state token (e.g. "RUNNING", "PD") using the same per-scheduler
+    /// parsers as single-job status. The token is space-padded before matching so short codes
+    /// like " R " / " PD " still hit the SLURM parser's word-boundary checks. Returns Unknown
+    /// when no parser recognizes the state.
+    /// </summary>
+    private ClusterJobStatus ClassifyState(string stateText)
+    {
+        string padded = $" {stateText} ";
+
+        foreach (var parser in JobStatusParsers)
+        {
+            try
+            {
+                var status = parser.Value(padded);
+                if (status is { } s && s != ClusterJobStatus.Unknown)
+                    return s;
+            }
+            catch { }
+        }
+
+        return ClusterJobStatus.Unknown;
+    }
 
     /// <summary>
     /// Cancels all provided cluster job IDs in a single scheduler call.

@@ -98,7 +98,7 @@
     {
         <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 3px;">
             <FluentIcon Value="@(new Icons.Regular.Size12.Server())"/>
-            <span>Pool: @gpuJob.PoolWorkersAlive / @gpuJob.PoolSize workers</span>
+            <span>Pool: @gpuJob.PoolWorkersRunning running · @(gpuJob.PoolWorkersAlive - gpuJob.PoolWorkersRunning) pending / @gpuJob.PoolSize target</span>
             <FluentBadge>@gpuJob.PoolWorkersSubmitted submitted</FluentBadge>
         </div>
     }

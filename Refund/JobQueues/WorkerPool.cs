@@ -64,15 +64,29 @@ public class WorkerPool
 
     /// <summary>
     /// One maintenance tick: reconcile alive workers, submit replacements up to the cap.
-    /// Returns (aliveCount, totalSubmissions) for the caller to push to the job model.
+    /// Returns (aliveCount, runningCount, totalSubmissions) for the caller to push to the job model.
+    /// "Alive" is every one of our workers still present and non-terminal in the scheduler
+    /// (running + pending + unknown); "running" is the subset the scheduler reports as actually
+    /// executing. The difference is pending — the distinction the pool UI needs so a fleet that is
+    /// mostly queued doesn't read as fully up.
     /// </summary>
-    public async Task<(int aliveCount, int totalSubmissions)> Tick()
+    public async Task<(int aliveCount, int runningCount, int totalSubmissions)> Tick()
     {
         if (!_initialized)
             throw new InvalidOperationException("Call Initialize() before Tick().");
 
-        var active = await _poolQueue.ListActiveJobIds();
-        _aliveIds  = _submittedIds.Intersect(active).ToHashSet();
+        var active = await _poolQueue.ListActiveJobs();
+
+        // Keep only our workers that are still present and not in a terminal state — a worker that
+        // finished or failed must be replaced, not counted as filling its slot.
+        var ours = _submittedIds
+            .Where(id => active.TryGetValue(id, out var s)
+                         && s != ClusterJobStatus.Finished
+                         && s != ClusterJobStatus.Failed)
+            .ToDictionary(id => id, id => active[id]);
+
+        _aliveIds       = ours.Keys.ToHashSet();
+        int runningCount = ours.Count(kv => kv.Value == ClusterJobStatus.Running);
 
         int deficit   = Math.Max(0, _job.PoolSize - _aliveIds.Count);
         int canSubmit = Math.Max(0, _job.PoolSubmissionCap - _totalSubmissions);
@@ -80,9 +94,10 @@ public class WorkerPool
 
         _log.Debug(
             "Worker pool tick: target={Target} schedulerActive={SchedulerActive} ours={Submitted} " +
-            "alive={Alive} deficit={Deficit} capRemaining={CapRemaining} submitting={ToSubmit}",
+            "alive={Alive} running={Running} pending={Pending} deficit={Deficit} " +
+            "capRemaining={CapRemaining} submitting={ToSubmit}",
             _job.PoolSize, active.Count, _submittedIds.Count, _aliveIds.Count,
-            deficit, canSubmit, toSubmit);
+            runningCount, _aliveIds.Count - runningCount, deficit, canSubmit, toSubmit);
 
         for (int i = 0; i < toSubmit; i++)
         {
@@ -95,7 +110,7 @@ public class WorkerPool
         }
 
         SaveState();
-        return (_aliveIds.Count, _totalSubmissions);
+        return (_aliveIds.Count, runningCount, _totalSubmissions);
     }
 
     /// <summary>

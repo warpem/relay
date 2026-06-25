@@ -222,8 +222,11 @@
 
                                 <div class="setting-variable-chips">
                                     Required only for queues used as GPU worker pools.
-                                    Should return one active job ID per line, e.g.
-                                    <span style="font-family: monospace;">squeue -u $USER -h -o "%i"</span>
+                                    Should print one active job per line as
+                                    <span style="font-family: monospace;">&lt;id&gt; &lt;state&gt;</span>
+                                    so the pool can tell running from pending workers, e.g.
+                                    <span style="font-family: monospace;">squeue -u $USER -h -o "%i %T"</span>.
+                                    The state is matched with the same patterns as the job-status templates below.
                                 </div>
 
                                 <FluentTextField Value="@_selectedQueue.ListJobsTemplate"

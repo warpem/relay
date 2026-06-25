@@ -166,11 +166,41 @@ public class WorkerPoolTests
             var pool = new WorkerPool(fakeQueue, new FakePooledJob(tmpDir, poolQueueId: 1, poolSize: 3));
             pool.Initialize();
 
-            var (alive, submitted) = await pool.Tick();
+            var (alive, running, submitted) = await pool.Tick();
 
             Assert.Equal(3, submitted);
             Assert.Equal(3, alive);
+            // Workers just submitted this tick are alive but not yet reported running by the
+            // scheduler (the active-jobs snapshot is taken before submission) — so running == 0.
+            // The running/pending split is exercised on a later tick in
+            // WorkerPool_Tick_ReportsRunningSeparatelyFromPending.
+            Assert.Equal(0, running);
             Assert.Equal(3, fakeQueue.SubmitScriptCalls);
+        }
+        finally { Directory.Delete(tmpDir, true); }
+    }
+
+    [Fact]
+    public async Task WorkerPool_Tick_ReportsRunningSeparatelyFromPending()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tmpDir);
+        try
+        {
+            var fakeQueue = new FakePoolQueue();
+            var pool = new WorkerPool(fakeQueue, new FakePooledJob(tmpDir, poolQueueId: 1, poolSize: 3));
+            pool.Initialize();
+
+            // First tick submits IDs 100, 101, 102 (FakePoolQueue._nextId starts at 100).
+            await pool.Tick();
+
+            // Mark one worker pending; the fleet is full so the next tick submits nothing.
+            fakeQueue.PendingIds.Add("100");
+            var (alive, running, _) = await pool.Tick();
+
+            Assert.Equal(3, alive);                  // all three still present and non-terminal
+            Assert.Equal(2, running);                // one is pending, two are running
+            Assert.Equal(3, fakeQueue.SubmitScriptCalls);   // no extra submissions: pending counts as alive
         }
         finally { Directory.Delete(tmpDir, true); }
     }
@@ -189,7 +219,7 @@ public class WorkerPoolTests
 
             await pool.Tick();   // submits 2 (total 2)
             await pool.Tick();   // submits 2 (total 4)
-            var (_, submitted) = await pool.Tick();   // cap reached, submits 0
+            var (_, _, submitted) = await pool.Tick();   // cap reached, submits 0
 
             Assert.Equal(4, submitted);
             Assert.Equal(4, fakeQueue.SubmitScriptCalls);
@@ -237,7 +267,7 @@ public class WorkerPoolTests
             // so Tick must submit 2 fresh workers — and total_submissions resumes from 2, giving cap room.
             // Tick returns the cumulative totalSubmissions (same contract as the cap test).
             // Restored total was 2; this tick submits 2 fresh workers -> cumulative total 4.
-            var (_, total) = await pool2.Tick();
+            var (_, _, total) = await pool2.Tick();
             // total == 4 is the load-bearing assertion: without restore, _totalSubmissions would
             // start at 0 and end at 2 here, not 4. SubmitScriptCalls == 2 passes with OR without
             // restore (a fresh pool with an empty queue also submits 2), so it does not alone prove
@@ -268,7 +298,7 @@ public class WorkerPoolTests
             var pool2 = new WorkerPool(q2, new FakePooledJob(tmpDir, poolQueueId: 1, poolSize: 2));
             pool2.Initialize();
 
-            var (alive, _) = await pool2.Tick();
+            var (alive, _, _) = await pool2.Tick();
 
             // Restored IDs are recognized as alive -> deficit 0 -> no new submissions.
             // This is what proves the persisted submitted_ids SET is restored and used.
@@ -327,8 +357,15 @@ internal class FakePoolQueue : IPoolQueue
         return Task.FromResult(id);
     }
 
-    public Task<HashSet<string>> ListActiveJobIds() =>
-        Task.FromResult(_alwaysEmpty ? new HashSet<string>() : new HashSet<string>(_submitted));
+    /// <summary>IDs reported as Pending instead of Running; everything else alive is Running.</summary>
+    public HashSet<string> PendingIds { get; } = new();
+
+    public Task<Dictionary<string, ClusterJobStatus>> ListActiveJobs() =>
+        Task.FromResult(_alwaysEmpty
+            ? new Dictionary<string, ClusterJobStatus>()
+            : _submitted.ToDictionary(
+                id => id,
+                id => PendingIds.Contains(id) ? ClusterJobStatus.Pending : ClusterJobStatus.Running));
 
     public Task CancelJobs(IEnumerable<string> ids)
     {

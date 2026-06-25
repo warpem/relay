@@ -1,3 +1,5 @@
+using Refund.DataModel;
+
 namespace Refund.JobQueues;
 
 /// <summary>
@@ -7,7 +9,7 @@ namespace Refund.JobQueues;
 public interface IPoolQueue
 {
     Task<string> SubmitScript(string scriptPath);
-    Task<HashSet<string>> ListActiveJobIds();
+    Task<Dictionary<string, ClusterJobStatus>> ListActiveJobs();
     Task CancelJobs(IEnumerable<string> jobIds);
     string BuildWorkerScript(string command, Dictionary<string, string> resourceValues,
                              string[] requiredModules, string scriptPath);

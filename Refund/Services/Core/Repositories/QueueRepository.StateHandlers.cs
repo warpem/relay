@@ -42,7 +42,8 @@ public partial class QueueRepository
                     if (string.IsNullOrWhiteSpace(poolQueue.ListJobsTemplate))
                         throw new InvalidOperationException(
                             $"Pool queue \"{poolQueue.Alias}\" has no List Jobs template configured. " +
-                            "Add a ListJobsTemplate (e.g. \"squeue -u $USER -h -o \\\"%i\\\"\") before using it as a pool queue.");
+                            "Add a ListJobsTemplate that prints \"<id> <state>\" per line " +
+                            "(e.g. \"squeue -u $USER -h -o \\\"%i %T\\\"\") before using it as a pool queue.");
                     if (string.IsNullOrWhiteSpace(poolQueue.CancelManyJobsTemplate))
                         throw new InvalidOperationException(
                             $"Pool queue \"{poolQueue.Alias}\" has no Cancel Many Jobs template configured. " +
@@ -156,10 +157,11 @@ public partial class QueueRepository
             {
                 try
                 {
-                    var (alive, submitted) = await GetOrCreatePool(job).Tick();
+                    var (alive, running, submitted) = await GetOrCreatePool(job).Tick();
                     _jobUpdateCallback(job, j =>
                     {
                         ((WarpJobGpu)j).PoolWorkersAlive = alive;
+                        ((WarpJobGpu)j).PoolWorkersRunning = running;
                         ((WarpJobGpu)j).PoolWorkersSubmitted = submitted;
                     });
                 }
