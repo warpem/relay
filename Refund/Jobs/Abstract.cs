@@ -213,7 +213,8 @@ public abstract class WarpJobGpu : WarpJob, IPooledJob
     
     [UiFieldGroup("Resources", 999)]
     [UiInt("", "Number of GPUs",
-           helpText: "Number of GPUs to request for this job",
+           helpText: "Number of GPUs to request for this job. When a pool queue is set, this is " +
+                     "the number of parallel GPU workers maintained in the pool (one worker per GPU).",
            min: 1)]
     [RelayProperty]
     public virtual int NGpus { get; set; } = 1;
@@ -227,18 +228,9 @@ public abstract class WarpJobGpu : WarpJob, IPooledJob
 
     [UiFieldGroup("Resources", 999)]
     [UiQueue("Pool Queue",
-             helpText: "Cluster queue for the GPU worker pool. Leave as Local (no pool) to run workers on this machine.",
-             dataDelegateName: nameof(GetAvailableQueues))]
+             helpText: "Cluster queue for the GPU worker pool. Leave as Local (no pool) to run workers on this machine.")]
     [RelayProperty]
     public int PoolQueueId { get; set; } = -1;
-
-    [UiFieldGroup("Resources", 999)]
-    [UiInt("pool_size", "Pool size",
-           min: 1,
-           helpText: "Target number of simultaneous GPU worker jobs in the pool. " +
-                     "Only used when a pool queue is set.")]
-    [RelayProperty]
-    public int PoolSize { get; set; } = 8;
 
     /// <summary>Number of alive pool workers at last daemon tick. Updated by QueueRepository.</summary>
     [RelayProperty]
@@ -270,10 +262,17 @@ public abstract class WarpJobGpu : WarpJob, IPooledJob
         return result;
     }
 
+    /// <summary>
+    /// Target number of pool workers. Derived from <see cref="NGpus"/> — each pool worker is
+    /// one GPU, so the worker count equals the requested GPU count (no separate pool-size field).
+    /// Public (not just an explicit interface member) so the generated read-only wrapper exposes
+    /// it, letting the UI reference the pool abstraction rather than a GPU-specific field.
+    /// </summary>
+    public int PoolSize => NGpus;
+
     // IPooledJob
-    // PoolQueueId and PoolSize satisfy the interface implicitly via the public
-    // [RelayProperty] auto-properties above. Only the derived/computed members are
-    // implemented explicitly here.
+    // PoolQueueId and PoolSize satisfy the interface implicitly via the public members above;
+    // the remaining members are derived/computed.
     int IPooledJob.PoolSubmissionCap          => PoolSize * 2;
     int IPooledJob.WorkerMemoryGb             => MemoryPerWorker;
     int IPooledJob.WorkerCoreCount            => 2;

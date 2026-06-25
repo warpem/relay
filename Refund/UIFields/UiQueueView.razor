@@ -1,5 +1,7 @@
+@using Refund.Services.Core.DataManager
 @namespace Refund.UIFields
 @inherits UiFieldViewBase
+@inject DataManager DataManager
 
 <FluentSelect Class="borderless"
               @bind-Value="@ValueT"
@@ -30,13 +32,12 @@
                 new() { Value = "-1", Text = "Local (no pool)", Selected = current == -1 }
             };
 
-            if (AdditionalData is List<(int id, string alias)> queues)
-                options.AddRange(queues.Select(q => new Option<string>
-                {
-                    Value    = q.id.ToString(),
-                    Text     = string.IsNullOrWhiteSpace(q.alias) ? $"Queue {q.id}" : q.alias,
-                    Selected = q.id == current,
-                }));
+            options.AddRange(DataManager.ClusterQueues.Select(q => new Option<string>
+            {
+                Value    = q.Id.ToString(),
+                Text     = string.IsNullOrWhiteSpace(q.Alias) ? $"Queue {q.Id}" : q.Alias,
+                Selected = q.Id == current,
+            }));
 
             return options;
         }

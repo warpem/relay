@@ -276,12 +276,6 @@ public partial class DataManager
         });
         _queueRepository.LoadQueues(_dataRepository);
 
-        // Supply [UiQueue] fields (e.g. pooled-job pool-queue picker) with the live queue list.
-        Job.QueueListProvider = () => _queueRepository.ClusterQueues
-            .OfType<ClusterQueue>()
-            .Select(q => (q.Id, q.Alias ?? $"Queue {q.Id}"))
-            .ToList();
-
         // Handle jobs that were in active states when the application shut down.
         // Jobs already tracked in a queue (via improved persistence that now includes Waiting jobs)
         // will be picked up by the daemon automatically. Jobs NOT in any queue are orphaned and

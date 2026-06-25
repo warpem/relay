@@ -65,9 +65,10 @@ public class WorkerPoolTests
     {
         EnsurePopulated();
 
-        // Pool fields are [RelayProperty] ints handled by RelayBase.WriteToJson /
-        // ReadFromJson via reflection; a bare instance round-trips them fine.
-        var job = new MotionAndCTF2D { PoolQueueId = 3, PoolSize = 16 };
+        // Pool config is [RelayProperty] ints handled by RelayBase.WriteToJson /
+        // ReadFromJson via reflection; a bare instance round-trips them fine. Pool size
+        // is derived from NGpus (one worker per GPU), so NGpus is the persisted source.
+        var job = new MotionAndCTF2D { PoolQueueId = 3, NGpus = 16 };
         var node = new JsonObject();
         job.WriteToJson(node);
 
@@ -78,7 +79,8 @@ public class WorkerPoolTests
         job2.ReadFromJson(node);
 
         Assert.Equal(3, job2.PoolQueueId);
-        Assert.Equal(16, job2.PoolSize);
+        Assert.Equal(16, job2.NGpus);
+        Assert.Equal(16, ((IPooledJob)job2).PoolSize);   // derived from NGpus
     }
 
     [Fact]

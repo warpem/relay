@@ -77,19 +77,6 @@ public abstract class Job : RelayBase, IFolderContent
     /// </summary>
     public static readonly Dictionary<Type, Dictionary<string, object>> DefaultValues = new();
 
-    /// <summary>
-    /// Injected by DataManager at startup. Supplies the list of available cluster queues
-    /// (id, alias) for rendering [UiQueue] fields. Null until DataManager sets it.
-    /// </summary>
-    public static Func<List<(int id, string alias)>> QueueListProvider { get; set; }
-
-    /// <summary>
-    /// DataDelegate target for [UiQueue] fields. Returns the live cluster queue list as
-    /// the field's AdditionalData. Must be public static (Func&lt;ReadOnlyJob, object&gt;)
-    /// so PopulateStatic's reflection (GetMethod + CreateDelegate with null target) can bind it.
-    /// </summary>
-    public static object GetAvailableQueues(ReadOnlyJob _) =>
-        QueueListProvider?.Invoke() ?? new List<(int id, string alias)>();
 
     /// <summary>
     /// Pre-computed dependency chains for each property of each job type.
