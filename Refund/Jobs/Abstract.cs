@@ -292,8 +292,23 @@ public abstract class WarpJobGpu : WarpJob, IPooledJob
     // PoolQueueId and PoolSize satisfy the interface implicitly via the public members above;
     // the remaining members are derived/computed.
     int IPooledJob.PoolSubmissionCap          => PoolSize * 2;
-    int IPooledJob.WorkerMemoryGb             => MemoryPerWorker;
-    int IPooledJob.WorkerCoreCount            => 2;
+
+    // Build the worker's template variables from the Manager's own GetResourceValues so the two
+    // can never drift: the worker inherits every variable the template expects (and any future
+    // additions), then overrides only the worker-specific profile.
+    Dictionary<string, string> IPooledJob.GetWorkerResourceValues(string workerLogDir)
+    {
+        var values = GetResourceValues();
+        values["job_id"]        = $"{Id}-worker";
+        values["n_processes"]   = "1";
+        values["n_cores"]       = "2";
+        values["memory_gb"]     = MemoryPerWorker.ToString();
+        values["n_gpus"]        = "1";                              // one worker == one GPU
+        values["gpu_memory_gb"] = base.GpuMemoryGb.ToString();     // un-pooled per-GPU default
+        values["std_out"]       = Path.Combine(workerLogDir, "%j.out");
+        values["std_err"]       = Path.Combine(workerLogDir, "%j.err");
+        return values;
+    }
 
     // Workers are always single-GPU, regardless of the Manager's (CPU-only when pooled)
     // module profile — so they require the "gpu" module, NOT this job's RequiredModules.

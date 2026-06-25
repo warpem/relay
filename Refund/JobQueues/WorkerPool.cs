@@ -45,23 +45,10 @@ public class WorkerPool
         Directory.CreateDirectory(WorkerLogsDir);
 
         _workerScriptPath = WorkerScriptPath;
-        // Must supply every variable the submission-script template expects (mirroring the
-        // Manager's Job.GetResourceValues + job_id substitution). A missing variable is stripped
-        // to an empty value, producing a malformed directive — e.g. an empty "#SBATCH -J " makes
-        // SLURM swallow the following "-p", orphaning the partition name. Each worker is one GPU;
-        // %j lets SLURM give each worker its own log file under worker_logs/.
-        var resourceValues = new Dictionary<string, string>
-        {
-            { "job_id",        $"{Path.GetFileName(_jobDir)}-worker" },
-            { "n_processes",   "1" },
-            { "n_cores",       _job.WorkerCoreCount.ToString() },
-            { "memory_gb",     _job.WorkerMemoryGb.ToString() },
-            { "n_gpus",        "1" },
-            { "gpu_memory_gb", _job.WorkerMemoryGb.ToString() },
-            { "std_out",       Path.Combine(WorkerLogsDir, "%j.out") },
-            { "std_err",       Path.Combine(WorkerLogsDir, "%j.err") },
-            { "run_directory", _jobDir },
-        };
+        // The job derives the worker's template variables from the Manager's own GetResourceValues
+        // (see GetWorkerResourceValues), so the worker script can never silently miss a variable the
+        // template expects. WorkerLogsDir is where the worker's SLURM stdout/stderr land.
+        var resourceValues = _job.GetWorkerResourceValues(WorkerLogsDir);
         _poolQueue.BuildWorkerScript(
             _job.GetWorkerCommand(0), resourceValues, _job.WorkerRequiredModules, _workerScriptPath);
 
@@ -91,7 +78,7 @@ public class WorkerPool
         int canSubmit = Math.Max(0, _job.PoolSubmissionCap - _totalSubmissions);
         int toSubmit  = Math.Min(deficit, canSubmit);
 
-        _log.Information(
+        _log.Debug(
             "Worker pool tick: target={Target} schedulerActive={SchedulerActive} ours={Submitted} " +
             "alive={Alive} deficit={Deficit} capRemaining={CapRemaining} submitting={ToSubmit}",
             _job.PoolSize, active.Count, _submittedIds.Count, _aliveIds.Count,

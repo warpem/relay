@@ -1649,18 +1649,20 @@ public interface IPooledJob
     /// </summary>
     int PoolSubmissionCap { get; }
 
-    /// <summary>Memory in GB to request per worker cluster job.</summary>
-    int WorkerMemoryGb { get; }
+    /// <summary>
+    /// Submission-script template variables for one pool worker. Derived from the Manager's
+    /// Job.GetResourceValues (so a worker can never silently miss a variable the template expects)
+    /// with worker-specific overrides (one GPU, per-worker cores/memory, worker job name, log paths).
+    /// <paramref name="workerLogDir"/> is where the worker's SLURM stdout/stderr (std_out/std_err) go.
+    /// </summary>
+    Dictionary<string, string> GetWorkerResourceValues(string workerLogDir);
 
-    /// <summary>CPU cores to request per worker cluster job.</summary>
-    int WorkerCoreCount { get; }
-
-    /// <summary>Required cluster modules for worker jobs (e.g. ["gpu", "warp"]).</summary>
+    /// <summary>Required cluster modules for worker jobs (e.g. ["warp", "gpu"]).</summary>
     string[] WorkerRequiredModules { get; }
 
     /// <summary>
-    /// Full command string for a worker assigned to the given GPU device index.
-    /// Example: "WarpWorker2 --task_dir /data/1/tasks --device 2"
+    /// Full command string for a worker bound to the given GPU device index.
+    /// Example: "cd /run && WarpWorker2 --queue-dir /data/1/tasks --device 2 --log-dir /data/1/logs"
     /// </summary>
     string GetWorkerCommand(int deviceIndex);
 }

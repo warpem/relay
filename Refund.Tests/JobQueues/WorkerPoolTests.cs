@@ -104,6 +104,27 @@ public class WorkerPoolTests
     }
 
     [Fact]
+    public void WarpJobGpu_GetWorkerResourceValues_CoversManagerKeysWithWorkerOverrides()
+    {
+        var job = MakeJobWithSpace();
+
+        // Anti-drift: the worker must carry every variable the Manager's template expects, so it
+        // can't silently miss one (which would leave an empty #SBATCH directive).
+        var managerKeys = job.GetResourceValues().Keys;
+        var worker = ((IPooledJob)job).GetWorkerResourceValues("/tmp/worker-logs");
+
+        foreach (var key in managerKeys)
+            Assert.Contains(key, worker.Keys);
+
+        // ...plus job_id, with the worker-specific overrides applied.
+        Assert.Contains("worker", worker["job_id"]);
+        Assert.Equal("1", worker["n_gpus"]);
+        Assert.Equal("1", worker["n_processes"]);
+        Assert.Contains("%j", worker["std_out"]);
+        Assert.Contains("%j", worker["std_err"]);
+    }
+
+    [Fact]
     public void WarpJobGpu_ComposeCommandArguments_OmitsExternalProvisionerByDefault()
     {
         var job = MakeJobWithSpace();   // PoolQueueId defaults to -1
@@ -270,9 +291,14 @@ internal class FakePooledJob : IPooledJob
     public int PoolQueueId { get; }
     public int PoolSize { get; }
     public int PoolSubmissionCap => PoolSize * 2;
-    public int WorkerMemoryGb => 12;
-    public int WorkerCoreCount => 2;
     public string[] WorkerRequiredModules => ["gpu"];
+    public Dictionary<string, string> GetWorkerResourceValues(string workerLogDir) => new()
+    {
+        { "job_id",  "fake-worker" },
+        { "n_gpus",  "1" },
+        { "std_out", Path.Combine(workerLogDir, "%j.out") },
+        { "std_err", Path.Combine(workerLogDir, "%j.err") },
+    };
     public string GetWorkerCommand(int deviceIndex) => $"WarpWorker2 --device {deviceIndex}";
 }
 
