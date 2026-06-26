@@ -11,6 +11,13 @@ namespace Refund.JobQueues;
 /// </summary>
 public class WorkerPool
 {
+    /// <summary>
+    /// Maximum workers submitted in a single tick. A large pool fills over several ticks rather
+    /// than blocking one daemon iteration on a long synchronous burst of sbatch calls, and the
+    /// submitted/alive counts advance every tick (~1s) instead of only after the whole fleet is in.
+    /// </summary>
+    private const int MaxSubmitsPerTick = 5;
+
     private readonly IPoolQueue _poolQueue;
     private readonly IPooledJob _job;
     private readonly string     _jobDir;
@@ -90,7 +97,7 @@ public class WorkerPool
 
         int deficit   = Math.Max(0, _job.PoolSize - _aliveIds.Count);
         int canSubmit = Math.Max(0, _job.PoolSubmissionCap - _totalSubmissions);
-        int toSubmit  = Math.Min(deficit, canSubmit);
+        int toSubmit  = Math.Min(Math.Min(deficit, canSubmit), MaxSubmitsPerTick);
 
         _log.Debug(
             "Worker pool tick: target={Target} schedulerActive={SchedulerActive} ours={Submitted} " +

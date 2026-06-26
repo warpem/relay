@@ -67,4 +67,14 @@ public class ClusterQueueBatchTests
         var result = queue.ParseActiveJobs($"12345 {state}\n");
         Assert.Equal(expected, result["12345"]);
     }
+
+    [Theory]
+    [InlineData("12345,RUNNING", "12345", ClusterJobStatus.Running)]   // space-free squeue -o "%i,%T"
+    [InlineData("12345,PENDING", "12345", ClusterJobStatus.Pending)]
+    public void ParseActiveJobs_AcceptsCommaSeparator(string line, string id, ClusterJobStatus expected)
+    {
+        var queue = new ClusterQueue((_, _) => { });
+        var result = queue.ParseActiveJobs(line + "\n");
+        Assert.Equal(expected, result[id]);
+    }
 }

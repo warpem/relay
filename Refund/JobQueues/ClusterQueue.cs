@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using Serilog;
 using Refund.DataModel;
 using Refund.DataModel.ReadOnly;
 using Refund.JobQueues.ReadOnly;
@@ -689,10 +690,25 @@ public class ClusterQueue : JobQueue, IPoolQueue
             throw new InvalidOperationException(
                 $"Queue \"{Alias}\" has no ListJobsTemplate configured. " +
                 "Add a command that prints one active job per line as \"<id> <state>\" " +
-                "(e.g. squeue -u $USER -h -o \"%i %T\").");
+                "(e.g. squeue -u $USER -h -o \"%i,%T\"). Use a space-free format (comma, not " +
+                "\"%i %T\") so the column survives a remote shell hop such as ssh, which re-splits " +
+                "quoted arguments.");
 
         string output = await ExecuteOnCluster(ListJobsTemplate);
-        return ParseActiveJobs(output);
+        var parsed = ParseActiveJobs(output);
+
+        // Boundary diagnostic: the exact command sent and the raw scheduler output, plus the
+        // state histogram. If the histogram is all-Unknown while the raw output clearly carries
+        // RUNNING/PENDING, parsing is at fault; if the raw output itself has no state column,
+        // the configured template (or quote handling in the command pipeline) is at fault.
+        Log.ForContext<ClusterQueue>().Debug(
+            "ListActiveJobs queue=\"{Alias}\" command={Command} parsed={Count} states={States}\n" +
+            "--- raw output ---\n{RawOutput}\n--- end raw output ---",
+            Alias, ListJobsTemplate, parsed.Count,
+            string.Join(", ", parsed.GroupBy(kv => kv.Value).Select(g => $"{g.Key}={g.Count()}")),
+            output);
+
+        return parsed;
     }
 
     /// <summary>
@@ -706,7 +722,10 @@ public class ClusterQueue : JobQueue, IPoolQueue
 
         foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
-            var tokens = line.Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
+            // Accept whitespace OR comma between the ID and state. A comma lets the list command use
+            // a space-free format (e.g. squeue -o "%i,%T") that survives shell-quote mangling in the
+            // command pipeline, where a "%i %T" with an embedded space can lose its state column.
+            var tokens = line.Split(new[] { ' ', '\t', ',' }, StringSplitOptions.RemoveEmptyEntries);
             if (tokens.Length == 0)
                 continue;
 
@@ -816,19 +835,35 @@ public class ClusterQueue : JobQueue, IPoolQueue
             
             try
             {
-                // Default shells
-                string shellPath = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "cmd.exe" : "/bin/bash";
-                string shellArguments = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? $"/c {fullCommand}" : $"-c \"{fullCommand}\"";
-
-                // If a specific shell is provided, use it
+                // How the command reaches the shell:
+                //
+                // The default Unix path passes ["-c", fullCommand] via ArgumentList, NOT a single
+                // Arguments string. ArgumentList hands argv straight to execve with no re-parsing,
+                // so fullCommand reaches /bin/bash verbatim and the admin's quoting behaves exactly
+                // as in an interactive shell. (The old `-c "{fullCommand}"` string was parsed twice
+                // — once by .NET's Arguments→argv parser, once by bash — which silently collapsed
+                // embedded double quotes, e.g. turning -o "%i %T" into -o %i with %T dropped.)
+                //
+                // CustomShell keeps the string-template form: the admin owns that quoting via
+                // CustomShellArguments. Windows cmd.exe keeps the string form too (cmd has its own
+                // quoting rules that ArgumentList's escaping does not match).
                 if (!string.IsNullOrEmpty(CustomShell))
                 {
-                    shellPath = CustomShell;
-                    shellArguments = CustomShellArguments.ReplaceRegex("{{\\s*command\\s*}}", fullCommand);
+                    process.StartInfo.FileName  = CustomShell;
+                    process.StartInfo.Arguments = CustomShellArguments.ReplaceRegex("{{\\s*command\\s*}}", fullCommand);
+                }
+                else if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                {
+                    process.StartInfo.FileName  = "cmd.exe";
+                    process.StartInfo.Arguments = $"/c {fullCommand}";
+                }
+                else
+                {
+                    process.StartInfo.FileName = "/bin/bash";
+                    process.StartInfo.ArgumentList.Add("-c");
+                    process.StartInfo.ArgumentList.Add(fullCommand);
                 }
 
-                process.StartInfo.FileName = shellPath;
-                process.StartInfo.Arguments = shellArguments;
                 process.StartInfo.UseShellExecute = false;
                 process.StartInfo.RedirectStandardOutput = true;
                 process.StartInfo.RedirectStandardError = true;

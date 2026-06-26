@@ -206,6 +206,29 @@ public class WorkerPoolTests
     }
 
     [Fact]
+    public async Task WorkerPool_Tick_CapsSubmissionsPerTick()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tmpDir);
+        try
+        {
+            // Pool larger than the per-tick cap: it must ramp over several ticks, not submit all at once.
+            var fakeQueue = new FakePoolQueue();
+            var pool = new WorkerPool(fakeQueue, new FakePooledJob(tmpDir, poolQueueId: 1, poolSize: 40));
+            pool.Initialize();
+
+            // Per-tick cap is MaxSubmitsPerTick (5): a 40-worker pool ramps over several ticks.
+            var (_, _, submittedAfter1) = await pool.Tick();
+            Assert.Equal(5, submittedAfter1);               // capped per tick, not the full 40
+            Assert.Equal(5, fakeQueue.SubmitScriptCalls);
+
+            var (_, _, submittedAfter2) = await pool.Tick();
+            Assert.Equal(10, submittedAfter2);              // next batch the following tick
+        }
+        finally { Directory.Delete(tmpDir, true); }
+    }
+
+    [Fact]
     public async Task WorkerPool_Tick_DoesNotExceedCap()
     {
         var tmpDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());

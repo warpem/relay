@@ -47,6 +47,15 @@ html, body {
     flex-shrink: 0;
 }
 
+.tab-h100 {
+    /* Make the tab grid's panel row fill (and be allowed to shrink) rather than size to content,
+       so a tall tab panel scrolls instead of pushing the whole overlay past the viewport. */
+    grid-template-rows: auto minmax(0, 1fr);
+    min-height: 0;
+}
+
 .tab-h100 fluent-tab-panel {
     height: 100%;
+    min-height: 0;
+    overflow: hidden;
 }
