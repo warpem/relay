@@ -38,7 +38,7 @@ public class PeakAlign : WarpJobGpu, IClusterJob
 
     public override int2 CardSquareCount { set; get; } = new int2(2, 1);
 
-    public override int CoreCount => (NGpus * PerDevice) * 4;
+    public override int CoreCount => IsPooled ? base.CoreCount : (NGpus * PerDevice) * 4;
 
     /// <summary>
     /// Port name constants
