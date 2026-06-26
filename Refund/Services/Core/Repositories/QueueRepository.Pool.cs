@@ -43,7 +43,11 @@ public partial class QueueRepository
     {
         if (_workerPools.TryRemove(job, out var pool))
         {
-            try { await pool.Dissolve(); }
+            try
+            {
+                await job.WriteToLifecycleLog("Dissolving worker pool, cancelling any remaining workers");
+                await pool.Dissolve();
+            }
             catch (Exception ex) { _logger.Error(ex, "Error dissolving worker pool for job {JobId}", job.Id); }
         }
     }
@@ -75,6 +79,9 @@ public partial class QueueRepository
                 _workerPools[job] = pool;
 
                 _logger.Information("Re-adopted worker pool for job {JobId} from disk", job.Id);
+                // LoadQueues is synchronous; append to the job lifecycle log without blocking
+                // startup (WriteToLifecycleLog self-handles its own IO errors).
+                _ = job.WriteToLifecycleLog("Re-adopted worker pool from disk after restart");
             }
             catch (Exception ex)
             {

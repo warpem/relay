@@ -158,7 +158,27 @@ public partial class QueueRepository
             {
                 try
                 {
-                    var (alive, running, submitted) = await GetOrCreatePool(job).Tick();
+                    // The first running tick creates the pool (and writes its worker submission
+                    // script). Record that in the job's own lifecycle log, next to the staging/
+                    // running/completion entries, so the pool's history travels with the job.
+                    bool poolIsNew = !_workerPools.ContainsKey(job);
+                    var pool = GetOrCreatePool(job);
+                    if (poolIsNew)
+                        await job.WriteToLifecycleLog(
+                            $"Worker pool created on pool queue {pooledJob.PoolQueueId}, target {pooledJob.PoolSize} worker(s)");
+
+                    int submittedBefore = ((WarpJobGpu)job).PoolWorkersSubmitted;
+
+                    var (alive, running, submitted) = await pool.Tick();
+
+                    // Only log ticks that actually spawned workers (ramp-up or replacing dead
+                    // ones), so the lifecycle log records fleet changes instead of a line every
+                    // ~1s daemon tick.
+                    if (submitted > submittedBefore)
+                        await job.WriteToLifecycleLog(
+                            $"Spawned {submitted - submittedBefore} pool worker(s); " +
+                            $"{alive}/{pooledJob.PoolSize} alive ({running} running), {submitted} submitted in total");
+
                     _jobUpdateCallback(job, j =>
                     {
                         ((WarpJobGpu)j).PoolWorkersAlive = alive;
