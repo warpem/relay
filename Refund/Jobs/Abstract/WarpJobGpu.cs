@@ -142,6 +142,12 @@ public abstract class WarpJobGpu : WarpJob, IPooledJob
     // setting asks for that many WarpWorker2 processes sharing the GPU — same as the non-pooled job
     // runs PerDevice processes per GPU. Launch them in the background and wait for all to exit.
     //
+    // --persistent keeps each worker polling when the queue momentarily empties instead of exiting.
+    // Without it, workers quit as soon as pending/ drains (e.g. between the Manager's task batches or
+    // just before it finalizes), the pool's deficit reconciliation sees them gone, and it respawns a
+    // fresh fleet that has nothing left to do. Workers still terminate on Manager heartbeat stall and
+    // are cancelled wholesale when the pool dissolves, so --persistent doesn't leak them.
+    //
     // WarpWorker2 disentangles concurrent workers itself: ClaimOne() is an atomic claim and per-item
     // logs are keyed by task id, so processes never double-claim or clobber each other. Worker ids
     // default to local-<pid>-gpu<device> (unique per process on a host) — but the whole pool shares
@@ -157,7 +163,7 @@ public abstract class WarpJobGpu : WarpJob, IPooledJob
         for (int i = 0; i < PerDevice; i++)
             lines.Add(
                 $"WarpWorker2 --queue-dir {queueDir} --device {deviceIndex} --log-dir {logDir} " +
-                $"--worker-id \"$(hostname)-$$-{deviceIndex}-{i}\" &");
+                $"--persistent --worker-id \"$(hostname)-$$-{deviceIndex}-{i}\" &");
         lines.Add("wait");
 
         return string.Join("\n", lines);

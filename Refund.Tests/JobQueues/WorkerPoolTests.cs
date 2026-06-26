@@ -100,6 +100,7 @@ public class WorkerPoolTests
         Assert.Contains("--queue-dir ", cmd);   // WarpWorker2's flag (NOT the Manager's --task_dir)
         Assert.Contains("--device 2", cmd);
         Assert.Contains("--log-dir ", cmd);
+        Assert.Contains("--persistent", cmd);   // keep polling instead of exiting when the queue drains
         Assert.Contains("cd ", cmd);            // runs from the job's working directory, like the Manager
     }
 
