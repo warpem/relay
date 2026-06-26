@@ -104,6 +104,38 @@ public class WorkerPoolTests
     }
 
     [Fact]
+    public void WarpJobGpu_GetWorkerCommand_LaunchesPerDeviceProcesses()
+    {
+        var job = MakeJobWithSpace();
+        job.PerDevice = 3;                       // 3 worker processes per GPU
+
+        var cmd = ((IPooledJob)job).GetWorkerCommand(0);
+
+        // One WarpWorker2 invocation per worker process, each backgrounded, then a single wait.
+        Assert.Equal(3, System.Text.RegularExpressions.Regex.Matches(cmd, "WarpWorker2 ").Count);
+        Assert.Equal(3, System.Text.RegularExpressions.Regex.Matches(cmd, " &").Count);
+        Assert.Contains("\nwait", cmd);
+
+        // Each process gets a distinct, globally-unique worker id (…-<device>-<index>).
+        Assert.Contains("-0-0\"", cmd);
+        Assert.Contains("-0-1\"", cmd);
+        Assert.Contains("-0-2\"", cmd);
+    }
+
+    [Fact]
+    public void WarpJobGpu_GetWorkerResourceValues_ScalesCoresAndMemoryWithPerDevice()
+    {
+        var job = MakeJobWithSpace();
+        job.PerDevice = 4;
+
+        var worker = ((IPooledJob)job).GetWorkerResourceValues("/tmp/worker-logs");
+
+        Assert.Equal((4 * 2).ToString(), worker["n_cores"]);                  // ~2 cores per process
+        Assert.Equal((4 * job.MemoryPerWorker).ToString(), worker["memory_gb"]);
+        Assert.Equal("1", worker["n_gpus"]);                                  // still one GPU
+    }
+
+    [Fact]
     public void WarpJobGpu_GetWorkerResourceValues_CoversManagerKeysWithWorkerOverrides()
     {
         var job = MakeJobWithSpace();

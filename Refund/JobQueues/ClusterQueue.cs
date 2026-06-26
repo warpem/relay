@@ -531,9 +531,10 @@ public class ClusterQueue : JobQueue, IPoolQueue
         // Replace resource values first
         foreach (var kvp in resourceValues)
         {
-            // Create a regex pattern that allows for any number of spaces between braces and name
+            // Create a regex pattern that allows for any number of spaces between braces and name.
+            // Replace literally (MatchEvaluator) so "$" in a value isn't treated as a substitution.
             string pattern = $"{{{{\\s*{Regex.Escape(kvp.Key)}\\s*}}}}";
-            result = Regex.Replace(result, pattern, kvp.Value);
+            result = Regex.Replace(result, pattern, _ => kvp.Value);
         }
 
         // Replace custom variables
@@ -542,8 +543,8 @@ public class ClusterQueue : JobQueue, IPoolQueue
             // Create a regex pattern that allows for any number of spaces between braces and name
             string pattern = $"{{{{\\s*{Regex.Escape(kvp.Key)}\\s*}}}}";
             string value = (customValues?.GetValueOrDefault(kvp.Key) ?? kvp.Value.defaultValue) ?? "";
-            
-            result = Regex.Replace(result, pattern, value);
+
+            result = Regex.Replace(result, pattern, _ => value);
         }
 
         // Process module-dependent blocks

@@ -77,4 +77,24 @@ public class ClusterQueueBatchTests
         var result = queue.ParseActiveJobs(line + "\n");
         Assert.Equal(expected, result[id]);
     }
+
+    [Fact]
+    public void BuildWorkerScript_PreservesDollarSignsInCommand()
+    {
+        var queue = new ClusterQueue((_, _) => { }) { SubmissionScriptTemplate = "#!/bin/bash\n{{ command }}\n" };
+        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".sh");
+        try
+        {
+            // Shell content that the old Regex.Replace-as-substitution path corrupted:
+            // "$$" -> "$" (so bash later read "$-"), and "${VAR}" -> a group reference.
+            queue.BuildWorkerScript(
+                "WarpWorker2 --worker-id \"$(hostname)-$$-0-0\" ${SLURM_JOB_ID:-x}",
+                new Dictionary<string, string>(), Array.Empty<string>(), path);
+
+            var script = File.ReadAllText(path);
+            Assert.Contains("$(hostname)-$$-0-0", script);   // $$ preserved (not collapsed to $)
+            Assert.Contains("${SLURM_JOB_ID:-x}", script);   // ${...} preserved (not a group ref)
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
+    }
 }

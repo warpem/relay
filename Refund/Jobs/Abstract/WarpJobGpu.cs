@@ -117,11 +117,11 @@ public abstract class WarpJobGpu : WarpJob, IPooledJob
     {
         var values = GetResourceValues();
         values["job_id"]        = $"{Id}-worker";
-        values["n_processes"]   = "1";
-        values["n_cores"]       = "2";
-        values["memory_gb"]     = MemoryPerWorker.ToString();
-        values["n_gpus"]        = "1";                              // one worker == one GPU
-        values["gpu_memory_gb"] = base.GpuMemoryGb.ToString();     // un-pooled per-GPU default
+        values["n_processes"]   = "1";                              // one SLURM task; PerDevice procs run within it
+        values["n_cores"]       = (PerDevice * 2).ToString();       // PerDevice worker processes, ~2 cores each
+        values["memory_gb"]     = (PerDevice * MemoryPerWorker).ToString();
+        values["n_gpus"]        = "1";                              // one cluster job == one GPU
+        values["gpu_memory_gb"] = base.GpuMemoryGb.ToString();     // un-pooled per-GPU default (shared by PerDevice procs)
         values["std_out"]       = Path.Combine(workerLogDir, "%j.out");
         values["std_err"]       = Path.Combine(workerLogDir, "%j.err");
         return values;
@@ -137,9 +137,29 @@ public abstract class WarpJobGpu : WarpJob, IPooledJob
     // --device is the GPU id, --log-dir is for per-item <task_id>.log files. The Manager creates
     // and expects those at <output>/logs (DistributedOptions), so point --log-dir there — NOT at
     // WarpWorker2's <queue-dir>/logs default — so worker and Manager agree. (<output> == DirectoryPath.)
-    string IPooledJob.GetWorkerCommand(int deviceIndex) =>
-        $"cd {RunDirectory}\nWarpWorker2 " +
-        $"--queue-dir {Path.Combine(DirectoryPath, "tasks")} " +
-        $"--device {deviceIndex} " +
-        $"--log-dir {Path.Combine(DirectoryPath, "logs")}";
+    //
+    // One pool worker is a single-GPU cluster job, but the user's "workers per GPU" (PerDevice)
+    // setting asks for that many WarpWorker2 processes sharing the GPU — same as the non-pooled job
+    // runs PerDevice processes per GPU. Launch them in the background and wait for all to exit.
+    //
+    // WarpWorker2 disentangles concurrent workers itself: ClaimOne() is an atomic claim and per-item
+    // logs are keyed by task id, so processes never double-claim or clobber each other. Worker ids
+    // default to local-<pid>-gpu<device> (unique per process on a host) — but the whole pool shares
+    // one queue-dir across many hosts where PIDs can repeat, so we pass an explicit, globally unique
+    // id: <hostname>-<script pid>-<device>-<index>. ($$ and $(hostname) are expanded by the compute
+    // node's shell at run time; the template engine only substitutes {{...}} tokens.)
+    string IPooledJob.GetWorkerCommand(int deviceIndex)
+    {
+        string queueDir = Path.Combine(DirectoryPath, "tasks");
+        string logDir   = Path.Combine(DirectoryPath, "logs");
+
+        var lines = new List<string> { $"cd {RunDirectory}" };
+        for (int i = 0; i < PerDevice; i++)
+            lines.Add(
+                $"WarpWorker2 --queue-dir {queueDir} --device {deviceIndex} --log-dir {logDir} " +
+                $"--worker-id \"$(hostname)-$$-{deviceIndex}-{i}\" &");
+        lines.Add("wait");
+
+        return string.Join("\n", lines);
+    }
 }
