@@ -127,9 +127,13 @@ public abstract class WarpJobGpu : WarpJob, IPooledJob
         return values;
     }
 
-    // Workers are always single-GPU, regardless of the Manager's (CPU-only when pooled)
-    // module profile — so they require the "gpu" module, NOT this job's RequiredModules.
-    string[] IPooledJob.WorkerRequiredModules => base.RequiredModules.Concat(["gpu"]).ToArray();
+    // A worker runs the actual per-item GPU work, so it needs this job's full tool-module set
+    // (e.g. "imod" for Etomo, "aretomo2" for AreTomo) — but on a GPU node, not the CPU partition
+    // the pooled Manager runs on. Start from this job's RequiredModules (which carries the leaf
+    // job's tool modules) and swap the Manager's "cpu" toggle for the worker's "gpu". Using
+    // base.RequiredModules here would silently drop those tool modules and break the worker.
+    string[] IPooledJob.WorkerRequiredModules =>
+        RequiredModules.Where(m => m != "cpu").Concat(["gpu"]).Distinct().ToArray();
 
     // Mirror the Manager's regular script: cd to RunDirectory first so the worker executes from
     // the same working directory (where the job's relative paths, e.g. processing.settings, resolve).

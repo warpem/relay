@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using Refund.DataModel;
 using Refund.JobQueues;
 using Refund.Jobs.Fs.MotionCtf.MotionAndCTF2D;
+using EtomoJob = Refund.Jobs.Ts.Alignment.AlignEtomo.AlignEtomo;
 
 namespace Refund.Tests.JobQueues;
 
@@ -172,6 +173,34 @@ public class WorkerPoolTests
         job.PoolQueueId = 1;
         var args = job.ComposeCommandArguments();
         Assert.True(args.ContainsKey("external_provisioner"));
+    }
+
+    [Fact]
+    public void WarpJobGpu_WorkerRequiredModules_SwapsManagerCpuForWorkerGpu()
+    {
+        // Pooled Manager runs CPU-only; the worker does the GPU work. The worker module set must
+        // request "gpu", never the Manager's "cpu".
+        var job = MakeJobWithSpace();
+        job.PoolQueueId = 1;   // pooled → this job's RequiredModules carries "cpu"
+
+        var workerModules = ((IPooledJob)job).WorkerRequiredModules;
+
+        Assert.Contains("gpu", workerModules);
+        Assert.DoesNotContain("cpu", workerModules);
+    }
+
+    [Fact]
+    public void WarpJobGpu_WorkerRequiredModules_CarriesLeafToolModules()
+    {
+        // Regression: workers ran etomo/aretomo without their tool module because
+        // WorkerRequiredModules built off WarpJob's base modules, dropping the leaf job's "imod".
+        var job = new EtomoJob { PoolQueueId = 1 };
+
+        var workerModules = ((IPooledJob)job).WorkerRequiredModules;
+
+        Assert.Contains("imod", workerModules);   // the worker is what actually runs etomo
+        Assert.Contains("gpu", workerModules);
+        Assert.DoesNotContain("cpu", workerModules);
     }
 
     [Fact]
