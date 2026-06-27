@@ -34,7 +34,7 @@ public class AlignEtomo : WarpJobGpu, IClusterJob
 
     public override int2 CardSquareCount { set; get; } = new int2(2, 1);
 
-    public override int CoreCount => (NGpus * PerDevice) * 8;
+    public override int CoreCount => IsPooled ? base.CoreCount : (NGpus * PerDevice) * 8;
 
     public override string[] SupportedModules => base.SupportedModules.Concat(["imod"]).ToArray();
 

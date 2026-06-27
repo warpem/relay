@@ -37,7 +37,7 @@ public class AlignAretomo : WarpJobGpu, IClusterJob
 
     protected override int DefaultMemoryPerWorker => 16;
 
-    public override int CoreCount => (NGpus) * 4;
+    public override int CoreCount => IsPooled ? base.CoreCount : (NGpus) * 4;
 
     public override string[] SupportedModules => base.SupportedModules.Concat(["aretomo2"]).ToArray();
 
