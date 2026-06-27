@@ -28,7 +28,7 @@ public class ExtractParticles : WarpJobGpu, IClusterJob
 
     public override string TypeDescription => "Extracts particles from tilt series as 2D image stacks or 3D volumes";
 
-    public override int CoreCount => (NGpus * PerDevice) * 3;
+    public override int CoreCount => IsPooled ? base.CoreCount : (NGpus * PerDevice) * 3;
 
     public override Type ExpandedViewType => typeof(ExtractParticlesExpandedView);
 
