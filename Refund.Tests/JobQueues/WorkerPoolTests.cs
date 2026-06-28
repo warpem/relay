@@ -4,6 +4,7 @@ using Refund.DataModel;
 using Refund.JobQueues;
 using Refund.Jobs.Fs.MotionCtf.MotionAndCTF2D;
 using EtomoJob = Refund.Jobs.Ts.Alignment.AlignEtomo.AlignEtomo;
+using RefineJob = Refund.Jobs.M.Refine.Refine;
 
 namespace Refund.Tests.JobQueues;
 
@@ -187,6 +188,25 @@ public class WorkerPoolTests
 
         Assert.Contains("gpu", workerModules);
         Assert.DoesNotContain("cpu", workerModules);
+    }
+
+    [Fact]
+    public void Refine_PooledResourceRequests_AreManagerProfileIndependentOfPoolSize()
+    {
+        // MCore's CoreCount/MemoryGb scale with NGpus*PerDevice for the non-pooled (single
+        // multi-GPU job) path. When pooled, NGpus IS the pool size, so the CPU-only Manager
+        // must fall back to the fixed manager profile instead of requesting worker-scaled
+        // resources. Two pools of very different sizes must request identical Manager resources.
+        var small = new RefineJob { NGpus = 4,  PerDevice = 2, MemoryPerWorker = 10, PoolQueueId = 1 };
+        var large = new RefineJob { NGpus = 64, PerDevice = 2, MemoryPerWorker = 10, PoolQueueId = 1 };
+
+        Assert.Equal(small.CoreCount, large.CoreCount);
+        Assert.Equal(small.MemoryGb,  large.MemoryGb);
+
+        // And the non-pooled path still scales with the GPU count.
+        var local = new RefineJob { NGpus = 64, PerDevice = 2, MemoryPerWorker = 10 };
+        Assert.True(local.CoreCount > large.CoreCount);
+        Assert.True(local.MemoryGb  > large.MemoryGb);
     }
 
     [Fact]

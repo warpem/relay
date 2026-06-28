@@ -65,9 +65,9 @@ public class Refine : WarpJobGpu, IClusterJob
 
     protected override int DefaultMemoryPerWorker => 8;
 
-    public override int CoreCount => 2 * NGpus * PerDevice;
+    public override int CoreCount => IsPooled ? base.CoreCount : 2 * NGpus * PerDevice;
 
-    public override int MemoryGb => MemoryPerWorker * NGpus * PerDevice;
+    public override int MemoryGb => IsPooled ? base.MemoryGb : MemoryPerWorker * NGpus * PerDevice;
 
     public override int ProcessCount => 1;
 
@@ -231,7 +231,7 @@ public class Refine : WarpJobGpu, IClusterJob
     [RelayProperty]
     public override int NGpus { get; set; } = 1;
 
-    [UiInt("perdevice_refine", "Workers per GPU",
+    [UiInt("perdevice", "Workers per GPU",
            min: 1,
            helpText: "Number of worker processes per GPU used for refinement; " +
                      "set to >1 to improve utilization if your GPUs have enough memory")]
@@ -316,6 +316,12 @@ public class Refine : WarpJobGpu, IClusterJob
             result["refine_volumewarp"] = $"{RefineVolumeWarpGrid.X}x{RefineVolumeWarpGrid.Y}x{RefineVolumeWarpGrid.Z}x{RefineVolumeWarpGrid.W}";
 
         result["port"] = "0"; // Use port 0 to disable the built-in web server
+
+        // Pin MCore's filesystem work queue to <job>/tasks so the Manager and the externally
+        // provisioned pool workers share one queue: WarpJobGpu.GetWorkerCommand points the
+        // workers' --queue-dir at <DirectoryPath>/tasks, but MCore otherwise defaults task_dir
+        // to <population>/refinement_temp/tasks, which those workers would never poll.
+        result["task_dir"] = Path.Combine(DirectoryPath, "tasks");
 
         result.Remove("strict");
 
