@@ -52,7 +52,7 @@ public class WorkerPoolTests
     {
         var job = new MotionAndCTF2D();
         var pooled = (IPooledJob)job;
-        Assert.Equal(pooled.PoolSize * 2, pooled.PoolSubmissionCap);
+        Assert.Equal(pooled.PoolSize * 100, pooled.PoolSubmissionCap);
     }
 
     [Fact]

@@ -108,7 +108,7 @@ public abstract class WarpJobGpu : WarpJob, IPooledJob
     // IPooledJob
     // PoolQueueId and PoolSize satisfy the interface implicitly via the public members above;
     // the remaining members are derived/computed.
-    int IPooledJob.PoolSubmissionCap          => PoolSize * 2;
+    int IPooledJob.PoolSubmissionCap          => PoolSize * 100;
 
     // Build the worker's template variables from the Manager's own GetResourceValues so the two
     // can never drift: the worker inherits every variable the template expects (and any future
