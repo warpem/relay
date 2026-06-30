@@ -1,0 +1,62 @@
+@namespace Relay.Screens.Overlay.Personal
+@using Refund.DataModel
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+
+<div style="padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+    <div style="display:flex; align-items:center; justify-content:space-between;">
+        <h6 style="margin:0;">Personal access tokens</h6>
+        <FluentButton Appearance="Appearance.Accent" OnClick="OpenCreate">New token</FluentButton>
+    </div>
+
+    <p style="margin:0; opacity:0.8;">
+        Use a personal access token to let an AI agent connect to Relay over MCP at
+        <code>/api/mcp</code> as you. Tokens act with your permissions and are read-only in this release.
+    </p>
+
+    @if (_showCreate)
+    {
+        <div style="border: 1px solid var(--neutral-stroke-rest); border-radius: 6px; padding: 16px; display:flex; flex-direction:column; gap:12px;">
+            @if (_createdRawToken == null)
+            {
+                <strong>New personal access token</strong>
+                <FluentTextField @bind-Value="_newName" Placeholder="Name (e.g. Claude on my laptop)" Style="width:100%;" AutoComplete="off" />
+                <div style="display:flex; gap:8px; justify-content:flex-end;">
+                    <FluentButton OnClick="CloseCreate">Cancel</FluentButton>
+                    <FluentButton Appearance="Appearance.Accent" OnClick="CreateToken">Create</FluentButton>
+                </div>
+            }
+            else
+            {
+                <strong>Copy your token now</strong>
+                <span style="color: var(--error);">
+                    This is the only time the token will be shown. Store it somewhere safe.
+                </span>
+                <FluentTextField Value="@_createdRawToken" ReadOnly="true" Style="width:100%;" />
+                <div style="display:flex; gap:8px; justify-content:flex-end;">
+                    <FluentButton Appearance="Appearance.Accent" OnClick="CloseCreate">Done</FluentButton>
+                </div>
+            }
+        </div>
+    }
+
+    @if (_tokens.Count == 0)
+    {
+        <p style="opacity:0.7;">You have no tokens yet.</p>
+    }
+    else
+    {
+        <FluentDataGrid Items="@_tokens.AsQueryable()" RowSize="DataGridRowSize.Medium">
+            <PropertyColumn Title="Name" Property="@(t => t.Name)" />
+            <TemplateColumn Title="Created">@FormatCreated(context.CreationDate)</TemplateColumn>
+            <TemplateColumn Title="Last used">@FormatLastUsed(context.LastUsedDate)</TemplateColumn>
+            <TemplateColumn Title="Expires">@FormatExpiry(context.ExpirationDate)</TemplateColumn>
+            <TemplateColumn Align="@Align.End" Width="120px">
+                <ConfirmButton aria-label="Revoke token"
+                               Title="Revoke token"
+                               IconEnd="@(new Icons.Regular.Size16.Delete().WithColor("var(--error)"))"
+                               OnClick="@(() => RevokeToken(context.Id))"
+                               Position="ConfirmationPosition.Bottom" />
+            </TemplateColumn>
+        </FluentDataGrid>
+    }
+</div>
