@@ -1,0 +1,90 @@
+using Microsoft.Extensions.Logging.Abstractions;
+using Refund.Configuration;
+using Refund.Services;
+
+namespace Refund.Tests.Mcp;
+
+public class PersonalAccessTokenServiceTests
+{
+    private static PersonalAccessTokenService NewService(out string path)
+    {
+        path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var config = new RelayConfiguration { PatsPath = path };
+        return new PersonalAccessTokenService(NullLogger<PersonalAccessTokenService>.Instance, config);
+    }
+
+    [Fact]
+    public async Task Generate_ReturnsPrefixedRawToken()
+    {
+        var svc = NewService(out _);
+        var raw = await svc.Generate(ownerUserId: 7, name: "laptop");
+        Assert.StartsWith("relay_pat_", raw);
+    }
+
+    [Fact]
+    public async Task Generate_DoesNotPersistRawToken()
+    {
+        var svc = NewService(out var path);
+        var raw = await svc.Generate(7, "laptop");
+        var fileContents = await File.ReadAllTextAsync(path);
+        Assert.DoesNotContain(raw, fileContents);
+        Assert.Contains(PersonalAccessTokenService.HashToken(raw), fileContents);
+    }
+
+    [Fact]
+    public async Task Validate_ReturnsOwnerId_AndStampsLastUsed()
+    {
+        var svc = NewService(out _);
+        var raw = await svc.Generate(42, "laptop");
+        var ownerId = svc.Validate(raw);
+        Assert.Equal(42, ownerId);
+        Assert.NotNull(svc.ListForUser(42).Single().LastUsedDate);
+    }
+
+    [Fact]
+    public void Validate_UnknownToken_ReturnsNull()
+    {
+        var svc = NewService(out _);
+        Assert.Null(svc.Validate("relay_pat_bogus"));
+    }
+
+    [Fact]
+    public async Task Validate_ExpiredToken_ReturnsNull()
+    {
+        var svc = NewService(out _);
+        var raw = await svc.Generate(1, "old", expiry: DateTime.UtcNow.AddMinutes(-1));
+        Assert.Null(svc.Validate(raw));
+    }
+
+    [Fact]
+    public async Task Revoke_RemovesToken_SoItNoLongerValidates()
+    {
+        var svc = NewService(out _);
+        var raw = await svc.Generate(5, "laptop");
+        var id = svc.ListForUser(5).Single().Id;
+        await svc.Revoke(5, id);
+        Assert.Empty(svc.ListForUser(5));
+        Assert.Null(svc.Validate(raw));
+    }
+
+    [Fact]
+    public async Task Revoke_OtherUsersToken_DoesNothing()
+    {
+        var svc = NewService(out _);
+        await svc.Generate(5, "mine");
+        var id = svc.ListForUser(5).Single().Id;
+        await svc.Revoke(ownerUserId: 999, tokenId: id);
+        Assert.Single(svc.ListForUser(5));
+    }
+
+    [Fact]
+    public async Task Tokens_SurviveReload()
+    {
+        var svc = NewService(out var path);
+        var raw = await svc.Generate(8, "laptop");
+
+        var config = new RelayConfiguration { PatsPath = path };
+        var reloaded = new PersonalAccessTokenService(NullLogger<PersonalAccessTokenService>.Instance, config);
+        Assert.Equal(8, reloaded.Validate(raw));
+    }
+}
