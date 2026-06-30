@@ -194,3 +194,9 @@ A **new** overlay, separate from the admin `OverlaySettings`:
 - PAT scopes / capability subsetting for least-privilege agents.
 - MCP resources and server-push notifications via `DataManager` events.
 - General personal-settings surface (profile, password) on the new overlay.
+- **Automated tests for the `Pat` auth handler and tool-level permission
+  scoping.** These live in the `Relay` project, which `Refund.Tests` does not
+  reference, so the prototype covers them by build + manual verification only.
+  The underlying logic is unit-tested (`PersonalAccessTokenService.Validate`)
+  or is pre-existing behavior (`DataManager.GetUserProjects`). Closing this gap
+  means adding a `Relay.Tests` project that can construct `DataManager`.
