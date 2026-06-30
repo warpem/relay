@@ -16,7 +16,7 @@
 - **Token format:** `relay_pat_` + base64url(32 random bytes).
 - **MCP endpoint path:** `/api/mcp` (already exempt from the login-redirect middleware in `Relay/Program.cs`).
 - **Auth scheme name:** `"Pat"` (string constant, used in registration and the endpoint authorization policy).
-- **Serialization:** model objects extend `RelayBase` and use `[RelayProperty]`; avoid nullable serialized properties (use `DateTime.MinValue` / `DateTime.MaxValue` sentinels) since the `RelayBase` serializer's handling of `Nullable<T>` is unverified.
+- **Serialization:** model objects extend `RelayBase` and use `[RelayProperty]`. `RelayBase` supports `Nullable<T>` (`DateTime?`, `int?`) and serializes `DateTime` via the `"s"` round-trip format (no sub-seconds). Use **nullable** `DateTime?` for optional timestamps (`null` = none) — do **not** use `DateTime.MaxValue`/`MinValue` sentinels, because `MaxValue` loses its sub-second ticks on round-trip and no longer compares equal to `DateTime.MaxValue` after a reload.
 - **Existing patterns to mirror:** `Refund/Services/SecurityTokenService.cs` (file-backed token store) and `Relay/Panels/Left/LeftBar.razor[.cs]` (overlay open buttons).
 
 ---
@@ -29,7 +29,7 @@
 - Test: `Refund.Tests/Mcp/PersonalAccessTokenTests.cs`
 
 **Interfaces:**
-- Produces: `PersonalAccessToken : RelayBase` with `int Id`, `string TokenHash`, `string Name`, `int OwnerUserId`, `DateTime CreationDate`, `DateTime LastUsedDate` (MinValue = never), `DateTime ExpirationDate` (MaxValue = no expiry), and `bool IsExpired`.
+- Produces: `PersonalAccessToken : RelayBase` with `int Id`, `string TokenHash`, `string Name`, `int OwnerUserId`, `DateTime CreationDate`, `DateTime? LastUsedDate` (null = never), `DateTime? ExpirationDate` (null = no expiry), and `bool IsExpired`.
 - Produces: `RelayConfiguration.PatsPath` (string, default `"pats.relay"`).
 
 - [ ] **Step 1: Write the failing test**
@@ -47,8 +47,8 @@ public class PersonalAccessTokenTests
     public void NewToken_HasNoExpiryByDefault_AndIsNotExpired()
     {
         var pat = new PersonalAccessToken();
-        Assert.Equal(DateTime.MaxValue, pat.ExpirationDate);
-        Assert.Equal(DateTime.MinValue, pat.LastUsedDate);
+        Assert.Null(pat.ExpirationDate);
+        Assert.Null(pat.LastUsedDate);
         Assert.False(pat.IsExpired);
     }
 
@@ -92,13 +92,13 @@ public class PersonalAccessToken : RelayBase
 
     [RelayProperty] public DateTime CreationDate { get; set; } = DateTime.UtcNow;
 
-    /// <summary><see cref="DateTime.MinValue"/> means the token has never been used.</summary>
-    [RelayProperty] public DateTime LastUsedDate { get; set; } = DateTime.MinValue;
+    /// <summary><c>null</c> means the token has never been used.</summary>
+    [RelayProperty] public DateTime? LastUsedDate { get; set; }
 
-    /// <summary><see cref="DateTime.MaxValue"/> means the token never expires.</summary>
-    [RelayProperty] public DateTime ExpirationDate { get; set; } = DateTime.MaxValue;
+    /// <summary><c>null</c> means the token never expires.</summary>
+    [RelayProperty] public DateTime? ExpirationDate { get; set; }
 
-    public bool IsExpired => ExpirationDate <= DateTime.UtcNow;
+    public bool IsExpired => ExpirationDate.HasValue && ExpirationDate.Value <= DateTime.UtcNow;
 }
 ```
 
@@ -185,7 +185,7 @@ public class PersonalAccessTokenServiceTests
         var raw = await svc.Generate(42, "laptop");
         var ownerId = svc.Validate(raw);
         Assert.Equal(42, ownerId);
-        Assert.NotEqual(DateTime.MinValue, svc.ListForUser(42).Single().LastUsedDate);
+        Assert.NotNull(svc.ListForUser(42).Single().LastUsedDate);
     }
 
     [Fact]
@@ -318,8 +318,8 @@ public class PersonalAccessTokenService : IHostedService, IAsyncDisposable
                 Name = name,
                 OwnerUserId = ownerUserId,
                 CreationDate = DateTime.UtcNow,
-                LastUsedDate = DateTime.MinValue,
-                ExpirationDate = expiry ?? DateTime.MaxValue
+                LastUsedDate = null,
+                ExpirationDate = expiry
             };
             _tokens[pat.TokenHash] = pat;
             await Save();
@@ -336,6 +336,8 @@ public class PersonalAccessTokenService : IHostedService, IAsyncDisposable
         if (string.IsNullOrEmpty(rawToken)) return null;
         if (!_tokens.TryGetValue(HashToken(rawToken), out var pat)) return null;
         if (pat.IsExpired) return null;
+        // Best-effort last-used stamp. Written without _lock: the DateTime? write is atomic on 64-bit
+        // and _tokens enumeration in Save() is safe (ConcurrentDictionary); flushed by the cleanup loop.
         pat.LastUsedDate = DateTime.UtcNow;
         _dirty = true;
         return pat.OwnerUserId;
@@ -738,7 +740,6 @@ In `Relay/Program.cs`, add the MCP server registration alongside the other `buil
 // In-process MCP server (read-only tools), authenticated by the Pat scheme.
 builder.Services.AddMcpServer()
        .WithHttpTransport(o => o.Stateless = true)
-       .AddAuthorizationFilters()
        .WithTools<Relay.Services.RelayMcpTools>();
 ```
 
@@ -1072,10 +1073,14 @@ public partial class AccessTokenManager : ComponentBase
         }
     }
 
-    private static string Format(DateTime dt) =>
-        dt == DateTime.MinValue ? "Never"
-        : dt == DateTime.MaxValue ? "—"
-        : dt.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+    private static string FormatLastUsed(DateTime? dt) =>
+        dt is null ? "Never" : dt.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+
+    private static string FormatExpiry(DateTime? dt) =>
+        dt is null ? "—" : dt.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+
+    private static string FormatCreated(DateTime dt) =>
+        dt.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
 }
 ```
 
@@ -1105,9 +1110,9 @@ Create `Relay/Screens/Overlay/Personal/AccessTokenManager.razor`:
     {
         <FluentDataGrid Items="@_tokens.AsQueryable()" GridTemplateColumns="2fr 1fr 1fr 1fr auto">
             <PropertyColumn Title="Name" Property="@(t => t.Name)" />
-            <TemplateColumn Title="Created">@Format(context.CreationDate)</TemplateColumn>
-            <TemplateColumn Title="Last used">@Format(context.LastUsedDate)</TemplateColumn>
-            <TemplateColumn Title="Expires">@Format(context.ExpirationDate)</TemplateColumn>
+            <TemplateColumn Title="Created">@FormatCreated(context.CreationDate)</TemplateColumn>
+            <TemplateColumn Title="Last used">@FormatLastUsed(context.LastUsedDate)</TemplateColumn>
+            <TemplateColumn Title="Expires">@FormatExpiry(context.ExpirationDate)</TemplateColumn>
             <TemplateColumn Title="">
                 <FluentButton Appearance="Appearance.Stealth" @onclick="@(() => RevokeToken(context.Id))">Revoke</FluentButton>
             </TemplateColumn>
@@ -1205,7 +1210,9 @@ In the inspector UI: Transport = Streamable HTTP, URL = `http://localhost:5000/a
 
 - [ ] **Step 5: Verify permission scoping**
 
-With a token for user A, confirm `list_projects` does not return a project owned solely by user B; calling `list_spaces`/`list_jobs`/`get_job` with ids belonging to user B's private project returns empty/null rather than data.
+**Use a non-admin account for this test.** `DataManager.GetUserProjects` returns *all* projects for `UserRole.Admin` users (by design), so an admin PAT legitimately sees everything and would make this check appear to fail.
+
+With a token for non-admin user A, confirm `list_projects` does not return a project owned solely by user B; calling `list_spaces`/`list_jobs`/`get_job` with ids belonging to user B's private project returns empty/null rather than data.
 
 - [ ] **Step 6: Final commit (docs/notes if any)**
 
