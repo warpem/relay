@@ -444,14 +444,43 @@ public partial class DataManager
     /// terminate the job's process. The actual abortion is handled by the job queue,
     /// which will eventually transition the job to the Aborted state.
     /// </remarks>
+    /// <summary>
+    /// Throws with a human-readable message if a job has unmet parameter or port-connection
+    /// requirements. Mirrors the GUI's pre-queue validation (<see cref="Job.ValidateInputs"/> +
+    /// <see cref="Job.ValidatePortInputs"/>) so non-GUI callers (e.g. MCP) can't queue a job the
+    /// GUI would have blocked. The GUI keeps its own copy of these checks for live button state.
+    /// </summary>
+    private static void EnsureJobInputsValid(Job job)
+    {
+        var inputErrors = job.ValidateInputs();
+        var portErrors = job.ValidatePortInputs();
+        if (inputErrors.Count == 0 && portErrors.Count == 0)
+            return;
+
+        var messages = new List<string>();
+        foreach (var (field, message) in inputErrors)
+            messages.Add($"{field}: {message}");
+        foreach (var (port, portMessages) in portErrors)
+            foreach (var message in portMessages)
+                messages.Add($"{port}: {message}");
+
+        throw new Exception(
+            "Job cannot be queued because its inputs are incomplete — " +
+            string.Join("; ", messages) + ".");
+    }
+
     public async Task AbortJob(ReadOnlyUser user, ReadOnlyJob job)
     {
         var originalUser = _userRepository.FindUser(user.Id);
+        var originalJob = ResolveJob(job.Space.Project.Id, job.Space.Id, job.Id);
 
-        await UpdateJob(user, job, originalJob =>
+        if (!originalJob.CanTransitionState(JobStatus.Aborting))
+            throw new Exception($"Job cannot be aborted from its current state ({originalJob.Status}).");
+
+        await UpdateJob(user, job, j =>
         {
-            originalJob.Status = JobStatus.Aborting;
-            originalJob.AddEvent(EventType.Aborting, originalUser);
+            j.Status = JobStatus.Aborting;
+            j.AddEvent(EventType.Aborting, originalUser);
         });
     }
 
@@ -498,6 +527,9 @@ public partial class DataManager
                 // Check if the job can be transitioned to the Waiting state
                 if (!originalJob.CanTransitionState(JobStatus.Waiting))
                     throw new Exception("Job cannot be started.");
+
+                // Enforce the same input/connectivity requirements the GUI checks before queueing.
+                EnsureJobInputsValid(originalJob);
 
                 // Inherit color from first colored parent if not already set
                 if (originalJob.ColorTag == null)
@@ -562,6 +594,9 @@ public partial class DataManager
                 // Check if the job can be transitioned to the Waiting state
                 if (!originalJob.CanTransitionState(JobStatus.Waiting))
                     throw new Exception("Job cannot be started.");
+
+                // Enforce the same input/connectivity requirements the GUI checks before queueing.
+                EnsureJobInputsValid(originalJob);
 
                 // Inherit color from first colored parent if not already set
                 if (originalJob.ColorTag == null)
