@@ -903,7 +903,12 @@ public enum OverlayScreenType
     /// <summary>
     /// The application settings overlay.
     /// </summary>
-    Settings
+    Settings,
+
+    /// <summary>
+    /// The current user's personal settings overlay (e.g. access tokens).
+    /// </summary>
+    Personal
 }
 
 /// <summary>

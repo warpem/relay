@@ -24,6 +24,15 @@
         </FluentButton>
         <FluentTooltip Anchor="buttonQueues" Position="TooltipPosition.Right">Queues</FluentTooltip>
 
+        <FluentButton id="buttonPersonal"
+                      IconStart="@(new Icons.Regular.Size24.Person())"
+                      Appearance="@(Session.CurrentOverlay == OverlayScreenType.Personal ? Appearance.Accent : null)"
+                      BackgroundColor="@(Session.CurrentOverlay == OverlayScreenType.Personal ? null : "transparent")"
+                      OnClick="OnPersonalButtonClick"
+                      Title="Personal settings">
+        </FluentButton>
+        <FluentTooltip Anchor="buttonPersonal" Position="TooltipPosition.Right">Personal settings</FluentTooltip>
+
         @if (Session.User.Role == UserRole.Admin)
         {
             <FluentButton id="buttonSettings"

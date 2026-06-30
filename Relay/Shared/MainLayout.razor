@@ -75,6 +75,13 @@
                                         <OverlaySettings @key="@("OverlaySettings")" />
 
                                         break;
+
+                                    case OverlayScreenType.Personal:
+                                        <PageTitle>Relay: Personal</PageTitle>
+
+                                        <Relay.Screens.Overlay.Personal.OverlayPersonal @key="@("OverlayPersonal")" />
+
+                                        break;
                                 }
                             </div>
                         }
