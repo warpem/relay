@@ -159,6 +159,9 @@ public class RelayMcpTools(IHttpContextAccessor contextAccessor, DataManager dat
         if (project == null) throw new McpException($"Project {projectId} not found.");
         var template = string.IsNullOrWhiteSpace(alias) ? null : new Space { Alias = alias };
         var space = await dataManager.CreateSpace(user, project, template);
+        // Mirror the GUI's space-creation flow: a space needs a default view before jobs can be
+        // placed in it (create_job targets a view), and DataManager.CreateSpace makes none.
+        await dataManager.CreateView(user, space, new View { Alias = "View 1", HeroImage = "🪟" });
         return new CreatedDto(space.Id, space.Alias);
     }
 
