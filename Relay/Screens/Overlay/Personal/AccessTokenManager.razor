@@ -10,7 +10,7 @@
 
     <p style="margin:0; opacity:0.8;">
         Use a personal access token to let an AI agent connect to Relay over MCP at
-        <code>/api/mcp</code> as you. Tokens act with your permissions and are read-only in this release.
+        <code>/api/mcp</code> as you, limited to the access levels you grant below.
     </p>
 
     @if (_showCreate)
@@ -20,6 +20,26 @@
             {
                 <strong>New personal access token</strong>
                 <FluentTextField @bind-Value="_newName" Placeholder="Name (e.g. Claude on my laptop)" Style="width:100%;" AutoComplete="off" />
+                <div style="display:flex; gap:16px; flex-wrap:wrap;">
+                    <div style="display:flex; flex-direction:column; gap:4px;">
+                        <span style="font-size:12px; opacity:0.8;">Projects</span>
+                        <FluentSelect Items="_levelNames" Width="120px" Position="SelectPosition.Below"
+                                      Value="@_newProjectAccess.ToString()"
+                                      ValueChanged="@(v => _newProjectAccess = Enum.Parse<AccessLevel>(v))" />
+                    </div>
+                    <div style="display:flex; flex-direction:column; gap:4px;">
+                        <span style="font-size:12px; opacity:0.8;">Spaces</span>
+                        <FluentSelect Items="_levelNames" Width="120px" Position="SelectPosition.Below"
+                                      Value="@_newSpaceAccess.ToString()"
+                                      ValueChanged="@(v => _newSpaceAccess = Enum.Parse<AccessLevel>(v))" />
+                    </div>
+                    <div style="display:flex; flex-direction:column; gap:4px;">
+                        <span style="font-size:12px; opacity:0.8;">Jobs</span>
+                        <FluentSelect Items="_levelNames" Width="120px" Position="SelectPosition.Below"
+                                      Value="@_newJobAccess.ToString()"
+                                      ValueChanged="@(v => _newJobAccess = Enum.Parse<AccessLevel>(v))" />
+                    </div>
+                </div>
                 <div style="display:flex; gap:8px; justify-content:flex-end;">
                     <FluentButton OnClick="CloseCreate">Cancel</FluentButton>
                     <FluentButton Appearance="Appearance.Accent" OnClick="CreateToken">Create</FluentButton>
@@ -50,6 +70,7 @@
     {
         <FluentDataGrid Items="@_tokens.AsQueryable()" RowSize="DataGridRowSize.Medium">
             <PropertyColumn Title="Name" Property="@(t => t.Name)" />
+            <TemplateColumn Title="Access">@FormatLevels(context)</TemplateColumn>
             <TemplateColumn Title="Created">@FormatCreated(context.CreationDate)</TemplateColumn>
             <TemplateColumn Title="Last used">@FormatLastUsed(context.LastUsedDate)</TemplateColumn>
             <TemplateColumn Title="Expires">@FormatExpiry(context.ExpirationDate)</TemplateColumn>
