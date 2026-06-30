@@ -298,3 +298,31 @@ None beyond the prototype's `ModelContextProtocol` / `.AspNetCore` packages.
 - A `Relay.Tests` project covering the `Pat` auth handler and tool-level checks.
 - General personal-settings surface (profile, password) on the overlay.
 - Per-item (id-scoped) permissions, if blanket per-tier ever proves too coarse.
+
+## Addendum: hardening from live E2E (2026-06-30)
+
+Driving the tools as a real MCP client surfaced gaps that were fixed in the same branch:
+
+- **MCP must enforce the GUI's business rules.** The tools call `DataManager`
+  directly, but several validations lived only in the Blazor layer. Enforcement
+  was pushed into the `DataManager` chokepoints (the GUI keeps its own copies for
+  live button state):
+  - Queue (`QueueLocalJob`/`QueueClusterJob`) runs `ValidateInputs` +
+    `ValidatePortInputs`; an under-connected job is rejected at queue time
+    instead of failing at staging.
+  - `CreateEdge` rejects ports with mismatched `ResourceType`.
+  - `AbortJob` gates on the state-transition matrix (e.g. Failed→Aborting is
+    disallowed); the matrix was correct, it just wasn't being checked.
+    `ForceAbortOrphanedJob` remains the intentional bypass.
+- **Surface business-rule errors.** The MCP host masks non-`McpException`
+  messages with a generic string, so every mutation tool routes its
+  `DataManager` call through an `Invoke()` wrapper that re-wraps plain exceptions
+  as `McpException`, preserving the message.
+- **`create_space` creates a default view.** `DataManager.CreateSpace` makes no
+  view (the GUI's dialog adds one separately), which left `create_job` unable to
+  target a fresh space. The tool now mirrors the GUI: CreateSpace → CreateView.
+- **Lean job-type catalog.** `list_job_types` returns only guid, name, and the
+  full context-menu category path; `get_job_type(guid)` returns the parameter
+  schema plus input/output ports (name, alias, resource type, min/max items).
+- **Hero emoji on creation.** `create_project`/`create_space` accept an optional
+  emoji (sets `HeroImage`) so agent-created cards aren't blank.
