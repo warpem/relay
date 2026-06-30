@@ -146,11 +146,18 @@ public class RelayMcpTools(IHttpContextAccessor contextAccessor, DataManager dat
 
     [McpServerTool(Name = "create_project"), Description("Create a new project owned by the current user.")]
     public async Task<CreatedDto> CreateProject(
-        [Description("Optional project name/alias.")] string? alias = null)
+        [Description("Optional project name/alias.")] string? alias = null,
+        [Description("Optional emoji shown on the project card, e.g. \"🧊\".")] string? emoji = null)
     {
         var user = CurrentUser();
         Require(PermTier.Project, AccessLevel.EditRun);
-        var template = string.IsNullOrWhiteSpace(alias) ? null : new Project { Alias = alias };
+        Project? template = null;
+        if (!string.IsNullOrWhiteSpace(alias) || !string.IsNullOrWhiteSpace(emoji))
+        {
+            template = new Project();
+            if (!string.IsNullOrWhiteSpace(alias)) template.Alias = alias;
+            if (!string.IsNullOrWhiteSpace(emoji)) template.HeroImage = emoji;
+        }
         var project = await Invoke(() => dataManager.CreateProject(user, template));
         return new CreatedDto(project.Id, project.Alias);
     }
@@ -170,17 +177,25 @@ public class RelayMcpTools(IHttpContextAccessor contextAccessor, DataManager dat
     [McpServerTool(Name = "create_space"), Description("Create a new space in a project.")]
     public async Task<CreatedDto> CreateSpace(
         [Description("The project id.")] int projectId,
-        [Description("Optional space name/alias.")] string? alias = null)
+        [Description("Optional space name/alias.")] string? alias = null,
+        [Description("Optional emoji shown on the space card, e.g. \"🏖️\".")] string? emoji = null)
     {
         var user = CurrentUser();
         Require(PermTier.Space, AccessLevel.EditRun);
         var project = dataManager.GetUserProjects(user).FirstOrDefault(p => p.Id == projectId);
         if (project == null) throw new McpException($"Project {projectId} not found.");
-        var template = string.IsNullOrWhiteSpace(alias) ? null : new Space { Alias = alias };
+        Space? template = null;
+        if (!string.IsNullOrWhiteSpace(alias) || !string.IsNullOrWhiteSpace(emoji))
+        {
+            template = new Space();
+            if (!string.IsNullOrWhiteSpace(alias)) template.Alias = alias;
+            if (!string.IsNullOrWhiteSpace(emoji)) template.HeroImage = emoji;
+        }
         var space = await Invoke(() => dataManager.CreateSpace(user, project, template));
         // Mirror the GUI's space-creation flow: a space needs a default view before jobs can be
         // placed in it (create_job targets a view), and DataManager.CreateSpace makes none.
-        await Invoke(() => dataManager.CreateView(user, space, new View { Alias = "View 1", HeroImage = "🪟" }));
+        var viewEmoji = string.IsNullOrWhiteSpace(emoji) ? "🪟" : emoji;
+        await Invoke(() => dataManager.CreateView(user, space, new View { Alias = "View 1", HeroImage = viewEmoji }));
         return new CreatedDto(space.Id, space.Alias);
     }
 
