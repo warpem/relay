@@ -21,6 +21,11 @@ public static class RelayMcpProjections
 
     public static SpaceDto ToDto(ReadOnlySpace s) => new(s.Id, s.Alias);
 
+    public static QueueDto ToDto(ReadOnlyJobQueue q) =>
+        new(q.Id, q.Alias, q.QueueType.HasFlag(JobQueueType.Local) ? "local" : "cluster");
+
+    public static ViewDto ToDto(ReadOnlyView v) => new(v.Id, v.Alias);
+
     public static JobDto ToDto(ReadOnlyJob j) =>
         new(j.Id, j.AliasOrId, j.TypeName, j.Status.ToString());
 

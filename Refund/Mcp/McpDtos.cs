@@ -25,3 +25,15 @@ public record JobDetailDto(
     IReadOnlyList<JobPortDto> Outputs);
 public record JobTypeParamDto(string Name, string Label, string Type, string? Help, bool Advanced);
 public record JobTypeDto(string TypeGuid, string TypeName, string Category, IReadOnlyList<JobTypeParamDto> Parameters);
+
+/// <summary>A job queue the agent may target with queue_job. Type is "local" or "cluster".</summary>
+public record QueueDto(int Id, string Alias, string Type);
+
+/// <summary>A view within a space; create_job targets a view by id.</summary>
+public record ViewDto(int Id, string Alias);
+
+/// <summary>Result of a create_* tool.</summary>
+public record CreatedDto(int Id, string Alias);
+
+/// <summary>Generic success result for mutating tools without a created entity.</summary>
+public record OkDto(bool Ok);
