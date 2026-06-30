@@ -37,8 +37,8 @@ public class PersonalAccessTokenServiceTests
     {
         var svc = NewService(out _);
         var raw = await svc.Generate(42, "laptop", AccessLevel.Read, AccessLevel.Read, AccessLevel.Read);
-        var ownerId = svc.Validate(raw);
-        Assert.Equal(42, ownerId);
+        var pat = svc.Validate(raw);
+        Assert.Equal(42, pat!.OwnerUserId);
         Assert.NotNull(svc.ListForUser(42).Single().LastUsedDate);
     }
 
@@ -86,6 +86,6 @@ public class PersonalAccessTokenServiceTests
 
         var config = new RelayConfiguration { PatsPath = path };
         var reloaded = new PersonalAccessTokenService(NullLogger<PersonalAccessTokenService>.Instance, config);
-        Assert.Equal(8, reloaded.Validate(raw));
+        Assert.Equal(8, reloaded.Validate(raw)!.OwnerUserId);
     }
 }
