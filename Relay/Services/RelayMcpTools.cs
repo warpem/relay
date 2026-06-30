@@ -38,6 +38,25 @@ public class RelayMcpTools(IHttpContextAccessor contextAccessor, DataManager dat
             throw new McpException($"This token lacks {level} access for {tier} operations.");
     }
 
+    /// <summary>
+    /// Runs a DataManager mutation and surfaces its (business-rule) exception message to the agent.
+    /// DataManager throws plain exceptions for validation/state errors; the MCP host masks
+    /// non-McpException messages with a generic string, so we re-wrap them as McpException.
+    /// </summary>
+    private static async Task<T> Invoke<T>(Func<Task<T>> op)
+    {
+        try { return await op(); }
+        catch (McpException) { throw; }
+        catch (Exception ex) { throw new McpException(ex.Message); }
+    }
+
+    private static async Task Invoke(Func<Task> op)
+    {
+        try { await op(); }
+        catch (McpException) { throw; }
+        catch (Exception ex) { throw new McpException(ex.Message); }
+    }
+
     // ---- Read tools ---------------------------------------------------------
 
     [McpServerTool(Name = "list_projects"), Description("List the projects the current user can access.")]
@@ -132,7 +151,7 @@ public class RelayMcpTools(IHttpContextAccessor contextAccessor, DataManager dat
         var user = CurrentUser();
         Require(PermTier.Project, AccessLevel.EditRun);
         var template = string.IsNullOrWhiteSpace(alias) ? null : new Project { Alias = alias };
-        var project = await dataManager.CreateProject(user, template);
+        var project = await Invoke(() => dataManager.CreateProject(user, template));
         return new CreatedDto(project.Id, project.Alias);
     }
 
@@ -144,7 +163,7 @@ public class RelayMcpTools(IHttpContextAccessor contextAccessor, DataManager dat
         Require(PermTier.Project, AccessLevel.Manage);
         var project = dataManager.GetUserProjects(user).FirstOrDefault(p => p.Id == projectId);
         if (project == null) throw new McpException($"Project {projectId} not found.");
-        await dataManager.DeleteProject(project);
+        await Invoke(() => dataManager.DeleteProject(project));
         return new OkDto(true);
     }
 
@@ -158,10 +177,10 @@ public class RelayMcpTools(IHttpContextAccessor contextAccessor, DataManager dat
         var project = dataManager.GetUserProjects(user).FirstOrDefault(p => p.Id == projectId);
         if (project == null) throw new McpException($"Project {projectId} not found.");
         var template = string.IsNullOrWhiteSpace(alias) ? null : new Space { Alias = alias };
-        var space = await dataManager.CreateSpace(user, project, template);
+        var space = await Invoke(() => dataManager.CreateSpace(user, project, template));
         // Mirror the GUI's space-creation flow: a space needs a default view before jobs can be
         // placed in it (create_job targets a view), and DataManager.CreateSpace makes none.
-        await dataManager.CreateView(user, space, new View { Alias = "View 1", HeroImage = "🪟" });
+        await Invoke(() => dataManager.CreateView(user, space, new View { Alias = "View 1", HeroImage = "🪟" }));
         return new CreatedDto(space.Id, space.Alias);
     }
 
@@ -174,7 +193,7 @@ public class RelayMcpTools(IHttpContextAccessor contextAccessor, DataManager dat
         Require(PermTier.Space, AccessLevel.Manage);
         var space = dataManager.GetUserProjects(user).FirstOrDefault(p => p.Id == projectId)?.FindSpace(spaceId);
         if (space == null) throw new McpException($"Space {spaceId} not found.");
-        await dataManager.DeleteSpace(user, space);
+        await Invoke(() => dataManager.DeleteSpace(user, space));
         return new OkDto(true);
     }
 
@@ -192,7 +211,7 @@ public class RelayMcpTools(IHttpContextAccessor contextAccessor, DataManager dat
         var space = dataManager.GetUserProjects(user).FirstOrDefault(p => p.Id == projectId)?.FindSpace(spaceId);
         var view = space?.FindView(viewId);
         if (view == null) throw new McpException($"View {viewId} not found in space {spaceId}.");
-        var job = await dataManager.CreateJob(user, view, typeGuid);
+        var job = await Invoke(() => dataManager.CreateJob(user, view, typeGuid));
         return new CreatedDto(job.Id, job.AliasOrId);
     }
 
@@ -212,10 +231,10 @@ public class RelayMcpTools(IHttpContextAccessor contextAccessor, DataManager dat
         try { assignments = RelayMcpParameterPatch.Resolve(job.GetOriginalType(), parameters); }
         catch (ArgumentException ex) { throw new McpException(ex.Message); }
 
-        await dataManager.UpdateJob(user, job, j =>
+        await Invoke(() => dataManager.UpdateJob(user, job, j =>
         {
             foreach (var (prop, value) in assignments) prop.SetValue(j, value);
-        });
+        }));
         return new OkDto(true);
     }
 
@@ -229,7 +248,7 @@ public class RelayMcpTools(IHttpContextAccessor contextAccessor, DataManager dat
         Require(PermTier.Job, AccessLevel.EditRun);
         var job = dataManager.GetUserProjects(user).FirstOrDefault(p => p.Id == projectId)?.FindSpace(spaceId)?.FindJob(jobId);
         if (job == null) throw new McpException($"Job {jobId} not found.");
-        await dataManager.AbortJob(user, job);
+        await Invoke(() => dataManager.AbortJob(user, job));
         return new OkDto(true);
     }
 
@@ -243,7 +262,7 @@ public class RelayMcpTools(IHttpContextAccessor contextAccessor, DataManager dat
         Require(PermTier.Job, AccessLevel.Manage);
         var job = dataManager.GetUserProjects(user).FirstOrDefault(p => p.Id == projectId)?.FindSpace(spaceId)?.FindJob(jobId);
         if (job == null) throw new McpException($"Job {jobId} not found.");
-        await dataManager.DeleteJob(user, job);
+        await Invoke(() => dataManager.DeleteJob(user, job));
         return new OkDto(true);
     }
 
@@ -266,7 +285,7 @@ public class RelayMcpTools(IHttpContextAccessor contextAccessor, DataManager dat
         if (space == null || fromJob == null || toJob == null) throw new McpException("Space or job not found.");
         if (!fromJob.PortsOut.TryGetValue(fromPort, out var outPort)) throw new McpException($"Output port '{fromPort}' not found on job {fromJobId}.");
         if (!toJob.PortsIn.TryGetValue(toPort, out var inPort)) throw new McpException($"Input port '{toPort}' not found on job {toJobId}.");
-        await dataManager.CreateEdge(space, outPort, inPort);
+        await Invoke(() => dataManager.CreateEdge(space, outPort, inPort));
         return new OkDto(true);
     }
 
@@ -287,7 +306,7 @@ public class RelayMcpTools(IHttpContextAccessor contextAccessor, DataManager dat
             e.Source.Job.Id == fromJobId && e.Source.Name == fromPort &&
             e.Target.Job.Id == toJobId && e.Target.Name == toPort);
         if (edge == null) throw new McpException("No such edge.");
-        await dataManager.DeleteEdge(edge);
+        await Invoke(() => dataManager.DeleteEdge(edge));
         return new OkDto(true);
     }
 
@@ -305,13 +324,13 @@ public class RelayMcpTools(IHttpContextAccessor contextAccessor, DataManager dat
 
         if (queueId is null or -1)
         {
-            await dataManager.QueueLocalJob(user, job);
+            await Invoke(() => dataManager.QueueLocalJob(user, job));
         }
         else
         {
             var queue = dataManager.FindClusterQueue(queueId.Value);
             if (queue == null) throw new McpException($"Cluster queue {queueId} not found.");
-            await dataManager.QueueClusterJob(user, job, queue);
+            await Invoke(() => dataManager.QueueClusterJob(user, job, queue));
         }
         return new OkDto(true);
     }
