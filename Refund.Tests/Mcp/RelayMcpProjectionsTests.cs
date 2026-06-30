@@ -1,4 +1,5 @@
 using Refund.DataModel;
+using Refund.Jobs.Fs.MotionCtf.MotionAndCTF2D;
 using Refund.Mcp;
 
 namespace Refund.Tests.Mcp;
@@ -34,5 +35,20 @@ public class RelayMcpProjectionsTests
         Assert.NotNull(motion);
         Assert.Equal("Motion & CTF", motion!.TypeName);
         Assert.NotEmpty(motion.Parameters);
+    }
+
+    [Fact]
+    public void ToDetailDto_PopulatesParametersAndPorts()
+    {
+        EnsurePopulated();
+        var job = new MotionAndCTF2D().AsReadOnly();
+
+        var dto = RelayMcpProjections.ToDetailDto(job);
+
+        Assert.Equal("77cdcb73-1bd0-43e0-b206-3d93acecafa8", dto.TypeGuid);
+        Assert.NotEmpty(dto.Parameters);              // reads the job's configured parameter values
+        Assert.NotNull(dto.Inputs);                   // ports are enumerated (no edges on a bare job)
+        Assert.NotNull(dto.Outputs);
+        Assert.True(dto.Inputs.Count + dto.Outputs.Count > 0, "job should declare at least one port");
     }
 }

@@ -31,7 +31,10 @@
                 <span style="color: var(--error);">
                     This is the only time the token will be shown. Store it somewhere safe.
                 </span>
-                <FluentTextField Value="@_createdRawToken" ReadOnly="true" Style="width:100%;" />
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <FluentTextField Value="@_createdRawToken" ReadOnly="true" Style="flex:1;" />
+                    <FluentButton IconStart="@(new Icons.Regular.Size16.Copy())" OnClick="CopyToken">Copy</FluentButton>
+                </div>
                 <div style="display:flex; gap:8px; justify-content:flex-end;">
                     <FluentButton Appearance="Appearance.Accent" OnClick="CloseCreate">Done</FluentButton>
                 </div>

@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Components;
 using Microsoft.FluentUI.AspNetCore.Components;
+using Microsoft.JSInterop;
 using Refund.DataModel;
 using Refund.Services;
 using Refund.Services.Core.Session;
@@ -11,6 +12,7 @@ public partial class AccessTokenManager : ComponentBase
     [Inject] private PersonalAccessTokenService Pats { get; set; } = default!;
     [Inject] private RelaySession Session { get; set; } = default!;
     [Inject] private IToastService ToastService { get; set; } = default!;
+    [Inject] private IJSRuntime JsRuntime { get; set; } = default!;
 
     private IReadOnlyList<PersonalAccessToken> _tokens = [];
     private bool _showCreate;
@@ -43,6 +45,20 @@ public partial class AccessTokenManager : ComponentBase
         catch (Exception exc)
         {
             ToastService.ShowError("Couldn't create token: " + exc.Message);
+        }
+    }
+
+    private async Task CopyToken()
+    {
+        if (_createdRawToken == null) return;
+        try
+        {
+            await JsRuntime.InvokeVoidAsync("navigator.clipboard.writeText", _createdRawToken);
+            ToastService.ShowSuccess("Token copied to clipboard");
+        }
+        catch (Exception exc)
+        {
+            ToastService.ShowError("Couldn't copy token: " + exc.Message);
         }
     }
 
