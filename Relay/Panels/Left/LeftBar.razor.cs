@@ -117,6 +117,22 @@ public partial class LeftBar : ComponentBase, IDisposable
     }
 
     /// <summary>
+    /// Opens the Personal settings overlay screen when the personal button is clicked.
+    /// Maintains the current navigation context while displaying the overlay.
+    /// </summary>
+    private async Task OnPersonalButtonClick()
+    {
+        await Session.NavigateToAsync(new()
+        {
+            ProjectId = Session.ProjectId,
+            SpaceId = Session.SpaceId,
+            ViewId = Session.ViewId,
+            JobId = Session.JobId,
+            Overlay = OverlayScreenType.Personal
+        });
+    }
+
+    /// <summary>
     /// Opens the file browser dialog in browse-only mode.
     /// Restores the last visited folder and tracks navigation.
     /// </summary>

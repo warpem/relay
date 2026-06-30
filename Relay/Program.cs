@@ -90,6 +90,11 @@ builder.Services.AddSingleton<DataManager>(new DataManager(relayOptions));
 builder.Services.AddSingleton<SecurityTokenService>();
 builder.Services.AddHostedService<SecurityTokenService>();
 
+// PersonalAccessTokenService stores PATs used to authenticate agents over MCP.
+// Register once and reuse the same instance as the hosted service so there is a single store.
+builder.Services.AddSingleton<PersonalAccessTokenService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<PersonalAccessTokenService>());
+
 // Register utility services
 builder.Services.AddScoped<HttpClient>();
 builder.Services.AddHttpContextAccessor();
@@ -163,7 +168,16 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
        {
            options.ExpireTimeSpan = TimeSpan.FromDays(30);
            options.SlidingExpiration = true;
-       });
+       })
+       .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, Relay.Services.PatAuthenticationHandler>(
+           Relay.Services.PatAuthenticationHandler.SchemeName, null);
+
+builder.Services.AddAuthorization();
+
+// In-process MCP server (read-only tools), authenticated by the Pat scheme.
+builder.Services.AddMcpServer()
+       .WithHttpTransport(o => o.Stateless = true)
+       .WithTools<Relay.Services.RelayMcpTools>();
 
 // Build the application
 var app = builder.Build();
@@ -214,6 +228,13 @@ app.Use(async (context, next) =>
 // Map endpoints
 app.MapRazorPages();
 app.MapControllers();
+
+// MCP endpoint: requires a valid personal access token (Pat scheme).
+var patPolicy = new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder(
+        Relay.Services.PatAuthenticationHandler.SchemeName)
+    .RequireAuthenticatedUser()
+    .Build();
+app.MapMcp("/api/mcp").RequireAuthorization(patPolicy);
 app.MapRazorComponents<App>()
    .AddInteractiveServerRenderMode();
 
