@@ -55,6 +55,12 @@ public partial class DataManager
                     throw new Exception($"Target Job {to.Job.Id} doesn't have an input port named {to.Name}.");
                 PortIn toPort = toJob.PortsIn[to.Name];
 
+                // Enforce resource-type compatibility, matching the GUI's port-connection check.
+                if (fromPort.ResourceType != toPort.ResourceType)
+                    throw new Exception(
+                        $"Cannot connect output '{from.Name}' ({fromPort.ResourceType.Name}) to input " +
+                        $"'{to.Name}' ({toPort.ResourceType.Name}): incompatible resource types.");
+
                 Edge newEdge = _dataRepository.CreateEdge(originalSpace, fromPort, toPort);
 
                 UpdateFolderLayoutsForEdge(originalSpace, fromJob.Id, toJob.Id);

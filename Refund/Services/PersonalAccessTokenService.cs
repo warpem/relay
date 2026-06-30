@@ -54,7 +54,9 @@ public class PersonalAccessTokenService : IHostedService, IAsyncDisposable
         return "relay_pat_" + b64;
     }
 
-    public async Task<string> Generate(int ownerUserId, string name, DateTime? expiry = null)
+    public async Task<string> Generate(int ownerUserId, string name,
+        AccessLevel projectAccess, AccessLevel spaceAccess, AccessLevel jobAccess,
+        DateTime? expiry = null)
     {
         var raw = NewRawToken();
         await _lock.WaitAsync();
@@ -68,7 +70,10 @@ public class PersonalAccessTokenService : IHostedService, IAsyncDisposable
                 OwnerUserId = ownerUserId,
                 CreationDate = DateTime.UtcNow,
                 LastUsedDate = null,
-                ExpirationDate = expiry
+                ExpirationDate = expiry,
+                ProjectAccess = projectAccess,
+                SpaceAccess = spaceAccess,
+                JobAccess = jobAccess
             };
             _tokens[pat.TokenHash] = pat;
             await Save();
@@ -80,7 +85,7 @@ public class PersonalAccessTokenService : IHostedService, IAsyncDisposable
         return raw;
     }
 
-    public int? Validate(string rawToken)
+    public PersonalAccessToken? Validate(string rawToken)
     {
         if (string.IsNullOrEmpty(rawToken)) return null;
         if (!_tokens.TryGetValue(HashToken(rawToken), out var pat)) return null;
@@ -89,7 +94,7 @@ public class PersonalAccessTokenService : IHostedService, IAsyncDisposable
         // and _tokens enumeration in Save() is safe (ConcurrentDictionary); flushed by the cleanup loop.
         pat.LastUsedDate = DateTime.UtcNow;
         _dirty = true;
-        return pat.OwnerUserId;
+        return pat;
     }
 
     public IReadOnlyList<PersonalAccessToken> ListForUser(int ownerUserId) =>
@@ -122,6 +127,15 @@ public class PersonalAccessTokenService : IHostedService, IAsyncDisposable
             {
                 var pat = new PersonalAccessToken();
                 pat.ReadFromJson(node);
+                // Migrate legacy (pre-permissions) tokens: all-None means full access today.
+                if (pat.ProjectAccess == AccessLevel.None
+                    && pat.SpaceAccess == AccessLevel.None
+                    && pat.JobAccess == AccessLevel.None)
+                {
+                    pat.ProjectAccess = AccessLevel.Manage;
+                    pat.SpaceAccess = AccessLevel.Manage;
+                    pat.JobAccess = AccessLevel.Manage;
+                }
                 _tokens[pat.TokenHash] = pat;
             }
         }

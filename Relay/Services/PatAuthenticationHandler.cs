@@ -39,13 +39,15 @@ public class PatAuthenticationHandler : AuthenticationHandler<AuthenticationSche
             return Task.FromResult(AuthenticateResult.NoResult());
 
         var raw = header["Bearer ".Length..].Trim();
-        var ownerId = _pats.Validate(raw);
-        if (ownerId == null)
+        var pat = _pats.Validate(raw);
+        if (pat == null)
             return Task.FromResult(AuthenticateResult.Fail("Invalid or expired personal access token"));
 
-        var user = _dataManager.FindUser(ownerId.Value);
+        var user = _dataManager.FindUser(pat.OwnerUserId);
         if (user == null)
             return Task.FromResult(AuthenticateResult.Fail("Token owner no longer exists"));
+
+        Context.Items["PatGrants"] = Refund.Mcp.PatAuthorization.From(pat);
 
         var claims = new[]
         {
