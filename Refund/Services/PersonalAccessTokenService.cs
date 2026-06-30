@@ -54,7 +54,9 @@ public class PersonalAccessTokenService : IHostedService, IAsyncDisposable
         return "relay_pat_" + b64;
     }
 
-    public async Task<string> Generate(int ownerUserId, string name, DateTime? expiry = null)
+    public async Task<string> Generate(int ownerUserId, string name,
+        AccessLevel projectAccess, AccessLevel spaceAccess, AccessLevel jobAccess,
+        DateTime? expiry = null)
     {
         var raw = NewRawToken();
         await _lock.WaitAsync();
@@ -68,7 +70,10 @@ public class PersonalAccessTokenService : IHostedService, IAsyncDisposable
                 OwnerUserId = ownerUserId,
                 CreationDate = DateTime.UtcNow,
                 LastUsedDate = null,
-                ExpirationDate = expiry
+                ExpirationDate = expiry,
+                ProjectAccess = projectAccess,
+                SpaceAccess = spaceAccess,
+                JobAccess = jobAccess
             };
             _tokens[pat.TokenHash] = pat;
             await Save();
