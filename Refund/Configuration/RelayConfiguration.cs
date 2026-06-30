@@ -103,4 +103,7 @@ public class RelayConfiguration
     /// The SecurityTokenService automatically cleans up expired tokens from this file.
     /// </remarks>
     public string TokensPath { get; set; } = "tokens.relay";
+
+    /// <summary>Path to the file storing personal access tokens (MCP/agent auth).</summary>
+    public string PatsPath { get; set; } = "pats.relay";
 }
