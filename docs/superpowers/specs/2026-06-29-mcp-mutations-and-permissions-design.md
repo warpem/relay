@@ -106,6 +106,7 @@ A mutation tool is gated by the level of **the tier of the thing it acts on**
 |------|----------------------|
 | `list_projects` | Project · Read |
 | `list_spaces` | Space · Read |
+| `list_views` | Space · Read |
 | `list_jobs`, `get_job` | Job · Read |
 | `list_job_types`, `list_queues` | — (authenticated only) |
 | `create_project` | Project · EditRun |
@@ -208,8 +209,8 @@ existence), then calls the corresponding `DataManager` method:
 - `delete_project(projectId)` → `DeleteProject(project)`
 - `create_space(projectId, alias?)` → `CreateSpace(user, project, template?)`
 - `delete_space(projectId, spaceId)` → `DeleteSpace(user, space)`
-- `create_job(projectId, spaceId, typeGuid)` → `CreateJob(user, view, typeGuid)`
-  (uses the space's default/active view, consistent with the UI path)
+- `create_job(projectId, spaceId, viewId, typeGuid)` → `CreateJob(user, view, typeGuid)`
+  (the agent picks the target `viewId` from `list_views`)
 - `configure_job(projectId, spaceId, jobId, params)` → patch translation → `UpdateJob`
 - `connect_jobs(projectId, spaceId, fromJobId, fromPort, toJobId, toPort)` → `CreateEdge(space, fromPort, toPort)`
 - `disconnect_jobs(projectId, spaceId, fromJobId, fromPort, toJobId, toPort)` → resolve the edge → `DeleteEdge(edge)`
@@ -217,12 +218,16 @@ existence), then calls the corresponding `DataManager` method:
 - `abort_job(projectId, spaceId, jobId)` → `AbortJob(user, job)`
 - `delete_job(projectId, spaceId, jobId)` → `DeleteJob(user, job)`
 
-#### 7. New read tool: `list_queues`
+#### 7. New read tools: `list_queues` and `list_views`
 
 `list_queues()` → authenticated-only (no tier check, like `list_job_types`),
 returning each queue's id, name/alias, and type (local vs cluster) so the agent
 can supply a valid `queueId` to `queue_job`. Sourced from the DataManager's
 queue registry (exact accessor pinned in the plan).
+
+`list_views(projectId, spaceId)` → Space · Read, returning each view's id and
+name within the space, so the agent can supply a valid `viewId` to `create_job`.
+Sourced from `space.Views`.
 
 #### 8. Personal-settings UI
 
