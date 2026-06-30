@@ -25,5 +25,14 @@ public class PersonalAccessToken : RelayBase
     /// <summary><c>null</c> means the token never expires.</summary>
     [RelayProperty] public DateTime? ExpirationDate { get; set; }
 
+    /// <summary>Access level for project-tier operations (list/create/delete projects).</summary>
+    [RelayProperty] public AccessLevel ProjectAccess { get; set; } = AccessLevel.None;
+
+    /// <summary>Access level for space-tier operations (list/create/delete spaces, list views).</summary>
+    [RelayProperty] public AccessLevel SpaceAccess { get; set; } = AccessLevel.None;
+
+    /// <summary>Access level for job-tier operations (list/get/create/configure/connect/queue/abort/delete jobs).</summary>
+    [RelayProperty] public AccessLevel JobAccess { get; set; } = AccessLevel.None;
+
     public bool IsExpired => ExpirationDate.HasValue && ExpirationDate.Value <= DateTime.UtcNow;
 }
