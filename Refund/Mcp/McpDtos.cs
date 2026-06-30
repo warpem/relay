@@ -24,7 +24,22 @@ public record JobDetailDto(
     IReadOnlyList<JobPortDto> Inputs,
     IReadOnlyList<JobPortDto> Outputs);
 public record JobTypeParamDto(string Name, string Label, string Type, string? Help, bool Advanced);
-public record JobTypeDto(string TypeGuid, string TypeName, string Category, IReadOnlyList<JobTypeParamDto> Parameters);
+
+/// <summary>Lean job-type listing entry. Category is the full context-menu path, e.g.
+/// "Tilt-series.Reconstruction.Map". Call get_job_type for parameters and ports.</summary>
+public record JobTypeSummaryDto(string TypeGuid, string TypeName, string Category);
+
+/// <summary>A declared port on a job type. MinItems/MaxItems are set for inputs, null for outputs.</summary>
+public record JobTypePortDto(string Name, string Alias, string ResourceType, int? MinItems, int? MaxItems);
+
+/// <summary>Full detail for one job type: parameter schema plus input/output ports.</summary>
+public record JobTypeDetailDto(
+    string TypeGuid,
+    string TypeName,
+    string Category,
+    IReadOnlyList<JobTypeParamDto> Parameters,
+    IReadOnlyList<JobTypePortDto> Inputs,
+    IReadOnlyList<JobTypePortDto> Outputs);
 
 /// <summary>A job queue the agent may target with queue_job. Type is "local" or "cluster".</summary>
 public record QueueDto(int Id, string Alias, string Type);

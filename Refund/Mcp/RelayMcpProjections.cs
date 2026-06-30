@@ -86,24 +86,51 @@ public static class RelayMcpProjections
         _ => value.ToString()
     };
 
-    public static IReadOnlyList<JobTypeDto> BuildJobTypeCatalog()
+    /// <summary>Category (full context-menu path) for a registered job type, e.g.
+    /// "Tilt-series.Reconstruction.Map". Empty string if not categorized.</summary>
+    private static string CategoryOf(Type clrType) =>
+        Job.TypeCategories.FirstOrDefault(kvp => kvp.Value == clrType).Key ?? "";
+
+    /// <summary>Lean listing of every job type: guid, display name, and full category path.</summary>
+    public static IReadOnlyList<JobTypeSummaryDto> BuildJobTypeSummaries()
     {
-        var result = new List<JobTypeDto>();
+        var result = new List<JobTypeSummaryDto>();
         foreach (var (typeGuid, clrType) in Job.Types)
         {
             var name = Job.TypeNames.TryGetValue(clrType, out var n) ? n : clrType.Name;
-            var category = Job.TypeCategories.FirstOrDefault(kvp => kvp.Value == clrType).Key ?? "";
-            var parameters = new List<JobTypeParamDto>();
-            if (Job.TypeUiFields.TryGetValue(clrType, out var fields))
-                foreach (var (prop, uiField) in fields)
-                    parameters.Add(new JobTypeParamDto(
-                        Name: prop.Name,
-                        Label: uiField.Label ?? prop.Name,
-                        Type: prop.PropertyType.Name,
-                        Help: string.IsNullOrEmpty(uiField.HelpText) ? null : uiField.HelpText,
-                        Advanced: uiField.IsAdvanced));
-            result.Add(new JobTypeDto(typeGuid, name, category, parameters));
+            result.Add(new JobTypeSummaryDto(typeGuid, name, CategoryOf(clrType)));
         }
         return result;
+    }
+
+    /// <summary>Full detail for a single job type (parameters + input/output ports), or null if
+    /// the guid is unknown.</summary>
+    public static JobTypeDetailDto? BuildJobTypeDetail(string typeGuid)
+    {
+        if (!Job.Types.TryGetValue(typeGuid, out var clrType)) return null;
+
+        var name = Job.TypeNames.TryGetValue(clrType, out var n) ? n : clrType.Name;
+
+        var parameters = new List<JobTypeParamDto>();
+        if (Job.TypeUiFields.TryGetValue(clrType, out var fields))
+            foreach (var (prop, uiField) in fields)
+                parameters.Add(new JobTypeParamDto(
+                    Name: prop.Name,
+                    Label: uiField.Label ?? prop.Name,
+                    Type: prop.PropertyType.Name,
+                    Help: string.IsNullOrEmpty(uiField.HelpText) ? null : uiField.HelpText,
+                    Advanced: uiField.IsAdvanced));
+
+        var inputs = new List<JobTypePortDto>();
+        if (Job.AllTypesPortsIn.TryGetValue(clrType, out var portsIn))
+            foreach (var (portName, port) in portsIn)
+                inputs.Add(new JobTypePortDto(portName, port.Alias, port.ResourceType.Name, port.MinItems, port.MaxItems));
+
+        var outputs = new List<JobTypePortDto>();
+        if (Job.AllTypesPortsOut.TryGetValue(clrType, out var portsOut))
+            foreach (var (portName, port) in portsOut)
+                outputs.Add(new JobTypePortDto(portName, port.Alias, port.ResourceType.Name, null, null));
+
+        return new JobTypeDetailDto(typeGuid, name, CategoryOf(clrType), parameters, inputs, outputs);
     }
 }

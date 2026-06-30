@@ -99,11 +99,19 @@ public class RelayMcpTools(IHttpContextAccessor contextAccessor, DataManager dat
         return job == null ? null : RelayMcpProjections.ToDetailDto(job);
     }
 
-    [McpServerTool(Name = "list_job_types"), Description("List all available job types and their parameters.")]
-    public IReadOnlyList<JobTypeDto> ListJobTypes()
+    [McpServerTool(Name = "list_job_types"), Description("List all job types (guid, name, and full context-menu category path). Call get_job_type for a type's parameters and ports.")]
+    public IReadOnlyList<JobTypeSummaryDto> ListJobTypes()
     {
         _ = CurrentUser(); // require authentication
-        return RelayMcpProjections.BuildJobTypeCatalog();
+        return RelayMcpProjections.BuildJobTypeSummaries();
+    }
+
+    [McpServerTool(Name = "get_job_type"), Description("Get the parameter schema and input/output ports for a single job type.")]
+    public JobTypeDetailDto? GetJobType(
+        [Description("The job type guid (from list_job_types).")] string typeGuid)
+    {
+        _ = CurrentUser(); // require authentication
+        return RelayMcpProjections.BuildJobTypeDetail(typeGuid);
     }
 
     [McpServerTool(Name = "list_queues"), Description("List job queues available for queue_job (local and cluster).")]
