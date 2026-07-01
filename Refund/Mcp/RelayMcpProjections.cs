@@ -74,6 +74,35 @@ public static class RelayMcpProjections
     }
 
     /// <summary>
+    /// Resolves which iteration's results to use: the caller's explicit choice if given, otherwise the
+    /// greatest iteration in [0, logsAvailableIteration] that has result files, or -1 if none do.
+    /// </summary>
+    public static int ResolveResultIteration(int? requested, int logsAvailableIteration, Func<int, bool> hasResultFilesForIteration)
+    {
+        if (requested.HasValue)
+            return requested.Value;
+        for (int i = logsAvailableIteration; i >= 0; i--)
+            if (hasResultFilesForIteration(i))
+                return i;
+        return -1;
+    }
+
+    public static JobResultDto ToResultDto(string port, Downloadable d, int iteration) =>
+        new(port, d.Name, d.Description, iteration);
+
+    /// <summary>
+    /// Finds the downloadable matching (port, name) among the job's enumerated downloadables, or null.
+    /// Used to validate a get_job_result_link request against real outputs before exposing a file URL.
+    /// </summary>
+    public static Downloadable MatchDownloadable(IEnumerable<(string Port, Downloadable Downloadable)> items, string port, string name)
+    {
+        foreach (var (p, d) in items)
+            if (p == port && d.Name == name)
+                return d;
+        return null;
+    }
+
+    /// <summary>
     /// Coerces a parameter value into something that serializes cleanly to JSON for the agent:
     /// primitives pass through, enums and anything else become their string form, null stays null.
     /// </summary>

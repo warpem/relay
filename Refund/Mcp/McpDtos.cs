@@ -23,6 +23,10 @@ public record JobDetailDto(
     IReadOnlyList<JobParamDto> Parameters,
     IReadOnlyList<JobPortDto> Inputs,
     IReadOnlyList<JobPortDto> Outputs);
+/// <summary>A downloadable result artifact of a job at a given iteration.
+/// (Port, Name, Iteration) is the key passed to get_job_result_link.</summary>
+public record JobResultDto(string Port, string Name, string Description, int Iteration);
+
 public record JobTypeParamDto(string Name, string Label, string Type, string? Help, bool Advanced);
 
 /// <summary>Lean job-type listing entry. Category is the full context-menu path, e.g.
