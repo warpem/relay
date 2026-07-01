@@ -150,6 +150,30 @@ public class RelayMcpTools(IHttpContextAccessor contextAccessor, DataManager dat
         [Description("Max lines to return (default 100, max 1000).")] int lines = 100)
         => ReadJobLog(projectId, spaceId, jobId, lines, stdout: false);
 
+    [McpServerTool(Name = "get_job_log"), Description("Get the last N lines of a job's cleaned per-iteration log (Relay's processed log, distinct from raw stdout; available for jobs that have no raw stdout). Defaults to the latest available iteration.")]
+    public JobIterationLogDto GetJobLog(
+        [Description("The project id.")] int projectId,
+        [Description("The space id.")] int spaceId,
+        [Description("The job id.")] int jobId,
+        [Description("Optional iteration; omit for the latest available iteration.")] int? iteration = null,
+        [Description("Max lines to return (default 100, max 1000).")] int lines = 100)
+    {
+        var user = CurrentUser();
+        if (!Can(PermTier.Job, AccessLevel.Read)) return new JobIterationLogDto(false, -1, 0, "");
+        var job = dataManager.GetUserProjects(user).FirstOrDefault(p => p.Id == projectId)?.FindSpace(spaceId)?.FindJob(jobId);
+        if (job == null) return new JobIterationLogDto(false, -1, 0, "");
+
+        int iter = iteration ?? job.LogsAvailableIteration;
+        if (iter < 0) return new JobIterationLogDto(false, -1, 0, "");
+
+        int clamped = Math.Clamp(lines, 1, 1000);
+        string path = job.LogFilePath(iter);
+        if (!File.Exists(path)) return new JobIterationLogDto(false, iter, 0, "");
+
+        string[] tail = JobTools.ReadLogTail(path, clamped);
+        return new JobIterationLogDto(true, iter, tail.Length, string.Join("\n", tail));
+    }
+
     // Collects (portName, downloadable) pairs for a job at one iteration. A single failing port is
     // skipped rather than failing the whole listing (mirrors JobProperties.UpdateResults in the UI).
     private static List<(string Port, Downloadable Downloadable)> EnumerateDownloadables(ReadOnlyJob job, int iteration)

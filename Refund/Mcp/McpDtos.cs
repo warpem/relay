@@ -31,6 +31,11 @@ public record JobResultDto(string Port, string Name, string Description, int Ite
 /// that stream yet (distinct from an empty file).</summary>
 public record JobLogDto(bool Exists, int Lines, string Text);
 
+/// <summary>A snapshot of a job's cleaned per-iteration log tail (Relay's processed log, distinct from
+/// raw stdout). Iteration is the iteration actually read — resolved to the latest available when the
+/// caller didn't specify one, or -1 when no log exists.</summary>
+public record JobIterationLogDto(bool Exists, int Iteration, int Lines, string Text);
+
 /// <summary>An absolute download URL for one named job result.</summary>
 public record ResultLinkDto(string Name, string FileName, string Url);
 
