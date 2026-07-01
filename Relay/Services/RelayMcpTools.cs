@@ -378,6 +378,40 @@ public class RelayMcpTools(IHttpContextAccessor contextAccessor, DataManager dat
         return new OkDto(true);
     }
 
+    [McpServerTool(Name = "clone_job"), Description("Clone a job (copies parameters and input connections) into a view.")]
+    public async Task<CreatedDto> CloneJob(
+        [Description("The project id.")] int projectId,
+        [Description("The space id.")] int spaceId,
+        [Description("The job id to clone.")] int jobId,
+        [Description("Optional target view id (from list_views); omit for the space's first view.")] int? viewId = null)
+    {
+        var user = CurrentUser();
+        Require(PermTier.Job, AccessLevel.EditRun);
+        var space = dataManager.GetUserProjects(user).FirstOrDefault(p => p.Id == projectId)?.FindSpace(spaceId);
+        if (space == null) throw new McpException($"Space {spaceId} not found.");
+        var job = space.FindJob(jobId);
+        if (job == null) throw new McpException($"Job {jobId} not found.");
+        var view = viewId.HasValue ? space.FindView(viewId.Value) : space.Views.FirstOrDefault();
+        if (view == null)
+            throw new McpException(viewId.HasValue ? $"View {viewId} not found in space {spaceId}." : $"Space {spaceId} has no views.");
+        var clone = await Invoke(() => dataManager.CloneJob(user, job, view));
+        return new CreatedDto(clone.Id, clone.AliasOrId);
+    }
+
+    [McpServerTool(Name = "clear_job"), Description("Clear a job's results and reset it to Building (keeps its parameters).")]
+    public async Task<OkDto> ClearJob(
+        [Description("The project id.")] int projectId,
+        [Description("The space id.")] int spaceId,
+        [Description("The job id.")] int jobId)
+    {
+        var user = CurrentUser();
+        Require(PermTier.Job, AccessLevel.Manage);
+        var job = dataManager.GetUserProjects(user).FirstOrDefault(p => p.Id == projectId)?.FindSpace(spaceId)?.FindJob(jobId);
+        if (job == null) throw new McpException($"Job {jobId} not found.");
+        await Invoke(() => dataManager.ClearJob(user, job));
+        return new OkDto(true);
+    }
+
     // ---- Edge + queue tools -------------------------------------------------
 
     [McpServerTool(Name = "connect_jobs"), Description("Connect an output port of one job to an input port of another.")]
