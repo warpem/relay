@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -60,8 +61,49 @@ namespace Refund.Utils
                 if (cleanedLines[i].Contains('\r'))
                     // Take only content after the last carriage return
                     cleanedLines[i] = cleanedLines[i].Substring(cleanedLines[i].LastIndexOf('\r') + 1);
-            
+
             return cleanedLines;
+        }
+
+        /// <summary>
+        /// Reads the tail of a log file and returns its last <paramref name="maxLines"/> non-empty
+        /// lines. Only the final <paramref name="maxWindowBytes"/> bytes are read (logs can be huge);
+        /// if the file exceeds the window the first, partially-read line is dropped. CRLF endings are
+        /// normalized and \r progress-bar lines are collapsed to their final segment.
+        /// </summary>
+        /// <param name="path">Path to the log file.</param>
+        /// <param name="maxLines">Maximum number of lines to return.</param>
+        /// <param name="maxWindowBytes">Maximum number of trailing bytes to read.</param>
+        /// <returns>The cleaned trailing lines, or an empty array if the file does not exist.</returns>
+        public static string[] ReadLogTail(string path, int maxLines, int maxWindowBytes = 512 * 1024)
+        {
+            if (!File.Exists(path))
+                return Array.Empty<string>();
+
+            string content;
+            bool truncated;
+            using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            {
+                long start = Math.Max(0, stream.Length - maxWindowBytes);
+                truncated = start > 0;
+                stream.Seek(start, SeekOrigin.Begin);
+                using var reader = new StreamReader(stream);
+                content = reader.ReadToEnd();
+            }
+
+            string[] rawLines = content.Split('\n');
+            IEnumerable<string> lines = truncated ? rawLines.Skip(1) : rawLines;
+
+            // Strip the CR of CRLF endings first (leaving embedded \r for CleanProgressBarLines),
+            // then collapse progress-bar lines, then drop blanks and take the last N.
+            string[] stripped = lines
+                .Select(l => l.EndsWith("\r") ? l.Substring(0, l.Length - 1) : l)
+                .ToArray();
+
+            return CleanProgressBarLines(stripped)
+                .Where(l => l.Length > 0)
+                .TakeLast(maxLines)
+                .ToArray();
         }
 
         /// <summary>
