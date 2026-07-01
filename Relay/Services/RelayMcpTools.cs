@@ -6,6 +6,7 @@ using Refund.DataModel;
 using Refund.DataModel.ReadOnly;
 using Refund.Mcp;
 using Refund.Services.Core.DataManager;
+using Refund.Utils;
 
 namespace Relay.Services;
 
@@ -117,6 +118,37 @@ public class RelayMcpTools(IHttpContextAccessor contextAccessor, DataManager dat
         var job = project?.FindSpace(spaceId)?.FindJob(jobId);
         return job == null ? null : RelayMcpProjections.ToDetailDto(job);
     }
+
+    private JobLogDto ReadJobLog(int projectId, int spaceId, int jobId, int lines, bool stdout)
+    {
+        var user = CurrentUser();
+        if (!Can(PermTier.Job, AccessLevel.Read)) return new JobLogDto(false, 0, "");
+        var job = dataManager.GetUserProjects(user).FirstOrDefault(p => p.Id == projectId)?.FindSpace(spaceId)?.FindJob(jobId);
+        if (job == null) return new JobLogDto(false, 0, "");
+
+        int clamped = Math.Clamp(lines, 1, 1000);
+        string path = Path.Combine(job.DirectoryPath, stdout ? job.NameStdOut : job.NameStdErr);
+        if (!File.Exists(path)) return new JobLogDto(false, 0, "");
+
+        string[] tail = JobTools.ReadLogTail(path, clamped);
+        return new JobLogDto(true, tail.Length, string.Join("\n", tail));
+    }
+
+    [McpServerTool(Name = "get_job_stdout"), Description("Get the last N lines of a job's stdout (progress-bar lines collapsed to their final state).")]
+    public JobLogDto GetJobStdout(
+        [Description("The project id.")] int projectId,
+        [Description("The space id.")] int spaceId,
+        [Description("The job id.")] int jobId,
+        [Description("Max lines to return (default 100, max 1000).")] int lines = 100)
+        => ReadJobLog(projectId, spaceId, jobId, lines, stdout: true);
+
+    [McpServerTool(Name = "get_job_stderr"), Description("Get the last N lines of a job's stderr (progress-bar lines collapsed to their final state).")]
+    public JobLogDto GetJobStderr(
+        [Description("The project id.")] int projectId,
+        [Description("The space id.")] int spaceId,
+        [Description("The job id.")] int jobId,
+        [Description("Max lines to return (default 100, max 1000).")] int lines = 100)
+        => ReadJobLog(projectId, spaceId, jobId, lines, stdout: false);
 
     [McpServerTool(Name = "list_job_types"), Description("List all job types (guid, name, and full context-menu category path). Call get_job_type for a type's parameters and ports.")]
     public IReadOnlyList<JobTypeSummaryDto> ListJobTypes()

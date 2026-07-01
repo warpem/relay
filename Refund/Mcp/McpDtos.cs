@@ -27,6 +27,10 @@ public record JobDetailDto(
 /// (Port, Name, Iteration) is the key passed to get_job_result_link.</summary>
 public record JobResultDto(string Port, string Name, string Description, int Iteration);
 
+/// <summary>A snapshot of a job's log stream tail. Exists=false when the job has not produced
+/// that stream yet (distinct from an empty file).</summary>
+public record JobLogDto(bool Exists, int Lines, string Text);
+
 public record JobTypeParamDto(string Name, string Label, string Type, string? Help, bool Advanced);
 
 /// <summary>Lean job-type listing entry. Category is the full context-menu path, e.g.
