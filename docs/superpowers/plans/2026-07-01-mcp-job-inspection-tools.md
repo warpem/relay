@@ -589,6 +589,77 @@ git commit -m "feat: MCP clone_job / clear_job tools"
 
 ---
 
+### Task 7: Log tool — `get_job_log` (cleaned per-iteration log)
+
+Added after the initial six tools: many jobs (local/import/note) never write a raw
+`std.out`, so `get_job_stdout` returns `Exists=false` for them. They do have Relay's
+processed per-iteration log (`.relay/log_it{NNNN}.txt`), which this tool exposes.
+
+**Files:**
+- Modify: `Refund/Mcp/McpDtos.cs` (add `JobIterationLogDto`)
+- Modify: `Relay/Services/RelayMcpTools.cs` (add `get_job_log` tool)
+
+**Interfaces:**
+- Consumes: `JobTools.ReadLogTail(path, maxLines)` (Task 1); `ReadOnlyJob.LogFilePath(int)` (`.relay/log_it{iter:D4}.txt`), `ReadOnlyJob.LogsAvailableIteration`.
+- Produces: `public record JobIterationLogDto(bool Exists, int Iteration, int Lines, string Text);`; MCP tool `get_job_log`.
+
+- [ ] **Step 1: Add the `JobIterationLogDto` record**
+
+In `Refund/Mcp/McpDtos.cs`, add after the `JobLogDto` record:
+
+```csharp
+/// <summary>A snapshot of a job's cleaned per-iteration log tail (Relay's processed log, distinct from
+/// raw stdout). Iteration is the iteration actually read — resolved to the latest available when the
+/// caller didn't specify one, or -1 when no log exists.</summary>
+public record JobIterationLogDto(bool Exists, int Iteration, int Lines, string Text);
+```
+
+- [ ] **Step 2: Add the `get_job_log` tool**
+
+In `Relay/Services/RelayMcpTools.cs`, add after the `get_job_stderr` tool:
+
+```csharp
+    [McpServerTool(Name = "get_job_log"), Description("Get the last N lines of a job's cleaned per-iteration log (Relay's processed log, distinct from raw stdout; available for jobs that have no raw stdout). Defaults to the latest available iteration.")]
+    public JobIterationLogDto GetJobLog(
+        [Description("The project id.")] int projectId,
+        [Description("The space id.")] int spaceId,
+        [Description("The job id.")] int jobId,
+        [Description("Optional iteration; omit for the latest available iteration.")] int? iteration = null,
+        [Description("Max lines to return (default 100, max 1000).")] int lines = 100)
+    {
+        var user = CurrentUser();
+        if (!Can(PermTier.Job, AccessLevel.Read)) return new JobIterationLogDto(false, -1, 0, "");
+        var job = dataManager.GetUserProjects(user).FirstOrDefault(p => p.Id == projectId)?.FindSpace(spaceId)?.FindJob(jobId);
+        if (job == null) return new JobIterationLogDto(false, -1, 0, "");
+
+        int iter = iteration ?? job.LogsAvailableIteration;
+        if (iter < 0) return new JobIterationLogDto(false, -1, 0, "");
+
+        int clamped = Math.Clamp(lines, 1, 1000);
+        string path = job.LogFilePath(iter);
+        if (!File.Exists(path)) return new JobIterationLogDto(false, iter, 0, "");
+
+        string[] tail = JobTools.ReadLogTail(path, clamped);
+        return new JobIterationLogDto(true, iter, tail.Length, string.Join("\n", tail));
+    }
+```
+
+- [ ] **Step 3: Build and run the full test suite**
+
+Run: `dotnet build Relay.sln`
+Expected: build succeeds.
+Run: `dotnet test Refund.Tests/Refund.Tests.csproj`
+Expected: all tests pass.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add Refund/Mcp/McpDtos.cs Relay/Services/RelayMcpTools.cs
+git commit -m "feat: MCP get_job_log tool for cleaned per-iteration logs"
+```
+
+---
+
 ### Task 6: Live smoke test (verification)
 
 **Files:** none (manual verification against a running instance).
@@ -604,6 +675,7 @@ Expected: server listening on `http://localhost:5001`.
 
 For a job that has run and produced output, confirm:
 - `get_job_stdout` / `get_job_stderr` return a `JobLogDto` with `Exists=true`, `Lines>0`, and no `\r` progress-bar spam in `Text`.
+- `get_job_log` returns a `JobIterationLogDto` with `Exists=true` and the resolved `Iteration`, including for a job whose `get_job_stdout` was `Exists=false` (local/import job with no raw stdout but a processed log).
 - `list_job_results` returns one or more `JobResultDto` for the latest iteration.
 - `get_job_result_link` with a `(port, name)` from that list returns a `ResultLinkDto` whose `Url` is absolute (`http://localhost:5001/api/file/...`) and downloads the file when fetched.
 - `get_job_result_link` with a bogus `name` returns a clean error, not a stack trace.

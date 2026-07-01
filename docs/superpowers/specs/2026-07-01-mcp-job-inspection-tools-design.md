@@ -9,10 +9,15 @@
 Expand the MCP surface so an agent can inspect a job's *progress and output*, not
 just its configuration and status. Today the agent can create/configure/queue/
 abort/delete jobs and read their metadata, but it is blind to what a job actually
-printed and what artifacts it produced. This spec adds six tools:
+printed and what artifacts it produced. This spec adds seven tools:
 
 - **`get_job_stdout`** / **`get_job_stderr`** — the last N lines of a job's raw
   stdout/stderr, with `\r` progress-bar lines collapsed to their final state.
+- **`get_job_log`** — the last N lines of a job's cleaned per-iteration log
+  (Relay's processed log), for a chosen or the latest available iteration. Added
+  after initial implementation: many jobs (local/import/note jobs) never write a
+  raw `std.out`, but do have a processed log — so a stdout-only view is blind to
+  them.
 - **`list_job_results`** — the downloadable result artifacts of a job (per
   iteration).
 - **`get_job_result_link`** — an absolute download URL for one named result.
@@ -24,6 +29,8 @@ printed and what artifacts it produced. This spec adds six tools:
 An agent with a PAT of sufficient per-tier level can, for a job it can see:
 
 - fetch the tail of stdout/stderr and see clean lines (no progress-bar spam),
+- fetch the tail of the cleaned per-iteration log even for jobs that never wrote
+  a raw `std.out`,
 - list the job's downloadable results for the latest (or a specified) iteration,
 - obtain a working absolute download link for a specific result,
 - clone the job into a view, and clear the job's results —
@@ -40,10 +47,14 @@ level the PAT lacks.
   credential-free URL — accepted here, called out under Security below.
 - **Multi-job clone (`CloneJobTree`).** `clone_job` wraps single-job `CloneJob`.
   Cloning connected subgraphs is out of scope.
-- **Processed/iteration logs as the stdout source.** `get_job_stdout` reads raw
-  `std.out`, not the `.relay/log_it{NNNN}.txt` processed log. (Considered; raw was
-  chosen for being literal and simple. The processed log remains reachable later
-  if desired.)
+- **Merging the raw and processed logs into one tool.** `get_job_stdout` reads
+  raw `std.out` and `get_job_log` reads the `.relay/log_it{NNNN}.txt` processed
+  log; they stay separate rather than one tool that guesses/falls back. Relay has
+  a genuine duality — cluster jobs produce raw stdout, while Relay separately
+  prepares cleaned per-iteration logs (sometimes derived from stdout) — and the
+  two tools expose each side explicitly. (`get_job_log` was added after the
+  initial six-tool implementation once it was clear stdout-only left many jobs
+  blind.)
 
 ## Background / current state
 
@@ -139,6 +150,28 @@ public static string[] ReadLogTail(string path, int maxLines, int maxWindowBytes
 
 This is the unit-tested core (trim + tail + partial-first-line + missing file).
 
+### 1b. `get_job_log` (read — `PermTier.Job, Read`)
+
+Params: `int projectId, int spaceId, int jobId, int? iteration = null, int lines = 100`.
+
+- Resolve the iteration: `iteration ?? job.LogsAvailableIteration`. If that is
+  `< 0` (no logs available) → `Exists=false`, `Iteration=-1`.
+- Path is the job's own processed log — `job.LogFilePath(iter)`
+  (`.relay/log_it{iter:D4}.txt`). **No agent-supplied path.**
+- Read via the same `JobTools.ReadLogTail` (bounded window, `\r`/blank cleanup,
+  last-N). The processed log is already cleaned, so `ReadLogTail` is idempotent
+  here; reusing it keeps the tail/last-N behavior identical to the stdout tools.
+- Denied → `JobIterationLogDto(false, -1, 0, "")`. Missing file for a resolved
+  iteration → `Exists=false` with the resolved `Iteration` echoed back.
+
+Returns `JobIterationLogDto(bool Exists, int Iteration, int Lines, string Text)`.
+`Iteration` reports which iteration was actually read (useful because "latest" is
+resolved server-side).
+
+This tool is the answer to Relay's log duality: local/import/note jobs never write
+a raw `std.out`, so `get_job_stdout` returns `Exists=false` for them — but they do
+have a processed per-iteration log that `get_job_log` surfaces.
+
 ### 2. `list_job_results` (read — `PermTier.Job, Read`)
 
 Params: `int projectId, int spaceId, int jobId, int? iteration = null`.
@@ -203,6 +236,7 @@ Params: `int projectId, int spaceId, int jobId`.
 
 ```csharp
 public record JobLogDto(bool Exists, int Lines, string Text);
+public record JobIterationLogDto(bool Exists, int Iteration, int Lines, string Text);
 public record JobResultDto(string Port, string Name, string Description, int Iteration);
 public record ResultLinkDto(string Name, string FileName, string Url);
 ```
@@ -225,8 +259,8 @@ public record ResultLinkDto(string Name, string FileName, string Url);
 
 ## Files touched
 
-- `Relay/Services/RelayMcpTools.cs` — 6 tool methods + `FileService` ctor param.
-- `Refund/Mcp/McpDtos.cs` — `JobLogDto`, `JobResultDto`, `ResultLinkDto`.
+- `Relay/Services/RelayMcpTools.cs` — 7 tool methods + `FileService` ctor param.
+- `Refund/Mcp/McpDtos.cs` — `JobLogDto`, `JobIterationLogDto`, `JobResultDto`, `ResultLinkDto`.
 - `Refund/Mcp/RelayMcpProjections.cs` — `ToResultDtos(job, iteration)`.
 - `Refund/Utils/JobTools.cs` — `ReadLogTail(path, maxLines, maxWindowBytes)`.
 - `Refund.Tests/Mcp/` — new test file(s):
