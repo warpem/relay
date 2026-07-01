@@ -16,7 +16,7 @@ namespace Relay.Services;
 /// check the token's per-tier <see cref="AccessLevel"/> grants (stashed by the Pat auth handler).
 /// </summary>
 [McpServerToolType]
-public class RelayMcpTools(IHttpContextAccessor contextAccessor, DataManager dataManager)
+public class RelayMcpTools(IHttpContextAccessor contextAccessor, DataManager dataManager, Refund.Services.FileService fileService)
 {
     private ReadOnlyUser CurrentUser()
     {
@@ -149,6 +149,71 @@ public class RelayMcpTools(IHttpContextAccessor contextAccessor, DataManager dat
         [Description("The job id.")] int jobId,
         [Description("Max lines to return (default 100, max 1000).")] int lines = 100)
         => ReadJobLog(projectId, spaceId, jobId, lines, stdout: false);
+
+    // Collects (portName, downloadable) pairs for a job at one iteration. A single failing port is
+    // skipped rather than failing the whole listing (mirrors JobProperties.UpdateResults in the UI).
+    private static List<(string Port, Downloadable Downloadable)> EnumerateDownloadables(ReadOnlyJob job, int iteration)
+    {
+        var result = new List<(string, Downloadable)>();
+        foreach (var port in job.PortsOut.Values)
+        {
+            try
+            {
+                var downloadables = port.GetResource(iteration)?.GetDownloadables();
+                if (downloadables == null) continue;
+                foreach (var d in downloadables)
+                    result.Add((port.Name, d));
+            }
+            catch { /* skip this port */ }
+        }
+        return result;
+    }
+
+    [McpServerTool(Name = "list_job_results"), Description("List a job's downloadable results for an iteration (default: the latest iteration with results).")]
+    public IReadOnlyList<JobResultDto> ListJobResults(
+        [Description("The project id.")] int projectId,
+        [Description("The space id.")] int spaceId,
+        [Description("The job id.")] int jobId,
+        [Description("Optional iteration; omit for the latest iteration with results.")] int? iteration = null)
+    {
+        var user = CurrentUser();
+        if (!Can(PermTier.Job, AccessLevel.Read)) return [];
+        var job = dataManager.GetUserProjects(user).FirstOrDefault(p => p.Id == projectId)?.FindSpace(spaceId)?.FindJob(jobId);
+        if (job == null) return [];
+
+        int iter = RelayMcpProjections.ResolveResultIteration(iteration, job.LogsAvailableIteration, job.HasResultFilesForIteration);
+        if (iter < 0) return [];
+
+        return EnumerateDownloadables(job, iter)
+            .Select(x => RelayMcpProjections.ToResultDto(x.Port, x.Downloadable, iter))
+            .ToList();
+    }
+
+    [McpServerTool(Name = "get_job_result_link"), Description("Get an absolute download URL for one named result of a job (see list_job_results).")]
+    public ResultLinkDto? GetJobResultLink(
+        [Description("The project id.")] int projectId,
+        [Description("The space id.")] int spaceId,
+        [Description("The job id.")] int jobId,
+        [Description("The output port name (from list_job_results).")] string port,
+        [Description("The result name (from list_job_results).")] string name,
+        [Description("Optional iteration; omit for the latest iteration with results.")] int? iteration = null)
+    {
+        var user = CurrentUser();
+        if (!Can(PermTier.Job, AccessLevel.Read)) return null;
+        var job = dataManager.GetUserProjects(user).FirstOrDefault(p => p.Id == projectId)?.FindSpace(spaceId)?.FindJob(jobId);
+        if (job == null) throw new McpException($"Job {jobId} not found.");
+
+        int iter = RelayMcpProjections.ResolveResultIteration(iteration, job.LogsAvailableIteration, job.HasResultFilesForIteration);
+        if (iter < 0) throw new McpException("Job has no results.");
+
+        var match = RelayMcpProjections.MatchDownloadable(EnumerateDownloadables(job, iter), port, name);
+        if (match == null) throw new McpException($"No result named '{name}' on port '{port}' for iteration {iter}.");
+
+        string relative = fileService.GetUrl(match.ServerPath); // "/api/file/{hash}"
+        var request = contextAccessor.HttpContext?.Request;
+        string url = request != null ? $"{request.Scheme}://{request.Host}{relative}" : relative;
+        return new ResultLinkDto(match.Name, Path.GetFileName(match.ServerPath), url);
+    }
 
     [McpServerTool(Name = "list_job_types"), Description("List all job types (guid, name, and full context-menu category path). Call get_job_type for a type's parameters and ports.")]
     public IReadOnlyList<JobTypeSummaryDto> ListJobTypes()

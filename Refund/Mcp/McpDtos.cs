@@ -31,6 +31,9 @@ public record JobResultDto(string Port, string Name, string Description, int Ite
 /// that stream yet (distinct from an empty file).</summary>
 public record JobLogDto(bool Exists, int Lines, string Text);
 
+/// <summary>An absolute download URL for one named job result.</summary>
+public record ResultLinkDto(string Name, string FileName, string Url);
+
 public record JobTypeParamDto(string Name, string Label, string Type, string? Help, bool Advanced);
 
 /// <summary>Lean job-type listing entry. Category is the full context-menu path, e.g.
