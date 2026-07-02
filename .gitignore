@@ -219,3 +219,6 @@ Relay/wwwroot/js/volstar.js
 .superpowers/
 .worktrees/
 .DS_Store
+
+# Local MCP server config
+.mcp.json
