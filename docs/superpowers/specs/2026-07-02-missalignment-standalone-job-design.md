@@ -109,16 +109,31 @@ Unchanged and verified safe:
 - Type registration (`Job.Types`) — filters on `IsSubclassOf(typeof(Job))`, which
   still holds.
 
-### Known minor UI consequence
+### Item-count display: capability interface instead of a job-type gate
 
-- `JobCard.razor:289` gates the "items processed" line on
-  `Job is ReadOnlyWarpJob && NItemsTotal > 0`. `ReadOnlyAlignMiss` is no longer a
-  `ReadOnlyWarpJob`, so that line stops rendering for MissAlignment even though
-  `NItems*` are still computed. This is cosmetic and consistent with the job owning
-  its own presentation. Optional follow-up: generalize that check (e.g. a shared
-  read-only interface) if the item count should still show. Out of scope here.
-- `QueueJobCard.razor:97` gates the pool status line on `ReadOnlyWarpJobGpu` — it
-  stops rendering for MissAlignment, which is exactly the goal.
+`JobCard.razor` previously gated the "items processed" line on
+`Job is ReadOnlyWarpJob && NItemsTotal > 0` — a concrete-type gate that would have
+dropped the line for the now-standalone MissAlignment. Rather than special-case it,
+the display is made capability-driven:
+
+- New `IItemProgress` interface (`Job.cs`) — a pure read contract with nullable
+  `NItemsProcessed`/`NItemsTotal`/`NItemsFailed` getters.
+- `WarpJob` and `AlignMiss` implement it; their count fields become `int?`
+  (default `null` = "not reporting"). The two pre-existing shadowed redeclarations of
+  these fields in `BoxNetInference2D`/`ExtractParticles2D` (a `CS0108` smell) are
+  removed so they use the base nullable fields.
+- The `[GenerateReadOnly]` source generator is extended to replicate any directly
+  implemented pure-read-contract interface (>= 1 property, all get-only, no
+  methods/events) onto the generated read-only wrapper. So `ReadOnlyWarpJob`/
+  `ReadOnlyAlignMiss` (and subclasses via the chain) implement `IItemProgress`
+  automatically. Marker/behavioral interfaces (`IClusterJob`, `ILocalJob`,
+  `IPooledJob`) are skipped by the heuristic. This is reusable for future read
+  contracts.
+- `JobCard.razor` now gates on `Job is IItemProgress p && p.NItemsTotal != null` —
+  no job-type coupling. MissAlignment shows item progress like any reporting job.
+
+`QueueJobCard.razor:97` still gates the pool status line on `ReadOnlyWarpJobGpu` —
+it stops rendering for MissAlignment, which is exactly the goal.
 
 ## Testing
 

@@ -21,7 +21,7 @@ namespace Refund.Jobs.Ts.Alignment.AlignMiss;
 /// than the WarpTools <c>WarpJobGpu</c> base (and therefore does not support GPU worker pools).
 /// </summary>
 [GenerateReadOnly]
-public class AlignMiss : Job, IClusterJob
+public class AlignMiss : Job, IClusterJob, IItemProgress
 {
     public override string TypeGuid => "94136ed6-ce7c-4688-8c06-e655f14129f3";
 
@@ -59,20 +59,20 @@ public class AlignMiss : Job, IClusterJob
 
     #region Progress tracking
 
-    /// <summary>Number of items processed by the job so far.</summary>
+    /// <summary>Number of items processed so far (null until the job starts reporting).</summary>
     [RelayProperty]
     [Clearable]
-    public int NItemsProcessed { get; set; }
+    public int? NItemsProcessed { get; set; }
 
-    /// <summary>Number of items that failed processing.</summary>
+    /// <summary>Number of items that failed processing (null until the job starts reporting).</summary>
     [RelayProperty]
     [Clearable]
-    public int NItemsFailed { get; set; }
+    public int? NItemsFailed { get; set; }
 
-    /// <summary>Total number of items to process.</summary>
+    /// <summary>Total number of items to process (null until the job starts reporting).</summary>
     [RelayProperty]
     [Clearable]
-    public int NItemsTotal { get; set; }
+    public int? NItemsTotal { get; set; }
 
     #endregion
 

@@ -14,28 +14,28 @@ namespace Refund.Jobs;
 /// This class extends the base Job class with Warp-specific module requirements.
 /// </remarks>
 [GenerateReadOnly]
-public abstract class WarpJob : Job
+public abstract class WarpJob : Job, IItemProgress
 {
     /// <summary>
-    /// Number of items processed by the job so far
+    /// Number of items processed by the job so far (null until the job starts reporting).
     /// </summary>
     [RelayProperty]
     [Clearable]
-    public int NItemsProcessed { get; set; }
+    public int? NItemsProcessed { get; set; }
 
     /// <summary>
-    /// Number of items that failed processing
+    /// Number of items that failed processing (null until the job starts reporting).
     /// </summary>
     [RelayProperty]
     [Clearable]
-    public int NItemsFailed { get; set; }
+    public int? NItemsFailed { get; set; }
 
     /// <summary>
-    /// Total number of items to process
+    /// Total number of items to process (null until the job starts reporting).
     /// </summary>
     [RelayProperty]
     [Clearable]
-    public int NItemsTotal { get; set; }
+    public int? NItemsTotal { get; set; }
 
     protected WarpJob()
     {

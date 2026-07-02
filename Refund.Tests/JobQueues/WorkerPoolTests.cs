@@ -6,6 +6,7 @@ using Refund.Jobs.Fs.MotionCtf.MotionAndCTF2D;
 using EtomoJob = Refund.Jobs.Ts.Alignment.AlignEtomo.AlignEtomo;
 using RefineJob = Refund.Jobs.M.Refine.Refine;
 using MissAlignmentJob = Refund.Jobs.Ts.Alignment.AlignMiss.AlignMiss;
+using MaskJob = Refund.Jobs.Refinement.Masks.CreateMask.CreateMask;
 
 namespace Refund.Tests.JobQueues;
 
@@ -49,6 +50,36 @@ public class WorkerPoolTests
         var job = new MissAlignmentJob();
         Assert.IsNotAssignableFrom<IPooledJob>(job);
         Assert.Equal(JobQueueType.GPU, job.QueueType);
+    }
+
+    [Fact]
+    public void ItemProgress_ReadOnlyWrapper_ImplementsInterface_ForWarpAndMissAlignmentJobs()
+    {
+        EnsurePopulated();
+
+        // Both a WarpTools job (WarpJob-derived) and MissAlignment (standalone Job) report item
+        // counts, so their generated read-only wrappers must expose IItemProgress. This is what lets
+        // the job card gate the item-count display on the capability + non-null counts, not on a
+        // concrete job type. Also proves the ReadOnly source generator replicated the interface.
+        foreach (Job job in new Job[] { new MotionAndCTF2D(), new MissAlignmentJob() })
+        {
+            Assert.IsAssignableFrom<IItemProgress>(job);                 // mutable side
+            Assert.IsAssignableFrom<IItemProgress>(job.AsReadOnly());    // generated read-only side
+            Assert.Null(((IItemProgress)job).NItemsTotal);              // nullable, defaults to null
+        }
+    }
+
+    [Fact]
+    public void ItemProgress_ReadOnlyWrapper_NotImplemented_ForNonItemJob()
+    {
+        EnsurePopulated();
+
+        // A job that does not report item counts (RELION mask creation) must not gain IItemProgress,
+        // so the card shows nothing for it. Guards the generator's read-contract heuristic against
+        // over-replicating interfaces.
+        var job = new MaskJob();
+        Assert.IsNotAssignableFrom<IItemProgress>(job);
+        Assert.IsNotAssignableFrom<IItemProgress>(job.AsReadOnly());
     }
 
     [Fact]

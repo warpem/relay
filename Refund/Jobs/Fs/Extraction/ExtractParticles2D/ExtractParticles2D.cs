@@ -22,11 +22,6 @@ public class ExtractParticles2D : WarpJobGpu, IClusterJob
     public override bool IsIterative => false;
     public override Type ExpandedViewType => typeof(ExtractParticles2DExpandedView);
 
-    [RelayProperty]
-    public int NItemsProcessed { get; set; } = 0;
-    [RelayProperty]
-    public int NItemsTotal { get; set; } = 0;
-    
     #region Parameters
 
     [UiFieldGroup("Extraction Settings", 0)]

@@ -21,11 +21,6 @@ public class BoxNetInference2D : WarpJobGpu, IClusterJob
     public override bool IsIterative => false;
     public override Type ExpandedViewType => null;
 
-    [RelayProperty]
-    public int NItemsProcessed { get; set; } = 0;
-    [RelayProperty]
-    public int NItemsTotal { get; set; } = 0;
-    
     #region Results paths
     
     

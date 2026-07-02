@@ -1626,6 +1626,24 @@ public interface ILocalJob
 public interface IClusterJob { }
 
 /// <summary>
+/// Implemented by jobs that process a set of items and report progress counts. UI (e.g. the job
+/// card) shows item progress for any job implementing this — gated on the counts being non-null
+/// rather than on a concrete job type. This is a pure read contract (get-only properties), so the
+/// ReadOnly source generator mirrors it onto the generated read-only wrappers automatically.
+/// </summary>
+public interface IItemProgress
+{
+    /// <summary>Number of items processed so far, or null if the job is not reporting counts.</summary>
+    int? NItemsProcessed { get; }
+
+    /// <summary>Total number of items to process, or null if not yet known / not reported.</summary>
+    int? NItemsTotal { get; }
+
+    /// <summary>Number of items that failed processing, or null if not applicable.</summary>
+    int? NItemsFailed { get; }
+}
+
+/// <summary>
 /// Implemented by WarpTools GPU jobs that maintain a fleet of short-lived cluster
 /// worker jobs alongside the single Manager cluster job.
 /// </summary>

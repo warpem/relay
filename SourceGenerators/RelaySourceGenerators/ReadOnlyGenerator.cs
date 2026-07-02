@@ -66,12 +66,40 @@ public class ReadOnlyWrapperGenerator : ISourceGenerator
                 baseReadOnlyClass = $"ReadOnly{baseClassName}";
                 
                 // Add the base namespace to usings if needed
-                if (baseNamespace != null && baseNamespace != namespaceName && 
+                if (baseNamespace != null && baseNamespace != namespaceName &&
                     !baseNamespace.StartsWith("System") && !baseNamespace.StartsWith("Microsoft"))
                 {
                     usings.Add($"using {baseNamespace};");
                 }
             }
+
+            // Replicate onto the ReadOnly wrapper any interface this class directly implements that is
+            // a pure read contract (>= 1 property, all get-only, no methods/events). The wrapper's
+            // generated get-only accessors satisfy such interfaces automatically, so read contracts
+            // like IItemProgress "just work" on the read-only side with no hand-maintenance. Marker /
+            // behavioral interfaces (IClusterJob, ILocalJob, IPooledJob) are skipped by the heuristic.
+            var readOnlyInterfaces = new List<string>();
+            if (classSymbol != null)
+            {
+                foreach (var iface in classSymbol.Interfaces)
+                {
+                    if (!IsPureReadContract(iface))
+                        continue;
+
+                    readOnlyInterfaces.Add(iface.Name);
+
+                    var ifaceNamespace = iface.ContainingNamespace?.ToDisplayString();
+                    if (!string.IsNullOrEmpty(ifaceNamespace) &&
+                        !ifaceNamespace.StartsWith("System") && !ifaceNamespace.StartsWith("Microsoft"))
+                    {
+                        usings.Add($"using {ifaceNamespace};");
+                    }
+                }
+            }
+
+            var interfaceList = readOnlyInterfaces.Count > 0
+                ? ", " + string.Join(", ", readOnlyInterfaces)
+                : "";
 
             var source = $@"
 {string.Join('\n', usings)}
@@ -79,7 +107,7 @@ public class ReadOnlyWrapperGenerator : ISourceGenerator
 namespace {namespaceName};
 
 [ReadOnlyFor(typeof({className}))]
-public class ReadOnly{className} : {baseReadOnlyClass}
+public class ReadOnly{className} : {baseReadOnlyClass}{interfaceList}
 {{
     {className} _typedJob;
 
@@ -98,6 +126,31 @@ public class ReadOnly{className} : {baseReadOnlyClass}
         }
     }
     
+    // A "pure read contract" is an interface an immutable wrapper can implement for free: it has at
+    // least one property, every property is get-only (no setter), and it declares no ordinary methods
+    // or events. Property get/set accessors are MethodKind.PropertyGet/PropertySet, so filtering on
+    // MethodKind.Ordinary leaves them out of the behavioral-member check.
+    private static bool IsPureReadContract(INamedTypeSymbol iface)
+    {
+        if (iface.TypeKind != TypeKind.Interface)
+            return false;
+
+        var members = iface.GetMembers();
+        var properties = members.OfType<IPropertySymbol>().ToList();
+
+        if (properties.Count == 0)
+            return false;
+
+        bool hasBehavioralMembers = members.Any(m =>
+            (m is IMethodSymbol method && method.MethodKind == MethodKind.Ordinary) ||
+            m is IEventSymbol);
+
+        if (hasBehavioralMembers)
+            return false;
+
+        return properties.All(p => p.GetMethod != null && p.SetMethod == null);
+    }
+
     private IEnumerable<ClassDeclarationSyntax> GetJobClassesToWrap(GeneratorExecutionContext context)
     {
         return context.Compilation.SyntaxTrees
