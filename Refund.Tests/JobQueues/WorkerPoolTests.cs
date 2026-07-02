@@ -5,6 +5,7 @@ using Refund.JobQueues;
 using Refund.Jobs.Fs.MotionCtf.MotionAndCTF2D;
 using EtomoJob = Refund.Jobs.Ts.Alignment.AlignEtomo.AlignEtomo;
 using RefineJob = Refund.Jobs.M.Refine.Refine;
+using MissAlignmentJob = Refund.Jobs.Ts.Alignment.AlignMiss.AlignMiss;
 
 namespace Refund.Tests.JobQueues;
 
@@ -38,6 +39,16 @@ public class WorkerPoolTests
     {
         var job = new MotionAndCTF2D();
         Assert.IsAssignableFrom<IPooledJob>(job);
+    }
+
+    [Fact]
+    public void MissAlignment_IsNotPooled_ButStillGpu()
+    {
+        // MissAlignment runs a single GPU command outside the WarpTools per-item worker-pool model,
+        // so it must NOT inherit pool support (which lives on WarpJobGpu) — while remaining a GPU job.
+        var job = new MissAlignmentJob();
+        Assert.IsNotAssignableFrom<IPooledJob>(job);
+        Assert.Equal(JobQueueType.GPU, job.QueueType);
     }
 
     [Fact]

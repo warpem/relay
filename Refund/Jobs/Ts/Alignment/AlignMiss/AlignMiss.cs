@@ -15,11 +15,13 @@ using WarpHelper = Warp.Tools.Helper;
 namespace Refund.Jobs.Ts.Alignment.AlignMiss;
 
 /// <summary>
-/// Job that creates tilt series stacks and runs Etomo patch tracking to obtain tilt series alignments.
-/// This is based on the WarpTools EtomoPatchTrackTiltseries command.
+/// Job that prepares tilt series stacks and runs MissAlignment (a learning-based tilt-series
+/// alignment tool) to improve tilt-series alignments. MissAlignment is a standalone GPU tool
+/// outside the WarpTools ecosystem, so this job derives directly from <see cref="Job"/> rather
+/// than the WarpTools <c>WarpJobGpu</c> base (and therefore does not support GPU worker pools).
 /// </summary>
 [GenerateReadOnly]
-public class AlignMiss : WarpJobGpu, IClusterJob
+public class AlignMiss : Job, IClusterJob
 {
     public override string TypeGuid => "94136ed6-ce7c-4688-8c06-e655f14129f3";
 
@@ -35,15 +37,44 @@ public class AlignMiss : WarpJobGpu, IClusterJob
 
     public override int2 CardSquareCount { set; get; } = new int2(2, 1);
 
+    // MissAlignment runs a single GPU command (not a WarpTools per-item worker pool), so it derives
+    // directly from Job rather than WarpJobGpu. It still needs GPU cluster resources; QueueType and
+    // GpuCount are the WarpJobGpu bits it genuinely uses, replicated here.
+    public override JobQueueType QueueType => JobQueueType.GPU;
+
+    public override int GpuCount => NGpus;
+
     public override int CoreCount => NWorkers * 4 + 4;
 
     public override int MemoryGb => NWorkers * 6 + 20;
 
-    public override string[] SupportedModules => base.SupportedModules.Concat(["missalignment"]).ToArray();
+    // MissAlignment lives outside the WarpTools ecosystem, so it does not inherit WarpJob's module
+    // set. It still needs the "warp" module in its runtime environment for now; drop "warp" here if
+    // the miss-alignment binary is confirmed independent of it.
+    public override string[] SupportedModules => base.SupportedModules.Concat(["warp", "missalignment"]).ToArray();
 
-    public override string[] RequiredModules => base.RequiredModules.Concat(["missalignment"]).ToArray();
+    public override string[] RequiredModules => base.RequiredModules.Concat(["warp", "gpu", "missalignment"]).ToArray();
 
     public override bool CanBeFinalized => true;
+
+    #region Progress tracking
+
+    /// <summary>Number of items processed by the job so far.</summary>
+    [RelayProperty]
+    [Clearable]
+    public int NItemsProcessed { get; set; }
+
+    /// <summary>Number of items that failed processing.</summary>
+    [RelayProperty]
+    [Clearable]
+    public int NItemsFailed { get; set; }
+
+    /// <summary>Total number of items to process.</summary>
+    [RelayProperty]
+    [Clearable]
+    public int NItemsTotal { get; set; }
+
+    #endregion
 
     /// <summary>
     /// Port name constants
@@ -55,6 +86,9 @@ public class AlignMiss : WarpJobGpu, IClusterJob
     
     public string ResConfigPath => Path.Combine(DirectoryPath, "config.yaml");
     public string ResModelPath => Path.Combine(DirectoryPath, "model.ckpt");
+
+    /// <summary>Per-item summary JSON emitted by the run; consumed by the expanded view.</summary>
+    public string ResProcessedItemsJson => Path.Combine(DirectoryPath, "processed_items.json");
     
     #region Parameters
 
@@ -180,16 +214,27 @@ public class AlignMiss : WarpJobGpu, IClusterJob
     public bool DeleteIntermediate { get; set; } = false;
     
     #region GPU options
-    
+
+    [UiFieldGroup("Resources", 999)]
+    [UiInt("", "Number of GPUs",
+           helpText: "Number of GPUs to request for this job.",
+           min: 1)]
+    [RelayProperty]
+    public int NGpus { get; set; } = 1;
+
+    [UiInt("perdevice", "Workers per GPU",
+           helpText: "Number of workers to use per GPU. Higher values may improve GPU utilization, " +
+                     "but will also increase GPU memory consumption.",
+           min: 1)]
+    [RelayProperty]
+    public int PerDevice { get; set; } = 1;
+
     [UiInt("n-workers", "Reconstruction workers",
            helpText: "Number of reconstruction workers for MissAlignment to use for its data preparation.",
            min: 1,
            max: 99999)]
     [RelayProperty]
     public int NWorkers { get; set; } = 5;
-
-    public override int PerDevice { get; set; } = 1;
-    public override int MemoryPerWorker { get; set; } = 12;
 
     #endregion
     
@@ -252,8 +297,11 @@ public class AlignMiss : WarpJobGpu, IClusterJob
         };
     }
 
+    /// <summary>Creates the SUCCESS marker on the compute node when the command exits cleanly.</summary>
+    public override string CommandSuffix => $" && touch {PathSuccess}";
+
     /// <summary>
-    /// Gets the name of the Warp command used for tilt series import.
+    /// Gets the name of the command used to run MissAlignment.
     /// </summary>
     public override string CommandName => $"miss-alignment";
 
@@ -263,8 +311,6 @@ public class AlignMiss : WarpJobGpu, IClusterJob
 
         result["config-file"] = ResConfigPath;
         result["prepare-stacks"] = AngPix.ToString(CultureInfo.InvariantCulture);
-
-        result.Remove("strict");
 
         return result;
     }
@@ -402,6 +448,60 @@ public class AlignMiss : WarpJobGpu, IClusterJob
 
         var yaml = YamlSerializer.SerializeToString(config);
         File.WriteAllText(outputPath, yaml);
+    }
+
+    /// <summary>
+    /// Monitors and parses log output from the running job. Replicated from WarpJob so MissAlignment
+    /// no longer depends on the WarpTools hierarchy. Currently reuses the WarpTools progress format;
+    /// this is the seam to swap in a miss-alignment-specific parser once its output is finalized.
+    /// </summary>
+    public override Action TrackProgressLogs()
+    {
+        var baseResult = base.TrackProgressLogs();
+
+        if (!File.Exists(PathStdOut))
+            return baseResult;
+
+        // Read log file
+        string[] logLines = File.ReadAllText(PathStdOut).Split('\n');
+
+        if (logLines.Length == 0)
+            return null;
+
+        // Clean log lines to remove progress bar characters
+        logLines = JobTools.CleanProgressBarLines(logLines);
+
+        // Parse progress information
+        WarpTools.ExtractProgressInfo(logLines,
+                                      out int itemsProcessed,
+                                      out int itemsTotal,
+                                      out int itemsFailed,
+                                      out string remainingTime);
+
+        // Save processed logs
+        JobTools.WriteLogFile(string.Join('\n', logLines), LogFilePath(0));
+
+        // Parse remaining time string and update TimeRemaining property
+        TimeSpan? timeRemaining = WarpTools.ParseRemainingTimeToCompletion(remainingTime);
+
+        // Return update action if needed
+        if (LogsAvailableIteration < 0 ||
+            NItemsProcessed != itemsProcessed ||
+            NItemsTotal != itemsTotal ||
+            NItemsFailed != itemsFailed ||
+            TimeRemaining != timeRemaining)
+            return () =>
+            {
+                baseResult?.Invoke();
+
+                NItemsProcessed = itemsProcessed;
+                NItemsTotal = itemsTotal;
+                NItemsFailed = itemsFailed;
+                TimeRemaining = timeRemaining;
+                LogsAvailableIteration = 0;
+            };
+
+        return baseResult;
     }
 
     public override void FinalizeRun(Action<Job, Action<Job>> updateCallback)
