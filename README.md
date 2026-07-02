@@ -117,6 +117,112 @@ scripts/relay.sh status   # Check if running
 scripts/relay.sh restart  # Stop + start
 ```
 
+## Configure a cluster queue
+
+Queues are managed by an admin under **Users → Queue configuration**. Each queue has a name, a type (CPU, GPU, or Mixed), and several command templates.
+
+### Submission script template
+
+The script template is a shell script submitted to your scheduler for each job. It uses `{{ variable }}` placeholders that Relay fills in at submission time:
+
+| Variable | Description |
+|---|---|
+| `{{ command }}` | The actual job command to run |
+| `{{ job_id }}` | Relay's internal job identifier |
+| `{{ n_cores }}` | CPU cores requested |
+| `{{ n_processes }}` | MPI process count |
+| `{{ memory_gb }}` | Memory in GB |
+| `{{ n_gpus }}` | GPU count (GPU/Mixed queues) |
+| `{{ gpu_memory_gb }}` | GPU memory in GB |
+| `{{ run_directory }}` | Job working directory |
+| `{{ std_out }}` / `{{ std_err }}` | Paths for stdout/stderr logs |
+
+#### Module blocks
+
+Relay uses conditional blocks to load the right software modules depending on the job type. A block is only included in the script when that job type is being run:
+
+```bash
+{{ gpu }}
+# included only for GPU jobs
+{{ /gpu }}
+
+{{ cpu }}
+# included only for CPU jobs
+{{ /cpu }}
+
+{{ warp }}
+# included only for Warp jobs
+{{ /warp }}
+
+{{ relion }}
+# included only for RELION jobs
+{{ /relion }}
+
+{{ imod }}
+# included only for IMOD jobs
+{{ /imod }}
+
+{{ aretomo2 }}
+# included only for AreTomo2 jobs
+{{ /aretomo2 }}
+
+{{ missalignment }}
+# included only for MisAlignment jobs
+{{ /missalignment }}
+
+{{ mpi }}
+# included only for MPI-parallel jobs
+{{ /mpi }}
+```
+
+Use these blocks to call your site's module system (e.g. `ml modulename`) so each job loads only what it needs.
+
+A minimal SLURM example structure:
+
+```bash
+#!/bin/bash
+#SBATCH -J {{ job_id }}
+{{ gpu }}
+#SBATCH -p <your-gpu-partition>
+#SBATCH --gres=gpu:{{ n_gpus }}
+{{ /gpu }}
+{{ cpu }}
+#SBATCH -p <your-cpu-partition>
+{{ /cpu }}
+#SBATCH -e {{ std_err }}
+#SBATCH -o {{ std_out }}
+#SBATCH --cpus-per-task {{ n_cores }}
+#SBATCH --mem {{ memory_gb }}GB
+#SBATCH --nodes 1
+#SBATCH --ntasks-per-node {{ n_processes }}
+
+{{ warp }}
+ml warptools/latest
+{{ /warp }}
+
+{{ relion }}
+ml relion/5.0
+{{ /relion }}
+
+# Preserve parent directory permissions for group members
+umask 007
+
+{{ command }}
+```
+
+> **Why `umask 007`:** Without it, jobs create output files with default permissions that exclude the group, breaking access for other project members who share the same group. Setting `umask 007` ensures files land as `660` and directories as `770`, so the group can always read and write job outputs regardless of who submitted the job.
+
+### Command templates
+
+| Template | Variable | Purpose |
+|---|---|---|
+| **Send command** | `{{ command }}` | How to run a command on the cluster host, e.g. `ssh user@host {{ command }}` |
+| **Submit job** | `{{ script_path_abs }}` | How to submit the generated script, e.g. `sbatch {{ script_path_abs }}` |
+| **Status job** | `{{ job_id }}` | How to check a job's state; output must be parseable by Relay's status patterns |
+| **Abort job** | `{{ job_id }}` | How to cancel a single job, e.g. `scancel {{ job_id }}` |
+| **List jobs** *(GPU worker pools only)* | — | Lists running jobs as `<id>,<state>` one per line; use a comma separator (not quoted) so state survives a remote SSH hop |
+| **Cancel many jobs** *(GPU worker pools only)* | `{{ job_ids }}` | Cancels a batch of jobs at once |
+
 ## Project structure
 
 | Directory | Description |
