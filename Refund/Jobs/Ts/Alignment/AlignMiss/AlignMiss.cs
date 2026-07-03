@@ -199,7 +199,7 @@ public class AlignMiss : Job, IClusterJob, IItemProgress
                      "GPU utilization but increase GPU memory consumption.",
            min: 1)]
     [RelayProperty]
-    public int PerDevice { get; set; } = 4;
+    public int PerDevice { get; set; } = 8;
 
     [UiInt("", "DataLoader workers per trainer",
            helpText: "Number of CPU data-loading workers per training GPU (--dataloaders-per-trainer).",
