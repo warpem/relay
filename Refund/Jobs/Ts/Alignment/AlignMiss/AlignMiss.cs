@@ -44,9 +44,12 @@ public class AlignMiss : Job, IClusterJob, IItemProgress
 
     public override int GpuCount => NGpus;
 
-    public override int CoreCount => NWorkers * 4 + 4;
+    // CPU cores follow miss-alignment's documented sizing:
+    // len(reconstruction-devices) + n_training_devices * dataloaders_per_trainer, plus a small
+    // orchestrator overhead. reconstruction-devices has NGpus*PerDevice entries; training uses NGpus.
+    public override int CoreCount => NGpus * (PerDevice + NWorkers) + 2;
 
-    public override int MemoryGb => NWorkers * 6 + 20;
+    public override int MemoryGb => NGpus * (PerDevice + NWorkers) * 4 + 16;
 
     // MissAlignment lives outside the WarpTools ecosystem, so it does not inherit WarpJob's module
     // set. It still needs the "warp" module in its runtime environment for now; drop "warp" here if
@@ -100,31 +103,6 @@ public class AlignMiss : Job, IClusterJob, IItemProgress
     [UiDecimal("", "Pixel size", min: 1, max: 100000, stepSize: 0.1, unit: "Å",
                "Rescale tilt images to this pixel size; normally 10–15 A for cryo data")]
     public decimal AngPix { get; set; } = 10;
-
-    /// <summary>
-    /// Apply mask to each image if available; masked areas will be filled with Gaussian noise
-    /// </summary>
-    // [RelayProperty]
-    // [UiBool("mask", "Apply mask",
-    //         "Apply mask to each image if available; masked areas will be filled with Gaussian noise")]
-    // public bool ApplyMask { get; set; } = true;
-
-    /// <summary>
-    /// Override initial tilt axis angle with this value
-    /// </summary>
-    // [RelayProperty]
-    // [UiFieldGroup("Alignment", 1)]
-    // [UiDecimalNullable("initial_axis", "Override initial axis angle", -360, 360, 0.001, "°",
-    //                    "Override initial tilt axis angle with this value")]
-    // public decimal? InitialAxisAngle { get; set; } = null;
-
-    /// <summary>
-    /// Fit a new tilt axis angle for the whole dataset
-    /// </summary>
-    // [RelayProperty]
-    // [UiBool("do_axis_search", "Search for tilt axis angle",
-    //         "Fit a new tilt axis angle for the whole dataset")]
-    // public bool DoAxisAngleSearch { get; set; } = false;
     
     [UiFieldGroup("Alignment", 1)]
     [RelayProperty]
@@ -205,14 +183,6 @@ public class AlignMiss : Job, IClusterJob, IItemProgress
                helpText: "Disable tilts that contain less than this fraction of the tomogram's field of view due to excessive shifts")]
     public decimal MinFov { get; set; } = 0;
 
-    /// <summary>
-    /// Delete tilt series stacks generated for Etomo
-    /// </summary>
-    [RelayProperty]
-    [UiBool("delete_intermediate", "Delete intermediate files",
-            "Delete tilt series stacks generated for Etomo afterwards")]
-    public bool DeleteIntermediate { get; set; } = false;
-    
     #region GPU options
 
     [UiFieldGroup("Resources", 999)]
@@ -222,15 +192,17 @@ public class AlignMiss : Job, IClusterJob, IItemProgress
     [RelayProperty]
     public int NGpus { get; set; } = 1;
 
-    [UiInt("perdevice", "Workers per GPU",
-           helpText: "Number of workers to use per GPU. Higher values may improve GPU utilization, " +
-                     "but will also increase GPU memory consumption.",
+    // Composed into the --reconstruction-devices list (each GPU index repeated PerDevice times),
+    // so the CliName is empty; ComposeCommandArguments builds the list explicitly.
+    [UiInt("", "Reconstruction workers per GPU",
+           helpText: "Number of reconstruction workers to run on each GPU. Higher values may improve " +
+                     "GPU utilization but increase GPU memory consumption.",
            min: 1)]
     [RelayProperty]
     public int PerDevice { get; set; } = 1;
 
-    [UiInt("n-workers", "Reconstruction workers",
-           helpText: "Number of reconstruction workers for MissAlignment to use for its data preparation.",
+    [UiInt("", "DataLoader workers per trainer",
+           helpText: "Number of CPU data-loading workers per training GPU (--dataloaders-per-trainer).",
            min: 1,
            max: 99999)]
     [RelayProperty]
@@ -279,12 +251,11 @@ public class AlignMiss : Job, IClusterJob, IItemProgress
         previousTs.HasMetadata = true;
         previousTs.LatestMetadataDirectory = DirectoryPath;
 
-        if (!DeleteIntermediate)
-        {
-            previousTs.TiltStackDirectory = WarpHelper.PathCombine(DirectoryPath, TiltSeries.TiltStackDirName);
-            previousTs.ToTiltStackPath = (name) => WarpHelper.PathCombine(DirectoryPath, TiltSeries.ToTiltStackPath(name));
-            previousTs.ToTiltStackThumbnailPath = (tsName, fsName) => Path.Combine(DirectoryPath, TiltSeries.ToTiltStackThumbnailPath(tsName, fsName));
-        }
+        // miss-alignment writes the prepared tilt stacks to the job directory and never deletes them
+        // (it only auto-cleans its own temporary reconstruction pool), so always expose them.
+        previousTs.TiltStackDirectory = WarpHelper.PathCombine(DirectoryPath, TiltSeries.TiltStackDirName);
+        previousTs.ToTiltStackPath = (name) => WarpHelper.PathCombine(DirectoryPath, TiltSeries.ToTiltStackPath(name));
+        previousTs.ToTiltStackThumbnailPath = (tsName, fsName) => Path.Combine(DirectoryPath, TiltSeries.ToTiltStackThumbnailPath(tsName, fsName));
 
         return previousTs;
     }
@@ -301,9 +272,10 @@ public class AlignMiss : Job, IClusterJob, IItemProgress
     public override string CommandSuffix => $" && touch {PathSuccess}";
 
     /// <summary>
-    /// Gets the name of the command used to run MissAlignment.
+    /// Gets the command used to run MissAlignment training (the `train` subcommand of the
+    /// `miss-alignment` CLI).
     /// </summary>
-    public override string CommandName => $"miss-alignment";
+    public override string CommandName => "miss-alignment train";
 
     public override Dictionary<string, string> ComposeCommandArguments()
     {
@@ -311,6 +283,15 @@ public class AlignMiss : Job, IClusterJob, IItemProgress
 
         result["config-file"] = ResConfigPath;
         result["prepare-stacks"] = AngPix.ToString(CultureInfo.InvariantCulture);
+
+        // miss-alignment takes explicit device-index lists, not counts. The cluster exposes the
+        // requested GPUs as indices 0..NGpus-1. All GPUs are used for training; each GPU also hosts
+        // PerDevice reconstruction workers (one --reconstruction-devices entry per worker, i.e. the
+        // GPU index repeated PerDevice times). NWorkers is the CPU DataLoader workers per trainer.
+        result["training-devices"] = string.Join(",", Enumerable.Range(0, NGpus));
+        result["reconstruction-devices"] = string.Join(",",
+            Enumerable.Range(0, NGpus).SelectMany(gpu => Enumerable.Repeat(gpu, PerDevice)));
+        result["dataloaders-per-trainer"] = NWorkers.ToString(CultureInfo.InvariantCulture);
 
         return result;
     }

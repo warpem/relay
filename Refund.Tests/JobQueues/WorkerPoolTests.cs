@@ -53,6 +53,36 @@ public class WorkerPoolTests
     }
 
     [Fact]
+    public void MissAlignment_ComposeCommandArguments_MatchesRealCli()
+    {
+        EnsurePopulated();
+
+        var job = new MissAlignmentJob
+        {
+            Space = new Space { RootDirectory = "/tmp/relay-test" },
+            NGpus = 2,
+            PerDevice = 3,
+            NWorkers = 4,
+        };
+
+        var args = job.ComposeCommandArguments();
+
+        // Runs the `train` subcommand and emits miss-alignment's real device-list options.
+        Assert.Equal("miss-alignment train", job.CommandName);
+        Assert.Equal("0,1", args["training-devices"]);
+        Assert.Equal("0,0,0,1,1,1", args["reconstruction-devices"]);   // each GPU repeated PerDevice times
+        Assert.Equal("4", args["dataloaders-per-trainer"]);
+        Assert.True(args.ContainsKey("config-file"));
+        Assert.True(args.ContainsKey("prepare-stacks"));
+
+        // Flags miss-alignment does not accept must not be emitted (Typer would error on them).
+        Assert.False(args.ContainsKey("perdevice"));
+        Assert.False(args.ContainsKey("n-workers"));
+        Assert.False(args.ContainsKey("delete_intermediate"));
+        Assert.False(args.ContainsKey("strict"));
+    }
+
+    [Fact]
     public void ItemProgress_ReadOnlyWrapper_ImplementsInterface_ForWarpAndMissAlignmentJobs()
     {
         EnsurePopulated();
