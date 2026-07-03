@@ -46,10 +46,10 @@ public class AlignMiss : Job, IClusterJob, IItemProgress
 
     // CPU cores follow miss-alignment's documented sizing:
     // len(reconstruction-devices) + n_training_devices * dataloaders_per_trainer, plus a small
-    // orchestrator overhead. reconstruction-devices has NGpus*PerDevice entries; training uses NGpus.
-    public override int CoreCount => NGpus * (PerDevice + NWorkers) + 2;
+    // orchestrator overhead.
+    public override int CoreCount => ReconstructionDevices.Length + TrainingDevices.Length * NWorkers + 2;
 
-    public override int MemoryGb => NGpus * (PerDevice + NWorkers) * 4 + 16;
+    public override int MemoryGb => ReconstructionDevices.Length * 4 + TrainingDevices.Length * NWorkers + 8;
 
     // MissAlignment lives outside the WarpTools ecosystem, so it does not inherit WarpJob's module
     // set. It still needs the "warp" module in its runtime environment for now; drop "warp" here if
@@ -190,7 +190,7 @@ public class AlignMiss : Job, IClusterJob, IItemProgress
            helpText: "Number of GPUs to request for this job.",
            min: 1)]
     [RelayProperty]
-    public int NGpus { get; set; } = 1;
+    public int NGpus { get; set; } = 2;
 
     // Composed into the --reconstruction-devices list (each GPU index repeated PerDevice times),
     // so the CliName is empty; ComposeCommandArguments builds the list explicitly.
@@ -199,7 +199,7 @@ public class AlignMiss : Job, IClusterJob, IItemProgress
                      "GPU utilization but increase GPU memory consumption.",
            min: 1)]
     [RelayProperty]
-    public int PerDevice { get; set; } = 1;
+    public int PerDevice { get; set; } = 4;
 
     [UiInt("", "DataLoader workers per trainer",
            helpText: "Number of CPU data-loading workers per training GPU (--dataloaders-per-trainer).",
@@ -277,6 +277,22 @@ public class AlignMiss : Job, IClusterJob, IItemProgress
     /// </summary>
     public override string CommandName => "miss-alignment train";
 
+    // miss-alignment takes explicit device-index lists, not counts. The cluster exposes the requested
+    // GPUs as indices 0..NGpus-1. With a single GPU, training and reconstruction share it. With
+    // multiple GPUs they run on SEPARATE devices — the first half train, the rest reconstruct —
+    // because making the two contend for the same GPUs badly hurts performance. This mirrors
+    // miss-alignment's own multi-GPU docs (e.g. 4 GPUs -> train 0,1 / reconstruct 2,3).
+    private int[] TrainingDevices =>
+        NGpus <= 1 ? new[] { 0 } : Enumerable.Range(0, NGpus / 2).ToArray();
+
+    // GPUs dedicated to reconstruction (equal to the training GPU only in the single-GPU case).
+    private int[] ReconstructionGpus =>
+        NGpus <= 1 ? new[] { 0 } : Enumerable.Range(NGpus / 2, NGpus - NGpus / 2).ToArray();
+
+    // One --reconstruction-devices entry per worker; each reconstruction GPU hosts PerDevice workers.
+    private int[] ReconstructionDevices =>
+        ReconstructionGpus.SelectMany(gpu => Enumerable.Repeat(gpu, PerDevice)).ToArray();
+
     public override Dictionary<string, string> ComposeCommandArguments()
     {
         var result = base.ComposeCommandArguments();
@@ -284,13 +300,8 @@ public class AlignMiss : Job, IClusterJob, IItemProgress
         result["config-file"] = ResConfigPath;
         result["prepare-stacks"] = AngPix.ToString(CultureInfo.InvariantCulture);
 
-        // miss-alignment takes explicit device-index lists, not counts. The cluster exposes the
-        // requested GPUs as indices 0..NGpus-1. All GPUs are used for training; each GPU also hosts
-        // PerDevice reconstruction workers (one --reconstruction-devices entry per worker, i.e. the
-        // GPU index repeated PerDevice times). NWorkers is the CPU DataLoader workers per trainer.
-        result["training-devices"] = string.Join(",", Enumerable.Range(0, NGpus));
-        result["reconstruction-devices"] = string.Join(",",
-            Enumerable.Range(0, NGpus).SelectMany(gpu => Enumerable.Repeat(gpu, PerDevice)));
+        result["training-devices"] = string.Join(",", TrainingDevices);
+        result["reconstruction-devices"] = string.Join(",", ReconstructionDevices);
         result["dataloaders-per-trainer"] = NWorkers.ToString(CultureInfo.InvariantCulture);
 
         return result;

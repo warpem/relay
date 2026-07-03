@@ -60,17 +60,19 @@ public class WorkerPoolTests
         var job = new MissAlignmentJob
         {
             Space = new Space { RootDirectory = "/tmp/relay-test" },
-            NGpus = 2,
+            NGpus = 4,
             PerDevice = 3,
             NWorkers = 4,
         };
 
         var args = job.ComposeCommandArguments();
 
-        // Runs the `train` subcommand and emits miss-alignment's real device-list options.
+        // Runs the `train` subcommand and emits miss-alignment's real device-list options. With
+        // multiple GPUs, training and reconstruction go on SEPARATE devices (first half train, rest
+        // reconstruct), matching the tool's own 4-GPU docs example.
         Assert.Equal("miss-alignment train", job.CommandName);
         Assert.Equal("0,1", args["training-devices"]);
-        Assert.Equal("0,0,0,1,1,1", args["reconstruction-devices"]);   // each GPU repeated PerDevice times
+        Assert.Equal("2,2,2,3,3,3", args["reconstruction-devices"]);   // each recon GPU repeated PerDevice times
         Assert.Equal("4", args["dataloaders-per-trainer"]);
         Assert.True(args.ContainsKey("config-file"));
         Assert.True(args.ContainsKey("prepare-stacks"));
@@ -80,6 +82,31 @@ public class WorkerPoolTests
         Assert.False(args.ContainsKey("n-workers"));
         Assert.False(args.ContainsKey("delete_intermediate"));
         Assert.False(args.ContainsKey("strict"));
+    }
+
+    [Theory]
+    // 1 GPU: training and reconstruction share device 0.
+    [InlineData(1, 5, "0", "0,0,0,0,0")]
+    // 2 GPUs: dedicate device 0 to training, device 1 to reconstruction (the fast split).
+    [InlineData(2, 5, "0", "1,1,1,1,1")]
+    // 4 GPUs: half train, half reconstruct.
+    [InlineData(4, 2, "0,1", "2,2,3,3")]
+    public void MissAlignment_DeviceSplit_SeparatesTrainingAndReconstruction(
+        int nGpus, int perDevice, string expectedTraining, string expectedReconstruction)
+    {
+        EnsurePopulated();
+
+        var job = new MissAlignmentJob
+        {
+            Space = new Space { RootDirectory = "/tmp/relay-test" },
+            NGpus = nGpus,
+            PerDevice = perDevice,
+        };
+
+        var args = job.ComposeCommandArguments();
+
+        Assert.Equal(expectedTraining, args["training-devices"]);
+        Assert.Equal(expectedReconstruction, args["reconstruction-devices"]);
     }
 
     [Fact]
