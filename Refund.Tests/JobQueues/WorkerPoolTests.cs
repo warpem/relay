@@ -67,12 +67,12 @@ public class WorkerPoolTests
 
         var args = job.ComposeCommandArguments();
 
-        // Runs the `train` subcommand and emits miss-alignment's real device-list options. With
-        // multiple GPUs, training and reconstruction go on SEPARATE devices (first half train, rest
-        // reconstruct), matching the tool's own 4-GPU docs example.
+        // Runs the `train` subcommand and emits miss-alignment's real device-list options. Training
+        // runs only on device 0; every other GPU is dedicated to reconstruction (PerDevice workers
+        // each).
         Assert.Equal("miss-alignment train", job.CommandName);
-        Assert.Equal("0,1", args["training-devices"]);
-        Assert.Equal("2,2,2,3,3,3", args["reconstruction-devices"]);   // each recon GPU repeated PerDevice times
+        Assert.Equal("0", args["training-devices"]);
+        Assert.Equal("1,1,1,2,2,2,3,3,3", args["reconstruction-devices"]);   // GPUs 1-3, PerDevice workers each
         Assert.Equal("4", args["dataloaders-per-trainer"]);
         Assert.True(args.ContainsKey("config-file"));
         Assert.True(args.ContainsKey("prepare-stacks"));
@@ -87,10 +87,10 @@ public class WorkerPoolTests
     [Theory]
     // 1 GPU: training and reconstruction share device 0.
     [InlineData(1, 5, "0", "0,0,0,0,0")]
-    // 2 GPUs: dedicate device 0 to training, device 1 to reconstruction (the fast split).
+    // 2 GPUs: device 0 trains, device 1 reconstructs (the fast config).
     [InlineData(2, 5, "0", "1,1,1,1,1")]
-    // 4 GPUs: half train, half reconstruct.
-    [InlineData(4, 2, "0,1", "2,2,3,3")]
+    // 4 GPUs: device 0 trains, all remaining GPUs reconstruct (PerDevice workers each).
+    [InlineData(4, 2, "0", "1,1,2,2,3,3")]
     public void MissAlignment_DeviceSplit_SeparatesTrainingAndReconstruction(
         int nGpus, int perDevice, string expectedTraining, string expectedReconstruction)
     {

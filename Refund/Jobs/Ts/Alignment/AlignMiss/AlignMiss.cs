@@ -278,16 +278,16 @@ public class AlignMiss : Job, IClusterJob, IItemProgress
     public override string CommandName => "miss-alignment train";
 
     // miss-alignment takes explicit device-index lists, not counts. The cluster exposes the requested
-    // GPUs as indices 0..NGpus-1. With a single GPU, training and reconstruction share it. With
-    // multiple GPUs they run on SEPARATE devices — the first half train, the rest reconstruct —
-    // because making the two contend for the same GPUs badly hurts performance. This mirrors
-    // miss-alignment's own multi-GPU docs (e.g. 4 GPUs -> train 0,1 / reconstruct 2,3).
-    private int[] TrainingDevices =>
-        NGpus <= 1 ? new[] { 0 } : Enumerable.Range(0, NGpus / 2).ToArray();
+    // GPUs as indices 0..NGpus-1. Training runs on a single GPU (device 0); every other GPU is
+    // dedicated to reconstruction. Empirically this beats splitting GPUs evenly — training gains
+    // little from extra devices while reconstruction throughput scales with them. With a single GPU
+    // the two necessarily share device 0.
+    private int[] TrainingDevices => new[] { 0 };
 
-    // GPUs dedicated to reconstruction (equal to the training GPU only in the single-GPU case).
+    // GPUs dedicated to reconstruction: every GPU except the training one, or device 0 itself in the
+    // single-GPU case where training and reconstruction must share.
     private int[] ReconstructionGpus =>
-        NGpus <= 1 ? new[] { 0 } : Enumerable.Range(NGpus / 2, NGpus - NGpus / 2).ToArray();
+        NGpus <= 1 ? new[] { 0 } : Enumerable.Range(1, NGpus - 1).ToArray();
 
     // One --reconstruction-devices entry per worker; each reconstruction GPU hosts PerDevice workers.
     private int[] ReconstructionDevices =>
