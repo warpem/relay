@@ -17,14 +17,22 @@ public static class RelayMcpProjections
     }
 
     public static ProjectDto ToDto(ReadOnlyProject p, int currentUserId) =>
-        new(p.Id, p.Alias, ComputeProjectRole(p.Owner.Id, p.Members.Select(m => m.Id), currentUserId));
+        new(p.Id, p.Alias, ComputeProjectRole(p.Owner.Id, p.Members.Select(m => m.Id), currentUserId),
+            string.IsNullOrEmpty(p.HeroImage) ? null : p.HeroImage,
+            string.IsNullOrEmpty(p.Notes) ? null : p.Notes);
 
-    public static SpaceDto ToDto(ReadOnlySpace s) => new(s.Id, s.Alias);
+    public static SpaceDto ToDto(ReadOnlySpace s) =>
+        new(s.Id, s.Alias,
+            string.IsNullOrEmpty(s.HeroImage) ? null : s.HeroImage,
+            string.IsNullOrEmpty(s.Notes) ? null : s.Notes);
 
     public static QueueDto ToDto(ReadOnlyJobQueue q) =>
         new(q.Id, q.Alias, q.QueueType.HasFlag(JobQueueType.Local) ? "local" : "cluster");
 
-    public static ViewDto ToDto(ReadOnlyView v) => new(v.Id, v.Alias);
+    public static ViewDto ToDto(ReadOnlyView v) =>
+        new(v.Id, v.Alias,
+            string.IsNullOrEmpty(v.HeroImage) ? null : v.HeroImage,
+            string.IsNullOrEmpty(v.Notes) ? null : v.Notes);
 
     public static JobDto ToDto(ReadOnlyJob j) =>
         new(j.Id, j.AliasOrId, j.TypeName, j.Status.ToString());

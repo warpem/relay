@@ -1,8 +1,8 @@
 namespace Refund.Mcp;
 
 /// <summary>Serializable shapes returned by the read-only MCP tools.</summary>
-public record ProjectDto(int Id, string Alias, string Role);
-public record SpaceDto(int Id, string Alias);
+public record ProjectDto(int Id, string Alias, string Role, string? Emoji, string? Notes);
+public record SpaceDto(int Id, string Alias, string? Emoji, string? Notes);
 public record JobDto(int Id, string Alias, string TypeName, string Status);
 
 /// <summary>A job's configured value for one parameter.</summary>
@@ -61,7 +61,7 @@ public record JobTypeDetailDto(
 public record QueueDto(int Id, string Alias, string Type);
 
 /// <summary>A view within a space; create_job targets a view by id.</summary>
-public record ViewDto(int Id, string Alias);
+public record ViewDto(int Id, string Alias, string? Emoji, string? Notes);
 
 /// <summary>Result of a create_* tool.</summary>
 public record CreatedDto(int Id, string Alias);

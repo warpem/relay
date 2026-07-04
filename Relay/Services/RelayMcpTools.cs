@@ -268,16 +268,18 @@ public class RelayMcpTools(IHttpContextAccessor contextAccessor, DataManager dat
     [McpServerTool(Name = "create_project"), Description("Create a new project owned by the current user.")]
     public async Task<CreatedDto> CreateProject(
         [Description("Optional project name/alias.")] string? alias = null,
-        [Description("Optional emoji shown on the project card, e.g. \"🧊\".")] string? emoji = null)
+        [Description("Optional emoji shown on the project card, e.g. \"🧊\".")] string? emoji = null,
+        [Description("Optional notes or description for the project.")] string? notes = null)
     {
         var user = CurrentUser();
         Require(PermTier.Project, AccessLevel.EditRun);
         Project? template = null;
-        if (!string.IsNullOrWhiteSpace(alias) || !string.IsNullOrWhiteSpace(emoji))
+        if (!string.IsNullOrWhiteSpace(alias) || !string.IsNullOrWhiteSpace(emoji) || !string.IsNullOrWhiteSpace(notes))
         {
             template = new Project();
             if (!string.IsNullOrWhiteSpace(alias)) template.Alias = alias;
             if (!string.IsNullOrWhiteSpace(emoji)) template.HeroImage = emoji;
+            if (!string.IsNullOrWhiteSpace(notes)) template.Notes = notes;
         }
         var project = await Invoke(() => dataManager.CreateProject(user, template));
         return new CreatedDto(project.Id, project.Alias);
@@ -295,29 +297,88 @@ public class RelayMcpTools(IHttpContextAccessor contextAccessor, DataManager dat
         return new OkDto(true);
     }
 
-    [McpServerTool(Name = "create_space"), Description("Create a new space in a project.")]
+    [McpServerTool(Name = "create_space"), Description("Create a new space in a project. The space directory must already exist and be writable.")]
     public async Task<CreatedDto> CreateSpace(
         [Description("The project id.")] int projectId,
+        [Description("Absolute path to the directory on disk where this space's data will be stored. Must already exist and be writable.")] string rootDirectory,
         [Description("Optional space name/alias.")] string? alias = null,
-        [Description("Optional emoji shown on the space card, e.g. \"🏖️\".")] string? emoji = null)
+        [Description("Optional emoji shown on the space card, e.g. \"🏖️\".")] string? emoji = null,
+        [Description("Optional notes or description for the space.")] string? notes = null)
     {
         var user = CurrentUser();
         Require(PermTier.Space, AccessLevel.EditRun);
         var project = dataManager.GetUserProjects(user).FirstOrDefault(p => p.Id == projectId);
         if (project == null) throw new McpException($"Project {projectId} not found.");
-        Space? template = null;
-        if (!string.IsNullOrWhiteSpace(alias) || !string.IsNullOrWhiteSpace(emoji))
+        if (string.IsNullOrWhiteSpace(rootDirectory)) throw new McpException("rootDirectory is required.");
+        if (!Directory.Exists(rootDirectory)) throw new McpException($"Directory does not exist: {rootDirectory}");
+        // Refuse if a space.relay already exists in this directory — creating here would clobber it.
+        // (The UI distinguishes "reconnect" from "already connected"; for the API, both are errors:
+        // use reconnect_space to attach an existing space file, or choose an empty directory.)
+        string spaceFilePath = Path.Combine(rootDirectory, "space.relay");
+        if (File.Exists(spaceFilePath))
         {
-            template = new Space();
-            if (!string.IsNullOrWhiteSpace(alias)) template.Alias = alias;
-            if (!string.IsNullOrWhiteSpace(emoji)) template.HeroImage = emoji;
+            bool alreadyConnected = dataManager.Projects.Any(p =>
+                p.Spaces.Any(s => Path.GetFullPath(Path.Combine(s.RootDirectory, "space.relay")) ==
+                                  Path.GetFullPath(spaceFilePath)));
+            if (alreadyConnected)
+                throw new McpException($"A Relay space already exists in that directory and is connected to a project. Choose a different directory.");
+            throw new McpException($"A disconnected Relay space already exists in that directory (space.relay found). Use reconnect_space to attach it, or choose an empty directory.");
         }
+        var template = new Space { RootDirectory = rootDirectory };
+        if (!string.IsNullOrWhiteSpace(alias)) template.Alias = alias;
+        if (!string.IsNullOrWhiteSpace(emoji)) template.HeroImage = emoji;
+        if (!string.IsNullOrWhiteSpace(notes)) template.Notes = notes;
         var space = await Invoke(() => dataManager.CreateSpace(user, project, template));
         // Mirror the GUI's space-creation flow: a space needs a default view before jobs can be
         // placed in it (create_job targets a view), and DataManager.CreateSpace makes none.
         var viewEmoji = string.IsNullOrWhiteSpace(emoji) ? "🪟" : emoji;
         await Invoke(() => dataManager.CreateView(user, space, new View { Alias = "View 1", HeroImage = viewEmoji }));
         return new CreatedDto(space.Id, space.Alias);
+    }
+
+    [McpServerTool(Name = "reconnect_space"), Description("Attach an existing space (a directory that already contains a space.relay file) to a project. Any jobs that were left running at disconnect time are marked as Failed.")]
+    public async Task<CreatedDto> ReconnectSpace(
+        [Description("The project id.")] int projectId,
+        [Description("Absolute path to the space.relay file, or to the directory that contains it.")] string path)
+    {
+        var user = CurrentUser();
+        Require(PermTier.Space, AccessLevel.EditRun);
+        var project = dataManager.GetUserProjects(user).FirstOrDefault(p => p.Id == projectId);
+        if (project == null) throw new McpException($"Project {projectId} not found.");
+        if (string.IsNullOrWhiteSpace(path)) throw new McpException("path is required.");
+        // Accept either the directory or the file itself.
+        string spacePath = Path.GetFileName(path).Equals("space.relay", StringComparison.OrdinalIgnoreCase)
+            ? path
+            : Path.Combine(path, "space.relay");
+        if (!File.Exists(spacePath)) throw new McpException($"No space.relay file found at: {spacePath}");
+        // Refuse if already connected to any project.
+        bool alreadyConnected = dataManager.Projects.Any(p =>
+            p.Spaces.Any(s => Path.GetFullPath(Path.Combine(s.RootDirectory, "space.relay")) ==
+                              Path.GetFullPath(spacePath)));
+        if (alreadyConnected)
+            throw new McpException("That space is already connected to a project.");
+        var space = await Invoke(() => dataManager.ReconnectSpace(user, project, spacePath));
+        return new CreatedDto(space.Id, space.Alias);
+    }
+
+    [McpServerTool(Name = "create_view"), Description("Create a new view in a space. Views are visual canvases that hold jobs; create_job targets a view by id.")]
+    public async Task<CreatedDto> CreateView(
+        [Description("The project id.")] int projectId,
+        [Description("The space id.")] int spaceId,
+        [Description("Optional view name/alias.")] string? alias = null,
+        [Description("Optional emoji shown on the view tab, e.g. \"🪟\".")] string? emoji = null,
+        [Description("Optional notes or description for the view.")] string? notes = null)
+    {
+        var user = CurrentUser();
+        Require(PermTier.Space, AccessLevel.EditRun);
+        var space = dataManager.GetUserProjects(user).FirstOrDefault(p => p.Id == projectId)?.FindSpace(spaceId);
+        if (space == null) throw new McpException($"Space {spaceId} not found in project {projectId}.");
+        var template = new View();
+        if (!string.IsNullOrWhiteSpace(alias)) template.Alias = alias;
+        if (!string.IsNullOrWhiteSpace(emoji)) template.HeroImage = emoji;
+        if (!string.IsNullOrWhiteSpace(notes)) template.Notes = notes;
+        var view = await Invoke(() => dataManager.CreateView(user, space, template));
+        return new CreatedDto(view.Id, view.Alias);
     }
 
     [McpServerTool(Name = "delete_space"), Description("Delete a space and everything in it.")]
