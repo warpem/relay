@@ -1,6 +1,7 @@
 using System.Reflection;
 using Refund.DataModel;
 using Refund.DataModel.ReadOnly;
+using Warp.Tools;
 
 namespace Refund.Mcp;
 
@@ -112,7 +113,8 @@ public static class RelayMcpProjections
 
     /// <summary>
     /// Coerces a parameter value into something that serializes cleanly to JSON for the agent:
-    /// primitives pass through, enums and anything else become their string form, null stays null.
+    /// primitives pass through, enums become their string form, vector types become int/float arrays
+    /// (matching the array format that configure_job / CoerceJsonValue expects), null stays null.
     /// </summary>
     private static object? ToJsonSafeValue(object? value) => value switch
     {
@@ -120,6 +122,11 @@ public static class RelayMcpProjections
         string or bool or byte or sbyte or short or ushort or int or uint or long or ulong
             or float or double or decimal or DateTime => value,
         Enum e => e.ToString(),
+        int2 v => new[] { v.X, v.Y },
+        int3 v => new[] { v.X, v.Y, v.Z },
+        int4 v => new[] { v.X, v.Y, v.Z, v.W },
+        float2 v => new[] { v.X, v.Y },
+        float3 v => new[] { v.X, v.Y, v.Z },
         _ => value.ToString()
     };
 

@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Text.Json;
 using Refund.DataModel;
+using Warp.Tools;
 
 namespace Refund.Mcp;
 
@@ -60,6 +61,45 @@ public static class RelayMcpParameterPatch
         if (targetType == typeof(double)) return value.GetDouble();
         if (targetType == typeof(decimal)) return value.GetDecimal();
 
+        // Vector types — accept a JSON array of the right length, e.g. [4, 4, 1].
+        // A scalar is also accepted as a uniform value, e.g. 1 → [1, 1, 1].
+        if (targetType == typeof(int2)) return CoerceIntVector(value, 2, v => new int2(v[0], v[1]));
+        if (targetType == typeof(int3)) return CoerceIntVector(value, 3, v => new int3(v[0], v[1], v[2]));
+        if (targetType == typeof(int4)) return CoerceIntVector(value, 4, v => new int4(v[0], v[1], v[2], v[3]));
+        if (targetType == typeof(float2)) return CoerceFloatVector(value, 2, v => new float2(v[0], v[1]));
+        if (targetType == typeof(float3)) return CoerceFloatVector(value, 3, v => new float3(v[0], v[1], v[2]));
+
         throw new ArgumentException($"unsupported parameter type {targetType.Name}");
     }
+
+    private static T CoerceIntVector<T>(JsonElement value, int n, Func<int[], T> ctor)
+    {
+        if (value.ValueKind == JsonValueKind.Number)
+        {
+            int s = value.GetInt32();
+            return ctor(Enumerable.Repeat(s, n).ToArray());
+        }
+        if (value.ValueKind != JsonValueKind.Array)
+            throw new ArgumentException($"expected a JSON array of {n} integers or a single integer");
+        var elements = value.EnumerateArray().ToList();
+        if (elements.Count != n)
+            throw new ArgumentException($"expected {n} elements, got {elements.Count}");
+        return ctor(elements.Select(e => e.GetInt32()).ToArray());
+    }
+
+    private static T CoerceFloatVector<T>(JsonElement value, int n, Func<float[], T> ctor)
+    {
+        if (value.ValueKind == JsonValueKind.Number)
+        {
+            float s = value.GetSingle();
+            return ctor(Enumerable.Repeat(s, n).ToArray());
+        }
+        if (value.ValueKind != JsonValueKind.Array)
+            throw new ArgumentException($"expected a JSON array of {n} numbers or a single number");
+        var elements = value.EnumerateArray().ToList();
+        if (elements.Count != n)
+            throw new ArgumentException($"expected {n} elements, got {elements.Count}");
+        return ctor(elements.Select(e => e.GetSingle()).ToArray());
+    }
+
 }

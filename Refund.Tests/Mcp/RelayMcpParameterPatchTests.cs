@@ -1,7 +1,9 @@
 using System.Text.Json;
 using Refund.DataModel;
+using Refund.Jobs.Fs.MotionCtf.MotionAndCTF2D;
 using Refund.Jobs.Refinement.Classes3D.Class3D;
 using Refund.Mcp;
+using Warp.Tools;
 using Xunit;
 
 namespace Refund.Tests.Mcp;
@@ -74,5 +76,55 @@ public class RelayMcpParameterPatchTests
         Assert.Null(RelayMcpParameterPatch.CoerceJsonValue(J("null"), typeof(int?)));
         Assert.Equal(AccessLevel.EditRun,
             RelayMcpParameterPatch.CoerceJsonValue(J("\"EditRun\""), typeof(AccessLevel)));
+    }
+
+    [Fact]
+    public void CoerceJsonValue_HandlesInt3_Array()
+    {
+        var result = (int3)RelayMcpParameterPatch.CoerceJsonValue(J("[4, 4, 1]"), typeof(int3));
+        Assert.Equal(new int3(4, 4, 1), result);
+    }
+
+    [Fact]
+    public void CoerceJsonValue_HandlesInt3_Scalar()
+    {
+        // A scalar is broadcast to all components — e.g. 1 → [1, 1, 1].
+        var result = (int3)RelayMcpParameterPatch.CoerceJsonValue(J("1"), typeof(int3));
+        Assert.Equal(new int3(1, 1, 1), result);
+    }
+
+    [Fact]
+    public void CoerceJsonValue_HandlesInt2_Array()
+    {
+        var result = (int2)RelayMcpParameterPatch.CoerceJsonValue(J("[8, 8]"), typeof(int2));
+        Assert.Equal(new int2(8, 8), result);
+    }
+
+    [Fact]
+    public void CoerceJsonValue_HandlesFloat3_Array()
+    {
+        var result = (float3)RelayMcpParameterPatch.CoerceJsonValue(J("[1.0, 2.5, 0.5]"), typeof(float3));
+        Assert.Equal(1.0f, result.X);
+        Assert.Equal(2.5f, result.Y);
+        Assert.Equal(0.5f, result.Z);
+    }
+
+    [Fact]
+    public void CoerceJsonValue_Int3_WrongLength_Throws()
+    {
+        var ex = Assert.Throws<ArgumentException>(() =>
+            RelayMcpParameterPatch.CoerceJsonValue(J("[1, 2]"), typeof(int3)));
+        Assert.Contains("3", ex.Message);
+    }
+
+    [Fact]
+    public void Resolve_Int3Parameter_RoundTrips()
+    {
+        EnsurePopulated();
+        var job = new MotionAndCTF2D();
+        var patch = new Dictionary<string, JsonElement> { ["MotionGridDims"] = J("[4, 4, 1]") };
+        foreach (var (p, v) in RelayMcpParameterPatch.Resolve(typeof(MotionAndCTF2D), patch))
+            p.SetValue(job, v);
+        Assert.Equal(new int3(4, 4, 1), job.MotionGridDims);
     }
 }
