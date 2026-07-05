@@ -208,6 +208,19 @@ public class AlignMiss : Job, IClusterJob, IItemProgress
     [RelayProperty]
     public int NWorkers { get; set; } = 5;
 
+    [UiFieldGroup("Resources", 999)]
+    [UiBool("", "Use worker pool",
+            "Let MissAlignment spawn its own cluster worker pool for the inference steps during training " +
+            "(the tool's internal --n-cluster-workers pool, managed inside the run — not a Relay pool).")]
+    [RelayProperty]
+    public bool UseWorkerPool { get; set; } = false;
+
+    [UiInt("n-cluster-workers", "Pool size", min: 1,
+           helpText: "Number of cluster workers in MissAlignment's reconstruction pool.",
+           ConditionalOnField = nameof(UseWorkerPool), ConditionalOnValue = true)]
+    [RelayProperty]
+    public int PoolSize { get; set; } = 4;
+
     #endregion
     
     #endregion

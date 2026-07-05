@@ -84,6 +84,30 @@ public class WorkerPoolTests
         Assert.False(args.ContainsKey("strict"));
     }
 
+    [Fact]
+    public void MissAlignment_WorkerPool_EmitsNClusterWorkers_OnlyWhenEnabled()
+    {
+        EnsurePopulated();
+
+        // Off: no --n-cluster-workers, so MissAlignment runs without spawning its cluster pool.
+        var off = new MissAlignmentJob
+        {
+            Space = new Space { RootDirectory = "/tmp/relay-test" },
+            UseWorkerPool = false,
+            PoolSize = 6,
+        };
+        Assert.False(off.ComposeCommandArguments().ContainsKey("n-cluster-workers"));
+
+        // On: --n-cluster-workers <PoolSize> activates the tool's internal cluster worker pool.
+        var on = new MissAlignmentJob
+        {
+            Space = new Space { RootDirectory = "/tmp/relay-test" },
+            UseWorkerPool = true,
+            PoolSize = 6,
+        };
+        Assert.Equal("6", on.ComposeCommandArguments()["n-cluster-workers"]);
+    }
+
     [Theory]
     // 1 GPU: training and reconstruction share device 0.
     [InlineData(1, 5, "0", "0,0,0,0,0")]
