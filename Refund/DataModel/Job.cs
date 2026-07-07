@@ -394,8 +394,6 @@ public abstract class Job : RelayBase, IFolderContent
     /// </summary>
     public virtual string NameStdErr => "std.err";
 
-    protected ProgressiveTextReader StdErrReader;
-
     public string PathStdErr => Path.Combine(DirectoryPath, NameStdErr);
     
     public virtual string NameSuccess => "SUCCESS";
@@ -1559,23 +1557,32 @@ public abstract class Job : RelayBase, IFolderContent
             port.Edges.Clear();
     }
 
+    // Byte length of std.err the last time we mirrored it to ErrorFilePath.
+    // Tracking length (not content hash) is enough: std.err is append-only.
+    private long _stdErrMirroredLength = -1;
+
     public virtual Action TrackProgressLogs()
     {
-        StdErrReader ??= new ProgressiveTextReader(PathStdErr);
-
         // Ensure results directory exists
         JobTools.EnsureResultsDirectory(RelayResultsDirectoryPath);
 
         try
         {
-            string newErrors = StdErrReader.ReadNewContent();
+            if (!File.Exists(PathStdErr))
+                return null;
 
-            if (!string.IsNullOrEmpty(newErrors))
-            {
-                File.AppendAllText(ErrorFilePath, newErrors);
+            // Read std.err in full and overwrite ErrorFilePath so the UI always shows
+            // a consistent, complete copy. Using the file length as a cheap change-guard
+            // avoids a redundant write+event on every tick when nothing has changed.
+            long currentLength = new FileInfo(PathStdErr).Length;
+            if (currentLength == _stdErrMirroredLength)
+                return null;
 
-                return () => { };
-            }
+            string fullErrors = File.ReadAllText(PathStdErr);
+            File.WriteAllText(ErrorFilePath, fullErrors);
+            _stdErrMirroredLength = currentLength;
+
+            return () => { };
         }
         catch (Exception ex)
         {
