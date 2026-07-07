@@ -54,7 +54,7 @@
 
             @if (_isRegistering)
             {
-                <EditForm Model="@_registrationModel" OnValidSubmit="HandleRegistration">
+                <EditForm Model="@_registrationModel" OnValidSubmit="HandleRegistration" FormName="registration">
                     <DataAnnotationsValidator/>
 
                     <div class="form-content">
@@ -118,7 +118,8 @@
             {
                 <EditForm Model="@_loginModel"
                           OnValidSubmit="HandleNativeLogin"
-                          @onkeydown="@HandleLoginKeyPress">
+                          @onkeydown="@HandleLoginKeyPress"
+                          FormName="login">
                     <DataAnnotationsValidator/>
 
                     <div class="form-content">

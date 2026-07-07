@@ -96,9 +96,16 @@ public partial class Login : IAsyncDisposable
     {
         if (firstRender)
         {
-            _metaballModule = await JsRuntime.InvokeAsync<IJSObjectReference>(
-                "import", "./Pages/Login.razor.js");
-            await _metaballModule.InvokeVoidAsync("start");
+            try
+            {
+                _metaballModule = await JsRuntime.InvokeAsync<IJSObjectReference>(
+                    "import", "./Pages/Login.razor.js");
+                await _metaballModule.InvokeVoidAsync("start");
+            }
+            catch (JSException ex)
+            {
+                Logger.LogWarning(ex, "Login page JS module failed to load; metaball animation will be skipped");
+            }
         }
     }
 

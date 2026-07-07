@@ -106,4 +106,12 @@ public class RelayConfiguration
 
     /// <summary>Path to the file storing personal access tokens (MCP/agent auth).</summary>
     public string PatsPath { get; set; } = "pats.relay";
+
+    /// <summary>
+    /// Directory where ASP.NET Core Data Protection keys are persisted.
+    /// Keys must survive restarts so that auth cookies issued before a redeploy
+    /// remain valid. Defaults to a "keys" subdirectory next to the other relay
+    /// data files; override in relay.json when those files live elsewhere.
+    /// </summary>
+    public string DataProtectionKeysPath { get; set; } = "keys";
 }

@@ -17,6 +17,7 @@ using Relay.Screens.Main.View;
 using Relay.Services;
 using System.Reflection;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.DataProtection;
 using AuthenticationService = Refund.Services.AuthenticationService;
 using Serilog;
 using System.Runtime.InteropServices;
@@ -145,8 +146,13 @@ builder.Services.AddScoped<RelaySession>();
 // Authentication service for login/logout functionality
 builder.Services.AddScoped<AuthenticationService>();
 
-// Add data protection and secure storage
-builder.Services.AddDataProtection();
+// Add data protection and secure storage.
+// Keys are persisted to disk so auth cookies survive restarts and redeployments.
+// The path is configurable via relay.json ("Relay": { "DataProtectionKeysPath": "..." });
+// it defaults to a "keys" directory next to the other relay data files.
+builder.Services.AddDataProtection()
+       .PersistKeysToFileSystem(new DirectoryInfo(relayOptions.DataProtectionKeysPath))
+       .SetApplicationName("relay");
 builder.Services.AddSingleton<MemorySecureStorage>();
 
 // UI state management services
@@ -191,7 +197,6 @@ if (!app.Environment.IsDevelopment())
 }
 
 // Configure middleware pipeline
-app.UseStaticFiles();            // Serve static files (CSS, JS, images)
 app.UseRouting();                // Set up routing
 app.UseAntiforgery();            // Prevent CSRF attacks
 
@@ -202,6 +207,12 @@ app.UseAuthorization();
 // Redirect unauthenticated requests to /login before Blazor renders.
 // Without this, deep URLs (e.g. /P1/S2/V3) show a blank page because the
 // auth check in MainLayout.OnAfterRenderAsync fires too late.
+//
+// MapStaticAssets() is endpoint-routed and runs after this middleware, so any
+// static-asset path not explicitly allowed would be 302'd. Rather than
+// maintaining a directory allowlist, any path with a file extension is let
+// through: app routes in this codebase never carry extensions, so this cleanly
+// separates static assets (*.css, *.js, *.woff2, *.razor.js, ...) from pages.
 app.Use(async (context, next) =>
 {
     var path = context.Request.Path;
@@ -216,7 +227,8 @@ app.Use(async (context, next) =>
         && !path.StartsWithSegments("/process-logout")
         && !path.StartsWithSegments("/_blazor")
         && !path.StartsWithSegments("/_framework")
-        && !path.StartsWithSegments("/api"))
+        && !path.StartsWithSegments("/api")
+        && !Path.HasExtension(path.Value))
     {
         context.Response.Redirect("/login");
         return;
@@ -226,6 +238,7 @@ app.Use(async (context, next) =>
 });
 
 // Map endpoints
+app.MapStaticAssets();           // Serve static files with compression and fingerprinting (needed for FluentUI JS initializers in published builds)
 app.MapRazorPages();
 app.MapControllers();
 
