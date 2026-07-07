@@ -34,6 +34,26 @@
     cursor: default;
 }
 
+.error-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100%;
+    flex: 0 0 250px;
+    padding: 8px;
+}
+
+.error-message {
+    font-size: 0.8em;
+    color: var(--error);
+    text-align: center;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    cursor: help;
+}
+
 .item-label {
     overflow: hidden;
     text-overflow: ellipsis;

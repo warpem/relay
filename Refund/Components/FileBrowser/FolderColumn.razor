@@ -6,6 +6,12 @@
         <FluentProgressRing />
     </div>
 }
+else if (ErrorMessage != null)
+{
+    <div class="error-container">
+        <span class="error-message" title="@ErrorMessage">Can't read folder</span>
+    </div>
+}
 else
 {
     <div class="folder-column">

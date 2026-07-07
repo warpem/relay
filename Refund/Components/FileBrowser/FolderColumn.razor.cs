@@ -130,6 +130,12 @@ public partial class FolderColumn : ComponentBase
     private bool IsLoading { get; set; } = false;
 
     /// <summary>
+    /// Error message to display when the directory cannot be read.
+    /// Null when there is no error.
+    /// </summary>
+    private string ErrorMessage { get; set; } = null;
+
+    /// <summary>
     /// Called when component parameters are set or updated.
     /// Loads the directory contents if needed or if a refresh is forced.
     /// </summary>
@@ -145,16 +151,27 @@ public partial class FolderColumn : ComponentBase
     /// <summary>
     /// Loads the contents of the directory for this column.
     /// Sets the IsLoading flag to true during loading and updates the UI.
+    /// Catches IO and other exceptions to display an inline error instead of crashing the page.
     /// </summary>
     private async Task LoadItemsAsync()
     {
         IsLoading = true;
+        ErrorMessage = null;
         StateHasChanged();
 
-        var items = await GetFolderContentsAsync(Path);
+        try
+        {
+            var items = await GetFolderContentsAsync(Path);
 
-        Folders = items.Where(i => i.IsDirectory).ToList();
-        Files = items.Where(i => !i.IsDirectory).ToList();
+            Folders = items.Where(i => i.IsDirectory).ToList();
+            Files = items.Where(i => !i.IsDirectory).ToList();
+        }
+        catch (Exception ex)
+        {
+            Folders = [];
+            Files = [];
+            ErrorMessage = ex.Message;
+        }
 
         IsLoading = false;
         StateHasChanged();
