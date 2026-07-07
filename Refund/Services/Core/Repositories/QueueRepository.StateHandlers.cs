@@ -179,12 +179,18 @@ public partial class QueueRepository
                             $"Spawned {submitted - submittedBefore} pool worker(s); " +
                             $"{alive}/{pooledJob.PoolSize} alive ({running} running), {submitted} submitted in total");
 
-                    _jobUpdateCallback(job, j =>
+                    var warpJob = (WarpJobGpu)job;
+                    if (warpJob.PoolWorkersAlive   != alive   ||
+                        warpJob.PoolWorkersRunning != running ||
+                        warpJob.PoolWorkersSubmitted != submitted)
                     {
-                        ((WarpJobGpu)j).PoolWorkersAlive = alive;
-                        ((WarpJobGpu)j).PoolWorkersRunning = running;
-                        ((WarpJobGpu)j).PoolWorkersSubmitted = submitted;
-                    });
+                        _jobUpdateCallback(job, j =>
+                        {
+                            ((WarpJobGpu)j).PoolWorkersAlive = alive;
+                            ((WarpJobGpu)j).PoolWorkersRunning = running;
+                            ((WarpJobGpu)j).PoolWorkersSubmitted = submitted;
+                        });
+                    }
                 }
                 catch (Exception ex)
                 {
