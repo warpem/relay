@@ -227,7 +227,7 @@ public class TemplateMatch : WarpJobGpu, IClusterJob
            helpText: "Number of tomograms to use for handedness checking; clear to disable")]
     public int? CheckHandN { get; set; } = null;
 
-    public override int PerDevice { get; set; } = 1;
+    public override int PerDevice { get => 1; set { } }
 
     #endregion
 
