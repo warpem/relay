@@ -6,7 +6,7 @@ using Refund.Utils;
 namespace Refund.Jobs;
 
 [GenerateReadOnly]
-public abstract class WarpJobGpu : WarpJob, IPooledJob
+public abstract class WarpJobGpu : WarpJob, IPooledJob, IPoolStatus
 {
     /// <summary>
     /// True when this job runs as a pool Manager — a CPU-only orchestrator that populates the

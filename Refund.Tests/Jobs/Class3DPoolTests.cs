@@ -170,6 +170,23 @@ public class Class3DPoolTests
     }
 
     [Fact]
+    public void PoolStatus_MirroredOntoReadOnlyWrapper_ForCard()
+    {
+        // The queue job card gates pool display on IPoolStatus (a pure-read contract), so the ReadOnly
+        // source generator must replicate it onto ReadOnlyClass3D — otherwise the card shows nothing
+        // for a pooled RELION job even though the fleet is running.
+        var job = NewPooledJob();
+        job.PoolWorkersAlive = 5;
+        job.PoolWorkersRunning = 3;
+
+        Assert.IsAssignableFrom<IPoolStatus>(job);                 // mutable side
+        var ro = Assert.IsAssignableFrom<IPoolStatus>(job.AsReadOnly());   // generated read-only side
+        Assert.True(ro.IsPooled);
+        Assert.Equal(5, ro.PoolWorkersAlive);
+        Assert.Equal(3, ro.PoolWorkersRunning);
+    }
+
+    [Fact]
     public void JobModules_Registry_IncludesRelionPool()
     {
         if (Job.Types.Count == 0)

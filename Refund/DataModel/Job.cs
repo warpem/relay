@@ -1651,6 +1651,27 @@ public interface IItemProgress
 }
 
 /// <summary>
+/// Pure read contract exposing a pooled job's live worker-fleet status to the UI. Get-only, so the
+/// ReadOnly source generator mirrors it onto the generated read-only wrappers automatically (the same
+/// mechanism as <see cref="IItemProgress"/>). This lets the queue job card show pool state for ANY
+/// pooled job type (WarpTools GPU or RELION CPU) by gating on the capability rather than on a concrete
+/// class. The mutable <see cref="IPooledJob"/> is behavioral (has methods) so it is NOT mirrored;
+/// this interface is the read-only-friendly subset the card needs.
+/// </summary>
+public interface IPoolStatus
+{
+    /// <summary>True when this job is actually running as a pool manager.</summary>
+    bool IsPooled { get; }
+
+    /// <summary>Target number of workers in the pool.</summary>
+    int PoolSize { get; }
+
+    int PoolWorkersAlive { get; }
+    int PoolWorkersRunning { get; }
+    int PoolWorkersSubmitted { get; }
+}
+
+/// <summary>
 /// Implemented by WarpTools GPU jobs that maintain a fleet of short-lived cluster
 /// worker jobs alongside the single Manager cluster job.
 /// </summary>

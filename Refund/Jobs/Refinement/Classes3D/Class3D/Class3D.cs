@@ -29,7 +29,7 @@ namespace Refund.Jobs.Refinement.Classes3D.Class3D;
 /// job creation and cloning operations.
 /// </remarks>
 [GenerateReadOnly]
-public class Class3D : RelionJob, IClusterJob, IPooledJob
+public class Class3D : RelionJob, IClusterJob, IPooledJob, IPoolStatus
 {
     public override string TypeGuid => "e7f98e89-7ddc-48a0-89c8-6030f033f2d6";
 
