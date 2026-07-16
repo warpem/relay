@@ -158,6 +158,13 @@ Relay uses conditional blocks to load the right software modules depending on th
 # included only for RELION jobs
 {{ /relion }}
 
+{{ relion-pool }}
+# included instead of {{ relion }} when a RELION job runs through the disk-based
+# worker pool (CPU-only manager + CPU worker fleet). Load a RELION build that
+# provides the relion_refine_pool binary. Requested by both the manager and the
+# workers, alongside {{ cpu }} for the CPU partition directives.
+{{ /relion-pool }}
+
 {{ imod }}
 # included only for IMOD jobs
 {{ /imod }}

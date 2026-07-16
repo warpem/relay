@@ -558,6 +558,9 @@ internal class FakePooledJob : IPooledJob
         { "std_err", Path.Combine(workerLogDir, "%j.err") },
     };
     public string GetWorkerCommand(int deviceIndex) => $"WarpWorker2 --device {deviceIndex}";
+    public int PoolWorkersAlive { get; set; }
+    public int PoolWorkersRunning { get; set; }
+    public int PoolWorkersSubmitted { get; set; }
 }
 
 internal class FakePoolQueue : IPoolQueue

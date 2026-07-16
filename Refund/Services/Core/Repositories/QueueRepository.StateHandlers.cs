@@ -167,7 +167,7 @@ public partial class QueueRepository
                         await job.WriteToLifecycleLog(
                             $"Worker pool created on pool queue {pooledJob.PoolQueueId}, target {pooledJob.PoolSize} worker(s)");
 
-                    int submittedBefore = ((WarpJobGpu)job).PoolWorkersSubmitted;
+                    int submittedBefore = pooledJob.PoolWorkersSubmitted;
 
                     var (alive, running, submitted) = await pool.Tick();
 
@@ -179,16 +179,16 @@ public partial class QueueRepository
                             $"Spawned {submitted - submittedBefore} pool worker(s); " +
                             $"{alive}/{pooledJob.PoolSize} alive ({running} running), {submitted} submitted in total");
 
-                    var warpJob = (WarpJobGpu)job;
-                    if (warpJob.PoolWorkersAlive   != alive   ||
-                        warpJob.PoolWorkersRunning != running ||
-                        warpJob.PoolWorkersSubmitted != submitted)
+                    if (pooledJob.PoolWorkersAlive     != alive   ||
+                        pooledJob.PoolWorkersRunning   != running ||
+                        pooledJob.PoolWorkersSubmitted != submitted)
                     {
                         _jobUpdateCallback(job, j =>
                         {
-                            ((WarpJobGpu)j).PoolWorkersAlive = alive;
-                            ((WarpJobGpu)j).PoolWorkersRunning = running;
-                            ((WarpJobGpu)j).PoolWorkersSubmitted = submitted;
+                            var p = (IPooledJob)j;
+                            p.PoolWorkersAlive     = alive;
+                            p.PoolWorkersRunning   = running;
+                            p.PoolWorkersSubmitted = submitted;
                         });
                     }
                 }

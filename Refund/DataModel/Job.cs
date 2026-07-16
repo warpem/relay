@@ -1690,6 +1690,14 @@ public interface IPooledJob
     /// Example: "cd /run && WarpWorker2 --queue-dir /data/1/tasks --device 2 --log-dir /data/1/logs"
     /// </summary>
     string GetWorkerCommand(int deviceIndex);
+
+    /// <summary>
+    /// Live pool-worker counters written by QueueRepository each daemon tick and read by the pool UI.
+    /// Implementors expose them as [RelayProperty][Clearable] ints so they persist and reset with the job.
+    /// </summary>
+    int PoolWorkersAlive { get; set; }
+    int PoolWorkersRunning { get; set; }
+    int PoolWorkersSubmitted { get; set; }
 }
 
 public enum JobStatus
