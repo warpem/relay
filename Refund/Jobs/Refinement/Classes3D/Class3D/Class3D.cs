@@ -649,6 +649,16 @@ public class Class3D : RelionJob, IClusterJob, IPooledJob, IPoolStatus
     [RelayProperty]
     public int NWorkers { get; set; } = 4;
 
+    [UiInt("", "Particles per task",
+           1, 9999999, 1,
+           helpText: "Number of particles bundled into each pool task (RELION --pool_batch). Larger " +
+                     "tasks amortize the per-task backprojector cost; smaller tasks spread the work " +
+                     "more evenly across workers.",
+           ConditionalOnField = nameof(UseWorkerPool),
+           ConditionalOnValue = true)]
+    [RelayProperty]
+    public int ParticlesPerTask { get; set; } = 128;
+
     [UiBool("gpu", "Use GPU",
             helpText: "If set to Yes, the program will use the GPU for calculations. " +
                       "This will speed up the calculations significantly. If set to No, " +
@@ -1013,6 +1023,7 @@ public class Class3D : RelionJob, IClusterJob, IPooledJob, IPoolStatus
     public Dictionary<string, string> ApplyPoolArguments(Dictionary<string, string> result)
     {
         result["j"] = CoresPerWorker.ToString(CultureInfo.InvariantCulture);
+        result["pool_batch"] = ParticlesPerTask.ToString(CultureInfo.InvariantCulture);
         result["pool_dir"] = Space.GetRelativePath(Path.Combine(DirectoryPath, "pool"));
         result.Remove("gpu");
         result.Remove("scratch_dir");

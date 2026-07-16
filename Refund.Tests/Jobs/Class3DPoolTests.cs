@@ -29,6 +29,7 @@ public class Class3DPoolTests
         Assert.Equal(-1, job.PoolQueueId);
         Assert.Equal(8, job.CoresPerWorker);
         Assert.Equal(4, job.NWorkers);
+        Assert.Equal(128, job.ParticlesPerTask);
         Assert.Equal(0, job.PoolWorkersAlive);
     }
 
@@ -94,11 +95,13 @@ public class Class3DPoolTests
     {
         var job = NewJob();
         job.CoresPerWorker = 8;
+        job.ParticlesPerTask = 256;
         var args = new Dictionary<string, string> { ["gpu"] = "", ["scratch_dir"] = "/fast", ["j"] = "2" };
 
         job.ApplyPoolArguments(args);
 
         Assert.Equal("8", args["j"]);
+        Assert.Equal("256", args["pool_batch"]);
         Assert.True(args.ContainsKey("pool_dir"));
         Assert.False(args.ContainsKey("gpu"));
         Assert.False(args.ContainsKey("scratch_dir"));
@@ -175,6 +178,9 @@ public class Class3DPoolTests
         // The queue job card gates pool display on IPoolStatus (a pure-read contract), so the ReadOnly
         // source generator must replicate it onto ReadOnlyClass3D — otherwise the card shows nothing
         // for a pooled RELION job even though the fleet is running.
+        if (Job.Types.Count == 0)
+            Job.PopulateStatic();   // AsReadOnly() resolves the wrapper via the type registry
+
         var job = NewPooledJob();
         job.PoolWorkersAlive = 5;
         job.PoolWorkersRunning = 3;
