@@ -121,6 +121,9 @@ public class Class3D : RelionJob, IClusterJob, IPooledJob, IPoolStatus
     /// <summary>True when this job runs as a RELION disk-pool manager (CPU-only, relion_refine_pool).</summary>
     public bool IsPooled => UseWorkerPool;
 
+    /// <summary>True when the pool workers run on GPUs (the manager stays CPU-only regardless).</summary>
+    public bool IsGpuPool => UseWorkerPool && UseGpuWorkers;
+
     public override string[] SupportedModules =>
         base.SupportedModules.Concat(["gpu", "cpu", "relion-pool"]).ToArray();
 
@@ -659,6 +662,24 @@ public class Class3D : RelionJob, IClusterJob, IPooledJob, IPoolStatus
     [RelayProperty]
     public int ParticlesPerTask { get; set; } = 128;
 
+    [UiBool("", "GPU workers",
+            helpText: "Run the pool workers on GPUs instead of CPUs (the manager stays CPU-only). " +
+                      "Requires a RELION-pool build with GPU support. Each worker cluster job is " +
+                      "granted one GPU.",
+            ConditionalOnField = nameof(UseWorkerPool),
+            ConditionalOnValue = true)]
+    [RelayProperty]
+    public bool UseGpuWorkers { get; set; } = false;
+
+    [UiInt("", "Processes per GPU",
+           1, 99, 1,
+           helpText: "Number of pool-worker processes launched per GPU worker job, all sharing that " +
+                     "one GPU. Higher values improve GPU utilization at the cost of GPU memory.",
+           ConditionalOnField = nameof(UseGpuWorkers),
+           ConditionalOnValue = true)]
+    [RelayProperty]
+    public int ProcessesPerGpu { get; set; } = 2;
+
     [UiBool("gpu", "Use GPU",
             helpText: "If set to Yes, the program will use the GPU for calculations. " +
                       "This will speed up the calculations significantly. If set to No, " +
@@ -1043,22 +1064,33 @@ public class Class3D : RelionJob, IClusterJob, IPooledJob, IPoolStatus
 
     int IPooledJob.PoolSubmissionCap => PoolSize * 100;
 
-    // Both manager and workers are CPU here (RELION's pool has no GPU path yet), so workers request
-    // CoresPerWorker cores and zero GPUs — the opposite of the WarpTools pool, whose workers are GPU.
+    // The manager is always CPU-only; workers are CPU or GPU depending on UseGpuWorkers. A GPU worker
+    // cluster job is granted one GPU and runs ProcessesPerGpu worker processes on it, so its node
+    // cores/memory scale with that count; a CPU worker is a single process.
     Dictionary<string, string> IPooledJob.GetWorkerResourceValues(string workerLogDir)
     {
         var values = GetResourceValues();
         values["job_id"]      = $"{Id}-worker";
         values["n_processes"] = "1";
-        values["n_cores"]     = CoresPerWorker.ToString(CultureInfo.InvariantCulture);
-        values["memory_gb"]   = MemoryPerWorker.ToString(CultureInfo.InvariantCulture);
-        values["n_gpus"]      = "0";
+        if (IsGpuPool)
+        {
+            values["n_gpus"]    = "1";
+            values["n_cores"]   = (ProcessesPerGpu * CoresPerWorker).ToString(CultureInfo.InvariantCulture);
+            values["memory_gb"] = (ProcessesPerGpu * MemoryPerWorker).ToString(CultureInfo.InvariantCulture);
+        }
+        else
+        {
+            values["n_gpus"]    = "0";
+            values["n_cores"]   = CoresPerWorker.ToString(CultureInfo.InvariantCulture);
+            values["memory_gb"] = MemoryPerWorker.ToString(CultureInfo.InvariantCulture);
+        }
         values["std_out"]     = Path.Combine(workerLogDir, "%j.out");
         values["std_err"]     = Path.Combine(workerLogDir, "%j.err");
         return values;
     }
 
-    string[] IPooledJob.WorkerRequiredModules => ["cpu", "relion-pool"];
+    // GPU workers run on the GPU partition; CPU workers on the CPU partition. Both load relion-pool.
+    string[] IPooledJob.WorkerRequiredModules => IsGpuPool ? ["gpu", "relion-pool"] : ["cpu", "relion-pool"];
 
     // A RELION pool worker runs the same run as the manager, so it needs the manager's full science
     // arguments (RELION requires manager/worker arg parity), plus the worker role flags. 3D
@@ -1067,15 +1099,25 @@ public class Class3D : RelionJob, IClusterJob, IPooledJob, IPoolStatus
         ComposeWorkerCommand(ComposeCommandArguments());
 
     /// <summary>
-    /// Wraps a fully-composed argument set into a pool worker command: cd into the run directory,
-    /// then launch relion_refine_pool with those arguments plus --worker --half 0. Public seam so it
-    /// is unit-testable without a connected input port graph (the arg dict is supplied directly).
+    /// Wraps a fully-composed argument set into a pool worker command. CPU: one relion_refine_pool
+    /// --worker process. GPU: ProcessesPerGpu background processes, all bound (via --gpu) to the
+    /// single GPU this worker job was granted, then a wait. Public seam so it is unit-testable
+    /// without a connected input port graph (the arg dict is supplied directly). Note ApplyPoolArguments
+    /// has already stripped --gpu from the args; the GPU worker re-adds a bare --gpu here.
     /// </summary>
     public string ComposeWorkerCommand(Dictionary<string, string> args)
     {
         string flat = string.Join(" ", args.Select(kv =>
             string.IsNullOrWhiteSpace(kv.Value) ? $"--{kv.Key}" : $"--{kv.Key} {kv.Value}"));
-        return $"cd {RunDirectory}\nrelion_refine_pool {flat} --worker --half 0";
+
+        if (!IsGpuPool)
+            return $"cd {RunDirectory}\nrelion_refine_pool {flat} --worker --half 0";
+
+        var lines = new List<string> { $"cd {RunDirectory}" };
+        for (int i = 0; i < ProcessesPerGpu; i++)
+            lines.Add($"relion_refine_pool {flat} --gpu --worker --half 0 &");
+        lines.Add("wait");
+        return string.Join("\n", lines);
     }
 
     #endregion

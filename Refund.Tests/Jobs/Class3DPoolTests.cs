@@ -21,6 +21,14 @@ public class Class3DPoolTests
         return job;
     }
 
+    private static Class3DJob NewGpuPooledJob()
+    {
+        var job = NewPooledJob();
+        job.UseGpuWorkers = true;
+        job.ProcessesPerGpu = 2;
+        return job;
+    }
+
     [Fact]
     public void PoolFields_HaveExpectedDefaults()
     {
@@ -30,6 +38,8 @@ public class Class3DPoolTests
         Assert.Equal(8, job.CoresPerWorker);
         Assert.Equal(4, job.NWorkers);
         Assert.Equal(128, job.ParticlesPerTask);
+        Assert.False(job.UseGpuWorkers);
+        Assert.Equal(2, job.ProcessesPerGpu);
         Assert.Equal(0, job.PoolWorkersAlive);
     }
 
@@ -141,6 +151,58 @@ public class Class3DPoolTests
     public void WorkerRequiredModules_IsCpuPlusRelionPool()
     {
         Assert.Equal(new[] { "cpu", "relion-pool" }, ((IPooledJob)new Class3DJob()).WorkerRequiredModules);
+    }
+
+    [Fact]
+    public void IsGpuPool_RequiresBothTogglesOn()
+    {
+        Assert.False(new Class3DJob { UseWorkerPool = true, UseGpuWorkers = false }.IsGpuPool);
+        Assert.False(new Class3DJob { UseWorkerPool = false, UseGpuWorkers = true }.IsGpuPool);
+        Assert.True(new Class3DJob { UseWorkerPool = true, UseGpuWorkers = true }.IsGpuPool);
+    }
+
+    [Fact]
+    public void GpuWorkers_ManagerStaysCpuOnly()
+    {
+        // The manager orchestrates on CPU even when workers are GPU (RELION's GPU-pool design).
+        var job = NewGpuPooledJob();
+        Assert.Equal(0, job.GpuCount);
+        Assert.Equal(JobQueueType.CPU, job.QueueType);
+        Assert.Equal(new[] { "cpu", "relion-pool" }, job.RequiredModules);
+        Assert.Equal("relion_refine_pool", job.CommandName);   // no mpirun, no --gpu on the manager
+    }
+
+    [Fact]
+    public void GpuWorkerResourceValues_RequestOneGpuAndScaledCpu()
+    {
+        var job = NewGpuPooledJob();   // CoresPerWorker=8, MemoryPerWorker=12, ProcessesPerGpu=2
+        var w = ((IPooledJob)job).GetWorkerResourceValues("/tmp/worker-logs");
+
+        Assert.Equal("1", w["n_gpus"]);
+        Assert.Equal("16", w["n_cores"]);     // ProcessesPerGpu * CoresPerWorker
+        Assert.Equal("24", w["memory_gb"]);   // ProcessesPerGpu * MemoryPerWorker
+        Assert.Equal("1", w["n_processes"]);
+    }
+
+    [Fact]
+    public void GpuWorkerRequiredModules_IsGpuPlusRelionPool()
+    {
+        Assert.Equal(new[] { "gpu", "relion-pool" },
+            ((IPooledJob)NewGpuPooledJob()).WorkerRequiredModules);
+    }
+
+    [Fact]
+    public void GpuWorkerCommand_LaunchesProcessesPerGpuOnOneGpu()
+    {
+        var job = NewGpuPooledJob();
+        job.ProcessesPerGpu = 2;
+        var cmd = job.ComposeWorkerCommand(new Dictionary<string, string> { ["o"] = "run", ["j"] = "8" });
+
+        Assert.StartsWith("cd ", cmd);
+        Assert.Equal(2, System.Text.RegularExpressions.Regex.Matches(cmd, "relion_refine_pool ").Count);
+        Assert.Equal(2, System.Text.RegularExpressions.Regex.Matches(cmd, " &").Count);
+        Assert.Contains("\nwait", cmd);
+        Assert.Contains("--gpu --worker --half 0", cmd);
     }
 
     [Fact]
