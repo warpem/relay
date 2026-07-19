@@ -95,7 +95,7 @@ public class Class3DPoolTests
         var job = NewPooledJob();
         Assert.Equal(0, job.GpuCount);
         Assert.Equal(JobQueueType.CPU, job.QueueType);
-        Assert.Equal(8, job.CoreCount);            // reuses CoresPerWorker
+        Assert.Equal(16, job.CoreCount);           // fixed manager budget, decoupled from CoresPerWorker
         Assert.Equal(1, job.ProcessCount);
         Assert.Equal(12, job.MemoryGb);
     }
@@ -110,7 +110,7 @@ public class Class3DPoolTests
 
         job.ApplyPoolArguments(args);
 
-        Assert.Equal("8", args["j"]);
+        Assert.Equal("16", args["j"]);             // manager thread count (fixed), not CoresPerWorker
         Assert.Equal("256", args["pool_batch"]);
         Assert.True(args.ContainsKey("pool_dir"));
         Assert.False(args.ContainsKey("gpu"));
@@ -220,6 +220,18 @@ public class Class3DPoolTests
         Assert.Contains("--half 0", cmd);
         Assert.Contains("--pool_dir pool", cmd);
         Assert.Contains("--j 8", cmd);
+    }
+
+    [Fact]
+    public void WorkerThreads_DecoupledFromManagerThreads()
+    {
+        // The manager gets a fixed 16-thread budget for its multithreaded CPU steps; each worker's
+        // E-step uses CoresPerWorker threads. The worker command must override --j back down even
+        // though it starts from the manager's argument set.
+        var job = NewPooledJob();   // CoresPerWorker = 8
+        var cmd = job.ComposeWorkerCommand(new Dictionary<string, string> { ["j"] = "16" });
+        Assert.Contains("--j 8", cmd);
+        Assert.DoesNotContain("--j 16", cmd);
     }
 
     [Fact]

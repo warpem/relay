@@ -134,7 +134,15 @@ public class Class3D : RelionJob, IClusterJob, IPooledJob, IPoolStatus
         IsPooled ? ["cpu", "relion-pool"]
                  : base.RequiredModules.Concat(UseGpu ? ["gpu"] : ["cpu"]).ToArray();
 
-    public override int CoreCount => IsPooled ? CoresPerWorker : NThreads;
+    /// <summary>
+    /// Fixed core/thread budget for the pool manager. It runs the CPU-side angular-accuracy
+    /// estimation (now multithreaded), reconstruction and maximization, which scale with threads —
+    /// so it gets a generous budget independent of the (typically smaller) per-worker count. Not
+    /// user-exposed; the manager's cores are decoupled from the workers' in pool mode.
+    /// </summary>
+    private const int ManagerPoolCores = 16;
+
+    public override int CoreCount => IsPooled ? ManagerPoolCores : NThreads;
 
     public override int MemoryGb => IsPooled ? MemoryPerWorker
                                              : Math.Max(NProcesses - 1, 1) * MemoryPerWorker;
@@ -1043,7 +1051,9 @@ public class Class3D : RelionJob, IClusterJob, IPooledJob, IPoolStatus
     /// </summary>
     public Dictionary<string, string> ApplyPoolArguments(Dictionary<string, string> result)
     {
-        result["j"] = CoresPerWorker.ToString(CultureInfo.InvariantCulture);
+        // These are the manager's arguments; --j is the manager thread count. The worker command
+        // (ComposeWorkerCommand) overrides --j down to CoresPerWorker for the per-worker E-step.
+        result["j"] = ManagerPoolCores.ToString(CultureInfo.InvariantCulture);
         result["pool_batch"] = ParticlesPerTask.ToString(CultureInfo.InvariantCulture);
         result["pool_dir"] = Space.GetRelativePath(Path.Combine(DirectoryPath, "pool"));
         result.Remove("gpu");
@@ -1112,6 +1122,10 @@ public class Class3D : RelionJob, IClusterJob, IPooledJob, IPoolStatus
     /// </summary>
     public string ComposeWorkerCommand(Dictionary<string, string> args)
     {
+        // The manager composed these args with its own (larger) thread count; a worker's E-step uses
+        // CoresPerWorker threads, so override --j back down here.
+        args["j"] = CoresPerWorker.ToString(CultureInfo.InvariantCulture);
+
         string flat = string.Join(" ", args.Select(kv =>
             string.IsNullOrWhiteSpace(kv.Value) ? $"--{kv.Key}" : $"--{kv.Key} {kv.Value}"));
 
