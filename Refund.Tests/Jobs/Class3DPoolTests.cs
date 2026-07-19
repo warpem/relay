@@ -2,6 +2,7 @@ using System.Text.Json.Nodes;
 using Refund.DataModel;
 using Refund.JobQueues;
 using Class3DJob = Refund.Jobs.Refinement.Classes3D.Class3D.Class3D;
+using Class3DContinueJob = Refund.Jobs.Refinement.Classes3D.Class3D.Class3DContinue;
 
 namespace Refund.Tests.Jobs;
 
@@ -265,6 +266,29 @@ public class Class3DPoolTests
         Assert.True(ro.IsPooled);
         Assert.Equal(5, ro.PoolWorkersAlive);
         Assert.Equal(3, ro.PoolWorkersRunning);
+    }
+
+    [Fact]
+    public void Continue_IsPoolArtifact_ExcludesPreviousPoolState_KeepsResults()
+    {
+        // A continued job copies the predecessor's directory but must NOT drag along the old run's
+        // pool state (it would corrupt the new job's fresh pool).
+        var job = new Class3DContinueJob();
+        Assert.True(job.IsPoolArtifact(Path.Combine("pool", "pending", "task1.json")));
+        Assert.True(job.IsPoolArtifact(Path.Combine("worker_logs", "123.out")));
+        Assert.True(job.IsPoolArtifact("pool_state.json"));
+        Assert.True(job.IsPoolArtifact("worker_submit.sh"));
+
+        // Actual results and other data must still be copied.
+        Assert.False(job.IsPoolArtifact("run_it025_data.star"));
+        Assert.False(job.IsPoolArtifact("run_it025_optimiser.star"));
+        Assert.False(job.IsPoolArtifact(Path.Combine("visualizations", "class1.png")));
+    }
+
+    [Fact]
+    public void Continue_IsIPooledJob_InheritedFromClass3D()
+    {
+        Assert.IsAssignableFrom<IPooledJob>(new Class3DContinueJob());
     }
 
     [Fact]

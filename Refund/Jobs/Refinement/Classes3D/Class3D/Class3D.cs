@@ -124,6 +124,9 @@ public class Class3D : RelionJob, IClusterJob, IPooledJob, IPoolStatus
     /// <summary>True when the pool workers run on GPUs (the manager stays CPU-only regardless).</summary>
     public bool IsGpuPool => UseWorkerPool && UseGpuWorkers;
 
+    /// <summary>Name of the RELION pool coordination directory (--pool_dir) created under the job directory.</summary>
+    public const string PoolDirName = "pool";
+
     public override string[] SupportedModules =>
         base.SupportedModules.Concat(["gpu", "cpu", "relion-pool"]).ToArray();
 
@@ -1055,7 +1058,7 @@ public class Class3D : RelionJob, IClusterJob, IPooledJob, IPoolStatus
         // (ComposeWorkerCommand) overrides --j down to CoresPerWorker for the per-worker E-step.
         result["j"] = ManagerPoolCores.ToString(CultureInfo.InvariantCulture);
         result["pool_batch"] = ParticlesPerTask.ToString(CultureInfo.InvariantCulture);
-        result["pool_dir"] = Space.GetRelativePath(Path.Combine(DirectoryPath, "pool"));
+        result["pool_dir"] = Space.GetRelativePath(Path.Combine(DirectoryPath, PoolDirName));
         result.Remove("gpu");
         result.Remove("scratch_dir");
         return result;
