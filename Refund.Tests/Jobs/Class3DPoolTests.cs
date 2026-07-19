@@ -202,7 +202,8 @@ public class Class3DPoolTests
         Assert.Equal(2, System.Text.RegularExpressions.Regex.Matches(cmd, "relion_refine_pool ").Count);
         Assert.Equal(2, System.Text.RegularExpressions.Regex.Matches(cmd, " &").Count);
         Assert.Contains("\nwait", cmd);
-        Assert.Contains("--gpu --worker --half 0", cmd);
+        // Explicit empty device list (bare --gpu would eat the next token) + gpu_shares = K workers/GPU.
+        Assert.Contains("--gpu \"\" --gpu_shares 2 --worker --half 0", cmd);
     }
 
     [Fact]

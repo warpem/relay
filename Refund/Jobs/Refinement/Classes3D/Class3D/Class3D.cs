@@ -1100,10 +1100,15 @@ public class Class3D : RelionJob, IClusterJob, IPooledJob, IPoolStatus
 
     /// <summary>
     /// Wraps a fully-composed argument set into a pool worker command. CPU: one relion_refine_pool
-    /// --worker process. GPU: ProcessesPerGpu background processes, all bound (via --gpu) to the
-    /// single GPU this worker job was granted, then a wait. Public seam so it is unit-testable
-    /// without a connected input port graph (the arg dict is supplied directly). Note ApplyPoolArguments
-    /// has already stripped --gpu from the args; the GPU worker re-adds a bare --gpu here.
+    /// --worker process. GPU: ProcessesPerGpu background processes sharing the single GPU this worker
+    /// job was granted, then a wait. Public seam so it is unit-testable without a connected input port
+    /// graph (the arg dict is supplied directly).
+    ///
+    /// GPU launch contract (docs/pool_gpu_runbook.md): each GPU worker gets an explicit empty device
+    /// list <c>--gpu ""</c> — bare <c>--gpu</c> would make RELION's getOption() swallow the next token
+    /// as a device id — plus <c>--gpu_shares K</c> where K is the number of workers sharing the GPU, so
+    /// each reserves ~1/K of VRAM instead of fighting for all of it. ApplyPoolArguments already stripped
+    /// --gpu from the args; the GPU worker re-adds the explicit form here.
     /// </summary>
     public string ComposeWorkerCommand(Dictionary<string, string> args)
     {
@@ -1115,7 +1120,7 @@ public class Class3D : RelionJob, IClusterJob, IPooledJob, IPoolStatus
 
         var lines = new List<string> { $"cd {RunDirectory}" };
         for (int i = 0; i < ProcessesPerGpu; i++)
-            lines.Add($"relion_refine_pool {flat} --gpu --worker --half 0 &");
+            lines.Add($"relion_refine_pool {flat} --gpu \"\" --gpu_shares {ProcessesPerGpu} --worker --half 0 &");
         lines.Add("wait");
         return string.Join("\n", lines);
     }
