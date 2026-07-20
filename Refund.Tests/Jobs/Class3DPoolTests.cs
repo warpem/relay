@@ -12,10 +12,12 @@ public class Class3DPoolTests
     private static Class3DJob NewJob() =>
         new() { Space = new Space { RootDirectory = "/tmp/relay-test" } };
 
+    // A CPU-worker pooled job (explicit, so it doesn't depend on the UseGpuWorkers default).
     private static Class3DJob NewPooledJob()
     {
         var job = NewJob();
         job.UseWorkerPool = true;
+        job.UseGpuWorkers = false;
         job.PoolQueueId = 1;
         job.CoresPerWorker = 8;
         job.MemoryPerWorker = 12;
@@ -36,10 +38,10 @@ public class Class3DPoolTests
         var job = new Class3DJob();
         Assert.False(job.UseWorkerPool);
         Assert.Equal(-1, job.PoolQueueId);
-        Assert.Equal(8, job.CoresPerWorker);
+        Assert.Equal(2, job.CoresPerWorker);
         Assert.Equal(4, job.NWorkers);
         Assert.Equal(128, job.ParticlesPerTask);
-        Assert.False(job.UseGpuWorkers);
+        Assert.True(job.UseGpuWorkers);
         Assert.Equal(2, job.ProcessesPerGpu);
         Assert.Equal(0, job.PoolWorkersAlive);
     }
@@ -210,7 +212,8 @@ public class Class3DPoolTests
     [Fact]
     public void ComposeWorkerCommand_WrapsArgsWithRoleFlags()
     {
-        var cmd = NewJob().ComposeWorkerCommand(new Dictionary<string, string>
+        var job = NewPooledJob();   // CPU worker, CoresPerWorker = 8
+        var cmd = job.ComposeWorkerCommand(new Dictionary<string, string>
         {
             ["o"] = "run", ["pool_dir"] = "pool", ["j"] = "8",
         });

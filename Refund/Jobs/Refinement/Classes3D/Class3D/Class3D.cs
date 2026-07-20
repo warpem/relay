@@ -642,7 +642,8 @@ public class Class3D : RelionJob, IClusterJob, IPooledJob, IPoolStatus
     [UiQueue("Pool queue",
              helpText: "Cluster queue on which to maintain the CPU pool worker fleet.",
              ConditionalOnField = nameof(UseWorkerPool),
-             ConditionalOnValue = true)]
+             ConditionalOnValue = true,
+             IncludeLocal = false)]
     [RelayProperty]
     public int PoolQueueId { get; set; } = -1;
 
@@ -653,7 +654,7 @@ public class Class3D : RelionJob, IClusterJob, IPooledJob, IPoolStatus
            ConditionalOnField = nameof(UseWorkerPool),
            ConditionalOnValue = true)]
     [RelayProperty]
-    public int CoresPerWorker { get; set; } = 8;
+    public int CoresPerWorker { get; set; } = 2;
 
     [UiInt("", "Number of pool workers",
            1, 99999, 1,
@@ -680,7 +681,7 @@ public class Class3D : RelionJob, IClusterJob, IPooledJob, IPoolStatus
             ConditionalOnField = nameof(UseWorkerPool),
             ConditionalOnValue = true)]
     [RelayProperty]
-    public bool UseGpuWorkers { get; set; } = false;
+    public bool UseGpuWorkers { get; set; } = true;
 
     [UiInt("", "Processes per GPU",
            1, 99, 1,

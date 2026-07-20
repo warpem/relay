@@ -11,10 +11,12 @@ public class Refine3DPoolTests
     private static Refine3DJob NewJob() =>
         new() { Space = new Space { RootDirectory = "/tmp/relay-test" } };
 
+    // A CPU-worker pooled job (explicit, so it doesn't depend on the UseGpuWorkers default).
     private static Refine3DJob NewPooledJob()
     {
         var job = NewJob();
         job.UseWorkerPool = true;
+        job.UseGpuWorkers = false;
         job.PoolQueueId = 1;
         job.CoresPerWorker = 8;
         job.MemoryPerWorker = 12;
@@ -34,10 +36,10 @@ public class Refine3DPoolTests
         var job = new Refine3DJob();
         Assert.False(job.UseWorkerPool);
         Assert.Equal(-1, job.PoolQueueId);
-        Assert.Equal(8, job.CoresPerWorker);
+        Assert.Equal(2, job.CoresPerWorker);
         Assert.Equal(4, job.NWorkers);
         Assert.Equal(128, job.ParticlesPerTask);
-        Assert.False(job.UseGpuWorkers);
+        Assert.True(job.UseGpuWorkers);
         Assert.Equal(0, job.PoolWorkersAlive);
     }
 

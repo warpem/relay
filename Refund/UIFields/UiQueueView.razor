@@ -27,10 +27,11 @@
         get
         {
             var current = CurrentId;
-            var options = new List<Option<string>>
-            {
-                new() { Value = "-1", Text = "Local (no pool)", Selected = current == -1 }
-            };
+            var includeLocal = (FieldDescription as UiQueue)?.IncludeLocal ?? true;
+            var options = new List<Option<string>>();
+
+            if (includeLocal)
+                options.Add(new() { Value = "-1", Text = "Local (no pool)", Selected = current == -1 });
 
             options.AddRange(DataManager.ClusterQueues.Select(q => new Option<string>
             {
