@@ -222,3 +222,6 @@ Relay/wwwroot/js/volstar.js
 
 # Local MCP server config
 .mcp.json
+
+# local review notes (not tracked)
+docs/superpowers/2026-07-15-relion-pool-class3d-review.md
