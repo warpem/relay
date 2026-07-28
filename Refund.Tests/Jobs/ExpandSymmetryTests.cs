@@ -139,6 +139,88 @@ public class ExpandSymmetryTests
     }
 
     [Fact]
+    public void Stage_WritesAdaptedOptimisationSet_ForTomoInput()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "relay-expandsym-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(root, "input"));
+        try
+        {
+            // Upstream optimisation set on disk, pointing at the upstream particles + tomograms.
+            string inOptSet = Path.Combine(root, "input", "optimisation_set.star");
+            new StarParameters(
+                new[] { "rlnTomoParticlesFile", "rlnTomoTomogramsFile" },
+                new[] { "input/particles.star", "input/tomograms.star" }).Save(inOptSet);
+
+            var particles = new ParticleSet
+            {
+                ParticlesSingleStarPath = Path.Combine(root, "input", "particles.star"),
+                OptimisationSetStarPath = inOptSet,
+                CoordPixelSize = 1M,
+            };
+
+            EnsurePopulated();
+            var job = new ExpandSymmetryJob
+            {
+                Space = new Space { RootDirectory = root },
+                Id = 203,
+                DirectoryName = "203",
+            };
+            var portIn = job.PortsIn[ExpandSymmetryJob.PortInParticles];
+            var source = new PortOut(job, typeof(ParticleSet), "src", "src", _ => particles);
+            portIn.Edges.Add(new Edge { Source = source, Target = portIn });
+
+            job.Stage();
+
+            // The job must write its own optimisation set (before the RELION command runs), repointed
+            // at the expanded particles while preserving the tomograms entry.
+            string outOptSet = Path.Combine(root, "203", "optimisation_set.star");
+            Assert.True(File.Exists(outOptSet), "Stage() did not write the optimisation set");
+
+            var set = new StarParameters(outOptSet);
+            Assert.Equal("203/expanded.star", set.GetColumn("rlnTomoParticlesFile")[0]);
+            Assert.Equal("input/tomograms.star", set.GetColumn("rlnTomoTomogramsFile")[0]);
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public void Stage_NoOp_WhenInputHasNoOptimisationSet()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "relay-expandsym-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var particles = new ParticleSet
+            {
+                ParticlesSingleStarPath = Path.Combine(root, "particles.star"),
+                OptimisationSetStarPath = null,
+            };
+
+            EnsurePopulated();
+            var job = new ExpandSymmetryJob
+            {
+                Space = new Space { RootDirectory = root },
+                Id = 7,
+                DirectoryName = "7",
+            };
+            var portIn = job.PortsIn[ExpandSymmetryJob.PortInParticles];
+            var source = new PortOut(job, typeof(ParticleSet), "src", "src", _ => particles);
+            portIn.Edges.Add(new Edge { Source = source, Target = portIn });
+
+            job.Stage();
+
+            Assert.False(File.Exists(Path.Combine(root, "7", "optimisation_set.star")));
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
     public void AdaptOptimisationSet_RepointsParticlesFileAndPreservesTomograms()
     {
         string dir = Path.Combine(Path.GetTempPath(), "relay-expandsym-" + Guid.NewGuid().ToString("N"));

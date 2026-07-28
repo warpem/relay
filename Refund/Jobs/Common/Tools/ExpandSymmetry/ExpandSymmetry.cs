@@ -16,7 +16,7 @@ namespace Refund.Jobs.Common.Tools.ExpandSymmetry;
 ///
 /// The RELION tool preserves the optics table and every non-orientation column itself. It does not
 /// know about the tomogram list or optimisation set, so for tomo inputs this job adapts the
-/// optimisation_set.star (repointing it at the expanded particles) in <see cref="FinalizeRun"/> while
+/// optimisation_set.star (repointing it at the expanded particles) in <see cref="Stage"/> while
 /// leaving the tomograms STAR file untouched.
 /// </summary>
 [GenerateReadOnly]
@@ -195,38 +195,25 @@ public class ExpandSymmetry : RelionJob, IClusterJob
         return result;
     }
 
-    public override void FinalizeRun(Action<Job, Action<Job>> updateCallback)
+    public override void Stage()
     {
-        base.FinalizeRun(updateCallback);
+        base.Stage();
 
-        using (File.CreateText(PathSuccess)) ;
-
+        // relion_particle_symmetry_expand only writes the expanded particle STAR (preserving the
+        // optics table). It knows nothing about the optimisation set or tomograms STAR, so for tomo
+        // inputs we write an adapted optimisation set here, repointing it at the expanded particles
+        // while leaving the tomograms STAR untouched.
+        //
+        // This is done in Stage() (before the command runs) rather than in FinalizeRun(), because
+        // cluster jobs transition straight to Finished on completion without a finalize step — the
+        // optimisation set only stores the path of the expanded STAR, which is known ahead of time.
         ParticleSet particles = PortsIn[PortInParticles].GetSingleResource<ParticleSet>();
 
-        // RELION preserves the optics table itself, but knows nothing about the optimisation set or
-        // tomograms STAR. Repoint the optimisation set at the expanded particles; leave tomograms as-is.
-        if (particles != null &&
-            !string.IsNullOrEmpty(particles.OptimisationSetStarPath) &&
-            File.Exists(particles.OptimisationSetStarPath))
+        if (particles != null && !string.IsNullOrEmpty(particles.OptimisationSetStarPath))
         {
+            Directory.CreateDirectory(DirectoryPath);
             AdaptOptimisationSet(particles.OptimisationSetStarPath, ResOptimisationSetStarFile,
                                  Space.GetRelativePath(ResExpandedStarFile));
-        }
-
-        // Record the expanded particle count so the output resource reports the right number.
-        if (File.Exists(ResExpandedStarFile))
-        {
-            int count = Star.IsMultiTable(ResExpandedStarFile)
-                ? new Star(ResExpandedStarFile, "particles").RowCount
-                : new Star(ResExpandedStarFile).RowCount;
-
-            updateCallback(this, _ => ExpandedParticleCount = count);
-        }
-
-        {
-            var action = TrackProgressLogs();
-            if (action != null)
-                updateCallback(this, _ => action());
         }
     }
 
@@ -268,5 +255,22 @@ public class ExpandSymmetry : RelionJob, IClusterJob
             return () => { LogsAvailableIteration = maxLogsExist; };
 
         return null;
+    }
+
+    public override Action TrackProgressResults()
+    {
+        JobTools.EnsureResultsDirectory(RelayResultsDirectoryPath);
+
+        // Record the expanded particle count once RELION has written the output, so the output
+        // resource reports the right number. Called on completion (and while running); guarded to
+        // run its work only once. The optimisation set is written earlier, in Stage().
+        if (ExpandedParticleCount > 0 || !File.Exists(ResExpandedStarFile))
+            return null;
+
+        int count = Star.IsMultiTable(ResExpandedStarFile)
+            ? new Star(ResExpandedStarFile, "particles").RowCount
+            : new Star(ResExpandedStarFile).RowCount;
+
+        return () => ExpandedParticleCount = count;
     }
 }
