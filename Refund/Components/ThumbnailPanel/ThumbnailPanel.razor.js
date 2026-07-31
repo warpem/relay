@@ -43,12 +43,25 @@ export function getElementWidth(element) {
 
 let resizeObservers = new Map();
 
+function stopObserving(element) {
+    const observer = resizeObservers.get(element);
+    if (observer) {
+        observer.disconnect();
+        resizeObservers.delete(element);
+    }
+}
+
 export function observeResize(element, dotNetHelper) {
     if (element && !resizeObservers.has(element)) {
         const observer = new ResizeObserver(entries => {
             for (let entry of entries) {
                 const width = entry.contentRect.width;
-                dotNetHelper.invokeMethodAsync('OnComponentResized', width);
+                // Removing the element from the DOM can queue a final resize notification that
+                // is delivered after the .NET component has been disposed. Invoking the disposed
+                // DotNetObjectReference then fails for every subsequent resize, so detach on the
+                // first failure instead of leaking the observer and the reference.
+                dotNetHelper.invokeMethodAsync('OnComponentResized', width)
+                            .catch(() => stopObserving(element));
             }
         });
         observer.observe(element);
@@ -57,11 +70,6 @@ export function observeResize(element, dotNetHelper) {
 }
 
 export function unobserveResize(element) {
-    if (element) {
-        const observer = resizeObservers.get(element);
-        if (observer) {
-            observer.unobserve(element);
-            resizeObservers.delete(element);
-        }
-    }
+    if (element)
+        stopObserving(element);
 }
