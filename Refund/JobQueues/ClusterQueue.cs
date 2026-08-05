@@ -15,8 +15,9 @@ namespace Refund.JobQueues;
 
 /// <summary>
 /// Manages job submission and execution on a remote computing cluster.
-/// Supports various cluster schedulers including SLURM, LSF, PBS, and SGE,
-/// with configurable templates for each phase of job submission and monitoring.
+/// Supports various cluster schedulers including SLURM, LSF, PBS, SGE and Flux — selected with
+/// <see cref="SchedulerType"/> — with configurable templates for each phase of job submission
+/// and monitoring.
 /// </summary>
 /// <remarks>
 /// ClusterQueue is a central component in the distributed job execution system:
@@ -55,6 +56,17 @@ public class ClusterQueue : JobQueue, IPoolQueue
     /// Semaphore to limit concurrent cluster command executions
     /// </summary>
     private readonly SemaphoreSlim _clusterCommandSemaphore = new(Environment.ProcessorCount);
+
+    /// <summary>
+    /// Which scheduler this queue talks to. Selects the parsers used to read job IDs and job
+    /// states out of scheduler output.
+    /// </summary>
+    /// <remarks>
+    /// Defaults to <see cref="ClusterScheduler.Slurm"/>, which is what every queue was effectively
+    /// getting before this field existed — see the remarks on <see cref="ClusterScheduler"/>.
+    /// </remarks>
+    [RelayProperty]
+    public ClusterScheduler SchedulerType { get; set; } = ClusterScheduler.Slurm;
 
     /// <summary>
     /// Custom shell executable path for running cluster commands.
@@ -100,29 +112,30 @@ public class ClusterQueue : JobQueue, IPoolQueue
     public string AbortJobTemplate { get; set; } = "";
 
     /// <summary>
-    /// Regular expression for extracting the job ID from the cluster scheduler output.
-    /// Used when scheduler type is set to 'custom'.
+    /// Regular expression for extracting the job ID from the cluster scheduler output; the ID is
+    /// taken from the first capture group. Used only when <see cref="SchedulerType"/> is
+    /// <see cref="ClusterScheduler.Custom"/>.
     /// </summary>
     [RelayProperty]
     public string JobIdParseRegex { get; set; } = "";
 
     /// <summary>
     /// String pattern that indicates a job is pending in the cluster queue.
-    /// Used when scheduler type is set to 'custom'.
+    /// Used only when <see cref="SchedulerType"/> is <see cref="ClusterScheduler.Custom"/>.
     /// </summary>
     [RelayProperty]
     public string JobStatusParseTemplatePending { get; set; } = "";
 
     /// <summary>
     /// String pattern that indicates a job is running on the cluster.
-    /// Used when scheduler type is set to 'custom'.
+    /// Used only when <see cref="SchedulerType"/> is <see cref="ClusterScheduler.Custom"/>.
     /// </summary>
     [RelayProperty]
     public string JobStatusParseTemplateRunning { get; set; } = "";
 
     /// <summary>
     /// String pattern that indicates a job has failed on the cluster.
-    /// Used when scheduler type is set to 'custom'.
+    /// Used only when <see cref="SchedulerType"/> is <see cref="ClusterScheduler.Custom"/>.
     /// </summary>
     [RelayProperty]
     public string JobStatusParseTemplateFailed { get; set; } = "";
@@ -183,16 +196,18 @@ public class ClusterQueue : JobQueue, IPoolQueue
     public Dictionary<string, (string description, string defaultValue)> CustomVariables { get; set; } = new();
 
     /// <summary>
-    /// Collection of parser functions for extracting job IDs from cluster output.
-    /// Each parser handles a specific scheduler type (slurm, lsf, pbs, sge, or custom).
+    /// Parser functions for extracting job IDs from scheduler output, one per scheduler.
+    /// The one used is selected by <see cref="SchedulerType"/>; parsers return null when the
+    /// output holds no ID they recognise.
     /// </summary>
-    private Dictionary<string, Func<string, string>> JobIdParsers;
-    
+    private Dictionary<ClusterScheduler, Func<string, string>> JobIdParsers;
+
     /// <summary>
-    /// Collection of parser functions for determining job status from cluster output.
-    /// Each parser handles a specific scheduler type (slurm, lsf, pbs, sge, or custom).
+    /// Parser functions for determining job status from scheduler output, one per scheduler.
+    /// The one used is selected by <see cref="SchedulerType"/>; parsers return null when the
+    /// output holds no state they recognise.
     /// </summary>
-    private Dictionary<string, Func<string, ClusterJobStatus?>> JobStatusParsers;
+    private Dictionary<ClusterScheduler, Func<string, ClusterJobStatus?>> JobStatusParsers;
 
     /// <summary>
     /// Initializes a new instance of the ClusterQueue class with job update callback.
@@ -218,7 +233,7 @@ public class ClusterQueue : JobQueue, IPoolQueue
         JobIdParsers = new()
         {
             {
-                "slurm",
+                ClusterScheduler.Slurm,
                 (output) =>
                 {
                     var match = Regex.Match(output, @"Submitted batch job (\d+)");
@@ -226,7 +241,7 @@ public class ClusterQueue : JobQueue, IPoolQueue
                 }
             },
             {
-                "lsf",
+                ClusterScheduler.Lsf,
                 (output) =>
                 {
                     var match = Regex.Match(output, @"Job <(\d+)> is submitted");
@@ -234,7 +249,7 @@ public class ClusterQueue : JobQueue, IPoolQueue
                 }
             },
             {
-                "pbs",
+                ClusterScheduler.Pbs,
                 (output) =>
                 {
                     var match = Regex.Match(output, @"(\d+)\.(\w+)");
@@ -242,7 +257,7 @@ public class ClusterQueue : JobQueue, IPoolQueue
                 }
             },
             {
-                "sge",
+                ClusterScheduler.Sge,
                 (output) =>
                 {
                     var match = Regex.Match(output, @"Your job (\d+)");
@@ -250,7 +265,21 @@ public class ClusterQueue : JobQueue, IPoolQueue
                 }
             },
             {
-                "custom",
+                ClusterScheduler.Flux,
+                (output) =>
+                {
+                    // flux batch prints the job ID alone on stdout, in whichever encoding the submit
+                    // template asked for: F58 ("ƒ2ELdc8V", or "f2ELdc8V" under FLUX_F58_FORCE_ASCII)
+                    // or decimal. Rather than enumerate encodings — flux also speaks hex, dothex and
+                    // words — accept any single bare token. Requiring exactly one token still rejects
+                    // error text, so a misconfigured submit command fails loudly here instead of
+                    // handing the daemon a job ID that no status query will ever match.
+                    string trimmed = output.Trim();
+                    return trimmed.Length > 0 && !trimmed.Any(char.IsWhiteSpace) ? trimmed : null;
+                }
+            },
+            {
+                ClusterScheduler.Custom,
                 (output) =>
                 {
                     if (string.IsNullOrEmpty(JobIdParseRegex))
@@ -265,22 +294,26 @@ public class ClusterQueue : JobQueue, IPoolQueue
         JobStatusParsers = new()
         {
             {
-                "slurm",
+                ClusterScheduler.Slurm,
                 (output) =>
                 {
                     // Check for single-character state codes (default squeue output)
                     if (output.Contains(" PD ") || output.Contains("PENDING")) return ClusterJobStatus.Pending;
                     if (output.Contains(" R ") || output.Contains("RUNNING")) return ClusterJobStatus.Running;
                     if (output.Contains(" CD ") || output.Contains("COMPLETED")) return ClusterJobStatus.Finished;
-                    if (output.Contains(" F ") || output.Contains(" CA ") || output.Contains(" TO ") || 
+                    if (output.Contains(" F ") || output.Contains(" CA ") || output.Contains(" TO ") ||
                         output.Contains("FAILED") || output.Contains("CANCELLED") || output.Contains("TIMEOUT")) return ClusterJobStatus.Failed;
                     if (output.Contains(" CG ") || output.Contains("COMPLETING")) return ClusterJobStatus.Running; // Still running
 
-                    return ClusterJobStatus.Unknown;
+                    // Decline rather than reporting Unknown. Returning a value here used to
+                    // short-circuit the try-each-parser loop this dictionary was iterated with,
+                    // which made every other parser — including the queue's own custom patterns —
+                    // unreachable. Callers turn a declined parse into Unknown themselves.
+                    return null;
                 }
             },
             {
-                "lsf",
+                ClusterScheduler.Lsf,
                 (output) =>
                 {
                     if (output.Contains("PEND")) return ClusterJobStatus.Pending;
@@ -292,7 +325,7 @@ public class ClusterQueue : JobQueue, IPoolQueue
                 }
             },
             {
-                "pbs",
+                ClusterScheduler.Pbs,
                 (output) =>
                 {
                     if (output.Contains(" Q ")) return ClusterJobStatus.Pending;
@@ -303,7 +336,7 @@ public class ClusterQueue : JobQueue, IPoolQueue
                 }
             },
             {
-                "sge",
+                ClusterScheduler.Sge,
                 (output) =>
                 {
                     if (output.Contains(" qw ")) return ClusterJobStatus.Pending;
@@ -314,7 +347,41 @@ public class ClusterQueue : JobQueue, IPoolQueue
                 }
             },
             {
-                "custom",
+                ClusterScheduler.Flux,
+                (output) =>
+                {
+                    // flux jobs -no "{status}" prints exactly one token per job; {status_abbrev}
+                    // prints its short form. Match the whole token: the abbreviations overlap by
+                    // prefix ("C" for CLEANUP is a prefix of both "CD" and "CA"), so a Contains-style
+                    // test would read a finished job as still running.
+                    return output.Trim() switch
+                    {
+                        "DEPEND" or "PRIORITY" or "SCHED" or
+                        "D" or "P" or "S"
+                            => ClusterJobStatus.Pending,
+
+                        // CLEANUP is where a job flushes its output and releases resources. It is
+                        // brief but every job passes through it, so a poll can easily land there;
+                        // anything other than Running here makes HandleRunningState finalise the
+                        // job as Failed on its way to succeeding.
+                        "RUN" or "CLEANUP" or
+                        "R" or "C"
+                            => ClusterJobStatus.Running,
+
+                        "COMPLETED" or "CD"
+                            => ClusterJobStatus.Finished,
+
+                        // Flux spells it CANCELED, with one L.
+                        "FAILED" or "CANCELED" or "TIMEOUT" or
+                        "F" or "CA" or "TO"
+                            => ClusterJobStatus.Failed,
+
+                        _ => null
+                    };
+                }
+            },
+            {
+                ClusterScheduler.Custom,
                 (output) =>
                 {
                     // Treat empty templates as "not configured" — otherwise string.Contains("")
@@ -739,28 +806,12 @@ public class ClusterQueue : JobQueue, IPoolQueue
     }
 
     /// <summary>
-    /// Classifies a scheduler state token (e.g. "RUNNING", "PD") using the same per-scheduler
-    /// parsers as single-job status. The token is space-padded before matching so short codes
-    /// like " R " / " PD " still hit the SLURM parser's word-boundary checks. Returns Unknown
-    /// when no parser recognizes the state.
+    /// Classifies a scheduler state token (e.g. "RUNNING", "PD", "RUN") using the same parser as
+    /// single-job status, so the list and status paths can never disagree about what a state means.
+    /// The token is space-padded before matching so short codes like " R " / " PD " still hit the
+    /// SLURM parser's word-boundary checks. Returns Unknown when the state isn't recognised.
     /// </summary>
-    private ClusterJobStatus ClassifyState(string stateText)
-    {
-        string padded = $" {stateText} ";
-
-        foreach (var parser in JobStatusParsers)
-        {
-            try
-            {
-                var status = parser.Value(padded);
-                if (status is { } s && s != ClusterJobStatus.Unknown)
-                    return s;
-            }
-            catch { }
-        }
-
-        return ClusterJobStatus.Unknown;
-    }
+    private ClusterJobStatus ClassifyState(string stateText) => ParseClusterJobStatus($" {stateText} ");
 
     /// <summary>
     /// Cancels all provided cluster job IDs in a single scheduler call.
@@ -926,26 +977,33 @@ public class ClusterQueue : JobQueue, IPoolQueue
     /// <returns>The parsed cluster job ID</returns>
     /// <exception cref="Exception">Thrown when the job ID cannot be parsed from the output</exception>
     /// <remarks>
-    /// Tries parsers for each supported scheduler type (slurm, lsf, pbs, sge, custom)
-    /// until one succeeds or all fail.
+    /// Uses only the parser for this queue's <see cref="SchedulerType"/>. Earlier versions tried
+    /// every scheduler's parser in turn, which meant a queue could silently accept a job ID in
+    /// another scheduler's format — and masked misconfigured submit commands.
     /// </remarks>
-    private string ParseClusterJobId(string output)
+    internal string ParseClusterJobId(string output)
     {
-        string result = null;
+        if (!JobIdParsers.TryGetValue(SchedulerType, out var parser))
+            throw new Exception($"No job ID parser for scheduler {SchedulerType}.");
 
-        foreach (var parser in JobIdParsers)
+        string result;
+        try
         {
-            try
-            {
-                result = parser.Value(output);
-            }
-            catch { }
-
-            if (result != null) break;
+            result = parser(output);
+        }
+        catch (Exception exc)
+        {
+            throw new Exception(
+                $"Couldn't parse job ID from output = \"{output}\" using the {SchedulerType} parser.", exc);
         }
 
         if (result == null)
-            throw new Exception($"Couldn't parse job ID from output = \"{output}\"");
+            throw new Exception(
+                $"Couldn't parse job ID from output = \"{output}\" using the {SchedulerType} parser. " +
+                (SchedulerType == ClusterScheduler.Custom
+                    ? "Check the queue's job ID parsing regular expression."
+                    : $"Check that the queue's scheduler is really {SchedulerType} and that its submit " +
+                      "command template is correct."));
 
         return result;
     }
@@ -954,32 +1012,28 @@ public class ClusterQueue : JobQueue, IPoolQueue
     /// Parses the cluster job status from the output of the status check command.
     /// </summary>
     /// <param name="output">The output from the cluster status check command</param>
-    /// <returns>The parsed cluster job status</returns>
-    /// <exception cref="Exception">Thrown when the job status cannot be parsed from the output</exception>
+    /// <returns>The parsed cluster job status, or Unknown if the output holds no recognisable state</returns>
     /// <remarks>
-    /// Tries parsers for each supported scheduler type (slurm, lsf, pbs, sge, custom)
-    /// until one succeeds or all fail. Parsers look for specific strings that indicate
-    /// job states like pending, running, completed, or failed.
+    /// Uses only the parser for this queue's <see cref="SchedulerType"/>.
+    ///
+    /// Output the parser doesn't recognise yields Unknown rather than throwing. That is what SLURM
+    /// queues already did — their parser returned Unknown as a catch-all — and the daemon's state
+    /// handlers are written around it: Unknown leaves a Staging job staged, and finalises a Running
+    /// job as Failed. Throwing here would instead escape into the polling loop.
     /// </remarks>
-    private ClusterJobStatus ParseClusterJobStatus(string output)
+    internal ClusterJobStatus ParseClusterJobStatus(string output)
     {
-        ClusterJobStatus? result = null;
+        if (!JobStatusParsers.TryGetValue(SchedulerType, out var parser))
+            return ClusterJobStatus.Unknown;
 
-        foreach (var parser in JobStatusParsers)
+        try
         {
-            try
-            {
-                result = parser.Value(output);
-            }
-            catch { }
-
-            if (result != null) break;
+            return parser(output) ?? ClusterJobStatus.Unknown;
         }
-
-        if (result == null)
-            throw new Exception($"Couldn't parse job status from output = \"{output}\"");
-
-        return result.Value;
+        catch
+        {
+            return ClusterJobStatus.Unknown;
+        }
     }
 
     /// <summary>

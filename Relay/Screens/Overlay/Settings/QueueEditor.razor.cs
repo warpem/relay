@@ -22,6 +22,14 @@ public partial class QueueEditor
 
     private IEnumerable<JobQueueType> QueueTypes => Enum.GetValues<JobQueueType>().Where(v => v != JobQueueType.Local);
 
+    private IEnumerable<ClusterScheduler> Schedulers => Enum.GetValues<ClusterScheduler>();
+
+    /// <summary>
+    /// The job ID regular expression and job status patterns are only consulted for
+    /// <see cref="ClusterScheduler.Custom"/> queues; every other scheduler has a built-in parser.
+    /// </summary>
+    private bool ShowCustomParsingFields => _selectedQueue?.SchedulerType == ClusterScheduler.Custom;
+
     private CodeEditor _submissionScriptEditor;
     private int _submissionScriptCursorPosition = -1;
 

@@ -208,6 +208,44 @@ namespace Refund.DataModel
     }
 
     /// <summary>
+    /// Identifies which cluster scheduler a <see cref="Refund.JobQueues.ClusterQueue"/> talks to,
+    /// selecting the parsers used to read job IDs and job states out of scheduler output.
+    /// </summary>
+    /// <remarks>
+    /// Slurm is deliberately value 0: queues saved before this field existed deserialize to the
+    /// default, and every one of them was already being parsed with the SLURM patterns (the SLURM
+    /// status parser returned Unknown for unrecognised output, which short-circuited the
+    /// try-each-parser-in-turn loop before any other parser was reached). Defaulting to Slurm
+    /// therefore preserves existing behaviour exactly.
+    ///
+    /// The consequence for a pre-existing non-SLURM queue is that its scheduler must now be
+    /// selected explicitly — job ID parsing no longer falls through to the other schedulers.
+    /// </remarks>
+    public enum ClusterScheduler
+    {
+        /// <summary>SLURM: sbatch / squeue / scancel.</summary>
+        Slurm = 0,
+
+        /// <summary>IBM Spectrum LSF: bsub / bjobs / bkill.</summary>
+        Lsf = 1,
+
+        /// <summary>PBS / Torque: qsub / qstat / qdel.</summary>
+        Pbs = 2,
+
+        /// <summary>Sun Grid Engine and derivatives: qsub / qstat / qdel.</summary>
+        Sge = 3,
+
+        /// <summary>Flux: flux batch / flux jobs / flux cancel.</summary>
+        Flux = 4,
+
+        /// <summary>
+        /// Anything else. Job IDs are read with <see cref="Refund.JobQueues.ClusterQueue.JobIdParseRegex"/>
+        /// and states with the JobStatusParseTemplate* patterns.
+        /// </summary>
+        Custom = 5
+    }
+
+    /// <summary>
     /// Defines the possible status values for jobs running on a cluster.
     /// This is used to track the state of jobs on the cluster scheduler.
     /// </summary>

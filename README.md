@@ -119,7 +119,13 @@ scripts/relay.sh restart  # Stop + start
 
 ## Configure a cluster queue
 
-Queues are managed by an admin under **Users → Queue configuration**. Each queue has a name, a type (CPU, GPU, or Mixed), and several command templates.
+Queues are managed by an admin under **Users → Queue configuration**. Each queue has a name, a type (CPU, GPU, or Mixed), a scheduler, and several command templates.
+
+### Scheduler
+
+The **Scheduler** setting tells Relay how to read job IDs and job states out of your commands' output. Pick `Slurm`, `Lsf`, `Pbs`, `Sge` or `Flux` to use the built-in parser for that scheduler, or `Custom` to supply your own patterns — the job ID regular expression and the pending/running/failed status patterns in the **Advanced settings** tab apply only to `Custom` queues, and are hidden otherwise.
+
+Queues default to `Slurm`. Note that the parser no longer falls back across schedulers: a queue set to `Slurm` will reject output in another scheduler's format rather than guessing, so a non-SLURM queue must have its scheduler selected explicitly.
 
 ### Submission script template
 
@@ -218,6 +224,49 @@ umask 007
 ```
 
 > **Why `umask 007`:** Without it, jobs create output files with default permissions that exclude the group, breaking access for other project members who share the same group. Setting `umask 007` ensures files land as `660` and directories as `770`, so the group can always read and write job outputs regardless of who submitted the job.
+
+A minimal Flux example:
+
+```bash
+#!/bin/bash
+#FLUX: --job-name={{ job_id }}
+#FLUX: -N 1
+#FLUX: -n 1
+#FLUX: -x
+#FLUX: --output={{ std_out }}
+#FLUX: --error={{ std_err }}
+{{ gpu }}
+#FLUX: -g {{ n_gpus }}
+{{ /gpu }}
+
+{{ warp }}
+ml warptools/latest
+{{ /warp }}
+
+umask 007
+
+{{ command }}
+```
+
+Flux specifics worth knowing:
+
+- **All `#FLUX:` directives must be grouped at the top.** Flux errors out on a directive that follows any non-blank line which isn't a comment, so module blocks that emit `ml ...` have to come after them. The blank lines left behind by stripped `{{ gpu }}` tags are fine.
+- **`-g` is GPUs *per slot*, not per job.** With `-n {{ n_processes }}`, a 3-rank job asking for 1 GPU would request 3. Pairing `-n 1` with `-x` (exclusive) sidesteps the arithmetic and gives each job the whole node — a good fit for single-node installations, at the cost of running jobs strictly one at a time.
+- **Flux's `{{id}}` mustache cannot be used in output paths**, because Relay's own templating strips unrecognised `{{ ... }}` tags. Use `{{ std_out }}` / `{{ std_err }}`, which are already per-job absolute paths.
+- Relay must be able to reach your Flux instance. A systemd-managed system instance works out of the box; a per-terminal `flux start` will not, since `FLUX_URI` won't be in the Relay service's environment.
+
+Matching command templates:
+
+| Template | Value |
+|---|---|
+| Send command | `{{ command }}` |
+| Submit job | `flux batch {{ script_path_abs }}` |
+| Status job | `flux jobs -no "{status}" {{ job_id }}` |
+| Abort job | `flux cancel {{ job_id }} \|\| true` |
+| List jobs *(pools only)* | `flux jobs -no "{id.f58},{status}"` |
+| Cancel many jobs *(pools only)* | `flux cancel {{ job_ids }} \|\| true` |
+
+Single braces such as `{status}` are Flux's own format fields and pass through Relay's templating untouched.
 
 ### Command templates
 
