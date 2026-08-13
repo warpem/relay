@@ -182,7 +182,51 @@ namespace Refund.Utils
                 }
             }
         }
-        
+
+        #endregion
+
+        #region Command Line Composition
+
+        /// <summary>
+        /// Quotes a single argument value for the bash submission scripts we generate.
+        ///
+        /// Double quotes, deliberately, not single quotes. Everything we interpolate into a
+        /// script is exposed to the shell, so an unquoted glob like <c>--input_pattern *.star</c>
+        /// is expanded against the *submitting* directory before the tool starts — if exactly one
+        /// file happens to match, the pattern is silently replaced by that filename and the tool
+        /// then finds nothing in the directory it was actually pointed at. Single quotes would
+        /// stop that too, but they would also freeze <c>$TMPDIR</c> and friends, which the
+        /// templates and hand-written extra arguments rely on. Inside double quotes bash still
+        /// expands variables while leaving <c>*</c>, <c>?</c>, <c>[...]</c> and whitespace alone.
+        ///
+        /// Consequently <c>\</c> and <c>"</c> are escaped, but <c>$</c> and <c>`</c> are left live.
+        /// </summary>
+        public static string QuoteArgumentValue(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+                return value;
+
+            // Values the caller already wrapped themselves (hand-written extra arguments,
+            // RELION's explicit --gpu "") are passed through rather than quoted twice.
+            if (value.Length >= 2 && value[0] == '"' && value[^1] == '"' &&
+                !value.AsSpan(1, value.Length - 2).Contains('"'))
+                return value;
+
+            return $"\"{value.Replace("\\", "\\\\").Replace("\"", "\\\"")}\"";
+        }
+
+        /// <summary>
+        /// Flattens composed command arguments into the <c>--key "value"</c> string that goes into
+        /// a submission script. Valueless entries stay bare flags. Shared by every site that builds
+        /// a shell command so the quoting rules above can't drift between them.
+        /// </summary>
+        public static string ComposeArgumentString(IEnumerable<KeyValuePair<string, string>> arguments)
+        {
+            return string.Join(" ", arguments.Select(kv => string.IsNullOrWhiteSpace(kv.Value) ?
+                                                               $"--{kv.Key}" :
+                                                               $"--{kv.Key} {QuoteArgumentValue(kv.Value)}"));
+        }
+
         #endregion
     }
 }

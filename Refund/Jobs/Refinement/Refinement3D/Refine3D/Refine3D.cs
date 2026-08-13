@@ -929,8 +929,7 @@ public class Refine3D : RelionJob, IClusterJob, IPooledJob, IPoolStatus
         // CoresPerWorker threads, so override --j back down here.
         args["j"] = CoresPerWorker.ToString(CultureInfo.InvariantCulture);
 
-        string flat = string.Join(" ", args.Select(kv =>
-            string.IsNullOrWhiteSpace(kv.Value) ? $"--{kv.Key}" : $"--{kv.Key} {kv.Value}"));
+        string flat = JobTools.ComposeArgumentString(args);
 
         string gpu = IsGpuPool ? " --gpu \"\" --gpu_shares 2" : "";
 

@@ -1135,7 +1135,9 @@ public abstract class Job : RelayBase, IFolderContent
                 if (value is decimal decimalValue)
                     result.Add(attribute.CliName, decimalValue.ToString(CultureInfo.InvariantCulture));
                 else if (value is string)
-                    result.Add(attribute.CliName, $"\"{value}\"");
+                    // Stored raw: JobTools.ComposeArgumentString quotes every value on its way into
+                    // the submission script, so quoting here as well would nest the quotes.
+                    result.Add(attribute.CliName, (string)value);
                 else
                     result.Add(attribute.CliName, value.ToString());
             }

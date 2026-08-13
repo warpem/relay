@@ -506,9 +506,7 @@ public class ClusterQueue : JobQueue, IPoolQueue
         StringBuilder jobCommand = new StringBuilder();
         jobCommand.AppendLine($"cd {job.RunDirectory}\n");
         jobCommand.Append(job.CommandPrefix);
-        jobCommand.Append($"{commandName} {string.Join(" ", arguments.Select(kv => string.IsNullOrWhiteSpace(kv.Value) ?
-                                                                                   $"--{kv.Key}" :
-                                                                                   $"--{kv.Key} {kv.Value}"))}");
+        jobCommand.Append($"{commandName} {JobTools.ComposeArgumentString(arguments)}");
         jobCommand.AppendLine(job.CommandSuffix);
 
         string script = ProcessSubmissionScript(

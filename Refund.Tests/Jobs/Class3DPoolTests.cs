@@ -222,8 +222,9 @@ public class Class3DPoolTests
         Assert.Contains("relion_refine_pool", cmd);
         Assert.Contains("--worker", cmd);
         Assert.Contains("--half 0", cmd);
-        Assert.Contains("--pool_dir pool", cmd);
-        Assert.Contains("--j 8", cmd);
+        // Values are double-quoted on their way into the script (JobTools.QuoteArgumentValue).
+        Assert.Contains("--pool_dir \"pool\"", cmd);
+        Assert.Contains("--j \"8\"", cmd);
     }
 
     [Fact]
@@ -234,8 +235,8 @@ public class Class3DPoolTests
         // though it starts from the manager's argument set.
         var job = NewPooledJob();   // CoresPerWorker = 8
         var cmd = job.ComposeWorkerCommand(new Dictionary<string, string> { ["j"] = "16" });
-        Assert.Contains("--j 8", cmd);
-        Assert.DoesNotContain("--j 16", cmd);
+        Assert.Contains("--j \"8\"", cmd);
+        Assert.DoesNotContain("--j \"16\"", cmd);
     }
 
     [Fact]

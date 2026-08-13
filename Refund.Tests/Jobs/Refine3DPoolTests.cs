@@ -140,8 +140,8 @@ public class Refine3DPoolTests
         Assert.Equal(2, Regex.Matches(cmd, " &").Count);
         Assert.Contains("\nwait", cmd);
         Assert.DoesNotContain("--gpu", cmd);
-        Assert.Contains("--j 8", cmd);          // worker threads (not the manager's 16)
-        Assert.DoesNotContain("--j 16", cmd);
+        Assert.Contains("--j \"8\"", cmd);      // worker threads (not the manager's 16)
+        Assert.DoesNotContain("--j \"16\"", cmd);
     }
 
     [Fact]
