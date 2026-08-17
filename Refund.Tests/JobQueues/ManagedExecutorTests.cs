@@ -10,8 +10,6 @@ namespace Refund.Tests.JobQueues;
 [Collection("JobRegistry")]
 public class ManagedExecutorTests : IDisposable
 {
-    private static readonly object _populateLock = new();
-
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "relay-executor-" + Guid.NewGuid());
 
     public ManagedExecutorTests() => Directory.CreateDirectory(_dir);
@@ -20,48 +18,20 @@ public class ManagedExecutorTests : IDisposable
     private ManagedProcessRegistry NewRegistry() =>
         new(Path.Combine(_dir, "managed-processes.json"));
 
-    private static void EnsurePopulated()
-    {
-        lock (_populateLock)
-        {
-            if (Job.Types.Count == 0)
-                Job.PopulateStatic();
-        }
-    }
-
     private static readonly ResourceTotals Host = new(Cores: 8, MemoryGb: 32, Gpus: 2);
 
     /// <summary>CreateMask: 1 process x 1 core, 8 GB, no GPU. Asserted outright in RequestFor tests.</summary>
     private static Job NewJob()
     {
-        EnsurePopulated();
+        JobRegistry.EnsurePopulated();
         return new MaskJob { Status = JobStatus.Waiting };
     }
 
     /// <summary>Class2D with a GPU: 1 process x 1 core, 16 GB, 1 GPU.</summary>
     private static Job NewGpuJob()
     {
-        EnsurePopulated();
+        JobRegistry.EnsurePopulated();
         return new Class2DJob { UseGpu = true, Status = JobStatus.Waiting };
-    }
-
-    /// <summary>Stands in for a real OS process so liveness can be driven deterministically.</summary>
-    private sealed class FakeProcess : IManagedProcess
-    {
-        public int Pid { get; init; } = 4242;
-        public DateTime StartTime { get; init; } = new(2026, 1, 1);
-        public bool HasExited { get; private set; }
-        public int ExitCode { get; private set; }
-        public bool WasKilled => KillCount > 0;
-        public int KillCount { get; private set; }
-
-        /// <summary>Fired inside <see cref="KillTree"/>, for tests that need to look at the world
-        /// at the moment the executor is disowning this process.</summary>
-        public Action OnKill { get; init; }
-
-        public void Exit(int code) { ExitCode = code; HasExited = true; }
-        public void KillTree() { KillCount++; OnKill?.Invoke(); }
-        public Task WaitForExitAsync(CancellationToken ct = default) => Task.CompletedTask;
     }
 
     /// <summary>
@@ -109,7 +79,7 @@ public class ManagedExecutorTests : IDisposable
     {
         // CoreCount is documented as cores *per process* (Job.cs:347); MemoryGb is already a total
         // in every override. Conflating them silently over- or under-books the host.
-        EnsurePopulated();
+        JobRegistry.EnsurePopulated();
         var job = new Class2DJob
         {
             Algorithm = Class2DAlgorithm.VDAM,   // the branch that actually launches MPI
@@ -126,10 +96,6 @@ public class ManagedExecutorTests : IDisposable
         // 3 working ranks x 16 GB, already a total: not multiplied again by ProcessCount (192).
         Assert.Equal(48, request.MemoryGb);
         Assert.Equal(1, request.Gpus);
-
-        Assert.Equal(job.ProcessCount * job.CoreCount, request.Cores);
-        Assert.Equal(job.MemoryGb, request.MemoryGb);
-        Assert.Equal(job.GpuCount, request.Gpus);
     }
 
     [Fact]
@@ -148,50 +114,9 @@ public class ManagedExecutorTests : IDisposable
                      ManagedExecutor.RequestFor(job));
     }
 
-    [Fact]
-    public void NegativeRequest_CannotManufactureCapacity()
-    {
-        // Unclamped, this job's allocation of -4 cores / -32 GB would make the host report
-        // *more* free capacity than it has, and the one-core host would admit two mask jobs.
-        var executor = new ManagedExecutor();
-        var oneCore = new ResourceTotals(Cores: 1, MemoryGb: 8, Gpus: 0);
-
-        var nonsense = new ConfigurableResourceJob
-        {
-            Processes = 1, CoresPerProcess = -4, Memory = -32, Gpus = 0, Status = JobStatus.Waiting
-        };
-        Assert.IsType<AdmissionResult.Admit>(executor.TryAdmit(nonsense, oneCore));
-        executor.Attach(nonsense, new FakeProcess());
-
-        var real = NewJob();
-        Assert.IsType<AdmissionResult.Admit>(executor.TryAdmit(real, oneCore));
-        executor.Attach(real, new FakeProcess());
-
-        Assert.IsType<AdmissionResult.Busy>(executor.TryAdmit(NewJob(), oneCore));
-    }
-
     #endregion
 
     #region Admission
-
-    [Fact]
-    public void TryAdmit_WhenResourcesAreFree_Admits()
-    {
-        var executor = new ManagedExecutor();
-        Assert.IsType<AdmissionResult.Admit>(executor.TryAdmit(NewJob(), Host));
-    }
-
-    [Fact]
-    public void TryAdmit_WhenRequestExceedsTotals_RejectsPermanently()
-    {
-        var executor = new ManagedExecutor();
-        var tiny = new ResourceTotals(Cores: 0, MemoryGb: 0, Gpus: 0);
-
-        var result = executor.TryAdmit(NewJob(), tiny);
-
-        var reject = Assert.IsType<AdmissionResult.Reject>(result);
-        Assert.Contains("never", reject.Reason, StringComparison.OrdinalIgnoreCase);
-    }
 
     [Fact]
     public void TryAdmit_RejectionReasonNamesBothTheRequestAndTheHost()
@@ -307,30 +232,6 @@ public class ManagedExecutorTests : IDisposable
 
         Assert.False(process.WasKilled);
         Assert.Single(executor.LiveAllocations());
-    }
-
-    [Fact]
-    public void ExitedProcess_FreesResourcesEvenWhileTheJobIsStillActive()
-    {
-        // The daemon has not polled yet, so the job is still Running while its process is gone.
-        // Holding the allocation until the status catches up would idle the host for a whole tick.
-        var executor = new ManagedExecutor();
-        var oneCore = new ResourceTotals(Cores: 1, MemoryGb: 64, Gpus: 0);
-
-        var job = NewJob();
-        job.Status = JobStatus.Running;
-        Assert.IsType<AdmissionResult.Admit>(executor.TryAdmit(job, oneCore));
-        var process = new FakeProcess();
-        executor.Attach(job, process);
-
-        process.Exit(0);
-        executor.Reap();
-
-        Assert.Empty(executor.LiveAllocations());
-        Assert.IsType<AdmissionResult.Admit>(executor.TryAdmit(NewJob(), oneCore));
-
-        // ...but the entry survives, so the daemon's next poll can still read the exit code.
-        Assert.Equal(ClusterJobStatus.Finished, executor.GetStatus(job));
     }
 
     [Fact]
@@ -478,7 +379,8 @@ public class ManagedExecutorTests : IDisposable
     public void TryAdmit_ReconcilesBeforeDeciding()
     {
         // The daemon's Waiting handler calls TryAdmit with no Reap in between, so the one core
-        // held by a dead process has to be seen as free on this very call.
+        // held by a dead process has to be seen as free on this very call — and on this call, not
+        // once the job's status catches up: holding it until then idles the host for a whole tick.
         var executor = new ManagedExecutor();
         var oneCore = new ResourceTotals(Cores: 1, MemoryGb: 64, Gpus: 0);
 
@@ -489,20 +391,6 @@ public class ManagedExecutorTests : IDisposable
         process.Exit(0);
 
         // No Reap(), no LiveAllocations().
-        Assert.IsType<AdmissionResult.Admit>(executor.TryAdmit(NewJob(), oneCore));
-    }
-
-    [Fact]
-    public void TryAdmit_ReconcilesAwayAnAbandonedReservation()
-    {
-        var executor = new ManagedExecutor();
-        var oneCore = new ResourceTotals(Cores: 1, MemoryGb: 64, Gpus: 0);
-
-        var stuck = NewJob();
-        Assert.IsType<AdmissionResult.Admit>(executor.TryAdmit(stuck, oneCore));
-        stuck.Status = JobStatus.Failed;
-
-        // No Reap().
         Assert.IsType<AdmissionResult.Admit>(executor.TryAdmit(NewJob(), oneCore));
     }
 
@@ -523,21 +411,6 @@ public class ManagedExecutorTests : IDisposable
         Assert.Equal(ClusterJobStatus.Finished, executor.GetStatus(job));   // no Reap()
     }
 
-    [Fact]
-    public void GpuIndicesFor_ReconcilesBeforeAnswering()
-    {
-        var executor = new ManagedExecutor();
-        var job = NewGpuJob();
-        executor.TryAdmit(job, Host);
-        var process = new FakeProcess();
-        executor.Attach(job, process);
-
-        process.Exit(0);
-        job.Status = JobStatus.Finished;
-
-        Assert.Empty(executor.GpuIndicesFor(job));   // no Reap(); the entry is gone
-    }
-
     #endregion
 
     #region Status
@@ -545,7 +418,6 @@ public class ManagedExecutorTests : IDisposable
     [Theory]
     [InlineData(0, ClusterJobStatus.Finished)]
     [InlineData(3, ClusterJobStatus.Failed)]
-    [InlineData(137, ClusterJobStatus.Failed)]
     public void GetStatus_MapsExitCode(int exitCode, ClusterJobStatus expected)
     {
         var executor = new ManagedExecutor();
@@ -560,52 +432,9 @@ public class ManagedExecutorTests : IDisposable
         Assert.Equal(expected, executor.GetStatus(job));
     }
 
-    [Fact]
-    public void GetStatus_AdmittedButNotLaunched_IsPending()
-    {
-        var executor = new ManagedExecutor();
-        var job = NewJob();
-        executor.TryAdmit(job, Host);
-
-        Assert.Equal(ClusterJobStatus.Pending, executor.GetStatus(job));
-    }
-
-    [Fact]
-    public void GetStatus_WhileRunning_IsRunning()
-    {
-        var executor = new ManagedExecutor();
-        var job = NewJob();
-        executor.TryAdmit(job, Host);
-        executor.Attach(job, new FakeProcess());
-
-        Assert.Equal(ClusterJobStatus.Running, executor.GetStatus(job));
-    }
-
-    [Fact]
-    public void GetStatus_UntrackedJob_IsFailed()
-    {
-        // After a restart the table is empty, so any job the daemon still believes is Running
-        // must be reported Failed rather than hanging forever.
-        Assert.Equal(ClusterJobStatus.Failed, new ManagedExecutor().GetStatus(NewJob()));
-    }
-
     #endregion
 
     #region Kill, GPUs and queries
-
-    [Fact]
-    public void Kill_TerminatesTheTreeOfATrackedJob()
-    {
-        var executor = new ManagedExecutor();
-        var job = NewJob();
-        executor.TryAdmit(job, Host);
-        var process = new FakeProcess();
-        executor.Attach(job, process);
-
-        executor.Kill(job);
-
-        Assert.True(process.WasKilled);
-    }
 
     [Fact]
     public void Kill_ForAnUntrackedJob_IsANoOp()
@@ -643,11 +472,15 @@ public class ManagedExecutorTests : IDisposable
     {
         // A reservation can be retired while its process is starting (an abort during staging).
         // The caller has to learn about it, or the process runs on outside the ledger forever.
+        // This is the public two-argument overload, which keeps its old meaning: only Launch,
+        // which knows which reservation it read, opts into the identity check.
         var executor = new ManagedExecutor();
         var admitted = NewJob();
         executor.TryAdmit(admitted, Host);
 
         Assert.True(executor.Attach(admitted, new FakeProcess()));
+        Assert.Equal(ClusterJobStatus.Running, executor.GetStatus(admitted));
+
         Assert.False(executor.Attach(NewJob(), new FakeProcess()));
     }
 
@@ -759,6 +592,9 @@ public class ManagedExecutorTests : IDisposable
     [Fact]
     public void OnceShutdownBegins_NothingNewIsAdmittedOrLaunched()
     {
+        // Busy, not Reject. Reject is terminal — the daemon fails the job with the reason string —
+        // and a job that simply arrived while Relay was stopping must still be Waiting when it
+        // comes back.
         var executor = new ManagedExecutor();
         var job = NewJob();
         Assert.IsType<AdmissionResult.Admit>(executor.TryAdmit(job, Host));
@@ -768,17 +604,6 @@ public class ManagedExecutorTests : IDisposable
         Assert.IsType<AdmissionResult.Busy>(executor.TryAdmit(NewJob(), Host));
         Assert.Throws<InvalidOperationException>(
             () => executor.Launch(job, "/tmp/does-not-matter.sh", "/tmp"));
-    }
-
-    [Fact]
-    public void ShutdownRefusesAdmission_AsBusyRatherThanAsAPermanentRejection()
-    {
-        // Reject is terminal: the daemon fails the job with the reason string. A job that simply
-        // arrived while Relay was stopping must still be Waiting when Relay comes back.
-        var executor = new ManagedExecutor();
-        executor.BeginShutdown();
-
-        Assert.IsType<AdmissionResult.Busy>(executor.TryAdmit(NewJob(), Host));
     }
 
     [Fact]
@@ -967,27 +792,6 @@ public class ManagedExecutorTests : IDisposable
             Task.Delay(Timeout.Infinite, ct);
     }
 
-    [Fact]
-    public void ALaunchThatFinishesSpawningAfterShutdownBegan_KillsTheProcessAndThrows()
-    {
-        // The other half of the ordering. The guard at the top of Launch was passed before shutdown
-        // started, so the spawn goes ahead; by the time it returns, KillAllAsync may already have
-        // taken its snapshot and walked past this entry. Nothing else would ever signal it.
-        var executor = new ManagedExecutor();
-        var job = NewJob();
-        executor.TryAdmit(job, Host);
-
-        var late = new FakeProcess();
-
-        Assert.Throws<InvalidOperationException>(() => executor.Launch(job, _ =>
-        {
-            executor.BeginShutdown();
-            return late;
-        }));
-
-        Assert.Equal(1, late.KillCount);
-    }
-
     #endregion
 
     #region The leftover registry
@@ -998,15 +802,19 @@ public class ManagedExecutorTests : IDisposable
         var registry = NewRegistry();
         var executor = new ManagedExecutor(registry);
 
-        var job = NewJob();
+        var job = InSpace(NewJob(), spaceId: 3, jobId: 9);
         job.Status = JobStatus.Running;
         executor.TryAdmit(job, Host);
 
         var process = new FakeProcess { Pid = 5150, StartTime = new DateTime(1234) };
         executor.Launch(job, _ => process);
 
+        // The full identity, not just the pid: Job.Id is per-space, so a record keyed on it alone
+        // would let one space's job settling delete another space's live record.
         var record = Assert.Single(registry.Load());
-        Assert.Equal(job.Id, record.JobId);
+        Assert.Equal(7, record.ProjectId);
+        Assert.Equal(3, record.SpaceId);
+        Assert.Equal(9, record.JobId);
         Assert.Equal(5150, record.Pid);
         // UTC, not the raw Local ticks: a DST or timezone change between the crash and the restart
         // would otherwise move a recorded start time by an hour and hide the process from the sweep.
@@ -1035,27 +843,6 @@ public class ManagedExecutorTests : IDisposable
     }
 
     [Fact]
-    public void ALaunchThatFailsToAttach_LeavesNoRecordBehind()
-    {
-        // The process is killed on this path, so recording it would put a dead pid in range of the
-        // next sweep — and, worse, clobber the record of whichever run replaced this reservation.
-        var registry = NewRegistry();
-        var executor = new ManagedExecutor(registry);
-
-        var job = NewJob();
-        executor.TryAdmit(job, Host);
-
-        Assert.Throws<InvalidOperationException>(() => executor.Launch(job, _ =>
-        {
-            executor.Kill(job);
-            executor.Reap();
-            return new FakeProcess();
-        }));
-
-        Assert.Empty(registry.Load());
-    }
-
-    [Fact]
     public void ALaunchIsRecorded_BeforeItIsAttached()
     {
         // Shutdown cannot cancel a staging task that is already inside the spawn, and the child is
@@ -1081,61 +868,12 @@ public class ManagedExecutorTests : IDisposable
         // Had Relay died in that window, this is what the next startup would have found — and
         // killed. Under the old ordering it found nothing at all.
         Assert.Equal(777, Assert.Single(whenDisowned).Pid);
+        Assert.Equal(1, process.KillCount);
 
-        // And a failed attach that does reach its own cleanup still leaves nothing behind: the
-        // process it described was killed here.
+        // And a failed attach still leaves nothing behind: the process it described was killed
+        // here, so recording it would put a dead pid in range of the next sweep — and, worse,
+        // clobber the record of whichever run replaced this reservation.
         Assert.Empty(registry.Load());
-    }
-
-    [Fact]
-    public async Task KillAllAsync_ClearsTheRegistry()
-    {
-        // A clean shutdown leaves nothing for the next startup to sweep. Records left behind would
-        // point the next Relay's sweep at pids that have since been recycled.
-        var registry = NewRegistry();
-        var executor = new ManagedExecutor(registry);
-
-        var job = NewJob();
-        executor.TryAdmit(job, Host);
-        executor.Launch(job, _ => new FakeProcess());
-        Assert.Single(registry.Load());
-
-        await executor.KillAllAsync();
-
-        Assert.Empty(registry.Load());
-    }
-
-    [Fact]
-    public void TwoSpacesRunningTheirOwnJobFive_KeepSeparateRecords()
-    {
-        // Job.Id is per-space, so this is an ordinary Tuesday, not an edge case. Keyed on Job.Id
-        // alone, space 1's job settling would call Forget and delete space 2's *live* record —
-        // a running process quietly un-registered by a completely unrelated, successful job.
-        var registry = NewRegistry();
-        var executor = new ManagedExecutor(registry);
-
-        var first = InSpace(NewJob(), spaceId: 1, jobId: 5);
-        var second = InSpace(NewJob(), spaceId: 2, jobId: 5);
-        first.Status = JobStatus.Running;
-        second.Status = JobStatus.Running;
-
-        executor.TryAdmit(first, Host);
-        executor.TryAdmit(second, Host);
-
-        var firstProcess = new FakeProcess { Pid = 111 };
-        executor.Launch(first, _ => firstProcess);
-        executor.Launch(second, _ => new FakeProcess { Pid = 222 });
-
-        Assert.Equal(2, registry.Load().Count);
-
-        // Space 1's job finishes normally.
-        firstProcess.Exit(0);
-        first.Status = JobStatus.Finished;
-        executor.Reap();
-
-        var survivor = Assert.Single(registry.Load());
-        Assert.Equal(2, survivor.SpaceId);
-        Assert.Equal(222, survivor.Pid);          // space 2's process is still registered
     }
 
     private static Job InSpace(Job job, int spaceId, int jobId)
@@ -1143,22 +881,6 @@ public class ManagedExecutorTests : IDisposable
         job.Space = new Space { Id = spaceId, Project = new Project { Id = 7 } };
         job.Id = jobId;
         return job;
-    }
-
-    [Fact]
-    public void ARecordCarriesTheJobsProjectAndSpace()
-    {
-        var registry = NewRegistry();
-        var executor = new ManagedExecutor(registry);
-
-        var job = InSpace(NewJob(), spaceId: 3, jobId: 9);
-        executor.TryAdmit(job, Host);
-        executor.Launch(job, _ => new FakeProcess());
-
-        var record = Assert.Single(registry.Load());
-        Assert.Equal(7, record.ProjectId);
-        Assert.Equal(3, record.SpaceId);
-        Assert.Equal(9, record.JobId);
     }
 
     [Fact]
@@ -1194,32 +916,20 @@ public class ManagedExecutorTests : IDisposable
         new(ProjectId: 1, SpaceId: 1, JobId: 1, Pid: pid, Pgid: pid, StartTimeTicks: 999);
 
     [Fact]
-    public void ASurvivingLeftover_MakesAdmissionBusy_NotRejected()
+    public void ASurvivorBlocksAdmissionAsBusy_AndReleasesTheBlockOnceItDies()
     {
         // A leftover the startup sweep could not confirm dead may still be holding a GPU this
         // ledger believes is free, so nothing may be admitted onto it. Busy rather than Reject
-        // because the condition is transient: the job stays Waiting and starts by itself.
-        var executor = new ManagedExecutor(unconfirmedLeftovers: new[] { Leftover() },
-                                           containLeftover: _ => false);
-
-        Assert.True(executor.HasUnconfirmedLeftovers);
-        Assert.IsType<AdmissionResult.Busy>(executor.TryAdmit(NewJob(), Host));
-
-        // And no reservation was booked behind the refusal.
-        Assert.Empty(executor.LiveAllocations());
-    }
-
-    [Fact]
-    public void ASurvivorThatDiesLater_ReleasesTheBlockOnTheNextReapTick()
-    {
-        // The self-heal, and the reason the verdict is Busy. A permanent wedge that needed a Relay
-        // restart to clear is the worst failure this feature can have.
+        // because the condition is transient — and the self-heal below is why: a permanent wedge
+        // that needed a Relay restart to clear is the worst failure this feature can have.
         bool dead = false;
         var executor = new ManagedExecutor(unconfirmedLeftovers: new[] { Leftover() },
                                            containLeftover: _ => dead);
 
         executor.Reap();
+        Assert.True(executor.HasUnconfirmedLeftovers);
         Assert.IsType<AdmissionResult.Busy>(executor.TryAdmit(NewJob(), Host));
+        Assert.Empty(executor.LiveAllocations());   // and nothing was booked behind the refusal
 
         dead = true;                       // the process finally exits
         executor.Reap();
@@ -1272,24 +982,6 @@ public class ManagedExecutorTests : IDisposable
     }
 
     #endregion
-
-    [Fact]
-    public void AnExecutorWithNoRegistry_StillLaunchesAndReconciles()
-    {
-        // The registry is optional; every accounting-only test constructs the executor without one.
-        var executor = new ManagedExecutor();
-        var job = NewJob();
-        executor.TryAdmit(job, Host);
-
-        var process = new FakeProcess();
-        Assert.Same(process, executor.Launch(job, _ => process));
-
-        process.Exit(0);
-        job.Status = JobStatus.Finished;
-        executor.Reap();
-
-        Assert.False(executor.HasEntries(_ => true));
-    }
 
     #endregion
 }

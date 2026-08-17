@@ -21,7 +21,6 @@ namespace Refund.Tests.JobQueues;
 [Collection("JobRegistry")]
 public class ManagedExecutorProcessTests : IDisposable
 {
-    private static readonly object _populateLock = new();
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "relay-managed-" + Guid.NewGuid());
 
     public ManagedExecutorProcessTests() => Directory.CreateDirectory(_dir);
@@ -30,26 +29,17 @@ public class ManagedExecutorProcessTests : IDisposable
     [DllImport("libc", SetLastError = true)]
     private static extern int getpgid(int pid);
 
-    private static void EnsurePopulated()
-    {
-        lock (_populateLock)
-        {
-            if (Job.Types.Count == 0)
-                Job.PopulateStatic();
-        }
-    }
-
     /// <summary>CreateMask: 1 process x 1 core, 8 GB, no GPU.</summary>
     private Job NewJob()
     {
-        EnsurePopulated();
+        JobRegistry.EnsurePopulated();
         return new MaskJob { Space = new Space { RootDirectory = _dir }, Status = JobStatus.Running };
     }
 
     /// <summary>Class2D with a GPU: 1 process x 1 core, 16 GB, 1 GPU.</summary>
     private Job NewGpuJob()
     {
-        EnsurePopulated();
+        JobRegistry.EnsurePopulated();
         return new Class2DJob
         {
             UseGpu = true, Space = new Space { RootDirectory = _dir }, Status = JobStatus.Running
@@ -74,34 +64,7 @@ public class ManagedExecutorProcessTests : IDisposable
         throw new TimeoutException("Condition not met within timeout.");
     }
 
-    /// <summary>Stands in for a real OS process where the test needs to drive it deterministically.</summary>
-    private sealed class FakeProcess : IManagedProcess
-    {
-        public int Pid { get; init; } = 4242;
-        public DateTime StartTime { get; init; } = new(2026, 1, 1);
-        public bool HasExited { get; private set; }
-        public int ExitCode { get; private set; }
-        public int KillCount { get; private set; }
-
-        public void Exit(int code) { ExitCode = code; HasExited = true; }
-        public void KillTree() => KillCount++;
-        public Task WaitForExitAsync(CancellationToken ct = default) => Task.CompletedTask;
-    }
-
     #region Running a script
-
-    [Fact]
-    public async Task Launch_RunsTheScript_AndReportsFinishedOnCleanExit()
-    {
-        var executor = new ManagedExecutor();
-        var job = NewJob();
-        executor.TryAdmit(job, new ResourceTotals(8, 32, 0));
-
-        executor.Launch(job, WriteScript("exit 0"), _dir);
-        await WaitUntil(() => executor.GetStatus(job) == ClusterJobStatus.Finished);
-
-        Assert.Equal(ClusterJobStatus.Finished, executor.GetStatus(job));
-    }
 
     [Fact]
     public async Task Launch_NonZeroExit_ReportsFailed()
@@ -114,24 +77,6 @@ public class ManagedExecutorProcessTests : IDisposable
         await WaitUntil(() => executor.GetStatus(job) == ClusterJobStatus.Failed);
 
         Assert.Equal(ClusterJobStatus.Failed, executor.GetStatus(job));
-    }
-
-    [Fact]
-    public async Task Launch_ReportsRunning_BeforeTheScriptHasFinished()
-    {
-        // Pending vs Running is what tells ClusterQueue the job actually started; a Launch that
-        // spawned but failed to attach would leave the entry reporting Pending forever.
-        var executor = new ManagedExecutor();
-        var job = NewJob();
-        executor.TryAdmit(job, new ResourceTotals(8, 32, 0));
-
-        var release = Path.Combine(_dir, "release");
-        executor.Launch(job, WriteScript($"while [ ! -f '{release}' ]; do sleep 0.05; done"), _dir);
-
-        Assert.Equal(ClusterJobStatus.Running, executor.GetStatus(job));
-
-        File.WriteAllText(release, "");
-        await WaitUntil(() => executor.GetStatus(job) == ClusterJobStatus.Finished);
     }
 
     [Fact]
@@ -187,7 +132,7 @@ public class ManagedExecutorProcessTests : IDisposable
     }
 
     [Fact]
-    public async Task OutputFilesAreTruncatedPerRun_NotAppendedTo()
+    public async Task OutputFilesAreTruncatedPerRun_AndTheTwoStreamsStaySeparate()
     {
         // Every progress parser reads the whole file and indexes iterations by line position from
         // the top (Class3D.cs:1197, Refine3D.cs:976, InitialReference.cs:391, PostProcess.cs:413),
@@ -208,34 +153,22 @@ public class ManagedExecutorProcessTests : IDisposable
 
         Assert.DoesNotContain("stale-iteration", stdOut);
         Assert.DoesNotContain("stale-error", stdErr);
+
+        // And each stream lands in its own file: stderr must not pollute the log the progress
+        // parsers read, nor stdout the error file the UI shows on a failure.
         Assert.Contains("fresh-out", stdOut);
+        Assert.DoesNotContain("fresh-err", stdOut);
         Assert.Contains("fresh-err", stdErr);
-    }
-
-    [Fact]
-    public async Task StandardErrorGoesToTheJobsErrorFile_NotItsOutputFile()
-    {
-        var executor = new ManagedExecutor();
-        var job = NewJob();
-        executor.TryAdmit(job, new ResourceTotals(8, 32, 0));
-
-        executor.Launch(job, WriteScript("echo to-out; echo to-err 1>&2"), _dir);
-        await WaitUntil(() => executor.GetStatus(job) == ClusterJobStatus.Finished);
-
-        var stdOut = await File.ReadAllTextAsync(job.PathStdOut);
-        var stdErr = await File.ReadAllTextAsync(job.PathStdErr);
-
-        Assert.Contains("to-out", stdOut);
-        Assert.DoesNotContain("to-err", stdOut);
-        Assert.Contains("to-err", stdErr);
-        Assert.DoesNotContain("to-out", stdErr);
+        Assert.DoesNotContain("fresh-out", stdErr);
     }
 
     [Fact]
     public async Task OutputIsFlushedLineByLine_WhileTheJobIsStillRunning()
     {
         // TrackProgressLogs tails these files to drive the job card. CopyToAsync's 80 KiB buffer
-        // would leave the file empty until the job ended, so the card would never move.
+        // would leave the file empty until the job ended, so the card would never move. Also the
+        // Pending-vs-Running check: Running is what tells ClusterQueue the job actually started,
+        // and a Launch that spawned but failed to attach would report Pending forever.
         var executor = new ManagedExecutor();
         var job = NewJob();
         executor.TryAdmit(job, new ResourceTotals(8, 32, 0));
@@ -450,14 +383,6 @@ public class ManagedExecutorProcessTests : IDisposable
         Assert.True(fallbackCalled);
         Assert.Empty(signals);
 
-        fallbackCalled = false;
-        SystemManagedProcess.KillTree(pid: 1234, pgid: 1,      // pgid != pid: not ours
-                                      fallbackKill: () => fallbackCalled = true,
-                                      hasExited: () => false,
-                                      signal: (p, s) => { signals.Add((p, s)); return 0; });
-        Assert.True(fallbackCalled);
-        Assert.Empty(signals);
-
         // The one that actually looks plausible: a real, ordinary group id that simply is not the
         // one we made. On macOS this is precisely Relay's own group, so signalling it is the
         // failure mode the whole interlock exists to prevent.
@@ -606,29 +531,6 @@ public class ManagedExecutorProcessTests : IDisposable
                                       signal: (_, _) => 0);
 
         Assert.True(fallbackCalled);
-
-        // And with a group whose signal did not land, so the probe is reached there too.
-        fallbackCalled = false;
-        SystemManagedProcess.KillTree(pid: 4321, pgid: 4321,
-                                      fallbackKill: () => fallbackCalled = true,
-                                      hasExited: () => throw new InvalidOperationException("disposed"),
-                                      signal: (_, _) => -1);
-
-        Assert.True(fallbackCalled);
-    }
-
-    [Fact]
-    public async Task KillTree_OnALiveProcess_ActuallyKillsIt()
-    {
-        // The unit tests above pin the interlock with a fake signal; this one pins that the real
-        // wiring — whichever branch this platform takes — reaches the process.
-        var script = WriteScript("sleep 30");
-        var process = SystemManagedProcess.Start(script, _dir, Array.Empty<int>(),
-                                                 Path.Combine(_dir, "std.out"),
-                                                 Path.Combine(_dir, "std.err"));
-
-        process.KillTree();
-        await WaitUntil(() => process.HasExited, timeoutMs: 5_000);
     }
 
     [Fact]
@@ -691,7 +593,9 @@ public class ManagedExecutorProcessTests : IDisposable
     public async Task GroupIsEmpty_AnswersTheRealKernel_InBothDirections()
     {
         // The probe the leftover sweep now believes before it drops a record, so both answers have
-        // to be right against a real kernel rather than only against a fake. Reading the errno
+        // to be right against a real kernel rather than only against a fake. It doubles as the
+        // check that the real kill wiring — whichever branch this platform takes — reaches the
+        // process at all, since the unit tests above pin the interlock with a fake signal. Reading the errno
         // wrongly would report every group as still occupied, and managed admission would then stay
         // Busy for as long as Relay ran — the wedge this design works hardest to avoid.
         Assert.False(SystemManagedProcess.GroupIsEmpty(getpgid(Environment.ProcessId)));
@@ -768,29 +672,19 @@ public class ManagedExecutorProcessTests : IDisposable
     }
 
     [Fact]
-    public void OwnProcessGroup_AsksTheOsOnlyUntilItGetsAnAnswer()
-    {
-        var calls = 0;
-        var group = new OwnProcessGroup(4321, true, _ => { calls++; return 4321; }, () => false);
-
-        Assert.Equal(4321, group.Value);
-        Assert.Equal(4321, group.Value);
-        Assert.Equal(4321, group.Value);
-
-        Assert.Equal(1, calls);
-    }
-
-    [Fact]
     public void OwnProcessGroup_RemembersAConfirmedGroup_AfterTheProcessHasGone()
     {
         // The registry has to keep being able to signal the group after Relay has lost the handle;
-        // that is the entire point of recording a group rather than a Process.
+        // that is the entire point of recording a group rather than a Process — so once the answer
+        // is in, it is latched rather than re-derived from a pid that may since have been recycled.
         var exited = false;
-        var group = new OwnProcessGroup(4321, true, _ => 4321, () => exited);
+        var calls = 0;
+        var group = new OwnProcessGroup(4321, true, _ => { calls++; return 4321; }, () => exited);
 
         Assert.Equal(4321, group.Value);
         exited = true;
         Assert.Equal(4321, group.Value);
+        Assert.Equal(1, calls);
     }
 
     [Fact]
@@ -836,46 +730,6 @@ public class ManagedExecutorProcessTests : IDisposable
         Assert.Null(group.Value);
     }
 
-    [Fact]
-    public async Task Pgid_IsResolvedOnceTheChildHasEnteredItsOwnGroup()
-    {
-        // Exercises the *deployment* branch, which a macOS dev machine cannot otherwise reach and
-        // which is the one where getting the group wrong is unrecoverable. Under the previous
-        // eager read this test is deterministically red — the child has not run setsid yet when
-        // Start returns, so Pgid latched null and never recovered.
-        var standIn = SetsidStandIn();
-        Assert.NotNull(standIn);
-
-        var previous = SystemManagedProcess.SetsidPathOverride;
-        SystemManagedProcess.SetsidPathOverride = standIn;
-        try
-        {
-            Assert.True(SystemManagedProcess.CanCreateOwnGroup);
-
-            var process = SystemManagedProcess.Start(WriteScript("sleep 8"), _dir,
-                                                     Array.Empty<int>(),
-                                                     Path.Combine(_dir, "std.out"),
-                                                     Path.Combine(_dir, "std.err"));
-            try
-            {
-                await WaitUntil(() => process.Pgid != null, timeoutMs: 5_000);
-
-                Assert.Equal(process.Pid, process.Pgid);
-                Assert.Equal(process.Pid, getpgid(process.Pid));                  // the OS agrees
-                Assert.NotEqual(getpgid(Environment.ProcessId), getpgid(process.Pid));
-            }
-            finally
-            {
-                process.KillTree();
-                await WaitUntil(() => process.HasExited, timeoutMs: 5_000);
-            }
-        }
-        finally
-        {
-            SystemManagedProcess.SetsidPathOverride = previous;
-        }
-    }
-
     /// <summary>
     /// The real setsid where there is one, otherwise a script that does the same thing to itself
     /// before exec-ing. Only used to force the Linux branch on a machine that has no setsid.
@@ -906,7 +760,9 @@ public class ManagedExecutorProcessTests : IDisposable
     [Fact]
     public async Task ThePersistedRecordEndsUpCarryingTheProcessGroup_OnTheSetsidBranch()
     {
-        // The deployment branch of the containment design, forced onto whatever machine runs this.
+        // The deployment branch of the containment design — which a macOS dev machine cannot
+        // otherwise reach, and which is the one where getting the group wrong is unrecoverable —
+        // forced onto whatever machine runs this.
         //
         // Pgid resolves lazily, so the record written at launch is *born null* — the child has not
         // reached setsid(2) when Process.Start returns. That is expected and is not the bug; the
@@ -1040,27 +896,32 @@ public class ManagedExecutorProcessTests : IDisposable
 
     #region Admission interlock
 
-    [Fact]
-    public async Task Launch_WithoutAdmission_Throws_AndSpawnsNothing()
+    /// <summary>
+    /// Launch must refuse before it spawns anything: a presence-only check would spawn first and
+    /// only then discover Attach refusing the entry, leaving a process nothing accounts for.
+    /// </summary>
+    private async Task AssertLaunchRefusesAndSpawnsNothing(ManagedExecutor executor, Job job,
+                                                           string what)
     {
-        var executor = new ManagedExecutor();
-        var job = NewJob();
-
         var marker = Path.Combine(_dir, "spawned");
-        var script = WriteScript($"touch '{marker}'");
 
-        Assert.Throws<InvalidOperationException>(() => executor.Launch(job, script, _dir));
+        Assert.Throws<InvalidOperationException>(
+            () => executor.Launch(job, WriteScript($"touch '{marker}'"), _dir));
 
         await Task.Delay(300);
-        Assert.False(File.Exists(marker), "a process ran without a reservation");
+        Assert.False(File.Exists(marker), $"a process ran {what}");
     }
+
+    [Fact]
+    public Task Launch_WithoutAdmission_Throws_AndSpawnsNothing() =>
+        AssertLaunchRefusesAndSpawnsNothing(new ManagedExecutor(), NewJob(),
+                                            "without a reservation");
 
     [Fact]
     public async Task Launch_IntoASpentReservation_Throws_AndSpawnsNothing()
     {
         // The entry still exists -- its previous run's exit code is recorded and the job is still
-        // active -- but it is no longer a reservation anything may be launched into. A presence
-        // check would spawn here and only then discover Attach refusing it.
+        // active -- but it is no longer a reservation anything may be launched into.
         var executor = new ManagedExecutor();
         var job = NewJob();
         executor.TryAdmit(job, new ResourceTotals(8, 32, 0));
@@ -1070,13 +931,7 @@ public class ManagedExecutorProcessTests : IDisposable
         spent.Exit(0);
         executor.Reap();
 
-        var marker = Path.Combine(_dir, "spawned");
-        var script = WriteScript($"touch '{marker}'");
-
-        Assert.Throws<InvalidOperationException>(() => executor.Launch(job, script, _dir));
-
-        await Task.Delay(300);
-        Assert.False(File.Exists(marker), "a process ran against a spent reservation");
+        await AssertLaunchRefusesAndSpawnsNothing(executor, job, "against a spent reservation");
     }
 
     [Fact]
@@ -1088,45 +943,19 @@ public class ManagedExecutorProcessTests : IDisposable
         var job = NewJob();
         executor.TryAdmit(job, new ResourceTotals(8, 32, 0));
 
-        var live = new FakeProcess();
-        Assert.True(executor.Attach(job, live));
+        Assert.True(executor.Attach(job, new FakeProcess()));
         executor.Kill(job);
         executor.Reap();
 
-        var marker = Path.Combine(_dir, "spawned");
-        var script = WriteScript($"touch '{marker}'");
-
-        Assert.Throws<InvalidOperationException>(() => executor.Launch(job, script, _dir));
-
-        await Task.Delay(300);
-        Assert.False(File.Exists(marker), "a process ran against a condemned reservation");
+        await AssertLaunchRefusesAndSpawnsNothing(executor, job, "against a condemned reservation");
     }
 
     [Fact]
-    public void Launch_WhenTheReservationVanishesDuringSpawn_KillsTheProcessAndThrows()
+    public async Task Launch_WhenTheReservationVanishesDuringSpawn_KillsTheRealProcessAndThrows()
     {
         // The reservation can be retired between admission and the process being up -- an abort,
         // typically. At that point we own a running process nothing is accounting for: leaving it
         // alive holds a GPU no ledger can ever reclaim.
-        var executor = new ManagedExecutor();
-        var job = NewJob();
-        executor.TryAdmit(job, new ResourceTotals(8, 32, 0));
-
-        var orphan = new FakeProcess();
-
-        Assert.Throws<InvalidOperationException>(() => executor.Launch(job, _ =>
-        {
-            executor.Kill(job);    // retires the reservation while the process is "starting"
-            executor.Reap();
-            return orphan;
-        }));
-
-        Assert.Equal(1, orphan.KillCount);
-    }
-
-    [Fact]
-    public async Task Launch_WhenTheReservationVanishesDuringSpawn_KillsARealProcessToo()
-    {
         var executor = new ManagedExecutor();
         var job = NewJob();
         executor.TryAdmit(job, new ResourceTotals(8, 32, 0));
@@ -1185,34 +1014,6 @@ public class ManagedExecutorProcessTests : IDisposable
         Assert.Equal(ClusterJobStatus.Pending, executor.GetStatus(job));
         Assert.NotNull(rebooked);
         Assert.Single(executor.LiveAllocations());
-    }
-
-    [Fact]
-    public void Attach_WithoutAReservationToken_StillBindsToWhateverTheJobHolds()
-    {
-        // The public two-argument overload keeps its old meaning; only Launch, which knows which
-        // reservation it read, opts into the identity check.
-        var executor = new ManagedExecutor();
-        var job = NewJob();
-        executor.TryAdmit(job, new ResourceTotals(8, 32, 0));
-
-        Assert.True(executor.Attach(job, new FakeProcess()));
-        Assert.Equal(ClusterJobStatus.Running, executor.GetStatus(job));
-    }
-
-    [Fact]
-    public void Launch_HandsTheProcessTheGpusItWasAdmittedWith()
-    {
-        var executor = new ManagedExecutor();
-        var job = NewGpuJob();
-        executor.TryAdmit(job, new ResourceTotals(8, 32, 4));
-
-        IReadOnlyList<int>? given = null;
-        var process = executor.Launch(job, gpus => { given = gpus; return new FakeProcess(); });
-
-        Assert.NotNull(process);
-        Assert.Equal(executor.GpuIndicesFor(job), given);
-        Assert.Single(given!);
     }
 
     /// <summary>

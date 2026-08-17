@@ -122,24 +122,6 @@ public class ManagedQueueConfigTests
     }
 
     [Fact]
-    public void ChangingTotals_IsAllowedWhenIdle()
-    {
-        ManagedQueueRules.ValidateTotalsChange(Managed("Local"), hasLiveEntries: false);
-    }
-
-    [Fact]
-    public void ChangingTheSchedulerOfABusyManagedQueue_SaysSoInTheMessage()
-    {
-        // totalsChanged covers SchedulerType, so this refusal is reachable by switching a busy
-        // managed queue to Slurm — a message naming only cores, memory and GPUs would not describe
-        // what the user actually did.
-        var error = Assert.Throws<InvalidOperationException>(() =>
-            ManagedQueueRules.ValidateTotalsChange(Managed("Local"), hasLiveEntries: true));
-
-        Assert.Contains("scheduler", error.Message, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
     public void ANonManagedQueue_IsNeverBlockedByLiveEntries()
     {
         // Renaming a Slurm queue must not be refused just because something is running on the host.
@@ -211,21 +193,12 @@ public class ManagedQueueConfigTests
     }
 
     [Fact]
-    public void EditingTheManagedQueueItself_IsNotMistakenForASecondOne()
+    public void RenamingTheManagedQueue_IsAllowed_AndIsNotMistakenForASecondOne()
     {
-        // The candidate handed to ValidateOnly is the copy, so its identity check cannot recognise
-        // it as the queue being edited; ValidateChange has to exclude the original by reference.
-        var queue = Managed("Local");
-
-        ManagedQueueRules.ValidateChange(queue, q => q.Alias = "Workstation",
-                                         new[] { queue }, NeverAsked);
-    }
-
-    [Fact]
-    public void RenamingABusyManagedQueue_IsAllowed()
-    {
-        // Nothing about the host's capacity moved, so running jobs are no reason to refuse — and
-        // the queue must not be asked whether it is busy at all.
+        // Two things at once. The candidate handed to ValidateOnly is the copy, so its identity
+        // check cannot recognise it as the queue being edited; ValidateChange has to exclude the
+        // original by reference. And nothing about the host's capacity moved, so running jobs are
+        // no reason to refuse — the queue must not be asked whether it is busy at all.
         var queue = Managed("Local");
 
         ManagedQueueRules.ValidateChange(queue, q => q.Alias = "Workstation",

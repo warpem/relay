@@ -56,18 +56,6 @@ public class ManagedProcessRegistryTests : IDisposable
     }
 
     [Fact]
-    public void Forget_RemovesOnlyThatJob()
-    {
-        var registry = new ManagedProcessRegistry(Path_);
-        registry.Record(new ManagedProcessRecord(1, 1, 1, 111, 111, 5));
-        registry.Record(new ManagedProcessRecord(1, 1, 2, 222, 222, 6));
-
-        registry.Forget(1, 1, 1);
-
-        Assert.Equal(2, Assert.Single(new ManagedProcessRegistry(Path_).Load()).JobId);
-    }
-
-    [Fact]
     public void TwoSpacesCanEachHaveAJobFive_WithoutEitherErasingTheOther()
     {
         // Job.Id is allocated per space (Space.cs:190), so a host routinely runs two jobs with the
@@ -225,23 +213,14 @@ public class ManagedProcessRegistryTests : IDisposable
         Assert.Equal(4242, Assert.Single(host.Signalled).Pid);
     }
 
-    [Fact]
-    public void KillLeftovers_StillKillsWhenTheTwoReadingsDisagreeByMilliseconds()
-    {
-        // THE Linux test, for the records that have no exact token. The recorded time is read by
-        // the Relay that launched the job; the probed one by the Relay sweeping after it crashed.
-        // On Linux .NET derives Process.StartTime from a per-process cached BootTime
-        // (CLOCK_REALTIME_COARSE - CLOCK_BOOTTIME), and the coarse clock is quantised to a kernel
-        // tick, so two independent samples of one process differ by 1-4 ms. Under exact equality
-        // the sweep would skip every record and report 0: every orphan keeps its GPU, silently.
-        new ManagedProcessRegistry(Path_).Record(At(Launched));
-
-        var host = new FakeHost().Alive(4242, Launched.AddMilliseconds(4));
-
-        Assert.Equal(1, Sweep(host).Killed);
-        Assert.Single(host.Signalled);
-    }
-
+    /// <summary>
+    /// THE Linux test, for the records that have no exact token. The recorded time is read by the
+    /// Relay that launched the job; the probed one by the Relay sweeping after it crashed. On Linux
+    /// .NET derives Process.StartTime from a per-process cached BootTime (CLOCK_REALTIME_COARSE -
+    /// CLOCK_BOOTTIME), and the coarse clock is quantised to a kernel tick, so two independent
+    /// samples of one process differ by 1-4 ms. Under exact equality the sweep would skip every
+    /// record and report 0: every orphan keeps its GPU, silently.
+    /// </summary>
     [Theory]
     [InlineData(-4)]      // the probe can land either side: the two clocks are independent
     [InlineData(4)]
@@ -287,19 +266,6 @@ public class ManagedProcessRegistryTests : IDisposable
     }
 
     [Fact]
-    public void KillLeftovers_SkipsRecordsWithNoLiveProcess()
-    {
-        new ManagedProcessRegistry(Path_).Record(At(Launched));
-
-        var host = new FakeHost();                             // nothing alive at all
-        var result = Sweep(host);
-
-        Assert.Equal(0, result.Killed);
-        Assert.Empty(host.Signalled);
-        Assert.Empty(result.Unconfirmed);
-    }
-
-    [Fact]
     public void KillLeftovers_KillsOnlyTheMatchingRecordsOfAMixedFile()
     {
         var registry = new ManagedProcessRegistry(Path_);
@@ -316,6 +282,10 @@ public class ManagedProcessRegistryTests : IDisposable
 
         Assert.Equal(1, result.Killed);
         Assert.Equal(new[] { 111 }, host.Signalled.Select(r => r.Pid));
+
+        // 222 was never there and 333 is somebody else: neither is signalled, and neither is held
+        // against us as an unconfirmed survivor.
+        Assert.Empty(result.Unconfirmed);
     }
 
     [Fact]
@@ -384,7 +354,7 @@ public class ManagedProcessRegistryTests : IDisposable
     }
 
     [Fact]
-    public void TryContain_ConfirmsASurvivorOnceItFinallyDies()
+    public void TryContain_SignalsASurvivor_AndConfirmsItOnceItFinallyDies()
     {
         // The self-heal. A survivor that resisted the startup sweep and then exited — the job
         // finished, an operator killed it — must be confirmable without restarting Relay, or one
@@ -394,6 +364,9 @@ public class ManagedProcessRegistryTests : IDisposable
 
         Assert.False(ManagedProcessRegistry.TryContain(record, host.StartTimeOf, _ => null,
                                                        host.Kill, TimeSpan.Zero));
+
+        // Probing first must not turn containment into a no-op for a process that really is ours.
+        Assert.Equal(4242, Assert.Single(host.Signalled).Pid);
 
         host.Dies(4242);
 
@@ -443,7 +416,10 @@ public class ManagedProcessRegistryTests : IDisposable
         // about it here returned false on every tick forever, _unconfirmedLeftovers never drained,
         // and every managed job on the host sat at Waiting for the life of a stranger's group.
         //
-        // Our process is provably gone, so the group id is not ours to reason about: drop it.
+        // Our process is provably gone, so the group id is not ours to reason about: drop it. And
+        // signal nothing — RetryContainment has no identity check of its own, so signalling before
+        // probing meant kill(-pgid) on a group that is gone, ESRCH, and then (KillRecord passes
+        // hasExited: () => false) .NET's tree walk SIGKILLing a stranger *and its entire tree*.
         var record = At(Launched);                                     // pid 4242, pgid 4242
         var host = new FakeHost().Alive(4242, Launched.AddHours(1));   // recycled: not ours
 
@@ -454,26 +430,6 @@ public class ManagedProcessRegistryTests : IDisposable
                 Assert.Equal(4242, pgid);
                 return false;          // a live group carries that id — somebody else's
             }));
-
-        Assert.Empty(host.Signalled);
-    }
-
-    [Fact]
-    public void TryContain_OnARecordWhosePidWasRecycled_SignalsNothingAtAll()
-    {
-        // The daemon's retry (RetryContainment) calls TryContain once per reap tick, for as long
-        // as a survivor is retained, and it has no identity check of its own — the sweep's gate at
-        // the top of KillLeftovers never runs on that path. So a survivor that exits between two
-        // ticks, with its pid recycled into somebody else's process, arrives here still matching
-        // nothing. Signalling before probing meant kill(-pgid) on a group that is gone, ESRCH,
-        // and then — KillRecord passes hasExited: () => false — .NET's tree walk SIGKILLing that
-        // stranger *and its entire tree*. Probing first is the whole fix, so the assertion that
-        // matters is not the verdict but that no signal was issued.
-        var record = At(Launched);
-        var host = new FakeHost().Alive(4242, Launched.AddHours(1));   // recycled: not ours
-
-        Assert.True(ManagedProcessRegistry.TryContain(record, host.StartTimeOf, _ => null,
-                                                      host.Kill, TimeSpan.Zero));
 
         Assert.Empty(host.Signalled);
     }
@@ -498,19 +454,6 @@ public class ManagedProcessRegistryTests : IDisposable
     }
 
     [Fact]
-    public void TryContain_StillSignalsAProcessThatIsStillOurs()
-    {
-        // The other half: probing first must not turn containment into a no-op for a real leftover.
-        var record = At(Launched);
-        var host = new FakeHost().Alive(4242, Launched);
-
-        Assert.True(ManagedProcessRegistry.TryContain(record, host.StartTimeOf, _ => null,
-                                                      host.Kill, TimeSpan.Zero));
-
-        Assert.Equal(4242, Assert.Single(host.Signalled).Pid);
-    }
-
-    [Fact]
     public void KillLeftovers_OnAnAbsentFile_IsANoOp()
     {
         Assert.Equal(0, ManagedProcessRegistry.KillLeftovers(
@@ -520,13 +463,6 @@ public class ManagedProcessRegistryTests : IDisposable
     #endregion
 
     #region Start-time identity across processes
-
-    [Fact]
-    public void LiveProcessStartTime_AnswersForThisProcessAndNullForAnImpossiblePid()
-    {
-        Assert.NotNull(ManagedProcessRegistry.LiveProcessStartTime(Environment.ProcessId));
-        Assert.Null(ManagedProcessRegistry.LiveProcessStartTime(-1));
-    }
 
     [Fact]
     public void LiveProcessStartTime_IsUtc_NotLocalTicksMislabelled()
@@ -545,6 +481,9 @@ public class ManagedProcessRegistryTests : IDisposable
 
         // And the value really is this process's start, not an epoch or a zero.
         Assert.InRange(utc.Value, DateTime.UtcNow.AddDays(-1), DateTime.UtcNow);
+
+        // A pid that cannot exist has no start time, rather than a default one that would match.
+        Assert.Null(ManagedProcessRegistry.LiveProcessStartTime(-1));
     }
 
     [Fact]

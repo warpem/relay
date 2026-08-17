@@ -15,26 +15,15 @@ namespace Refund.Tests.JobQueues;
 [Collection("JobRegistry")]
 public class ClusterQueueStagingCancellationTests : IDisposable
 {
-    private static readonly object _populateLock = new();
-
     private readonly string _dir =
         Path.Combine(Path.GetTempPath(), "relay-staging-" + Guid.NewGuid());
 
     public ClusterQueueStagingCancellationTests() => Directory.CreateDirectory(_dir);
     public void Dispose() { try { Directory.Delete(_dir, true); } catch { } }
 
-    private static void EnsurePopulated()
-    {
-        lock (_populateLock)
-        {
-            if (Job.Types.Count == 0)
-                Job.PopulateStatic();
-        }
-    }
-
     private Job NewJob(int id = 1)
     {
-        EnsurePopulated();
+        JobRegistry.EnsurePopulated();
         return new MaskJob { Id = id, Space = new Space { RootDirectory = _dir },
                              Status = JobStatus.Waiting };
     }

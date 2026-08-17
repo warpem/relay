@@ -10,16 +10,7 @@ namespace Refund.Tests.JobQueues;
 [Collection("JobRegistry")]
 public class JobResourceRequestTests
 {
-    private static readonly object _populateLock = new();
-
-    private static void EnsurePopulated()
-    {
-        lock (_populateLock)
-        {
-            if (Job.Types.Count == 0)
-                Job.PopulateStatic();
-        }
-    }
+    private static void EnsurePopulated() => JobRegistry.EnsurePopulated();
 
     [Fact]
     public void CpuOnlyJobs_RequestNoGpus()

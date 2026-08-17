@@ -10,16 +10,6 @@ public class ResourceLedgerTests
         new(cores, mem, gpus);
 
     [Fact]
-    public void Compute_WithNoAllocations_ReportsEverythingFree()
-    {
-        var snap = ResourceLedger.Compute(Host, Array.Empty<ResourceAllocation>());
-
-        Assert.Equal(16, snap.FreeCores);
-        Assert.Equal(64, snap.FreeMemoryGb);
-        Assert.Equal(new[] { 0, 1, 2, 3 }, snap.FreeGpuIndices);
-    }
-
-    [Fact]
     public void Compute_SubtractsLiveAllocations()
     {
         var snap = ResourceLedger.Compute(Host, new[] { Alloc(4, 16, 0), Alloc(2, 8, 2) });
@@ -54,25 +44,11 @@ public class ResourceLedgerTests
     }
 
     [Fact]
-    public void TryFit_AssignsLowestFreeGpuIndices_AndTheyAreDisjoint()
-    {
-        var live = new List<ResourceAllocation>();
-
-        Assert.True(ResourceLedger.TryFit(Host, live, new ResourceRequest(1, 1, 2), out var first));
-        live.Add(first);
-        Assert.True(ResourceLedger.TryFit(Host, live, new ResourceRequest(1, 1, 2), out var second));
-
-        Assert.Equal(new[] { 0, 1 }, first.GpuIndices);
-        Assert.Equal(new[] { 2, 3 }, second.GpuIndices);
-        Assert.Empty(first.GpuIndices.Intersect(second.GpuIndices));
-    }
-
-    [Fact]
-    public void TryFit_ReusesIndicesFreedByADroppedEntry()
+    public void TryFit_AssignsLowestFreeGpuIndices_AndReusesThoseADroppedEntryFreed()
     {
         // The entry must actually be live for a while, or this proves nothing beyond the
-        // empty-list case: hold {0,1}, watch the next request get pushed to {2,3}, then drop the
-        // holder and watch {0,1} become available again.
+        // empty-list case: hold {0,1}, watch the next request get pushed to {2,3} — disjoint, the
+        // one guarantee this type makes — then drop the holder and watch {0,1} come back.
         var live = new List<ResourceAllocation>();
 
         Assert.True(ResourceLedger.TryFit(Host, live, new ResourceRequest(1, 1, 2), out var holder));

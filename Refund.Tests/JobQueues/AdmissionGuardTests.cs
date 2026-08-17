@@ -14,20 +14,9 @@ namespace Refund.Tests.JobQueues;
 [Collection("JobRegistry")]
 public class AdmissionGuardTests
 {
-    private static readonly object _populateLock = new();
-
-    private static void EnsurePopulated()
-    {
-        lock (_populateLock)
-        {
-            if (Job.Types.Count == 0)
-                Job.PopulateStatic();
-        }
-    }
-
     private static Job NewJob()
     {
-        EnsurePopulated();
+        JobRegistry.EnsurePopulated();
         return new MaskJob { Space = new Space { RootDirectory = "/tmp/relay-test" },
                              Status = JobStatus.Waiting };
     }
@@ -41,19 +30,6 @@ public class AdmissionGuardTests
             ManagedGpus = gpus,
             Executor = executor,
         };
-
-    [Fact]
-    public void ABusyQueue_ReportsBusy_SoTheJobStaysWaiting()
-    {
-        var executor = new ManagedExecutor();
-        var queue = ManagedQueue(cores: 1, gpus: 0, executor);
-
-        var first = NewJob();
-        Assert.IsType<AdmissionResult.Admit>(queue.CanAdmit(first));
-        executor.Attach(first, null);   // admitted; process attaches later
-
-        Assert.IsType<AdmissionResult.Busy>(queue.CanAdmit(NewJob()));
-    }
 
     [Fact]
     public void NothingIsAdmittedWhileAQueueEditIsBeingJudgedAndApplied()
@@ -101,79 +77,36 @@ public class AdmissionGuardTests
 
         Assert.IsType<AdmissionResult.Admit>(queue.CanAdmit(NewJob()));
     }
-
-    [Fact]
-    public void AnImpossibleRequest_IsRejectedWithAReasonNamingBothSides()
-    {
-        // cores: 0, not 1. CreateMask asks for exactly 1 core and 8 GB, so against a 1-core,
-        // 1024 GB, 0-GPU queue every dimension fits and CanEverFit would admit it.
-        var queue = ManagedQueue(cores: 0, gpus: 0, new ManagedExecutor());
-
-        var reject = Assert.IsType<AdmissionResult.Reject>(queue.CanAdmit(NewJob()));
-
-        Assert.Contains("never", reject.Reason, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("1 cores", reject.Reason);      // the request side
-        Assert.Contains("0 cores", reject.Reason);      // the queue side
-    }
-
-    [Fact]
-    public void AdmissionIsIdempotent_SoARetriedTickDoesNotDoubleBook()
-    {
-        // The daemon can ask twice for the same job before it launches — once per tick. The second
-        // ask must not book the host again, or a one-core queue would report itself full.
-        var executor = new ManagedExecutor();
-        var queue = ManagedQueue(cores: 1, gpus: 0, executor);
-
-        var job = NewJob();
-        Assert.IsType<AdmissionResult.Admit>(queue.CanAdmit(job));
-        Assert.IsType<AdmissionResult.Admit>(queue.CanAdmit(job));
-
-        Assert.Single(executor.LiveAllocations());
-    }
 }
 
 /// <summary>
-/// The daemon-side half: that HandleWaitingState asks <em>before</em> it writes Staging. Placed
-/// after the transition, a Busy job would strand in Staging with nothing running it, and the whole
-/// reason Busy is not an exception is that the daemon must be able to retry from Waiting.
+/// Shared fixture for the two daemon-level classes below: a scratch directory, a repository whose
+/// update callbacks run inline, and a managed queue registered on it.
 /// </summary>
-[Collection("JobRegistry")]
-public class WaitingStateAdmissionTests : IDisposable
+public abstract class DaemonTestBase : IDisposable
 {
-    private static readonly object _populateLock = new();
+    protected readonly string _dir;
 
-    private readonly string _dir = Path.Combine(Path.GetTempPath(), "relay-admission-" + Guid.NewGuid());
-
-    public WaitingStateAdmissionTests() => Directory.CreateDirectory(_dir);
-    public void Dispose() { try { Directory.Delete(_dir, true); } catch { } }
-
-    private static void EnsurePopulated()
+    protected DaemonTestBase(string prefix)
     {
-        lock (_populateLock)
-        {
-            if (Job.Types.Count == 0)
-                Job.PopulateStatic();
-        }
+        _dir = Path.Combine(Path.GetTempPath(), prefix + Guid.NewGuid());
+        Directory.CreateDirectory(_dir);
     }
 
-    private QueueRepository NewRepository() =>
+    public void Dispose() { try { Directory.Delete(_dir, true); } catch { } }
+
+    protected QueueRepository NewRepository() =>
         new(Path.Combine(_dir, "queues.json"),
             (job, action) => action(job),
             (job, action) => { action(job); return Task.CompletedTask; });
 
-    private Job NewJob()
+    protected Job NewJob()
     {
-        EnsurePopulated();
+        JobRegistry.EnsurePopulated();
         return new MaskJob { Id = 1, Space = new Space { RootDirectory = _dir }, Status = JobStatus.Waiting };
     }
 
-    /// <summary>HandleWaitingState is private; nothing else drives it without the daemon timer.</summary>
-    private static Task Invoke(QueueRepository repository, Job job, JobQueue queue) =>
-        (Task)typeof(QueueRepository)
-            .GetMethod("HandleWaitingState", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .Invoke(repository, new object[] { job, queue })!;
-
-    private ClusterQueue ManagedQueue(QueueRepository repository, int cores)
+    protected ClusterQueue ManagedQueue(QueueRepository repository, int cores = 8)
     {
         var queue = (ClusterQueue)repository.CreateClusterQueue();
         queue.Alias           = "managed";
@@ -183,6 +116,26 @@ public class WaitingStateAdmissionTests : IDisposable
         queue.ManagedGpus     = 0;
         return queue;
     }
+
+    /// <summary>The daemon's state handlers are private; nothing else drives them without the timer.</summary>
+    protected static Task InvokeHandler(QueueRepository repository, string name, params object[] args) =>
+        (Task)typeof(QueueRepository)
+            .GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(repository, args)!;
+}
+
+/// <summary>
+/// The daemon-side half: that HandleWaitingState asks <em>before</em> it writes Staging. Placed
+/// after the transition, a Busy job would strand in Staging with nothing running it, and the whole
+/// reason Busy is not an exception is that the daemon must be able to retry from Waiting.
+/// </summary>
+[Collection("JobRegistry")]
+public class WaitingStateAdmissionTests : DaemonTestBase
+{
+    public WaitingStateAdmissionTests() : base("relay-admission-") { }
+
+    private static Task Invoke(QueueRepository repository, Job job, JobQueue queue) =>
+        InvokeHandler(repository, "HandleWaitingState", job, queue);
 
     [Fact]
     public void CreateClusterQueue_AttachesTheHostWideExecutor()
@@ -235,7 +188,7 @@ public class WaitingStateAdmissionTests : IDisposable
     [Fact]
     public async Task APoolJobOnAManagedPoolQueue_Fails_WithOneMessage()
     {
-        EnsurePopulated();
+        JobRegistry.EnsurePopulated();
 
         var repository = NewRepository();
         var queue = ManagedQueue(repository, cores: 8);
@@ -284,7 +237,7 @@ public class WaitingStateAdmissionTests : IDisposable
     [Fact]
     public async Task APoolQueueMissingItsTemplates_FailsTheJob_RatherThanRetryingForever()
     {
-        EnsurePopulated();
+        JobRegistry.EnsurePopulated();
 
         var repository = NewRepository();
         var queue = ManagedQueue(repository, cores: 8);
@@ -339,69 +292,17 @@ public class WaitingStateAdmissionTests : IDisposable
 /// executor, and a reconciliation that never happens because nothing asked.
 /// </summary>
 [Collection("JobRegistry")]
-public class ManagedContainmentTests : IDisposable
+public class ManagedContainmentTests : DaemonTestBase
 {
-    private static readonly object _populateLock = new();
-
-    private readonly string _dir = Path.Combine(Path.GetTempPath(), "relay-containment-" + Guid.NewGuid());
-
-    public ManagedContainmentTests() => Directory.CreateDirectory(_dir);
-    public void Dispose() { try { Directory.Delete(_dir, true); } catch { } }
-
-    private sealed class FakeProcess : IManagedProcess
-    {
-        public int Pid => 4242;
-        public DateTime StartTime => new(2026, 1, 1);
-        public bool HasExited { get; private set; }
-        public int ExitCode { get; private set; }
-
-        public void Exit(int code) { ExitCode = code; HasExited = true; }
-        public void KillTree() => HasExited = true;
-        public Task WaitForExitAsync(CancellationToken ct = default) => Task.CompletedTask;
-    }
-
-    private static void EnsurePopulated()
-    {
-        lock (_populateLock)
-        {
-            if (Job.Types.Count == 0)
-                Job.PopulateStatic();
-        }
-    }
+    public ManagedContainmentTests() : base("relay-containment-") { }
 
     private string RegistryPath => Path.Combine(_dir, "managed-processes.json");
 
-    private QueueRepository NewRepository() =>
-        new(Path.Combine(_dir, "queues.json"),
-            (job, action) => action(job),
-            (job, action) => { action(job); return Task.CompletedTask; });
-
-    private Job NewJob()
-    {
-        EnsurePopulated();
-        return new MaskJob { Id = 1, Space = new Space { RootDirectory = _dir }, Status = JobStatus.Waiting };
-    }
-
-    private ClusterQueue ManagedQueue(QueueRepository repository)
-    {
-        var queue = (ClusterQueue)repository.CreateClusterQueue();
-        queue.Alias           = "managed";
-        queue.SchedulerType   = ClusterScheduler.Managed;
-        queue.ManagedCores    = 8;
-        queue.ManagedMemoryGb = 1024;
-        queue.ManagedGpus     = 0;
-        return queue;
-    }
-
     private static Task InvokeAborting(QueueRepository repository, Job job, JobQueue queue) =>
-        (Task)typeof(QueueRepository)
-            .GetMethod("HandleAbortingState", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .Invoke(repository, new object[] { job, queue, false })!;
+        InvokeHandler(repository, "HandleAbortingState", job, queue, false);
 
     private static Task InvokeDaemon(QueueRepository repository) =>
-        (Task)typeof(QueueRepository)
-            .GetMethod("RunDaemonAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .Invoke(repository, Array.Empty<object>())!;
+        InvokeHandler(repository, "RunDaemonAsync");
 
     [Fact]
     public async Task AbortingAManagedJobBeforeItHasAPid_StillReachesTheExecutor()

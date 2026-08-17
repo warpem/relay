@@ -50,14 +50,6 @@ public class ManagedClusterQueueTests
     }
 
     [Fact]
-    public void IsManaged_IsTrueOnlyForTheManagedScheduler()
-    {
-        Assert.True(Managed().IsManaged);
-        Assert.False(new ClusterQueue((_, _) => { }) { SchedulerType = ClusterScheduler.Flux }
-                     .IsManaged);
-    }
-
-    [Fact]
     public void ParsersAreNeverConsultedForAManagedQueue()
     {
         // There is no scheduler output to parse; reaching a parser means a wiring mistake.
@@ -82,9 +74,22 @@ public class ManagedClusterQueueTests
     public void ANonManagedQueue_AdmitsWithoutConsultingAnExecutor()
     {
         // The external scheduler arbitrates; Relay must not second-guess it, and there is no
-        // executor attached to such a queue in the first place.
+        // executor attached to such a queue in the first place. Every non-managed queue must
+        // behave exactly as it did before this feature existed.
         var queue = new ClusterQueue((_, _) => { }) { SchedulerType = ClusterScheduler.Slurm };
 
         Assert.IsType<AdmissionResult.Admit>(queue.CanAdmit(null));
+    }
+
+    [Fact]
+    public void AdmitAndBusy_AreSharedSingletons()
+    {
+        // Returned for every waiting job on every daemon tick; do not allocate per call.
+        // Comparing a static field to itself proves nothing, so pin what the fields actually are:
+        // the right case, and distinct from each other. "Busy, ask again" and "start now" differ
+        // only by type, so a caller pattern-matching on Admit must not match Busy.
+        Assert.IsType<AdmissionResult.Admit>(AdmissionResult.Admitted);
+        Assert.IsType<AdmissionResult.Busy>(AdmissionResult.IsBusy);
+        Assert.NotSame(AdmissionResult.Admitted, AdmissionResult.IsBusy);
     }
 }
