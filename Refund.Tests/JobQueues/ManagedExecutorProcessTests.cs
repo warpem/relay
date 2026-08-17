@@ -162,16 +162,54 @@ public class ManagedExecutorProcessTests : IDisposable
         // Process.HasExited can go true while buffered output is unwritten. HandleJobCompletion
         // runs final progress tracking and then dequeues, so reporting Finished early loses the
         // job's last log lines.
+        //
+        // The line count is load-bearing. 5000 short lines fit inside the pipe, so the script
+        // writes the lot and exits without ever blocking, while the pump — one flush per line, by
+        // design — is still thousands of lines behind. That makes the backlog at process exit
+        // certain rather than incidental: at 500 lines the pump drains within a single 25 ms poll,
+        // and an implementation that ignored the pumps entirely passed this test anyway.
+        const int Lines = 5000;
+
         var executor = new ManagedExecutor();
         var job = NewJob();
         executor.TryAdmit(job, new ResourceTotals(8, 32, 0));
 
-        executor.Launch(job, WriteScript("for i in $(seq 1 500); do echo line-$i; done"), _dir);
+        executor.Launch(job, WriteScript($"for i in $(seq 1 {Lines}); do echo line-$i; done"), _dir);
         await WaitUntil(() => executor.GetStatus(job) == ClusterJobStatus.Finished);
 
+        // Read at the first terminal observation: the contract is that everything is already on
+        // disk by then, not that it turns up shortly afterwards.
         var written = await File.ReadAllTextAsync(job.PathStdOut);
+
         Assert.Contains("line-1\n", written);
-        Assert.Contains("line-500", written);
+        Assert.Contains($"line-{Lines}\n", written);
+        Assert.Equal(Lines, written.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length);
+    }
+
+    [Fact]
+    public async Task OutputFilesAreTruncatedPerRun_NotAppendedTo()
+    {
+        // Every progress parser reads the whole file and indexes iterations by line position from
+        // the top (Class3D.cs:1197, Refine3D.cs:976, InitialReference.cs:391, PostProcess.cs:413),
+        // so a re-queued job appending to its previous run's log parses stale markers as current
+        // progress. The SLURM path this replaces truncates via #SBATCH --output=.
+        var executor = new ManagedExecutor();
+        var job = NewJob();
+        executor.TryAdmit(job, new ResourceTotals(8, 32, 0));
+
+        await File.WriteAllTextAsync(job.PathStdOut, "stale-iteration-from-the-previous-run\n");
+        await File.WriteAllTextAsync(job.PathStdErr, "stale-error-from-the-previous-run\n");
+
+        executor.Launch(job, WriteScript("echo fresh-out; echo fresh-err 1>&2"), _dir);
+        await WaitUntil(() => executor.GetStatus(job) == ClusterJobStatus.Finished);
+
+        var stdOut = await File.ReadAllTextAsync(job.PathStdOut);
+        var stdErr = await File.ReadAllTextAsync(job.PathStdErr);
+
+        Assert.DoesNotContain("stale-iteration", stdOut);
+        Assert.DoesNotContain("stale-error", stdErr);
+        Assert.Contains("fresh-out", stdOut);
+        Assert.Contains("fresh-err", stdErr);
     }
 
     [Fact]
@@ -227,26 +265,54 @@ public class ManagedExecutorProcessTests : IDisposable
         // A background grandchild inherits the pipe, so the pump sees no EOF even though the job's
         // own process is long gone. Waiting for it unboundedly would strand the allocation, which
         // is released on exactly this signal.
-        // The sleep is a detached grandchild, so it deliberately outlives every handle we hold and
-        // (on macOS, which has no group to signal) survives KillTree. Kept short so it reaps itself.
-        var script = WriteScript("( sleep 8 ) & echo done; exit 0");
+        //
+        // Both bounds are asserted as elapsed time rather than as a state read at some chosen
+        // instant, because only elapsed time is robust under load: a slow machine can only push
+        // the measurement further from the thing being asserted, never across it.
+        var grace = TimeSpan.FromSeconds(1);
+        var pidFile = Path.Combine(_dir, "grandchild.pid");
 
+        // The sleep is detached and inherits stdout, so it outlives the script and holds the pipe
+        // open with no writer we will ever see again. Its pid is recorded so the test can clean up
+        // rather than leave it behind — on macOS there is no group to signal, so KillTree cannot.
+        var script = WriteScript($"sleep 15 & echo $! > '{pidFile}'; echo done; exit 0");
+
+        var started = Stopwatch.StartNew();
         var process = SystemManagedProcess.Start(script, _dir, Array.Empty<int>(),
                                                  Path.Combine(_dir, "std.out"),
                                                  Path.Combine(_dir, "std.err"),
-                                                 drainGrace: TimeSpan.FromSeconds(1));
+                                                 drainGrace: grace);
         try
         {
-            // The script itself exits in milliseconds; the pump cannot drain until the sleep does.
-            await Task.Delay(400);
-            Assert.False(process.HasExited);
+            // Upper bound: the wait is bounded at all. An implementation that waited for the pumps
+            // unconditionally would sit here for the full 15 s and time out.
+            await WaitUntil(() => process.HasExited, timeoutMs: 10_000);
 
-            await WaitUntil(() => process.HasExited, timeoutMs: 5_000);
+            // Lower bound: it really did wait. The script exits within milliseconds, so an
+            // implementation that ignored the pumps would arrive here almost immediately.
+            Assert.True(started.Elapsed >= grace,
+                        $"HasExited fired after {started.Elapsed.TotalMilliseconds:F0} ms, " +
+                        $"inside the {grace.TotalSeconds:F0} s drain grace");
         }
         finally
         {
             process.KillTree();
+            KillIfRunning(pidFile);
         }
+    }
+
+    private static void KillIfRunning(string pidFile)
+    {
+        try
+        {
+            if (!File.Exists(pidFile) ||
+                !int.TryParse(File.ReadAllText(pidFile).Trim(), out var pid))
+                return;
+
+            using var process = Process.GetProcessById(pid);
+            process.Kill();
+        }
+        catch { /* already gone */ }
     }
 
     [Fact]
@@ -578,6 +644,161 @@ public class ManagedExecutorProcessTests : IDisposable
     }
 
     [Fact]
+    public void OwnProcessGroup_KeepsAskingWhileTheChildIsStillOnItsWayIntoTheGroup()
+    {
+        // THE regression test for this type's reason to exist. Process.Start returns when fork(2)
+        // returns; execve, libc startup and setsid(2) are all still ahead of the child, so the
+        // first reads legitimately see Relay's group. Latching that answer disables group kills
+        // and the startup sweep permanently, on the deployment platform, with no other symptom.
+        var calls = 0;
+        var group = new OwnProcessGroup(pid: 4321, mayHaveOwnGroup: true,
+                                        getPgid: _ => ++calls <= 3 ? 100 : 4321,
+                                        hasExited: () => false);
+
+        Assert.Null(group.Value);
+        Assert.Null(group.Value);
+        Assert.Null(group.Value);
+
+        Assert.Equal(4321, group.Value);   // setsid has landed
+    }
+
+    [Fact]
+    public void OwnProcessGroup_AsksTheOsOnlyUntilItGetsAnAnswer()
+    {
+        var calls = 0;
+        var group = new OwnProcessGroup(4321, true, _ => { calls++; return 4321; }, () => false);
+
+        Assert.Equal(4321, group.Value);
+        Assert.Equal(4321, group.Value);
+        Assert.Equal(4321, group.Value);
+
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public void OwnProcessGroup_RemembersAConfirmedGroup_AfterTheProcessHasGone()
+    {
+        // The registry has to keep being able to signal the group after Relay has lost the handle;
+        // that is the entire point of recording a group rather than a Process.
+        var exited = false;
+        var group = new OwnProcessGroup(4321, true, _ => 4321, () => exited);
+
+        Assert.Equal(4321, group.Value);
+        exited = true;
+        Assert.Equal(4321, group.Value);
+    }
+
+    [Fact]
+    public void OwnProcessGroup_WillNotResolveAProcessThatIsAlreadyGone()
+    {
+        // Unconfirmed and exited: the pid may have been recycled, and the recycled process's
+        // group is somebody else's tree.
+        var group = new OwnProcessGroup(4321, true, _ => 4321, () => true);
+
+        Assert.Null(group.Value);
+    }
+
+    [Fact]
+    public void OwnProcessGroup_NeverAsksWhenThePlatformCannotCreateAGroup()
+    {
+        // On macOS the child is in Relay's group and always will be. There is no answer getpgid
+        // could give that would make signalling it safe, so it is never asked. The probe returns
+        // a *convincing* group rather than throwing: a swallowed exception would look like the
+        // right answer for the wrong reason.
+        var asked = false;
+        var group = new OwnProcessGroup(4321, mayHaveOwnGroup: false,
+                                        getPgid: _ => { asked = true; return 4321; },
+                                        hasExited: () => false);
+
+        Assert.Null(group.Value);
+        Assert.False(asked);
+    }
+
+    [Fact]
+    public void OwnProcessGroup_NeverTrustsAGroupThatIsNotTheChildsOwnPid()
+    {
+        Assert.Null(new OwnProcessGroup(4321, true, _ => 100, () => false).Value);
+        Assert.Null(new OwnProcessGroup(1, true, _ => 1, () => false).Value);   // never kill(-1)
+    }
+
+    [Fact]
+    public void OwnProcessGroup_ToleratesAFailingSyscall()
+    {
+        var group = new OwnProcessGroup(4321, true,
+                                        _ => throw new DllNotFoundException("libc"),
+                                        () => false);
+
+        Assert.Null(group.Value);
+    }
+
+    [Fact]
+    public async Task Pgid_IsResolvedOnceTheChildHasEnteredItsOwnGroup()
+    {
+        // Exercises the *deployment* branch, which a macOS dev machine cannot otherwise reach and
+        // which is the one where getting the group wrong is unrecoverable. Under the previous
+        // eager read this test is deterministically red — the child has not run setsid yet when
+        // Start returns, so Pgid latched null and never recovered.
+        var standIn = SetsidStandIn();
+        Assert.NotNull(standIn);
+
+        var previous = SystemManagedProcess.SetsidPathOverride;
+        SystemManagedProcess.SetsidPathOverride = standIn;
+        try
+        {
+            Assert.True(SystemManagedProcess.CanCreateOwnGroup);
+
+            var process = SystemManagedProcess.Start(WriteScript("sleep 8"), _dir,
+                                                     Array.Empty<int>(),
+                                                     Path.Combine(_dir, "std.out"),
+                                                     Path.Combine(_dir, "std.err"));
+            try
+            {
+                await WaitUntil(() => process.Pgid != null, timeoutMs: 5_000);
+
+                Assert.Equal(process.Pid, process.Pgid);
+                Assert.Equal(process.Pid, getpgid(process.Pid));                  // the OS agrees
+                Assert.NotEqual(getpgid(Environment.ProcessId), getpgid(process.Pid));
+            }
+            finally
+            {
+                process.KillTree();
+                await WaitUntil(() => process.HasExited, timeoutMs: 5_000);
+            }
+        }
+        finally
+        {
+            SystemManagedProcess.SetsidPathOverride = previous;
+        }
+    }
+
+    /// <summary>
+    /// The real setsid where there is one, otherwise a script that does the same thing to itself
+    /// before exec-ing. Only used to force the Linux branch on a machine that has no setsid.
+    /// </summary>
+    private string SetsidStandIn()
+    {
+        foreach (var real in new[] { "/usr/bin/setsid", "/bin/setsid" })
+            if (File.Exists(real))
+                return real;
+
+        string body =
+            File.Exists("/usr/bin/python3")
+                ? "exec /usr/bin/python3 -c 'import os,sys; os.setsid(); " +
+                  "os.execv(sys.argv[1], sys.argv[1:])' \"$@\""
+            : File.Exists("/usr/bin/perl")
+                ? "exec /usr/bin/perl -e 'setpgrp(0,0); exec @ARGV or die' \"$@\""
+                : null;
+
+        if (body == null)
+            return null;
+
+        var path = WriteScript(body, "setsid-standin");
+        File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite |
+                                   UnixFileMode.UserExecute);
+        return path;
+    }
+
+    [Fact]
     public void CanCreateOwnGroup_TracksWhetherSetsidIsActuallyInstalled()
     {
         var setsidExists = File.Exists("/usr/bin/setsid") || File.Exists("/bin/setsid");
@@ -704,6 +925,55 @@ public class ManagedExecutorProcessTests : IDisposable
         await Task.Delay(500);
         Assert.False(File.Exists(marker), "the unaccounted process was left running");
         Assert.NotNull(spawned);
+    }
+
+    [Fact]
+    public void Launch_WhenTheReservationIsReplacedDuringSpawn_KillsTheProcessAndThrows()
+    {
+        // Not the same case as "the reservation vanished". Here the job is aborted and re-queued
+        // while its process is starting, so a *different* entry is booked under the same Job key
+        // — present, usable and process-less, so presence-and-usability checks wave it through.
+        // Adopting it points the ledger at the new entry's GPUs while the process runs on the old
+        // entry's, leaving the GPUs actually in use free for the next job to be admitted onto.
+        var executor = new ManagedExecutor();
+        var job = NewGpuJob();
+        var host = new ResourceTotals(8, 32, 2);
+        executor.TryAdmit(job, host);
+
+        var launchedWith = executor.GpuIndicesFor(job);
+        Assert.Single(launchedWith);
+
+        var orphan = new FakeProcess();
+        IReadOnlyList<int>? rebooked = null;
+
+        Assert.Throws<InvalidOperationException>(() => executor.Launch(job, gpus =>
+        {
+            executor.Kill(job);                 // aborted: the reservation is retired ...
+            executor.Reap();
+            executor.TryAdmit(job, host);       // ... and re-queued onto a fresh one
+            rebooked = executor.GpuIndicesFor(job);
+            return orphan;
+        }));
+
+        Assert.Equal(1, orphan.KillCount);
+
+        // The replacement reservation is intact and was not handed the process.
+        Assert.Equal(ClusterJobStatus.Pending, executor.GetStatus(job));
+        Assert.NotNull(rebooked);
+        Assert.Single(executor.LiveAllocations());
+    }
+
+    [Fact]
+    public void Attach_WithoutAReservationToken_StillBindsToWhateverTheJobHolds()
+    {
+        // The public two-argument overload keeps its old meaning; only Launch, which knows which
+        // reservation it read, opts into the identity check.
+        var executor = new ManagedExecutor();
+        var job = NewJob();
+        executor.TryAdmit(job, new ResourceTotals(8, 32, 0));
+
+        Assert.True(executor.Attach(job, new FakeProcess()));
+        Assert.Equal(ClusterJobStatus.Running, executor.GetStatus(job));
     }
 
     [Fact]

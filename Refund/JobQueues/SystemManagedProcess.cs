@@ -17,6 +17,7 @@ public sealed class SystemManagedProcess : IManagedProcess
     private readonly Process _process;
     private readonly Task _pumps;
     private readonly TimeSpan _drainGrace;
+    private readonly OwnProcessGroup _group;
 
     /// <summary>
     /// Timestamp at which the OS process was first observed gone, or 0 if it has not been. Only
@@ -37,12 +38,22 @@ public sealed class SystemManagedProcess : IManagedProcess
     public int Pid { get; }
 
     /// <summary>
-    /// The process group we created for this job, or null when the platform has no
-    /// <c>setsid</c> (macOS). Null means the child inherited <em>Relay's own</em> group, and
-    /// group-signalling it would kill Relay — so a null here must never be turned into a
-    /// group kill anywhere, including the startup leftover sweep.
+    /// The process group we created for this job, or null when we have no group of our own —
+    /// either because the platform has no <c>setsid</c> (macOS), or because the child has not
+    /// entered its group yet. Null means the child is, as far as we can prove, still in
+    /// <em>Relay's own</em> group, and group-signalling that would kill Relay — so a null here
+    /// must never be turned into a group kill anywhere, including the startup leftover sweep.
     /// </summary>
-    public int? Pgid { get; }
+    /// <remarks>
+    /// <b>Resolved on read, not at launch, and callers must treat an early null as "not yet".</b>
+    /// <c>Process.Start</c> returns as soon as <c>fork(2)</c> returns in the parent, well before
+    /// the child has finished <c>execve</c>, libc startup and <c>setsid(2)</c> — measured at
+    /// 1-140 ms. A read taken inside <see cref="Start"/> therefore observes Relay's group every
+    /// single time, and latching that would permanently disable group kills and the startup
+    /// leftover sweep on the one platform that has them. Anything persisting this value must
+    /// re-read it rather than capture it at launch.
+    /// </remarks>
+    public int? Pgid => _group.Value;
 
     public DateTime StartTime { get; }
 
@@ -76,14 +87,17 @@ public sealed class SystemManagedProcess : IManagedProcess
 
     public int ExitCode => _process.ExitCode;
 
-    private SystemManagedProcess(Process process, Task pumps, int? pgid, TimeSpan drainGrace)
+    private SystemManagedProcess(Process process, Task pumps, bool ownGroup, TimeSpan drainGrace)
     {
         _process = process;
         _pumps = pumps;
         _drainGrace = drainGrace;
         Pid = process.Id;
         StartTime = SafeStartTime(process);
-        Pgid = pgid;
+
+        // The raw process liveness, not this class's HasExited: whether the pid is still ours to
+        // ask about has nothing to do with whether the output pumps have drained.
+        _group = new OwnProcessGroup(process.Id, ownGroup, GetPgid, () => SafeHasExited(process));
     }
 
     /// <summary>
@@ -91,8 +105,17 @@ public sealed class SystemManagedProcess : IManagedProcess
     /// our own process group and can signal the whole tree by group id even after losing the
     /// handle; on macOS we fall back to .NET's tree walk, which cannot survive a Relay crash.
     /// </summary>
-    private static readonly string SetsidPath =
+    private static readonly string InstalledSetsidPath =
         new[] { "/usr/bin/setsid", "/bin/setsid" }.FirstOrDefault(File.Exists);
+
+    /// <summary>
+    /// Test seam. The setsid branch is the deployment branch but cannot be reached on a macOS dev
+    /// machine, and it is the branch where getting the process group wrong is unrecoverable, so it
+    /// has to be exercisable from here.
+    /// </summary>
+    internal static string SetsidPathOverride;
+
+    private static string SetsidPath => SetsidPathOverride ?? InstalledSetsidPath;
 
     /// <summary>Whether this host can give a job a process group of its own.</summary>
     internal static bool CanCreateOwnGroup => SetsidPath != null;
@@ -144,44 +167,15 @@ public sealed class SystemManagedProcess : IManagedProcess
             PumpAsync(process.StandardOutput, stdOutPath),
             PumpAsync(process.StandardError, stdErrPath));
 
-        return new SystemManagedProcess(process, pumps, OwnGroupOf(process, ownGroup),
-                                        drainGrace ?? DefaultDrainGrace);
+        return new SystemManagedProcess(process, pumps, ownGroup, drainGrace ?? DefaultDrainGrace);
     }
 
-    /// <summary>
-    /// The group id to record, checked against the OS rather than assumed.
-    /// </summary>
-    /// <remarks>
-    /// setsid makes the child its own group leader, so pgid == pid by construction — but only if
-    /// setsid execs in place rather than forking, and only if it succeeded at all. Since the whole
-    /// interlock downstream is "a non-null Pgid is safe to group-kill", the invariant is verified
-    /// here instead of assumed: anything other than a group equal to our own pid is recorded as
-    /// null, which costs nothing but the (dev-only) fallback path.
-    /// </remarks>
-    private static int? OwnGroupOf(Process process, bool ownGroup)
+    /// <summary>Process.HasExited throws once the handle is disposed; treat that as "still alive",
+    /// which is the conservative answer everywhere it is used here.</summary>
+    private static bool SafeHasExited(Process process)
     {
-        if (!ownGroup)
-            return null;
-
-        try
-        {
-            int pid = process.Id;
-            int pgid = GetPgid(pid);
-
-            if (pgid == pid)
-                return pgid;
-
-            Log.ForContext<SystemManagedProcess>().Warning(
-                "Process {Pid} was launched via setsid but reports process group {Pgid}; " +
-                "falling back to tree-walk kills for it.", pid, pgid);
-        }
-        catch (Exception exc)
-        {
-            Log.ForContext<SystemManagedProcess>().Warning(
-                exc, "Could not read the process group of a freshly launched job.");
-        }
-
-        return null;
+        try { return process.HasExited; }
+        catch { return false; }
     }
 
     /// <summary>
@@ -211,7 +205,13 @@ public sealed class SystemManagedProcess : IManagedProcess
             if (!string.IsNullOrEmpty(directory))
                 Directory.CreateDirectory(directory);
 
-            await using var writer = new StreamWriter(path, append: true) { AutoFlush = true };
+            // Truncate, never append. These files are per-run: the SLURM path this replaces
+            // truncates via #SBATCH --output=, Class3DContinue deletes PathStdOut before running,
+            // and every progress parser (Class3D.cs:1197, Refine3D.cs:976, InitialReference.cs:391,
+            // PostProcess.cs:413) reads the whole file and indexes iterations by line position from
+            // the top. Appending would let a re-queued job parse its previous run's markers as
+            // current progress.
+            await using var writer = new StreamWriter(path, append: false) { AutoFlush = true };
 
             while (await reader.ReadLineAsync() is { } line)
                 await writer.WriteLineAsync(line);
@@ -223,8 +223,21 @@ public sealed class SystemManagedProcess : IManagedProcess
         }
     }
 
-    public void KillTree() => KillTree(Pid, Pgid, () => _process.Kill(entireProcessTree: true),
-                                       () => _process.HasExited);
+    public void KillTree()
+    {
+        // Resolved here rather than at launch; see the remarks on Pgid. An abort that lands within
+        // milliseconds of the spawn can legitimately still see null, and takes the tree walk —
+        // which is sound, because the direct child is necessarily still alive that early.
+        int? pgid = Pgid;
+
+        if (pgid == null && CanCreateOwnGroup)
+            Log.ForContext<SystemManagedProcess>().Debug(
+                "Killing process {Pid} by tree walk: no process group of ours could be confirmed " +
+                "for it.", Pid);
+
+        KillTree(Pid, pgid, () => _process.Kill(entireProcessTree: true),
+                 () => SafeHasExited(_process));
+    }
 
     /// <summary>
     /// Shared by the live path and the startup leftover sweep, which has no Process handle.
@@ -296,4 +309,91 @@ public sealed class SystemManagedProcess : IManagedProcess
 
     [DllImport("libc", EntryPoint = "getpgid", SetLastError = true)]
     private static extern int GetPgid(int pid);
+}
+
+/// <summary>
+/// The process group a child was launched into, confirmed against the OS and then remembered.
+/// Null until the kernel agrees the child leads a group of its own.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Resolution is lazy on purpose, and this is the whole reason the type exists.
+/// <c>Process.Start</c> returns as soon as <c>fork(2)</c> returns in the parent; the child still
+/// has to complete <c>execve</c>, libc startup and <c>setsid(2)</c>. Measured on Linux, a
+/// <c>getpgid</c> issued immediately after Start loses that race every time — 0 of 60 reads saw
+/// the new group, with a lag of 1-140 ms. Recording that answer would latch null forever, which
+/// silently downgrades every kill to the tree walk and turns the startup leftover sweep, which
+/// dispatches on a non-null group, into a permanent no-op. On the deployment platform. With no
+/// other symptom.
+/// </para>
+/// <para>
+/// The alternative — polling inside Start until the group appears — would add up to ~140 ms to
+/// every launch and still be probabilistic. Reading on use costs one syscall on a path
+/// (<see cref="SystemManagedProcess.KillTree()"/>) that is already making one, and by the time
+/// anyone can act on the answer it is correct.
+/// </para>
+/// <para>
+/// Only a positive is cached, and only <c>pgid == pid &amp;&amp; pid &gt; 1</c> counts as one:
+/// everything downstream treats a non-null value as safe to <c>kill(-pgid)</c>, so this never
+/// guesses. Once confirmed the value survives the process exiting, because the registry needs to
+/// keep signalling a group after Relay has lost the handle. Before confirmation an exited process
+/// resolves to null instead, since its pid may already have been recycled into somebody else's
+/// group.
+/// </para>
+/// </remarks>
+internal sealed class OwnProcessGroup
+{
+    private readonly int _pid;
+    private readonly bool _mayHaveOwnGroup;
+    private readonly Func<int, int> _getPgid;
+    private readonly Func<bool> _hasExited;
+
+    /// <summary>The confirmed group, or 0 while the OS has not yet agreed there is one.</summary>
+    private int _confirmed;
+
+    internal OwnProcessGroup(int pid, bool mayHaveOwnGroup, Func<int, int> getPgid,
+                             Func<bool> hasExited)
+    {
+        _pid = pid;
+        _mayHaveOwnGroup = mayHaveOwnGroup;
+        _getPgid = getPgid;
+        _hasExited = hasExited;
+    }
+
+    internal int? Value
+    {
+        get
+        {
+            int confirmed = Volatile.Read(ref _confirmed);
+            if (confirmed != 0)
+                return confirmed;
+
+            // No setsid on this host, so the child is in Relay's group and always will be. Never
+            // even ask: there is no answer that could make a group kill safe.
+            if (!_mayHaveOwnGroup)
+                return null;
+
+            try
+            {
+                if (_hasExited())
+                    return null;
+
+                int pgid = _getPgid(_pid);
+
+                // setsid makes the child its own group leader, so pgid == pid. Anything else is
+                // either the race (not there yet) or a setsid that forked instead of exec-ing,
+                // and both mean we have no group we may signal. The > 1 guard keeps a corrupt or
+                // defaulted pair from ever becoming kill(-1), which is "every process this user
+                // may signal".
+                if (pgid == _pid && pgid > 1)
+                {
+                    Volatile.Write(ref _confirmed, pgid);
+                    return pgid;
+                }
+            }
+            catch { /* no group we can prove is ours */ }
+
+            return null;
+        }
+    }
 }
