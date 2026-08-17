@@ -489,7 +489,18 @@ public sealed class ManagedExecutor
     /// caller — the ordering is the correctness property, so it must not be possible to get it
     /// wrong from outside.
     /// </remarks>
-    public async Task KillAllAsync()
+    public Task KillAllAsync() => KillAllAsync(DefaultShutdownExitWait);
+
+    /// <summary>
+    /// How long shutdown waits for one signalled process to actually exit. Bounded because
+    /// <see cref="IManagedProcess.KillTree"/> suppresses its own errors: a process joins the
+    /// signalled list even when nothing was delivered, and an unbounded wait on one of those would
+    /// hang the host's shutdown for as long as the job keeps computing.
+    /// </summary>
+    private static readonly TimeSpan DefaultShutdownExitWait = TimeSpan.FromSeconds(10);
+
+    /// <summary>Overload with the bound injected, so the timeout path is testable in milliseconds.</summary>
+    internal async Task KillAllAsync(TimeSpan exitWait)
     {
         BeginShutdown();
 
@@ -516,10 +527,24 @@ public sealed class ManagedExecutor
 
         await Task.WhenAll(signalled.Select(async p =>
         {
+            // Bounded, and cancelled rather than merely abandoned, so an implementation that
+            // honours the token stops waiting too. A process still here when this expires was
+            // signalled but not contained: it keeps its registry record, and the next startup's
+            // sweep retries. Shutdown proceeds either way — refusing to finish would leave Relay
+            // hung with no way to try again.
+            using var timeout = new CancellationTokenSource(exitWait);
+
             try
             {
-                await p.WaitForExitAsync();
+                await p.WaitForExitAsync(timeout.Token).WaitAsync(exitWait);
                 lock (dead) dead.Add(p);
+            }
+            catch (Exception exc) when (exc is OperationCanceledException or TimeoutException)
+            {
+                Log.ForContext<ManagedExecutor>().Error(
+                    "Managed process {Pid} was signalled but had not exited after {Seconds:F0}s; " +
+                    "leaving its leftover record in place so the next startup can retry containment.",
+                    p.Pid, exitWait.TotalSeconds);
             }
             catch (Exception exc)
             {

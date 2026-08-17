@@ -924,6 +924,46 @@ public class ManagedExecutorTests : IDisposable
     }
 
     [Fact]
+    public async Task KillAllAsync_BoundsItsWait_AndKeepsTheRecordOfAProcessThatNeverExits()
+    {
+        // KillTree suppresses both the group-signal error and the fallback's, so a process joins
+        // the signalled list even when nothing was delivered — and WaitForExitAsync then had no
+        // bound at all. Graceful shutdown hung for as long as the job kept computing, which on a
+        // refinement is hours. The wait is bounded; the record stays for the next startup to sweep.
+        var registry = NewRegistry();
+        var executor = new ManagedExecutor(registry);
+
+        var stuck = InSpace(NewJob(), spaceId: 1, jobId: 1);
+        executor.TryAdmit(stuck, Host);
+        executor.Launch(stuck, _ => new NeverExitsProcess());
+
+        var elapsed = System.Diagnostics.Stopwatch.StartNew();
+        await executor.KillAllAsync(TimeSpan.FromMilliseconds(100));
+        elapsed.Stop();
+
+        Assert.True(elapsed.Elapsed < TimeSpan.FromSeconds(5),
+                    $"shutdown took {elapsed.Elapsed.TotalSeconds:F1}s waiting on a process that " +
+                    "was never going to exit");
+
+        Assert.Equal(stuck.Id, Assert.Single(registry.Load()).JobId);
+    }
+
+    /// <summary>Signalled, apparently successfully, and yet still there. What a suppressed kill
+    /// error leaves behind.</summary>
+    private sealed class NeverExitsProcess : IManagedProcess
+    {
+        public int Pid => 9001;
+        public DateTime StartTime => new(2026, 1, 1);
+        public bool HasExited => false;
+        public int ExitCode => throw new InvalidOperationException("still running");
+
+        public void KillTree() { }
+
+        public Task WaitForExitAsync(CancellationToken ct = default) =>
+            Task.Delay(Timeout.Infinite, ct);
+    }
+
+    [Fact]
     public void ALaunchThatFinishesSpawningAfterShutdownBegan_KillsTheProcessAndThrows()
     {
         // The other half of the ordering. The guard at the top of Launch was passed before shutdown
