@@ -1807,3 +1807,292 @@ EOF
 ```
 
 ---
+
+### Task 7: Wire `Managed` into `ClusterQueue`
+
+Adds the enum member, the three resource properties, and the branch in submit / status / abort. Script composition is reused untouched — `PrepareAndWriteScript` (`ClusterQueue.cs:418`) already produces what is needed, and a managed template is just the existing one without the `#SBATCH`/`#FLUX` header.
+
+**Files:**
+- Modify: `Refund/DataModel/JobQueue.cs` (enum member)
+- Modify: `Refund/JobQueues/ClusterQueue.cs`
+- Modify: `Refund/JobQueues/ReadOnly/ReadOnlyClusterQueue.cs`
+- Test: `Refund.Tests/JobQueues/ManagedClusterQueueTests.cs`
+
+**Interfaces:**
+- Consumes: `ManagedExecutor` (Tasks 4–6), `AdmissionResult` (Task 3).
+- Produces, used by Tasks 8–10:
+  - `ClusterScheduler.Managed`
+  - `ClusterQueue.ManagedCores` / `ManagedMemoryGb` / `ManagedGpus` (`[RelayProperty] int`)
+  - `ClusterQueue.ManagedTotals → ResourceTotals`
+  - `ClusterQueue.Executor` — settable once, by `QueueRepository`
+  - `ClusterQueue.IsManaged → bool`
+
+- [ ] **Step 1: Write the failing tests**
+
+Create `Refund.Tests/JobQueues/ManagedClusterQueueTests.cs`:
+
+```csharp
+using Refund.DataModel;
+using Refund.JobQueues;
+
+namespace Refund.Tests.JobQueues;
+
+public class ManagedClusterQueueTests
+{
+    private static ClusterQueue Managed() => new ClusterQueue((_, _) => { })
+    {
+        SchedulerType = ClusterScheduler.Managed,
+        ManagedCores = 8,
+        ManagedMemoryGb = 32,
+        ManagedGpus = 2,
+    };
+
+    [Fact]
+    public void ManagedDefaults_AreSensibleForASingleWorkstation()
+    {
+        var queue = new ClusterQueue((_, _) => { });
+
+        Assert.Equal(Environment.ProcessorCount, queue.ManagedCores);
+        Assert.Equal(64, queue.ManagedMemoryGb);
+        Assert.Equal(1, queue.ManagedGpus);
+    }
+
+    [Fact]
+    public void ManagedProperties_RoundTripThroughJson()
+    {
+        var saved = Managed().ToJson();
+
+        var loaded = new ClusterQueue((_, _) => { });
+        loaded.ReadFromJson(saved, (_, _, _) => null);
+
+        Assert.Equal(ClusterScheduler.Managed, loaded.SchedulerType);
+        Assert.Equal(8, loaded.ManagedCores);
+        Assert.Equal(32, loaded.ManagedMemoryGb);
+        Assert.Equal(2, loaded.ManagedGpus);
+    }
+
+    [Fact]
+    public void ManagedTotals_ReadTheQueuesCurrentValues()
+    {
+        // Read per call, never snapshotted: ClusterQueue is constructed before ReadFromJson
+        // hydrates it, and an admin can edit the totals later.
+        var queue = Managed();
+        Assert.Equal(new ResourceTotals(8, 32, 2), queue.ManagedTotals);
+
+        queue.ManagedGpus = 4;
+        Assert.Equal(new ResourceTotals(8, 32, 4), queue.ManagedTotals);
+    }
+
+    [Fact]
+    public void IsManaged_IsTrueOnlyForTheManagedScheduler()
+    {
+        Assert.True(Managed().IsManaged);
+        Assert.False(new ClusterQueue((_, _) => { }) { SchedulerType = ClusterScheduler.Flux }
+                     .IsManaged);
+    }
+
+    [Fact]
+    public void ParsersAreNeverConsultedForAManagedQueue()
+    {
+        // There is no scheduler output to parse; reaching a parser means a wiring mistake.
+        var queue = Managed();
+
+        Assert.Throws<InvalidOperationException>(() => queue.ParseClusterJobId("anything"));
+        Assert.Equal(ClusterJobStatus.Unknown, queue.ParseClusterJobStatus("anything"));
+    }
+
+    [Fact]
+    public void CanAdmit_WithoutAnExecutor_RejectsRatherThanRunningUnaccounted()
+    {
+        // QueueRepository injects the host-wide executor. If that wiring is missing, failing loudly
+        // beats silently spawning processes nobody is accounting for.
+        var result = Managed().CanAdmit(null);
+
+        var reject = Assert.IsType<AdmissionResult.Reject>(result);
+        Assert.Contains("executor", reject.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+}
+```
+
+- [ ] **Step 2: Run and watch them fail**
+
+Run: `dotnet test Refund.Tests/Refund.Tests.csproj --nologo -v q --filter "FullyQualifiedName~ManagedClusterQueueTests"`
+Expected: FAIL to compile — `ClusterScheduler.Managed` does not exist.
+
+- [ ] **Step 3: Add the enum member**
+
+In `Refund/DataModel/JobQueue.cs`, in `ClusterScheduler`, after `Flux = 4`:
+
+```csharp
+        /// <summary>
+        /// No external scheduler: Relay runs the job as a local process and accounts for the host's
+        /// cores, memory and GPUs itself. Not a scheduler in the sense the other values are — the
+        /// job ID and status parsers are never consulted for a managed queue.
+        /// </summary>
+        Managed = 6,
+```
+
+Use `6`, not `5`; `Custom = 5` already exists and its persisted value must not shift.
+
+- [ ] **Step 4: Add the properties to `ClusterQueue`**
+
+```csharp
+    /// <summary>Total CPU cores a managed queue may hand out. Ignored unless SchedulerType is Managed.</summary>
+    [RelayProperty]
+    public int ManagedCores { get; set; } = Environment.ProcessorCount;
+
+    /// <summary>Total memory in GB a managed queue may hand out. Ignored unless SchedulerType is Managed.</summary>
+    [RelayProperty]
+    public int ManagedMemoryGb { get; set; } = 64;
+
+    /// <summary>Number of GPUs on this host. Ignored unless SchedulerType is Managed.</summary>
+    [RelayProperty]
+    public int ManagedGpus { get; set; } = 1;
+
+    /// <summary>True when Relay schedules this queue's jobs itself.</summary>
+    public bool IsManaged => SchedulerType == ClusterScheduler.Managed;
+
+    /// <summary>
+    /// Read fresh on every use rather than snapshotted: this object is constructed before
+    /// ReadFromJson hydrates the persisted values, and the editor can change them later.
+    /// </summary>
+    public ResourceTotals ManagedTotals => new(ManagedCores, ManagedMemoryGb, ManagedGpus);
+
+    /// <summary>
+    /// The host-wide executor, injected by QueueRepository. Null on a queue that was constructed
+    /// outside the repository (templates, copies, tests).
+    /// </summary>
+    public ManagedExecutor Executor { get; set; }
+```
+
+- [ ] **Step 5: Guard the parsers**
+
+At the top of `ParseClusterJobId`:
+
+```csharp
+        if (IsManaged)
+            throw new InvalidOperationException(
+                "A managed queue has no scheduler output to parse; job IDs are process ids " +
+                "assigned by ManagedExecutor. Reaching this is a wiring mistake.");
+```
+
+At the top of `ParseClusterJobStatus`:
+
+```csharp
+        if (IsManaged)
+            return ClusterJobStatus.Unknown;
+```
+
+- [ ] **Step 6: Override `CanAdmit`**
+
+```csharp
+    public override AdmissionResult CanAdmit(Job job)
+    {
+        if (!IsManaged)
+            return AdmissionResult.Admitted;      // the external scheduler arbitrates
+
+        if (Executor == null)
+            return new AdmissionResult.Reject(
+                $"Queue \"{Alias}\" is managed but has no executor attached. This is a Relay wiring " +
+                "fault, not a job problem; refusing to run the job unaccounted for.");
+
+        return Executor.TryAdmit(job, ManagedTotals);
+    }
+```
+
+- [ ] **Step 7: Branch submit, status and abort**
+
+In `SubmitJob`, inside the existing `Task.Run` staging body, replace the submission step for the managed case. After `string scriptPath = await PrepareAndWriteScript(job, customValues);`:
+
+```csharp
+                    if (IsManaged)
+                    {
+                        var process = Executor.Launch(job, scriptPath, job.RunDirectory);
+                        await job.WriteToLifecycleLog(
+                            $"Launched locally as pid {process.Pid} on GPUs " +
+                            $"[{string.Join(",", Executor.GpuIndicesFor(job))}]");
+
+                        JobUpdateCallback(job, j => { j.ClusterJobId = process.Pid.ToString(); });
+                        return;
+                    }
+```
+
+At the top of `CheckStatus`, after the existing `StagingJobs` check:
+
+```csharp
+        if (IsManaged)
+            return (Executor?.GetStatus(job) ?? ClusterJobStatus.Failed, "");
+```
+
+At the top of `AbortJob`, after `base.AbortJob(job)`:
+
+```csharp
+        if (IsManaged)
+        {
+            Executor?.Kill(job);
+            return;
+        }
+```
+
+- [ ] **Step 8: Expose the properties read-only**
+
+In `Refund/JobQueues/ReadOnly/ReadOnlyClusterQueue.cs`:
+
+```csharp
+    /// <summary>Total CPU cores a managed queue may hand out.</summary>
+    public int ManagedCores => _queue.ManagedCores;
+
+    /// <summary>Total memory in GB a managed queue may hand out.</summary>
+    public int ManagedMemoryGb => _queue.ManagedMemoryGb;
+
+    /// <summary>Number of GPUs on this host.</summary>
+    public int ManagedGpus => _queue.ManagedGpus;
+
+    /// <summary>True when Relay schedules this queue's jobs itself.</summary>
+    public bool IsManaged => _queue.IsManaged;
+```
+
+- [ ] **Step 9: Run and watch them pass**
+
+Run: `dotnet test Refund.Tests/Refund.Tests.csproj --nologo -v q --filter "FullyQualifiedName~ManagedClusterQueueTests"`
+Expected: PASS, 6 tests.
+
+- [ ] **Step 10: Run the whole suite and build the app**
+
+```bash
+dotnet test Refund.Tests/Refund.Tests.csproj --nologo -v q
+dotnet build Relay/Relay.csproj --nologo -v q
+```
+Expected: all tests pass; build succeeds with 0 errors.
+
+- [ ] **Step 11: Commit**
+
+```bash
+git add Refund/DataModel/JobQueue.cs Refund/JobQueues/ClusterQueue.cs \
+        Refund/JobQueues/ReadOnly/ReadOnlyClusterQueue.cs \
+        Refund.Tests/JobQueues/ManagedClusterQueueTests.cs
+git commit -m "$(cat <<'EOF'
+feat: add the Managed scheduler to ClusterQueue
+
+Managed means no external scheduler: Relay launches the job and accounts for
+the host itself. Script composition is reused unchanged — a managed template
+is the existing one without the #SBATCH/#FLUX header.
+
+Totals are read fresh on every use rather than snapshotted, because
+ClusterQueue is constructed before ReadFromJson hydrates it and the editor can
+change them later.
+
+The job ID parser throws for a managed queue rather than returning something:
+there is no scheduler output, so reaching it means a wiring mistake. Likewise
+CanAdmit rejects when no executor is attached, which fails loudly instead of
+spawning processes nobody is accounting for.
+
+Managed is enum value 6; Custom already owns 5 and its persisted value must
+not shift.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
