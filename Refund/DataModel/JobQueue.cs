@@ -170,6 +170,12 @@ namespace Refund.DataModel
         public virtual async Task<(ClusterJobStatus status, string output)> CheckStatus(Job job) => (ClusterJobStatus.Unknown, "");
 
         /// <summary>
+        /// Whether this queue can start <paramref name="job"/> right now.
+        /// Queues backed by an external scheduler always admit — the scheduler does the arbitration.
+        /// </summary>
+        public virtual AdmissionResult CanAdmit(Job job) => AdmissionResult.Admitted;
+
+        /// <summary>
         /// Clears all jobs from this queue.
         /// This removes all jobs from the queue but does not affect their execution status.
         /// </summary>
@@ -243,6 +249,35 @@ namespace Refund.DataModel
         /// and states with the JobStatusParseTemplate* patterns.
         /// </summary>
         Custom = 5
+    }
+
+    /// <summary>
+    /// The outcome of asking a queue whether it can start a job right now.
+    /// </summary>
+    /// <remarks>
+    /// A boolean cannot express the difference that matters. "No, resources are busy" must leave the
+    /// job Waiting so the daemon retries; "no, this can never run here" must fail it once, with a
+    /// reason. Throwing is not an alternative — HandleWaitingState's catch logs and returns without
+    /// changing job status, so an exception would leave the job Waiting and re-log every tick.
+    /// </remarks>
+    public abstract record AdmissionResult
+    {
+        private AdmissionResult() { }
+
+        /// <summary>Start the job now.</summary>
+        public sealed record Admit : AdmissionResult;
+
+        /// <summary>Resources are in use. Leave the job Waiting; the daemon will ask again.</summary>
+        public sealed record Busy : AdmissionResult;
+
+        /// <summary>The job can never run on this queue. Fail it once with this reason.</summary>
+        public sealed record Reject(string Reason) : AdmissionResult;
+
+        /// <summary>Shared instance — returned for every waiting job on every tick.</summary>
+        public static readonly AdmissionResult Admitted = new Admit();
+
+        /// <summary>Shared instance — returned for every waiting job on every tick.</summary>
+        public static readonly AdmissionResult IsBusy = new Busy();
     }
 
     /// <summary>
