@@ -56,6 +56,53 @@ public class AdmissionGuardTests
     }
 
     [Fact]
+    public void NothingIsAdmittedWhileAQueueEditIsBeingJudgedAndApplied()
+    {
+        // ValidateManagedQueueChange asked the executor whether it had entries, released its lock,
+        // and only then applied the mutation. CanAdmit could reserve in that window, so a totals or
+        // scheduler edit that should have been refused went through — and if the scheduler was
+        // switched, the job admitted in the window took the external submission branch while
+        // leaving a managed reservation stranded. Admission is closed for the whole operation.
+        var executor = new ManagedExecutor();
+        var queue = ManagedQueue(cores: 8, gpus: 0, executor);
+
+        AdmissionResult raced = null;
+
+        executor.WithAdmissionSuspended(
+            _ => true,
+            hasLiveEntries =>
+            {
+                Assert.False(hasLiveEntries());          // the verdict the edit would act on
+
+                // What the daemon does concurrently in the real window.
+                raced = queue.CanAdmit(NewJob());
+
+                // And the verdict still holds when the mutation is about to be applied.
+                Assert.False(hasLiveEntries());
+            });
+
+        Assert.IsType<AdmissionResult.Busy>(raced);      // Busy: the edit takes milliseconds
+        Assert.Empty(executor.LiveAllocations());        // and nothing was booked behind it
+
+        // Admission reopens once the edit is over.
+        Assert.IsType<AdmissionResult.Admit>(queue.CanAdmit(NewJob()));
+    }
+
+    [Fact]
+    public void AnEditThatThrows_StillReopensAdmission()
+    {
+        // The refusal path is the common one — that is what the rules are for — so a suspension
+        // that leaked on a throw would wedge the host on the user's first rejected edit.
+        var executor = new ManagedExecutor();
+        var queue = ManagedQueue(cores: 8, gpus: 0, executor);
+
+        Assert.Throws<InvalidOperationException>(() =>
+            executor.WithAdmissionSuspended(_ => true, _ => throw new InvalidOperationException("refused")));
+
+        Assert.IsType<AdmissionResult.Admit>(queue.CanAdmit(NewJob()));
+    }
+
+    [Fact]
     public void AnImpossibleRequest_IsRejectedWithAReasonNamingBothSides()
     {
         // cores: 0, not 1. CreateMask asks for exactly 1 core and 8 GB, so against a 1-core,

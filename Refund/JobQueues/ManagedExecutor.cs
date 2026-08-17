@@ -216,6 +216,11 @@ public sealed class ManagedExecutor
             if (_unconfirmedLeftovers.Count > 0)
                 return AdmissionResult.IsBusy;
 
+            // A queue edit is being judged and applied; see WithAdmissionSuspended. Busy, because
+            // the edit takes milliseconds and the daemon simply asks again on the next tick.
+            if (_admissionSuspensions > 0)
+                return AdmissionResult.IsBusy;
+
             Reconcile();
 
             if (_entries.TryGetValue(job, out var existing))
@@ -602,6 +607,53 @@ public sealed class ManagedExecutor
         {
             Reconcile();
             return _entries.Keys.Any(predicate);
+        }
+    }
+
+    /// <summary>
+    /// How many queue edits are in flight. Guarded by <see cref="_sync"/>; a counter rather than a
+    /// flag so two concurrent edits cannot have the first to finish re-open admission for the other.
+    /// </summary>
+    private int _admissionSuspensions;
+
+    /// <summary>
+    /// Run <paramref name="change"/> with admission closed, so a queue edit that inspects this
+    /// executor and then mutates the queue is atomic with respect to reservations.
+    /// </summary>
+    /// <param name="owns">Which jobs belong to the queue being edited.</param>
+    /// <param name="change">
+    /// The guarded edit. It is handed a function answering whether the queue still holds anything
+    /// here — still lazy, so an edit that does not touch the totals does not pay for a reconcile.
+    /// The answer cannot go stale in the dangerous direction: nothing new can be admitted while
+    /// this runs, and only admission ever creates an entry.
+    /// </param>
+    /// <remarks>
+    /// The guard suspends admission rather than holding <see cref="_sync"/> across the callback, and
+    /// that is deliberate. The callback ends in QueueRepository.UpdateQueue, which takes the
+    /// repository's save lock — and the daemon takes that same save lock before calling SubmitJob,
+    /// which comes back here for <see cref="Launch(Job, string, string)"/>. Holding this lock across
+    /// foreign code would invert that order and deadlock the host.
+    /// <para>
+    /// Without the guard, <see cref="TryAdmit"/> could reserve between the check and the mutation,
+    /// so a totals or scheduler edit that was supposed to be refused went through anyway. If the
+    /// scheduler was switched, the job admitted in that window then took the external submission
+    /// branch while leaving a managed reservation behind — the leak this whole design exists to
+    /// prevent.
+    /// </para>
+    /// </remarks>
+    public void WithAdmissionSuspended(Func<Job, bool> owns, Action<Func<bool>> change)
+    {
+        lock (_sync)
+            _admissionSuspensions++;
+
+        try
+        {
+            change(() => HasEntries(owns));
+        }
+        finally
+        {
+            lock (_sync)
+                _admissionSuspensions--;
         }
     }
 
