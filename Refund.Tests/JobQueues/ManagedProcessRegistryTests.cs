@@ -378,6 +378,58 @@ public class ManagedProcessRegistryTests : IDisposable
     }
 
     [Fact]
+    public void TryContain_OnARecordWhosePidWasRecycled_SignalsNothingAtAll()
+    {
+        // The daemon's retry (RetryContainment) calls TryContain once per reap tick, for as long
+        // as a survivor is retained, and it has no identity check of its own — the sweep's gate at
+        // the top of KillLeftovers never runs on that path. So a survivor that exits between two
+        // ticks, with its pid recycled into somebody else's process, arrives here still matching
+        // nothing. Signalling before probing meant kill(-pgid) on a group that is gone, ESRCH,
+        // and then — KillRecord passes hasExited: () => false — .NET's tree walk SIGKILLing that
+        // stranger *and its entire tree*. Probing first is the whole fix, so the assertion that
+        // matters is not the verdict but that no signal was issued.
+        var record = At(Launched);
+        var host = new FakeHost().Alive(4242, Launched.AddHours(1));   // recycled: not ours
+
+        Assert.True(ManagedProcessRegistry.TryContain(record, host.StartTimeOf, _ => null,
+                                                      host.Kill, TimeSpan.Zero));
+
+        Assert.Empty(host.Signalled);
+    }
+
+    [Fact]
+    public void TryContain_OnARecordWithAnExactToken_AlsoProbesBeforeSignalling()
+    {
+        // The Linux identity, same rule. One jiffy apart is a different process.
+        var record = new ManagedProcessRecord(1, 1, 1, 4242, 4242, Launched.Ticks,
+                                              StartToken: "boot-a:900");
+        var host = new FakeHost().Alive(4242, Launched);
+
+        Assert.True(ManagedProcessRegistry.TryContain(
+            record,
+            startTimeOf: _ => throw new InvalidOperationException(
+                "a record with an exact token must not consult the start-time fallback"),
+            startTokenOf: _ => "boot-a:901",
+            kill: host.Kill,
+            confirmWait: TimeSpan.Zero));
+
+        Assert.Empty(host.Signalled);
+    }
+
+    [Fact]
+    public void TryContain_StillSignalsAProcessThatIsStillOurs()
+    {
+        // The other half: probing first must not turn containment into a no-op for a real leftover.
+        var record = At(Launched);
+        var host = new FakeHost().Alive(4242, Launched);
+
+        Assert.True(ManagedProcessRegistry.TryContain(record, host.StartTimeOf, _ => null,
+                                                      host.Kill, TimeSpan.Zero));
+
+        Assert.Equal(4242, Assert.Single(host.Signalled).Pid);
+    }
+
+    [Fact]
     public void KillLeftovers_OnAnAbsentFile_IsANoOp()
     {
         Assert.Equal(0, ManagedProcessRegistry.KillLeftovers(

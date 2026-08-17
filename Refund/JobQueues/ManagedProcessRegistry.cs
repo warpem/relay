@@ -356,12 +356,14 @@ public sealed class ManagedProcessRegistry
     }
 
     /// <summary>
-    /// Signal one leftover and wait, briefly, to see it go. True once its process is confirmed
-    /// gone — or its identity no longer matches, which means it was never ours in the first place.
+    /// Check one leftover is still ours, signal it if so, and wait briefly to see it go. True once
+    /// its process is confirmed gone — or its identity no longer matches, in which case nothing is
+    /// signalled at all, because it was never ours in the first place.
     /// </summary>
     /// <remarks>
     /// Re-used by the daemon's reap tick to retry a survivor, so a process that only dies later
-    /// releases the admission block without needing a Relay restart.
+    /// releases the admission block without needing a Relay restart. That retry has no identity
+    /// check of its own, which is why this one has to come before the signal.
     /// </remarks>
     public static bool TryContain(ManagedProcessRecord record) =>
         TryContain(record, LiveProcessStartTime, StartTokenOf, KillRecord, DefaultConfirmWait);
@@ -381,6 +383,30 @@ public sealed class ManagedProcessRegistry
                                     Action<ManagedProcessRecord> kill,
                                     TimeSpan confirmWait)
     {
+        // Identity before signal, and not the other way round. KillLeftovers gates on identity
+        // before it calls in here, but <see cref="RetryContainment"/> does not: the daemon calls
+        // it once per reap tick for as long as a survivor is retained. A survivor that exits
+        // between two ticks can have its pid recycled by the kernel, and signalling first meant
+        // kill(-pgid, SIGKILL) against a group that no longer exists — ESRCH, a nonzero return,
+        // which falls through KillTree's interlock into the fallback; and KillRecord passes
+        // hasExited: () => false, so that fallback is
+        // Process.GetProcessById(pid).Kill(entireProcessTree: true) on a stranger and every child
+        // it has. The probe only ran afterwards, when the damage was already done.
+        //
+        // A record whose identity no longer matches is contained by definition: nothing of ours
+        // is left at that pid, which is exactly what the caller needs to know to drop it.
+        try
+        {
+            if (!IsStillTheSameProcess(record, startTimeOf, startTokenOf))
+                return true;
+        }
+        catch
+        {
+            // An unreadable probe is not a confirmation, and it is not a licence to signal
+            // either — the same verdict KillLeftovers reaches when the probe throws on it.
+            return false;
+        }
+
         try { kill(record); }
         catch { /* the probe below is the only verdict that counts */ }
 
