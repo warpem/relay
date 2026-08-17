@@ -132,10 +132,22 @@ public partial class QueueEditor
 
     private async Task DeleteQueue(ReadOnlyJobQueue queue)
     {
-        if (queue.Id == _selectedQueue.Id)
+        // Deleted first, deselected after: a managed queue that still owns processes on the host is
+        // refused, and clearing the selection up front would empty the editor for a queue that is
+        // still there. The delete button is already disabled while jobs are in the queue, but an
+        // executor entry outlives its job's membership of one, so the refusal is still reachable.
+        try
+        {
+            await DataManager.DeleteQueue(queue);
+        }
+        catch (InvalidOperationException exc)
+        {
+            ToastService.ShowError(exc.Message);
+            return;
+        }
+
+        if (queue.Id == _selectedQueue?.Id)
             _selectedQueue = null;
-            
-        await DataManager.DeleteQueue(queue);
     }
 
     private async Task MoveQueueUp()

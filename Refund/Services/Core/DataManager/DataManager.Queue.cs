@@ -140,6 +140,11 @@ public partial class DataManager
 
                 var originalQueue = (ClusterQueue)ResolveQueue(queue.Id);
 
+                // Before anything is removed: a managed queue that still owns compute must not go
+                // away, or its jobs stop being polled while their processes keep the host's cores
+                // and GPUs booked with nothing left to release them.
+                ManagedQueueRules.ValidateDelete(originalQueue, HasLiveEntries(originalQueue));
+
                 deletedQueue = originalQueue.AsReadOnly();
                 _queueRepository.DeleteClusterQueue(originalQueue);
             }
@@ -217,6 +222,13 @@ public partial class DataManager
         _queueRepository.ClusterQueues.OfType<ClusterQueue>();
 
     /// <summary>
+    /// Whether the host's executor still holds anything belonging to <paramref name="queue"/> — a
+    /// reservation or a live process, whether or not the job is still in the queue's own list.
+    /// </summary>
+    private bool HasLiveEntries(ClusterQueue queue) =>
+        _queueRepository.ManagedExecutor.HasEntries(j => j.QueueId == queue.Id);
+
+    /// <summary>
     /// Applies <paramref name="updateAction"/> to a throwaway copy of the queue's managed settings so the
     /// proposed configuration can be judged before the real queue is touched, then refuses it if it would
     /// create a second managed queue or move the totals of a queue that still has jobs on the host.
@@ -255,9 +267,7 @@ public partial class DataManager
                              cluster.SchedulerType != proposed.SchedulerType;
 
         if (totalsChanged)
-            ManagedQueueRules.ValidateTotalsChange(
-                cluster,
-                _queueRepository.ManagedExecutor.HasEntries(j => j.QueueId == cluster.Id));
+            ManagedQueueRules.ValidateTotalsChange(cluster, HasLiveEntries(cluster));
     }
 
     #endregion

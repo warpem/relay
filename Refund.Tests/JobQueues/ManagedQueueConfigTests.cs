@@ -73,4 +73,35 @@ public class ManagedQueueConfigTests
 
         ManagedQueueRules.ValidateTotalsChange(slurm, hasLiveEntries: true);
     }
+
+    #region Deleting a managed queue
+
+    [Fact]
+    public void DeletingAManagedQueue_IsRefusedWhileItHasLiveEntries()
+    {
+        // Worse than an edit: nothing polls the deleted queue's jobs afterwards, the executor holds
+        // their cores and GPUs for as long as their status says they are active, and a replacement
+        // queue declaring the host's full totals is two clicks away.
+        var error = Assert.Throws<InvalidOperationException>(() =>
+            ManagedQueueRules.ValidateDelete(Managed("Local"), hasLiveEntries: true));
+
+        Assert.Contains("Local", error.Message);
+    }
+
+    [Fact]
+    public void DeletingAManagedQueue_IsAllowedWhenTheHostHoldsNothingForIt()
+    {
+        ManagedQueueRules.ValidateDelete(Managed("Local"), hasLiveEntries: false);
+    }
+
+    [Fact]
+    public void DeletingANonManagedQueue_IsNeverBlocked()
+    {
+        var slurm = new ClusterQueue((_, _) => { })
+                    { Alias = "Cluster", SchedulerType = ClusterScheduler.Slurm };
+
+        ManagedQueueRules.ValidateDelete(slurm, hasLiveEntries: true);
+    }
+
+    #endregion
 }
