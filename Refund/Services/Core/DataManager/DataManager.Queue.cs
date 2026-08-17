@@ -36,6 +36,10 @@ public partial class DataManager
         {
             try
             {
+                // The new queue adopts the template's state, so the template is what has to pass
+                // the single-managed-queue rule. Nothing has been added to the repository yet.
+                ManagedQueueRules.ValidateOnly(MutableClusterQueues(), template);
+
                 JobQueue newQueue = _queueRepository.CreateClusterQueue(template);
                 createdQueue = newQueue.AsReadOnly();
             }
@@ -82,6 +86,9 @@ public partial class DataManager
             try
             {
                 var originalQueue = ResolveQueue(queue.Id);
+
+                if (originalQueue is ClusterQueue cluster)
+                    ValidateManagedQueueChange(cluster, updateAction);
 
                 _queueRepository.UpdateQueue(originalQueue, updateAction);
                 updatedQueue = originalQueue.AsReadOnly();
@@ -195,6 +202,62 @@ public partial class DataManager
 
         // Raise events outside of lock
         await QueueUpdated.InvokeHierarchy(queue, GroupName.QueueHierarchy(queue.Id));
+    }
+
+    #endregion
+
+    #region Managed queue rules
+
+    /// <summary>
+    /// The repository's mutable cluster queues. <see cref="Repositories.QueueRepository.ClusterQueues"/>
+    /// hands back a read-only <i>collection</i> of the live objects, not read-only wrappers, so no extra
+    /// accessor is needed — only the cast, since the list is typed as <see cref="JobQueue"/>.
+    /// </summary>
+    private IEnumerable<ClusterQueue> MutableClusterQueues() =>
+        _queueRepository.ClusterQueues.OfType<ClusterQueue>();
+
+    /// <summary>
+    /// Applies <paramref name="updateAction"/> to a throwaway copy of the queue's managed settings so the
+    /// proposed configuration can be judged before the real queue is touched, then refuses it if it would
+    /// create a second managed queue or move the totals of a queue that still has jobs on the host.
+    /// </summary>
+    /// <remarks>
+    /// The comparison against the current values is what keeps unrelated edits — a rename, a template
+    /// tweak — from being blocked while jobs are running.
+    /// </remarks>
+    private void ValidateManagedQueueChange(ClusterQueue cluster, Action<JobQueue> updateAction)
+    {
+        var proposed = new ClusterQueue(null)
+        {
+            Id = cluster.Id,
+            Alias = cluster.Alias,
+            SchedulerType = cluster.SchedulerType,
+            ManagedCores = cluster.ManagedCores,
+            ManagedMemoryGb = cluster.ManagedMemoryGb,
+            ManagedGpus = cluster.ManagedGpus,
+            SubmissionScriptTemplate = cluster.SubmissionScriptTemplate,
+
+            // A fresh dictionary, not the queue's own: an update action that edits a custom variable
+            // reads the existing entry, and must not reach the real queue through a shared reference.
+            CustomVariables = new Dictionary<string, (string, string)>(cluster.CustomVariables),
+        };
+
+        updateAction(proposed);
+
+        // The candidate is the copy, so ValidateOnly's identity check can't recognise it as the queue
+        // being edited; exclude that one here instead.
+        ManagedQueueRules.ValidateOnly(
+            MutableClusterQueues().Where(q => !ReferenceEquals(q, cluster)), proposed);
+
+        bool totalsChanged = cluster.ManagedCores != proposed.ManagedCores ||
+                             cluster.ManagedMemoryGb != proposed.ManagedMemoryGb ||
+                             cluster.ManagedGpus != proposed.ManagedGpus ||
+                             cluster.SchedulerType != proposed.SchedulerType;
+
+        if (totalsChanged)
+            ManagedQueueRules.ValidateTotalsChange(
+                cluster,
+                _queueRepository.ManagedExecutor.HasEntries(j => j.QueueId == cluster.Id));
     }
 
     #endregion

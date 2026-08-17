@@ -1,5 +1,7 @@
 using System.Reflection;
 using System.Text.RegularExpressions;
+using Microsoft.AspNetCore.Components;
+using Microsoft.FluentUI.AspNetCore.Components;
 using Refund.Components.CodeEditor;
 using Refund.DataModel;
 using Refund.DataModel.ReadOnly;
@@ -11,6 +13,9 @@ namespace Relay.Screens.Overlay.Settings;
 
 public partial class QueueEditor
 {
+    [Inject]
+    private IToastService ToastService { get; set; }
+
     private ReadOnlyClusterQueue _selectedQueue;
     private readonly List<GroupEventSubscription> _subscriptions = new();
     
@@ -104,8 +109,16 @@ public partial class QueueEditor
         template.Alias += " Copy";
         template.Clear();
 
-        var newQueue = await DataManager.CreateClusterQueue(template);
-        await SelectQueue(newQueue);
+        // Copying a managed queue is the mistake the single-queue rule exists to catch.
+        try
+        {
+            var newQueue = await DataManager.CreateClusterQueue(template);
+            await SelectQueue(newQueue);
+        }
+        catch (InvalidOperationException exc)
+        {
+            ToastService.ShowError(exc.Message);
+        }
     }
 
     private async Task DeleteQueue(ReadOnlyJobQueue queue)
@@ -315,13 +328,23 @@ public partial class QueueEditor
     {
         if (_selectedQueue == null)
             return;
-        
-        await DataManager.UpdateQueue(_selectedQueue, queue =>
+
+        // A refused change — a second managed queue, or new totals while jobs are running — has to
+        // be shown, and the control put back to the stored value rather than left showing the edit.
+        try
         {
-            var clusterQueue = queue as ClusterQueue;
-            PropertyInfo prop = clusterQueue.GetType().GetProperty(propertyName);
-            prop.SetValue(clusterQueue, value);
-        });
+            await DataManager.UpdateQueue(_selectedQueue, queue =>
+            {
+                var clusterQueue = queue as ClusterQueue;
+                PropertyInfo prop = clusterQueue.GetType().GetProperty(propertyName);
+                prop.SetValue(clusterQueue, value);
+            });
+        }
+        catch (InvalidOperationException exc)
+        {
+            ToastService.ShowError(exc.Message);
+            await InvokeAsync(StateHasChanged);
+        }
     }
     
     private async Task HandleCustomVariableKeyChanged(string oldValue, string newValue)
