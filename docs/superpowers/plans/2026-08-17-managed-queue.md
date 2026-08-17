@@ -2337,3 +2337,228 @@ EOF
 ```
 
 ---
+
+### Task 9: One managed queue, and no edits while it is busy
+
+Two guards in `DataManager`, both about configuration that would silently corrupt accounting.
+
+A second managed queue is a one-click mistake — the queue editor has a "Copy current queue" button (`QueueEditor.razor.cs:89`). Two managed queues sharing the host-wide executor would double-count its totals, so the second is refused outright.
+
+Changing totals while jobs are running would mean defining behaviour for totals dropping below current usage. Refusing the edit avoids the question entirely; lowering totals on an idle queue is always fine.
+
+**Files:**
+- Modify: `Refund/Services/Core/DataManager/DataManager.Queue.cs`
+- Test: `Refund.Tests/JobQueues/ManagedQueueConfigTests.cs`
+
+**Interfaces:**
+- Consumes: `ClusterQueue.IsManaged`, `ManagedExecutor.HasEntries` (Tasks 4, 7).
+- Produces: `DataManager.ValidateManagedQueueChange(ClusterQueue, ClusterQueue proposed)` throwing `InvalidOperationException`.
+
+- [ ] **Step 1: Write the failing tests**
+
+Create `Refund.Tests/JobQueues/ManagedQueueConfigTests.cs`:
+
+```csharp
+using Refund.DataModel;
+using Refund.JobQueues;
+
+namespace Refund.Tests.JobQueues;
+
+public class ManagedQueueConfigTests
+{
+    private static ClusterQueue Managed(string alias, ManagedExecutor executor = null) =>
+        new ClusterQueue((_, _) => { })
+        {
+            Alias = alias,
+            SchedulerType = ClusterScheduler.Managed,
+            ManagedCores = 8,
+            ManagedMemoryGb = 32,
+            ManagedGpus = 1,
+            Executor = executor,
+        };
+
+    [Fact]
+    public void ASecondManagedQueue_IsRefused()
+    {
+        var existing = new[] { Managed("Local") };
+
+        var error = Assert.Throws<InvalidOperationException>(() =>
+            ManagedQueueRules.ValidateOnly(existing, candidate: Managed("Local Copy")));
+
+        Assert.Contains("Local", error.Message);
+    }
+
+    [Fact]
+    public void ReconfiguringTheSameManagedQueue_IsAllowed()
+    {
+        var queue = Managed("Local");
+
+        // Editing the queue that already exists must not trip the single-queue rule against itself.
+        ManagedQueueRules.ValidateOnly(new[] { queue }, candidate: queue);
+    }
+
+    [Fact]
+    public void AnotherSchedulerAlongsideAManagedQueue_IsFine()
+    {
+        var existing = new[] { Managed("Local") };
+        var slurm = new ClusterQueue((_, _) => { })
+                    { Alias = "Cluster", SchedulerType = ClusterScheduler.Slurm };
+
+        ManagedQueueRules.ValidateOnly(existing, candidate: slurm);
+    }
+
+    [Fact]
+    public void ChangingTotals_IsRefusedWhileTheQueueHasLiveEntries()
+    {
+        var executor = new ManagedExecutor();
+        var queue = Managed("Local", executor);
+
+        var error = Assert.Throws<InvalidOperationException>(() =>
+            ManagedQueueRules.ValidateTotalsChange(queue, hasLiveEntries: true));
+
+        Assert.Contains("running", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ChangingTotals_IsAllowedWhenIdle()
+    {
+        ManagedQueueRules.ValidateTotalsChange(Managed("Local"), hasLiveEntries: false);
+    }
+}
+```
+
+- [ ] **Step 2: Run and watch them fail**
+
+Run: `dotnet test Refund.Tests/Refund.Tests.csproj --nologo -v q --filter "FullyQualifiedName~ManagedQueueConfigTests"`
+Expected: FAIL to compile — `ManagedQueueRules` does not exist.
+
+- [ ] **Step 3: Write the rules**
+
+Create `Refund/JobQueues/ManagedQueueRules.cs`:
+
+```csharp
+using Refund.DataModel;
+
+namespace Refund.JobQueues;
+
+/// <summary>
+/// Configuration rules for managed queues. Separate from DataManager so they can be tested without
+/// standing up a repository.
+/// </summary>
+public static class ManagedQueueRules
+{
+    /// <summary>
+    /// Refuses a second managed queue. They would share the host-wide executor while each declaring
+    /// its own totals, so the host would be booked twice over and both would hand out device 0.
+    /// The editor's "Copy current queue" button makes this a one-click mistake.
+    /// </summary>
+    public static void ValidateOnly(IEnumerable<ClusterQueue> existing, ClusterQueue candidate)
+    {
+        if (candidate is not { IsManaged: true })
+            return;
+
+        var other = existing.FirstOrDefault(q => q.IsManaged && !ReferenceEquals(q, candidate));
+
+        if (other != null)
+            throw new InvalidOperationException(
+                $"\"{other.Alias}\" is already the managed queue for this host, and there can only " +
+                "be one — a host has a single set of cores and GPUs. Edit that queue instead, or " +
+                "switch it to another scheduler first.");
+    }
+
+    /// <summary>
+    /// Refuses total changes while jobs are running, rather than defining what should happen when
+    /// new totals fall below current usage.
+    /// </summary>
+    public static void ValidateTotalsChange(ClusterQueue queue, bool hasLiveEntries)
+    {
+        if (queue.IsManaged && hasLiveEntries)
+            throw new InvalidOperationException(
+                $"Queue \"{queue.Alias}\" has running jobs. Wait for them to finish, or abort them, " +
+                "before changing its cores, memory or GPU count.");
+    }
+}
+```
+
+- [ ] **Step 4: Call the rules from `DataManager.Queue.cs`**
+
+In the method that creates a cluster queue, before it is added:
+
+```csharp
+        ManagedQueueRules.ValidateOnly(_queueRepository.ClusterQueuesMutable, template);
+```
+
+In the method that updates a queue, before applying the change — comparing the proposed values against the current ones so an unrelated edit (renaming, say) is not blocked:
+
+```csharp
+        if (originalQueue is ClusterQueue cluster)
+        {
+            ManagedQueueRules.ValidateOnly(_queueRepository.ClusterQueuesMutable, cluster);
+
+            bool totalsChanged = cluster.ManagedCores != proposed.ManagedCores ||
+                                 cluster.ManagedMemoryGb != proposed.ManagedMemoryGb ||
+                                 cluster.ManagedGpus != proposed.ManagedGpus ||
+                                 cluster.SchedulerType != proposed.SchedulerType;
+
+            if (totalsChanged)
+                ManagedQueueRules.ValidateTotalsChange(
+                    cluster,
+                    _queueRepository.ManagedExecutor.HasEntries(j => j.QueueId == cluster.Id));
+        }
+```
+
+If `QueueRepository` exposes only read-only queues, add an internal `ClusterQueuesMutable` accessor returning the backing `List<ClusterQueue>`.
+
+- [ ] **Step 5: Surface the error in the editor**
+
+`QueueEditor` already funnels changes through `HandleFieldChanged`. Wrap the call so a refused change shows rather than throwing into the void:
+
+```csharp
+        try
+        {
+            await DataManager.UpdateQueue(_selectedQueue, queue => { /* existing body */ });
+        }
+        catch (InvalidOperationException exc)
+        {
+            ToastService.ShowError(exc.Message);
+            await InvokeAsync(StateHasChanged);   // revert the control to the stored value
+        }
+```
+
+- [ ] **Step 6: Run and watch them pass**
+
+Run: `dotnet test Refund.Tests/Refund.Tests.csproj --nologo -v q --filter "FullyQualifiedName~ManagedQueueConfigTests"`
+Expected: PASS, 5 tests.
+
+- [ ] **Step 7: Run the whole suite and build**
+
+```bash
+dotnet test Refund.Tests/Refund.Tests.csproj --nologo -v q
+dotnet build Relay/Relay.csproj --nologo -v q
+```
+Expected: all pass; 0 errors.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add Refund/JobQueues/ManagedQueueRules.cs \
+        Refund/Services/Core/DataManager/DataManager.Queue.cs \
+        Relay/Screens/Overlay/Settings/QueueEditor.razor.cs \
+        Refund.Tests/JobQueues/ManagedQueueConfigTests.cs
+git commit -m "$(cat <<'EOF'
+feat: allow only one managed queue, and no edits while it is busy
+
+Two managed queues would share the host-wide executor while each declaring its
+own totals, booking the machine twice over and both handing out device 0. The
+editor's Copy button makes that a one-click mistake, so the second is refused.
+
+Changing totals while jobs run would require defining what happens when new
+totals fall below current usage. Refusing the edit avoids the question;
+lowering totals on an idle queue is always allowed.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
