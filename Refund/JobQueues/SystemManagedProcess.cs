@@ -273,14 +273,23 @@ public sealed class SystemManagedProcess : IManagedProcess
     {
         try
         {
-            if (hasExited())
-                return;
-
+            // The group first, *before* leader liveness. A bash group leader routinely exits while
+            // the work it started is still in the group — `( ... ) &` and mpirun both produce
+            // exactly that — and returning early on hasExited() left those descendants computing
+            // while the executor released their GPUs and the registry forgot the record. Signalling
+            // a group that is already empty is harmless: kill(2) returns ESRCH, which is a nonzero
+            // return, which falls through to the branch below exactly as a failed signal does.
+            //
             // pgid == pid by construction for a group we made (verified in OwnGroupOf), and the
             // > 1 guard is what stops a corrupted or defaulted pair reaching kill(-1, SIGKILL),
             // which means "every process this user may signal". The negation is the point:
             // kill(pgid) would hit only the group leader and leave every mpirun rank running.
             if (pgid is { } group && group == pid && group > 1 && signal(-group, SIGKILL) == 0)
+                return;
+
+            // Only now. With no group of ours to signal there is nothing left but the tree walk,
+            // and that needs a live direct child to walk from.
+            if (hasExited())
                 return;
         }
         catch { /* the group path is unavailable; the tree walk is still worth trying */ }

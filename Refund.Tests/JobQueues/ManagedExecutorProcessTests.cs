@@ -521,10 +521,13 @@ public class ManagedExecutorProcessTests : IDisposable
     }
 
     [Fact]
-    public void KillTree_DoesNotGroupSignalAnExitedProcess()
+    public void KillTree_StillSignalsOurGroup_WhenItsLeaderHasAlreadyExited()
     {
-        // Same interlock on the group path: a reaped pid can have been recycled, and the recycled
-        // process's group is somebody else's tree.
+        // The group outlives its leader. A submission script that runs `( ... ) &` or mpirun
+        // routinely has bash exit while the real compute is still a member of the group setsid
+        // gave us — so skipping the group signal on leader liveness left that compute running
+        // while the executor released its GPUs and the registry dropped the record. Signalling an
+        // empty group instead costs one ESRCH.
         var signals = new List<(int Pid, int Signal)>();
 
         SystemManagedProcess.KillTree(pid: 4321, pgid: 4321,
@@ -532,7 +535,24 @@ public class ManagedExecutorProcessTests : IDisposable
                                       hasExited: () => true,
                                       signal: (p, s) => { signals.Add((p, s)); return 0; });
 
-        Assert.Empty(signals);
+        Assert.Equal((-4321, 9), Assert.Single(signals));
+    }
+
+    [Fact]
+    public void KillTree_DoesNotTreeWalkAnExitedProcess_WhenTheGroupSignalDidNotLand()
+    {
+        // The other half of the ordering. Once the group signal has been attempted and failed —
+        // an empty group returns ESRCH — there is nothing left but .NET's tree walk, and that
+        // needs a live direct child to walk from. A reaped pid can have been recycled, so walking
+        // it would be walking somebody else's tree.
+        var signals = new List<(int Pid, int Signal)>();
+
+        SystemManagedProcess.KillTree(pid: 4321, pgid: 4321,
+                                      fallbackKill: () => Assert.Fail("should not walk a dead pid"),
+                                      hasExited: () => true,
+                                      signal: (p, s) => { signals.Add((p, s)); return -1; });
+
+        Assert.Equal((-4321, 9), Assert.Single(signals));   // tried, once
     }
 
     [Fact]
@@ -580,10 +600,19 @@ public class ManagedExecutorProcessTests : IDisposable
         // as "might still be alive" and try the tree walk rather than assuming it is safe to skip.
         var fallbackCalled = false;
 
-        SystemManagedProcess.KillTree(pid: 4321, pgid: 4321,
+        SystemManagedProcess.KillTree(pid: 4321, pgid: null,   // no group: liveness is all there is
                                       fallbackKill: () => fallbackCalled = true,
                                       hasExited: () => throw new InvalidOperationException("disposed"),
                                       signal: (_, _) => 0);
+
+        Assert.True(fallbackCalled);
+
+        // And with a group whose signal did not land, so the probe is reached there too.
+        fallbackCalled = false;
+        SystemManagedProcess.KillTree(pid: 4321, pgid: 4321,
+                                      fallbackKill: () => fallbackCalled = true,
+                                      hasExited: () => throw new InvalidOperationException("disposed"),
+                                      signal: (_, _) => -1);
 
         Assert.True(fallbackCalled);
     }
