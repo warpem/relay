@@ -3,6 +3,7 @@ using Refund.DataModel;
 using Refund.JobQueues;
 using Refund.Services.Core.Repositories;
 using MaskJob = Refund.Jobs.Refinement.Masks.CreateMask.CreateMask;
+using PooledJob = Refund.Jobs.Fs.MotionCtf.MotionAndCTF2D.MotionAndCTF2D;
 
 namespace Refund.Tests.JobQueues;
 
@@ -175,6 +176,104 @@ public class WaitingStateAdmissionTests : IDisposable
         await Invoke(repository, job, queue);
 
         Assert.Equal(JobStatus.Failed, job.Status);
+    }
+
+    /// <summary>
+    /// A worker pool submits bare scripts with no resource request, so a managed queue cannot back
+    /// one. That is a configuration fault, not a transient one: thrown rather than failed, the
+    /// enclosing catch logged a stack trace to error.txt and left the job Waiting for the next tick
+    /// to repeat — the exact log-and-stick-forever pathology Reject exists to prevent. It is the
+    /// default path on a one-queue workstation, where the managed queue is the only selectable one.
+    /// </summary>
+    [Fact]
+    public async Task APoolJobOnAManagedPoolQueue_Fails_WithOneMessage()
+    {
+        EnsurePopulated();
+
+        var repository = NewRepository();
+        var queue = ManagedQueue(repository, cores: 8);
+        queue.ListJobsTemplate       = "squeue -u $USER -h -o \"%i,%T\"";
+        queue.CancelManyJobsTemplate = "scancel {{job_ids}}";
+
+        var job = new PooledJob
+        {
+            Id            = 2,
+            Space         = new Space { RootDirectory = _dir },
+            Status        = JobStatus.Waiting,
+            UseWorkerPool = true,
+            PoolQueueId   = queue.Id,           // the managed queue, as the only selectable one
+        };
+
+        await Invoke(repository, job, queue);
+        Assert.Equal(JobStatus.Failed, job.Status);
+
+        // What the daemon would do next tick if the job had been left Waiting.
+        job.Status = JobStatus.Waiting;
+        await Invoke(repository, job, queue);
+
+        var error = File.ReadAllText(job.ErrorFilePath);
+        Assert.Contains("managed queue", error);
+        Assert.DoesNotContain("InvalidOperationException", error);      // a reason, not a stack trace
+
+        // Two ticks, two failures — but the second was a deliberate re-run of the same guard, so
+        // what matters is that one tick writes exactly one line.
+        Assert.Equal(2, File.ReadAllLines(job.ErrorFilePath).Count(l => l.Contains("managed queue")));
+    }
+
+    /// <summary>
+    /// The other two pool preflight guards have the same shape and wedge identically — a pool queue
+    /// missing its ListJobsTemplate is no more transient than a managed one.
+    /// </summary>
+    [Fact]
+    public async Task APoolQueueMissingItsTemplates_FailsTheJob_RatherThanRetryingForever()
+    {
+        EnsurePopulated();
+
+        var repository = NewRepository();
+        var queue = ManagedQueue(repository, cores: 8);
+
+        // A plain cluster queue that would be a valid pool target but for its missing templates.
+        var poolQueue = (ClusterQueue)repository.CreateClusterQueue();
+        poolQueue.Alias = "slurm";
+
+        var job = new PooledJob
+        {
+            Id            = 3,
+            Space         = new Space { RootDirectory = _dir },
+            Status        = JobStatus.Waiting,
+            UseWorkerPool = true,
+            PoolQueueId   = poolQueue.Id,
+        };
+
+        await Invoke(repository, job, queue);
+
+        Assert.Equal(JobStatus.Failed, job.Status);
+        Assert.Contains("List Jobs template", File.ReadAllText(job.ErrorFilePath));
+    }
+
+    /// <summary>
+    /// Busy is the steady state of a managed queue — that is the whole feature — so anything
+    /// HandleWaitingState writes before the admission switch is written once per second, forever,
+    /// into a file the UI tails.
+    /// </summary>
+    [Fact]
+    public async Task ABusyJob_DoesNotAccumulateLifecycleLines()
+    {
+        var repository = NewRepository();
+        var queue = ManagedQueue(repository, cores: 1);
+
+        var holder = NewJob();
+        Assert.IsType<AdmissionResult.Admit>(queue.CanAdmit(holder));   // the one core is taken
+
+        var waiting = new MaskJob { Id = 2, Space = new Space { RootDirectory = _dir },
+                                    Status = JobStatus.Waiting };
+
+        for (int tick = 0; tick < 5; tick++)
+            await Invoke(repository, waiting, queue);
+
+        Assert.Equal(JobStatus.Waiting, waiting.Status);
+        Assert.False(File.Exists(waiting.LifecycleFilePath),
+                     "A job that never left Waiting has no staging history to record.");
     }
 }
 
