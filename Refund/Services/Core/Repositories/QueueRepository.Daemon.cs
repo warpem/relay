@@ -73,6 +73,14 @@ public partial class QueueRepository
     /// </summary>
     private async Task RunDaemonAsync()
     {
+        // Unconditionally, and before any queue work: reconciliation is otherwise only a side
+        // effect of some *other* job asking the executor a question (TryAdmit, GetStatus,
+        // LiveAllocations). Abort the last job on an idle single-GPU workstation and nothing would
+        // ever ask again, so its process would keep the GPU booked indefinitely. One cheap call per
+        // tick on a lock this path already contends for removes the whole class.
+        try { ManagedExecutor.Reap(); }
+        catch (Exception ex) { _logger.Error(ex, "Error reaping managed processes"); }
+
         var tasks = new List<Task>();
         var maxConcurrentQueues = Math.Max(1, Environment.ProcessorCount / 2);
         using var semaphore = new SemaphoreSlim(maxConcurrentQueues);

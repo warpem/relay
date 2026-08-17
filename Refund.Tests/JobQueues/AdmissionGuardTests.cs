@@ -177,3 +177,116 @@ public class WaitingStateAdmissionTests : IDisposable
         Assert.Equal(JobStatus.Failed, job.Status);
     }
 }
+
+/// <summary>
+/// The two ways a managed job's compute can outlive the job: an abort that never reaches the
+/// executor, and a reconciliation that never happens because nothing asked.
+/// </summary>
+[Collection("JobRegistry")]
+public class ManagedContainmentTests : IDisposable
+{
+    private static readonly object _populateLock = new();
+
+    private readonly string _dir = Path.Combine(Path.GetTempPath(), "relay-containment-" + Guid.NewGuid());
+
+    public ManagedContainmentTests() => Directory.CreateDirectory(_dir);
+    public void Dispose() { try { Directory.Delete(_dir, true); } catch { } }
+
+    private sealed class FakeProcess : IManagedProcess
+    {
+        public int Pid => 4242;
+        public DateTime StartTime => new(2026, 1, 1);
+        public bool HasExited { get; private set; }
+        public int ExitCode { get; private set; }
+
+        public void Exit(int code) { ExitCode = code; HasExited = true; }
+        public void KillTree() => HasExited = true;
+        public Task WaitForExitAsync(CancellationToken ct = default) => Task.CompletedTask;
+    }
+
+    private static void EnsurePopulated()
+    {
+        lock (_populateLock)
+        {
+            if (Job.Types.Count == 0)
+                Job.PopulateStatic();
+        }
+    }
+
+    private string RegistryPath => Path.Combine(_dir, "managed-processes.json");
+
+    private QueueRepository NewRepository() =>
+        new(Path.Combine(_dir, "queues.json"),
+            (job, action) => action(job),
+            (job, action) => { action(job); return Task.CompletedTask; });
+
+    private Job NewJob()
+    {
+        EnsurePopulated();
+        return new MaskJob { Id = 1, Space = new Space { RootDirectory = _dir }, Status = JobStatus.Waiting };
+    }
+
+    private ClusterQueue ManagedQueue(QueueRepository repository)
+    {
+        var queue = (ClusterQueue)repository.CreateClusterQueue();
+        queue.Alias           = "managed";
+        queue.SchedulerType   = ClusterScheduler.Managed;
+        queue.ManagedCores    = 8;
+        queue.ManagedMemoryGb = 1024;
+        queue.ManagedGpus     = 0;
+        return queue;
+    }
+
+    private static Task InvokeAborting(QueueRepository repository, Job job, JobQueue queue) =>
+        (Task)typeof(QueueRepository)
+            .GetMethod("HandleAbortingState", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(repository, new object[] { job, queue, false })!;
+
+    private static Task InvokeDaemon(QueueRepository repository) =>
+        (Task)typeof(QueueRepository)
+            .GetMethod("RunDaemonAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(repository, Array.Empty<object>())!;
+
+    [Fact]
+    public async Task AbortingAManagedJobBeforeItHasAPid_StillReachesTheExecutor()
+    {
+        var repository = NewRepository();
+        var queue = ManagedQueue(repository);
+
+        // Exactly the staging window: admitted and holding the host, but Launch has not returned
+        // so nothing has written a ClusterJobId. Gated on one, the abort never fired at all and
+        // the reservation — and, moments later, a real process — outlived the job.
+        var job = NewJob();
+        Assert.IsType<AdmissionResult.Admit>(queue.CanAdmit(job));
+        Assert.True(string.IsNullOrWhiteSpace(job.ClusterJobId));
+        Assert.Single(repository.ManagedExecutor.LiveAllocations());
+
+        job.Status = JobStatus.Aborting;
+        await InvokeAborting(repository, job, queue);
+
+        Assert.Empty(repository.ManagedExecutor.LiveAllocations());
+    }
+
+    [Fact]
+    public async Task TheDaemonReconciles_EvenWhenNoOtherJobIsLeftToAsk()
+    {
+        var repository = NewRepository();
+
+        var job = NewJob();
+        var process = new FakeProcess();
+        Assert.IsType<AdmissionResult.Admit>(
+            repository.ManagedExecutor.TryAdmit(job, new ResourceTotals(8, 64, 0)));
+        repository.ManagedExecutor.Launch(job, _ => process);
+
+        Assert.Single(new ManagedProcessRegistry(RegistryPath).Load());
+
+        process.Exit(0);
+        job.Status = JobStatus.Aborted;     // settled, and in no queue: nothing will ever ask again
+
+        // Every queue is empty, so the daemon's queue loop does no work whatsoever. Only the
+        // unconditional Reap can retire the entry and drop its leftover record.
+        await InvokeDaemon(repository);
+
+        Assert.Empty(new ManagedProcessRegistry(RegistryPath).Load());
+    }
+}

@@ -354,9 +354,18 @@ public partial class QueueRepository
         // Check the job's status on the cluster or local machine
         (var clusterStatus, _) = await queue.CheckStatus(job);
 
+        // A managed job's ClusterJobId is its pid, and that is written only after Launch has
+        // already returned. Gating the abort on one would make the whole staging window
+        // unabortable: the staging task would go on to spawn a process for a job the user has
+        // abandoned, and HandleAbortingState's 30-second clause below would then mark the job
+        // Aborted and dequeue it with that process still computing. The executor is the handle in
+        // that window, so ask it instead of the job's ID.
+        bool hasSomethingToAbort = !string.IsNullOrWhiteSpace(job.ClusterJobId) ||
+                                   queue is ClusterQueue { IsManaged: true };
+
         if (clusterStatus != ClusterJobStatus.Failed &&
             clusterStatus != ClusterJobStatus.Finished &&
-            !string.IsNullOrWhiteSpace(job.ClusterJobId))
+            hasSomethingToAbort)
             queue.AbortJob(job);
 
         // Check the job's status again after aborting
