@@ -81,6 +81,12 @@ public partial class QueueRepository
         {
             _clusterQueues.Remove(queue);
 
+            // Same reason as in UpdateQueue, and deleting is the other way a user resolves a
+            // duplication. Delete the queue that *won* and the survivor keeps a
+            // ManagedDisabledReason naming a queue that no longer exists, rejecting every job it
+            // is handed until somebody happens to edit it or restart Relay.
+            ManagedQueueRules.DisableDuplicateManagedQueues(_clusterQueues.OfType<ClusterQueue>());
+
             _needsSaving = true;
         }
 
