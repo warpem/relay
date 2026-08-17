@@ -65,6 +65,12 @@ public partial class QueueRepository
     private Timer _daemonTimer;
 
     /// <summary>
+    /// Set by <see cref="StopDaemon"/>. Volatile because an in-flight iteration reads it on a
+    /// thread-pool thread while shutdown writes it on another.
+    /// </summary>
+    private volatile bool _daemonStopped;
+
+    /// <summary>
     /// Maps jobs to their log tracking tasks to avoid duplicate tracking.
     /// </summary>
     private readonly Dictionary<Job, Task> _trackProgressLogsTasks = new();
