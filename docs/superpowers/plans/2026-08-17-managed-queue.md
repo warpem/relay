@@ -2562,3 +2562,211 @@ EOF
 ```
 
 ---
+
+### Task 10: Queue editor — managed field group
+
+When `Managed` is selected, the command templates are meaningless (there is no scheduler to talk to) and the resource fields are what matter. Follow the `ShowCustomParsingFields` pattern already in the file from commit `ba63ad50`.
+
+The submission script template stays visible: it is still needed for module blocks and `{{ command }}`.
+
+**Files:**
+- Modify: `Relay/Screens/Overlay/Settings/QueueEditor.razor`
+- Modify: `Relay/Screens/Overlay/Settings/QueueEditor.razor.cs`
+
+**Interfaces:**
+- Consumes: `ReadOnlyClusterQueue.IsManaged` / `ManagedCores` / `ManagedMemoryGb` / `ManagedGpus` (Task 7).
+- Produces: nothing consumed by later tasks.
+
+- [ ] **Step 1: Add the visibility flags**
+
+In `QueueEditor.razor.cs`, next to `ShowCustomParsingFields`:
+
+```csharp
+    /// <summary>
+    /// A managed queue has no external scheduler to talk to, so the command templates are
+    /// meaningless for it and its resource limits take their place.
+    /// </summary>
+    private bool IsManagedQueue => _selectedQueue?.SchedulerType == ClusterScheduler.Managed;
+
+    /// <summary>Command templates apply to every scheduler except Managed.</summary>
+    private bool ShowCommandTemplates => !IsManagedQueue;
+```
+
+Leave `ShowCustomParsingFields` alone. `Custom` and `Managed` are distinct enum values, so it already excludes managed queues:
+
+```csharp
+    private bool ShowCustomParsingFields =>
+        _selectedQueue?.SchedulerType == ClusterScheduler.Custom;
+```
+
+- [ ] **Step 2: Wrap the command templates**
+
+In `QueueEditor.razor`, wrap the six template fields — Send command, Submit job, Status job, Abort job, List jobs, Cancel many jobs — in a single conditional. Place `@if (ShowCommandTemplates) {` immediately before the "Send command template" `<div class="settings-field">` and close it after the "Cancel many jobs command template" field.
+
+- [ ] **Step 3: Add the managed field group**
+
+Immediately after that block, still inside the Settings tab:
+
+```razor
+@if (IsManagedQueue)
+{
+    <div class="settings-field">
+        <span>Host resources</span>
+
+        <div class="setting-variable-chips">
+            Relay starts a job only when this much is free. Cores and memory are used for
+            admission decisions, not enforced — a job that overruns its declared memory is not
+            killed. GPUs are enforced: each job sees only the devices assigned to it.
+        </div>
+    </div>
+
+    <div class="settings-field">
+        <span>CPU cores</span>
+        <FluentNumberField Value="@_selectedQueue.ManagedCores"
+                           ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.ManagedCores)))"
+                           TValue="int" Min="1" />
+    </div>
+
+    <div class="settings-field">
+        <span>Memory (GB)</span>
+        <FluentNumberField Value="@_selectedQueue.ManagedMemoryGb"
+                           ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.ManagedMemoryGb)))"
+                           TValue="int" Min="1" />
+    </div>
+
+    <div class="settings-field">
+        <span>GPUs</span>
+        <FluentNumberField Value="@_selectedQueue.ManagedGpus"
+                           ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.ManagedGpus)))"
+                           TValue="int" Min="0" />
+    </div>
+}
+```
+
+- [ ] **Step 4: Explain the hidden Advanced tab**
+
+The Advanced tab's `else` branch currently says the built-in parser handles things. Managed queues have no parser at all, so give them their own message. Replace that `else` with:
+
+```razor
+else if (IsManagedQueue)
+{
+    <div class="settings-field">
+        <span>Job ID and status parsing</span>
+
+        <div class="setting-variable-chips">
+            Not applicable. A managed queue has no scheduler output to parse — Relay tracks its
+            jobs by process id directly.
+        </div>
+    </div>
+}
+else
+{
+    <div class="settings-field">
+        <span>Job ID and status parsing</span>
+
+        <div class="setting-variable-chips">
+            Handled by the built-in @_selectedQueue.SchedulerType.ToString() parser.
+            Set the scheduler to <span style="font-family: monospace;">Custom</span>
+            in the Settings tab to supply your own patterns.
+        </div>
+    </div>
+}
+```
+
+- [ ] **Step 5: Build**
+
+Run: `dotnet build Relay/Relay.csproj --nologo -v q`
+Expected: `Build succeeded`, 0 errors. If `FluentNumberField` needs a different generic form, match the usage elsewhere in the codebase rather than switching to a text field.
+
+- [ ] **Step 6: Verify by eye**
+
+Start Relay, open **Users → Queue configuration**, add a queue, and switch Scheduler between values. Check: with `Managed` the six command templates disappear and the three resource fields appear; with `Slurm` the reverse; with `Custom` the Advanced tab shows the parsing fields. Confirm a running managed job makes the resource fields refuse edits with a toast (Task 9).
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add Relay/Screens/Overlay/Settings/QueueEditor.razor \
+        Relay/Screens/Overlay/Settings/QueueEditor.razor.cs
+git commit -m "$(cat <<'EOF'
+feat: show host resource limits for managed queues
+
+A managed queue has no scheduler to talk to, so the six command templates are
+meaningless for it and the cores/memory/GPU limits take their place. The
+submission script template stays — it is still needed for module blocks and
+{{ command }}.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+### Task 11: Document it
+
+**Files:**
+- Modify: `README.md`
+
+- [ ] **Step 1: Add the section**
+
+After the existing "Scheduler" section added in `ba63ad50`:
+
+```markdown
+### Managed queues (no external scheduler)
+
+Setting **Scheduler** to `Managed` makes Relay run jobs itself, as local processes on the Relay
+host, instead of submitting them to SLURM, Flux or anything else. It starts a job only when the
+CPU cores, memory and GPUs it asks for are free. This suits a single workstation, where installing
+a scheduler purely to arbitrate one machine's resources is a large dependency for a small need.
+
+Configure **CPU cores**, **Memory (GB)** and **GPUs** to describe the host. The submission script
+template is still used — for module blocks and `{{ command }}` — but drops the scheduler
+directives:
+
+```bash
+#!/bin/bash
+{{ warp }}
+ml warptools/latest
+{{ /warp }}
+
+umask 007
+
+{{ command }}
+```
+
+Things worth knowing:
+
+- **Cores and memory are accounting, not enforcement.** Relay will not start a job unless its
+  declared requirements fit, but nothing stops a running job from exceeding them. GPUs are the
+  exception: each job sees only its assigned devices via `CUDA_VISIBLE_DEVICES`.
+- **One managed queue per host.** A second would double-book the same machine.
+- **Jobs do not survive a Relay restart.** They are killed on shutdown, and anything left by a
+  crash is killed at the next startup. Jobs that were running are marked failed.
+- **Worker pools cannot use a managed queue.** Pools submit bare scripts with no resource request
+  attached, so there is nothing to admit against.
+- **Jobs run in order of fit, not strictly in order of submission.** A small job may start ahead
+  of a queued larger one. On a multi-GPU host a large job can in principle be held off
+  indefinitely by a stream of small ones.
+- **macOS is a development-only configuration.** `setsid` is absent there, so Relay cannot clean
+  up compute processes left behind by a crash — only by a graceful shutdown. On Linux both work.
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add README.md
+git commit -m "$(cat <<'EOF'
+docs: document managed queues
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+## Done
+
+After Task 11: `dotnet test Refund.Tests/Refund.Tests.csproj --nologo -v q` and
+`dotnet build Relay/Relay.csproj --nologo -v q` both clean, and a managed queue runs jobs on the
+Relay host with resource-aware admission.
