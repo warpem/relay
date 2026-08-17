@@ -140,6 +140,8 @@
                                               ValueChanged="@(value => HandleFieldChanged(Enum.Parse<ClusterScheduler>(value), nameof(ClusterQueue.SchedulerType)))"/>
                             </div>
 
+                            @if (ShowCommandTemplates)
+                            {
                             <div class="settings-field">
                                 <span>Send command template</span>
                                 
@@ -274,6 +276,41 @@
                                 <FluentTextField Value="@_selectedQueue.CancelManyJobsTemplate"
                                                  ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.CancelManyJobsTemplate)))" />
                             </div>
+                            }
+
+                            @if (IsManagedQueue)
+                            {
+                                <div class="settings-field">
+                                    <span>Host resources</span>
+
+                                    <div class="setting-variable-chips">
+                                        Relay starts a job only when this much is free. Cores and memory are used for
+                                        admission decisions, not enforced — a job that overruns its declared memory is not
+                                        killed. GPUs are enforced: each job sees only the devices assigned to it.
+                                    </div>
+                                </div>
+
+                                <div class="settings-field">
+                                    <span>CPU cores</span>
+                                    <FluentNumberField Value="@_selectedQueue.ManagedCores"
+                                                       ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.ManagedCores)))"
+                                                       TValue="int" Min="1" />
+                                </div>
+
+                                <div class="settings-field">
+                                    <span>Memory (GB)</span>
+                                    <FluentNumberField Value="@_selectedQueue.ManagedMemoryGb"
+                                                       ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.ManagedMemoryGb)))"
+                                                       TValue="int" Min="1" />
+                                </div>
+
+                                <div class="settings-field">
+                                    <span>GPUs</span>
+                                    <FluentNumberField Value="@_selectedQueue.ManagedGpus"
+                                                       ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.ManagedGpus)))"
+                                                       TValue="int" Min="0" />
+                                </div>
+                            }
                         </div>
                     </FluentTab>
                     
@@ -358,6 +395,17 @@
                                     <span>Job status parsing template (Failed)</span>
                                     <FluentTextField Value="@_selectedQueue.JobStatusParseTemplateFailed"
                                                      ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.JobStatusParseTemplateFailed)))" />
+                                </div>
+                            }
+                            else if (IsManagedQueue)
+                            {
+                                <div class="settings-field">
+                                    <span>Job ID and status parsing</span>
+
+                                    <div class="setting-variable-chips">
+                                        Not applicable. A managed queue has no scheduler output to parse — Relay tracks
+                                        its jobs by process id directly.
+                                    </div>
                                 </div>
                             }
                             else

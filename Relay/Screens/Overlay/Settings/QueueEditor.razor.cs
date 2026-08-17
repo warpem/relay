@@ -35,6 +35,15 @@ public partial class QueueEditor
     /// </summary>
     private bool ShowCustomParsingFields => _selectedQueue?.SchedulerType == ClusterScheduler.Custom;
 
+    /// <summary>
+    /// A managed queue has no external scheduler to talk to, so the command templates are
+    /// meaningless for it and its resource limits take their place.
+    /// </summary>
+    private bool IsManagedQueue => _selectedQueue?.SchedulerType == ClusterScheduler.Managed;
+
+    /// <summary>Command templates apply to every scheduler except Managed.</summary>
+    private bool ShowCommandTemplates => !IsManagedQueue;
+
     private CodeEditor _submissionScriptEditor;
     private int _submissionScriptCursorPosition = -1;
 
