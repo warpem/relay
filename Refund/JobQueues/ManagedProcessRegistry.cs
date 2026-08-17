@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using Serilog;
 
 namespace Refund.JobQueues;
 
@@ -67,6 +68,20 @@ public sealed class ManagedProcessRegistry
             return LoadLocked();
     }
 
+    /// <summary>
+    /// Set the first time the file turns out to be present but unreadable. While it is set nothing
+    /// is written: those bytes may describe a live orphan, and an empty load that then overwrote
+    /// them would make that process invisible to this run <em>and</em> to every run after it.
+    /// Never cleared — the file is left exactly as found, for inspection and for a later run to
+    /// read again from scratch.
+    /// </summary>
+    private bool _unreadable;
+
+    /// <summary>
+    /// The records on disk, or an empty list. An absent file and an unreadable one both load as
+    /// empty — Relay must start either way — but only the absent one is <em>believed</em>; see
+    /// <see cref="_unreadable"/>.
+    /// </summary>
     private List<ManagedProcessRecord> LoadLocked()
     {
         try
@@ -77,9 +92,19 @@ public sealed class ManagedProcessRegistry
             return JsonSerializer.Deserialize<List<ManagedProcessRecord>>(File.ReadAllText(_path))
                    ?? new List<ManagedProcessRecord>();
         }
-        catch
+        catch (Exception exc)
         {
-            // A half-written file after a crash must never stop Relay from starting.
+            // A half-written file after a crash must never stop Relay from starting. It must not be
+            // quietly discarded either: failing open here used to have the startup sweep replace it
+            // with an empty list, so a leftover it described lost its last trace.
+            if (!_unreadable)
+                Log.ForContext<ManagedProcessRegistry>().Error(
+                    exc, "The managed process registry at {Path} exists but could not be read. It " +
+                         "may list processes left over from a previous run, which cannot now be " +
+                         "found or killed. The file is being left untouched for inspection, and " +
+                         "nothing will be written to it until Relay is restarted.", _path);
+
+            _unreadable = true;
             return new List<ManagedProcessRecord>();
         }
     }
@@ -135,6 +160,12 @@ public sealed class ManagedProcessRegistry
     /// </summary>
     private void SaveLocked(List<ManagedProcessRecord> records)
     {
+        // Every write goes through here, so this one guard covers Record, Forget, Clear and the
+        // startup sweep's ReplaceAll alike. What we would write is derived from a load that
+        // returned empty because it failed, not because the file was empty.
+        if (_unreadable)
+            return;
+
         var directory = Path.GetDirectoryName(_path);
         if (!string.IsNullOrEmpty(directory))
             Directory.CreateDirectory(directory);

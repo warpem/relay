@@ -121,6 +121,30 @@ public class ManagedProcessRegistryTests : IDisposable
     }
 
     [Fact]
+    public void AnUnreadableFile_IsPreservedRatherThanOverwritten()
+    {
+        // Failing open is fine — Relay has to start. Failing open *and then overwriting* is not:
+        // those bytes may name a live orphan holding a GPU, and once the sweep has replaced them
+        // with an empty list nothing can ever find that process again. An absent file means "no
+        // leftovers"; an unreadable one means "we do not know", and the two must not be confused.
+        File.WriteAllText(Path_, "{ not json");
+
+        ManagedProcessRegistry.KillLeftovers(Path_, _ => null,
+                                             _ => Assert.Fail("there is nothing to kill"),
+                                             confirmWait: TimeSpan.Zero);
+
+        Assert.Equal("{ not json", File.ReadAllText(Path_));
+
+        // Nor does an ordinary launch or settle overwrite it on the way past.
+        var registry = new ManagedProcessRegistry(Path_);
+        registry.Record(new ManagedProcessRecord(1, 1, 1, 111, 111, 5));
+        registry.Forget(1, 1, 1);
+        registry.Clear();
+
+        Assert.Equal("{ not json", File.ReadAllText(Path_));
+    }
+
+    [Fact]
     public void AMissingFileAndAMissingDirectory_AreBothHandled()
     {
         var nested = System.IO.Path.Combine(_dir, "does", "not", "exist", "managed-processes.json");
