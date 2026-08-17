@@ -127,6 +127,34 @@ The **Scheduler** setting tells Relay how to read job IDs and job states out of 
 
 Queues default to `Slurm`. Note that the parser no longer falls back across schedulers: a queue set to `Slurm` will reject output in another scheduler's format rather than guessing, so a non-SLURM queue must have its scheduler selected explicitly.
 
+### Managed queues (no external scheduler)
+
+Setting **Scheduler** to `Managed` makes Relay run jobs itself, as local processes on the Relay host, instead of submitting them to SLURM, Flux or anything else. It starts a job only when the CPU cores, memory and GPUs it asks for are free. This suits a single workstation, where installing a scheduler purely to arbitrate one machine's resources is a large dependency for a small need.
+
+Configure **CPU cores**, **Memory (GB)** and **GPUs** to describe the host. The submission script template is still used — for module blocks and `{{ command }}` — but drops the scheduler directives:
+
+```bash
+#!/bin/bash
+{{ warp }}
+ml warptools/latest
+{{ /warp }}
+
+umask 007
+
+{{ command }}
+```
+
+Things worth knowing:
+
+- **Cores and memory are accounting, not enforcement.** Relay will not start a job unless its declared requirements fit, but nothing stops a running job from exceeding them. GPUs are the exception: each job sees only its assigned devices via `CUDA_VISIBLE_DEVICES`.
+- **One managed queue per host.** A second would double-book the same machine, so Relay refuses to create or configure one.
+- **Jobs do not survive a Relay restart.** They are killed on shutdown, and anything left behind by a crash is killed at the next startup. Jobs that were running are marked failed.
+- **Worker pools cannot use a managed queue.** Pools submit bare scripts with no resource request attached, so there is nothing to admit against.
+- **Jobs run in order of fit, not strictly in order of submission.** A small job may start ahead of a queued larger one. On a multi-GPU host a large job can in principle be held off indefinitely by a stream of small ones.
+- **macOS is a development-only configuration.** `setsid` is absent there, so Relay cannot clean up compute processes left behind by a crash — only by a graceful shutdown. On Linux both work.
+
+The cores, memory and GPU totals can only be changed while the queue is idle. If jobs are still running on it, the edit is refused rather than leaving the accounting to disagree with what is on the host.
+
 ### Submission script template
 
 The script template is a shell script submitted to your scheduler for each job. It uses `{{ variable }}` placeholders that Relay fills in at submission time:
