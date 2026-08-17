@@ -541,6 +541,16 @@ public class ClusterQueue : JobQueue, IPoolQueue
                     // abort is an abort whatever exception carried it here.
                     await job.WriteToLifecycleLog(
                         $"Job {job.Id} was aborted while it was being staged: {exc.Message}");
+
+                    // The full exception, in the log a user diagnosing a failure actually opens.
+                    // Cancellation wins the *status*, but this catch also collects a genuine
+                    // staging failure that merely happened to coincide with an abort — a script
+                    // that could not be written, a missing input — and the message alone would
+                    // throw away the stack trace that says which.
+                    await job.WriteToErrorLog(
+                        $"Job {job.Id} was aborted while it was being staged; the exception that " +
+                        $"carried it here follows, and may be an unrelated staging failure:\n{exc}");
+
                     JobUpdateCallback(job, j => j.Status = JobStatus.Aborted);
                 }
                 catch (Exception exc)
