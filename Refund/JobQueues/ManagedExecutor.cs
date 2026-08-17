@@ -90,13 +90,18 @@ public sealed class ManagedExecutor
                 if (existing.IsUsableReservation)
                     return AdmissionResult.Admitted;   // this run's own reservation; idempotent
 
-                // Leftover from a previous run of the same job. Condemning is what keeps
-                // Reconcile killing it now that the job is active again, and what retires it the
-                // moment it dies; without that the entry would be protected by the job's new
-                // Waiting status and nothing would ever clean it up.
+                // Leftover from a previous run of the same job, and two separate things have to
+                // happen to it. Condemning marks it for retirement the instant its process exits,
+                // whatever the job's status says — without that the job's new Waiting status would
+                // make the entry look active forever and nothing would clean it up. (It does not
+                // make Reconcile re-kill: Condemn signals at most once, by design.)
                 Condemn(existing);
                 Reconcile();
 
+                // And the job has to be told to wait rather than given a fresh allocation, even
+                // when the host has room for one. _entries is keyed by Job, so a new entry would
+                // *replace* the one tracking the live process — orphaning it exactly as an Attach
+                // overwrite would, only via the ledger instead.
                 if (_entries.ContainsKey(job))
                     return AdmissionResult.IsBusy;     // still winding down; the daemon re-asks
             }
@@ -131,12 +136,18 @@ public sealed class ManagedExecutor
     /// has no process yet.
     /// </summary>
     /// <returns>
-    /// False if there is nothing to bind to. Either the reservation was retired while the process
-    /// was starting (an abort during staging, say), or it already holds a process. In both cases
-    /// the caller owns an unaccounted process and must kill it rather than leave it running
-    /// outside the ledger. Refusing is essential in the second case: overwriting a live
+    /// False if there is nothing to bind to, for any of three reasons: the reservation was retired
+    /// while the process was starting; it already holds a process; or it has been condemned or
+    /// spent. In every case the caller owns an unaccounted process and must kill it rather than
+    /// leave it running outside the ledger.
+    /// <para>
+    /// The last two reasons each close an orphan route. Overwriting a live
     /// <see cref="Entry.Process"/> would make the old one unreachable, so nothing would ever kill
-    /// it, reap it, or account for the GPU it is holding.
+    /// it, reap it, or account for the GPU it holds. Adopting into a condemned entry is just as
+    /// bad the other way round: <see cref="Condemn"/> has already fired, so the adopted process
+    /// would never be signalled at all, and its booking would stand until it happened to exit on
+    /// its own.
+    /// </para>
     /// </returns>
     public bool Attach(Job job, IManagedProcess process)
     {
@@ -253,8 +264,10 @@ public sealed class ManagedExecutor
             {
                 // Terminal or condemned, live process. Never free here: HandleAbortingState
                 // force-marks a job Aborted after 30s whether or not the kill landed, and releasing
-                // would hand a still-computing job's GPU to someone else. Condemn — which signals
-                // exactly once, however many passes this takes — and wait for the exit.
+                // would hand a still-computing job's GPU to someone else. Condemn and wait for the
+                // exit. This runs on every pass, but it signals only on the first: what the flag
+                // buys on later passes is that the entry is retired the moment its process exits
+                // (see the branch above) even if the job has gone active again in the meantime.
                 Condemn(entry);
                 continue;
             }

@@ -401,6 +401,43 @@ public class ManagedExecutorTests
     }
 
     [Fact]
+    public void RequeueingWithSpareCapacity_StillRefusesToDisplaceTheTrackedProcess()
+    {
+        // The one-GPU version of this scenario cannot pin the refusal: there, Busy comes from
+        // resource exhaustion, so letting the stale entry fall through to a fresh allocation looks
+        // identical. With headroom it does not. _entries is keyed by Job, so the fresh entry would
+        // *replace* the one tracking the live process — the same orphan as an Attach overwrite,
+        // reached through the ledger instead.
+        var executor = new ManagedExecutor();
+        var roomy = new ResourceTotals(Cores: 32, MemoryGb: 256, Gpus: 4);
+
+        var job = NewGpuJob();
+        Assert.IsType<AdmissionResult.Admit>(executor.TryAdmit(job, roomy));
+        var stubborn = new FakeProcess();
+        Assert.True(executor.Attach(job, stubborn));
+
+        job.Status = JobStatus.Aborted;
+        executor.Reap();
+        Assert.Equal(1, stubborn.KillCount);
+
+        job.Status = JobStatus.Building;
+        executor.Reap();
+        job.Status = JobStatus.Waiting;
+
+        // Three free GPUs and 31 free cores, and it still must not be admitted.
+        Assert.IsType<AdmissionResult.Busy>(executor.TryAdmit(job, roomy));
+        Assert.False(executor.Attach(job, new FakeProcess()));
+        Assert.Single(executor.LiveAllocations());
+
+        // The entry is still the one bound to the original process: when that process dies the
+        // entry retires. Had it been replaced by a fresh reservation, the job being Waiting would
+        // keep the replacement alive and stubborn's exit would go unnoticed.
+        stubborn.Exit(137);
+        executor.Reap();
+        Assert.False(executor.HasEntries(_ => true));
+    }
+
+    [Fact]
     public void CondemnationSurvivesTheJobBecomingActiveAgain()
     {
         // Isolates the stickiness: without it, the re-queued job's Waiting status makes the entry
@@ -578,6 +615,12 @@ public class ManagedExecutorTests
         Assert.IsType<AdmissionResult.Admit>(executor.TryAdmit(reserved, oneCore));
 
         executor.Kill(reserved);
+
+        // A process that was already starting when the kill landed must not be adopted — asserted
+        // before anything reconciles the entry away, so this is the condemned refusal and not the
+        // untracked one. Condemn has already fired, so an adopted process would never be signalled
+        // and its booking would stand until it happened to exit on its own.
+        Assert.False(executor.Attach(reserved, new FakeProcess()));
 
         Assert.Empty(executor.LiveAllocations());
         Assert.IsType<AdmissionResult.Admit>(executor.TryAdmit(NewJob(), oneCore));
