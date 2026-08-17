@@ -511,8 +511,7 @@ public class ClusterQueue : JobQueue, IPoolQueue
                         return;
                     }
 
-                    lock (Sync)
-                        JobsInLimbo.Add(job);
+                    EnterLimbo(job);
 
                     await job.WriteToLifecycleLog($"Submitting script: {scriptPath}");
 
@@ -541,15 +540,76 @@ public class ClusterQueue : JobQueue, IPoolQueue
                 {
                     // Reached on every path now, cancellation included. It is the only thing that
                     // lets the job be queued again.
-                    lock (Sync)
-                    {
-                        StagingJobs.Remove(job);
-                        if (!JobsInLimbo.Contains(job))
-                            JobsInLimbo.Remove(job);
-                    }
+                    SettleStaging(job);
                 }
             });
         }
+    }
+
+    /// <summary>The script is written and the job is now waiting for the scheduler to name it.</summary>
+    internal void EnterLimbo(Job job)
+    {
+        lock (Sync)
+            JobsInLimbo.Add(job);
+    }
+
+    internal bool IsInLimbo(Job job)
+    {
+        lock (Sync)
+            return JobsInLimbo.Contains(job);
+    }
+
+    /// <summary>
+    /// Drops both pieces of per-run staging bookkeeping, on every exit path.
+    /// </summary>
+    /// <remarks>
+    /// The limbo removal is unconditional, and has to be: the guard that used to stand here was
+    /// inverted — it removed the job only when the set did <em>not</em> contain it — so limbo was
+    /// never cleared for any queue, SLURM and Flux included. <see cref="HashSet{T}.Remove"/> is
+    /// already a no-op for a job that never entered limbo, so no guard is wanted at all. A stale
+    /// entry is what <see cref="AbortJob"/> then waited on forever.
+    /// </remarks>
+    internal void SettleStaging(Job job)
+    {
+        lock (Sync)
+        {
+            StagingJobs.Remove(job);
+            JobsInLimbo.Remove(job);
+        }
+    }
+
+    /// <summary>
+    /// How long an abort waits for a staged job's cluster job id to appear. Generous, because the
+    /// id comes back from a submission command that may be an ssh round trip to a loaded
+    /// scheduler — but bounded, because <see cref="AbortJob"/> runs on the daemon thread and an
+    /// unbounded wait there stops every other job on the host.
+    /// </summary>
+    internal static readonly TimeSpan LimboJobIdWait = TimeSpan.FromSeconds(60);
+
+    private static readonly TimeSpan LimboPollInterval = TimeSpan.FromMilliseconds(100);
+
+    /// <summary>
+    /// Blocks until the job leaves limbo or its cluster job id appears, whichever happens first,
+    /// and gives up after <paramref name="timeout"/>. True only when there is an id to abort with.
+    /// </summary>
+    /// <remarks>
+    /// A job whose staging failed after it entered limbo never gets an id at all, so the exit on
+    /// timeout is not belt-and-braces: it is the only thing that ends the wait if some future path
+    /// leaves an entry behind again.
+    /// </remarks>
+    internal bool WaitForClusterJobId(Job job, TimeSpan timeout)
+    {
+        long start = Stopwatch.GetTimestamp();
+
+        while (IsInLimbo(job) && string.IsNullOrWhiteSpace(job.ClusterJobId))
+        {
+            if (Stopwatch.GetElapsedTime(start) >= timeout)
+                break;
+
+            Thread.Sleep(LimboPollInterval < timeout ? LimboPollInterval : timeout);
+        }
+
+        return !string.IsNullOrWhiteSpace(job.ClusterJobId);
     }
 
     /// <summary>
@@ -787,7 +847,8 @@ public class ClusterQueue : JobQueue, IPoolQueue
     /// <remarks>
     /// This method handles aborting jobs in different states:
     /// 1. For jobs still in staging phase, it cancels the staging task
-    /// 2. For jobs in limbo (staged but waiting for cluster job ID), it waits for the ID to be assigned
+    /// 2. For jobs in limbo (staged but waiting for cluster job ID), it waits — for a bounded time,
+    ///    see <see cref="LimboJobIdWait"/> — for the ID to be assigned
     /// 3. For jobs running on the cluster, it sends an abort command to the cluster scheduler
     /// </remarks>
     public override void AbortJob(Job job)
@@ -816,8 +877,18 @@ public class ClusterQueue : JobQueue, IPoolQueue
                     return;
             }
 
-        while (JobsInLimbo.Contains(job) && string.IsNullOrWhiteSpace(job.ClusterJobId))
-            Thread.Sleep(100);
+        // Bounded, and locked. This runs on the daemon thread, so a wait that cannot end stops
+        // every other job on the host, not just this one.
+        if (!WaitForClusterJobId(job, LimboJobIdWait))
+        {
+            // No id ever arrived: staging failed after the job entered limbo, or the submission
+            // itself threw. There is nothing on the scheduler to cancel, and substituting an empty
+            // id into AbortJobTemplate would run a bare scancel/flux-cancel instead.
+            Log.ForContext<ClusterQueue>().Warning(
+                "Job {JobId} was aborted before the cluster gave it a job ID; there is nothing to " +
+                "cancel on the scheduler.", job.Id);
+            return;
+        }
 
         Task.Run(async () =>
         {
