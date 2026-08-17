@@ -1,4 +1,5 @@
 using Refund.DataModel;
+using Serilog;
 
 namespace Refund.JobQueues;
 
@@ -162,6 +163,61 @@ public sealed class ManagedExecutor
             entry.Process = process;
             return true;
         }
+    }
+
+    /// <summary>
+    /// Spawns the job's script and attaches the resulting process to its (already admitted) entry.
+    /// Throws if the job holds no reservation it could be launched into — a process must never run
+    /// unaccounted for.
+    /// </summary>
+    public IManagedProcess Launch(Job job, string scriptPath, string workingDirectory) =>
+        Launch(job, gpus => SystemManagedProcess.Start(scriptPath, workingDirectory, gpus,
+                                                       job.PathStdOut, job.PathStdErr));
+
+    /// <summary>Overload with the spawn injected, so the failure paths can be tested.</summary>
+    /// <remarks>
+    /// The spawn deliberately happens outside the lock — starting a process is slow, and holding
+    /// the host-wide lock across it would stall status polling for every other job.
+    /// </remarks>
+    internal IManagedProcess Launch(Job job, Func<IReadOnlyList<int>, IManagedProcess> spawn)
+    {
+        IReadOnlyList<int> gpus;
+        lock (_sync)
+        {
+            // Presence is not enough. An entry can exist while condemned, or spent by a process
+            // that has already run and exited, and <see cref="Attach"/> refuses both — so a
+            // presence check would spawn a real process only to find nothing will account for it.
+            if (!_entries.TryGetValue(job, out var entry) || !entry.IsUsableReservation)
+                throw new InvalidOperationException(
+                    $"Job {job.Id} holds no usable reservation; refusing to launch it unaccounted for.");
+
+            gpus = entry.Allocation.GpuIndices;
+        }
+
+        var process = spawn(gpus);
+
+        if (!Attach(job, process))
+        {
+            // The reservation was retired while the process was starting — an abort, typically.
+            // We now own a running process nothing is accounting for, and leaving it alive would
+            // hold cores, memory and GPUs that no ledger can ever reclaim.
+            try
+            {
+                process.KillTree();
+            }
+            catch (Exception exc)
+            {
+                Log.ForContext<ManagedExecutor>().Error(
+                    exc, "Could not kill the unaccounted process {Pid} of job {JobId}; " +
+                         "it may still be holding this host's resources.", process.Pid, job.Id);
+            }
+
+            throw new InvalidOperationException(
+                $"Job {job.Id}'s reservation was retired while its process was starting; " +
+                "the process has been killed rather than left running unaccounted for.");
+        }
+
+        return process;
     }
 
     public void Reap()
