@@ -173,12 +173,28 @@ public partial class QueueRepository
 
         // Before anything is admitted: kill compute left running by a Relay that crashed rather
         // than shut down. An orphan holding a GPU blocks every later job on a single-GPU host.
+        IReadOnlyList<ManagedProcessRecord> survivors = Array.Empty<ManagedProcessRecord>();
+
         try
         {
-            int leftovers = ManagedProcessRegistry.KillLeftovers(
+            var sweep = ManagedProcessRegistry.KillLeftovers(
                 registryPath, ManagedProcessRegistry.LiveProcessStartTime);
-            if (leftovers > 0)
-                _logger.Warning("Killed {Count} managed process(es) left over from a previous run", leftovers);
+
+            if (sweep.Killed > 0)
+                _logger.Warning("Killed {Count} managed process(es) left over from a previous run", sweep.Killed);
+
+            survivors = sweep.Unconfirmed;
+
+            // Named individually, at Error, because this is the state in which nothing will start.
+            // A count alone leaves nothing to go and look at with ps.
+            foreach (var survivor in survivors)
+                _logger.Error(
+                    "Managed process {Pid} (process group {Pgid}) of job {ProjectId}/{SpaceId}/{JobId} " +
+                    "was left over from a previous run and did not die when killed. It may still be " +
+                    "using this host's cores and GPUs, so managed queues will hold every job Waiting " +
+                    "until it is gone. Relay retries the kill on each daemon tick; if it persists, " +
+                    "kill it by hand.",
+                    survivor.Pid, survivor.Pgid, survivor.ProjectId, survivor.SpaceId, survivor.JobId);
         }
         catch (Exception exc)
         {
@@ -187,7 +203,7 @@ public partial class QueueRepository
             _logger.Error(exc, "Could not sweep managed processes left over from a previous run");
         }
 
-        ManagedExecutor = new ManagedExecutor(new ManagedProcessRegistry(registryPath));
+        ManagedExecutor = new ManagedExecutor(new ManagedProcessRegistry(registryPath), survivors);
 
         InitializeClusterQueues();
     }

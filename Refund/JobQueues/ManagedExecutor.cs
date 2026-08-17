@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Refund.DataModel;
 using Serilog;
 
@@ -67,7 +68,93 @@ public sealed class ManagedExecutor
     /// </summary>
     private volatile bool _shuttingDown;
 
-    public ManagedExecutor(ManagedProcessRegistry registry = null) => _registry = registry;
+    /// <summary>
+    /// Leftovers from a crashed Relay that the startup sweep signalled but could not confirm dead.
+    /// Guarded by <see cref="_sync"/>. Each one may still be holding a GPU that this executor's
+    /// ledger believes is free, so nothing is admitted while any remain.
+    /// </summary>
+    private readonly List<ManagedProcessRecord> _unconfirmedLeftovers = new();
+
+    /// <summary>
+    /// Retries containment of one survivor, returning true once it is confirmed gone. Injected so
+    /// the block-and-self-heal behaviour can be tested without real pids.
+    /// </summary>
+    private readonly Func<ManagedProcessRecord, bool> _containLeftover;
+
+    /// <summary>Throttles the survivor warning; see <see cref="RetryLeftoversLocked"/>.</summary>
+    private long _lastLeftoverWarningAt;
+
+    public ManagedExecutor(ManagedProcessRegistry registry = null,
+                           IEnumerable<ManagedProcessRecord> unconfirmedLeftovers = null,
+                           Func<ManagedProcessRecord, bool> containLeftover = null)
+    {
+        _registry = registry;
+        _containLeftover = containLeftover ?? ManagedProcessRegistry.RetryContainment;
+
+        if (unconfirmedLeftovers != null)
+            _unconfirmedLeftovers.AddRange(unconfirmedLeftovers);
+    }
+
+    /// <summary>
+    /// Whether a leftover from a previous run is still, as far as anyone can prove, running on this
+    /// host. While true nothing is admitted: the ledger cannot see that process's GPU.
+    /// </summary>
+    public bool HasUnconfirmedLeftovers
+    {
+        get { lock (_sync) return _unconfirmedLeftovers.Count > 0; }
+    }
+
+    /// <summary>
+    /// Re-signal every retained survivor and drop the ones that have since died. A process that
+    /// resisted the startup sweep and then exited — the job finished, an operator killed it — must
+    /// release the admission block on its own, or a single failed kill would wedge the host until
+    /// somebody restarted Relay.
+    /// </summary>
+    private void RetryLeftoversLocked()
+    {
+        if (_unconfirmedLeftovers.Count == 0)
+            return;
+
+        _unconfirmedLeftovers.RemoveAll(record =>
+        {
+            try { return _containLeftover(record); }
+            catch (Exception exc)
+            {
+                Log.ForContext<ManagedExecutor>().Error(
+                    exc, "Could not retry containment of leftover process {Pid} (job {JobId}).",
+                    record.Pid, record.JobId);
+                return false;
+            }
+        });
+
+        if (_unconfirmedLeftovers.Count == 0)
+        {
+            Log.ForContext<ManagedExecutor>().Information(
+                "Every leftover process from the previous run is now gone; managed queues are " +
+                "admitting jobs again.");
+
+            _registry?.ReplaceAll(_entries.Values.Select(e => e.Record).Where(r => r != null));
+            return;
+        }
+
+        // Throttled: this runs on every daemon tick, and the reason has to be findable in the log
+        // without drowning it. A student staring at a queue where nothing starts must be able to
+        // read why.
+        if (_lastLeftoverWarningAt != 0 &&
+            Stopwatch.GetElapsedTime(_lastLeftoverWarningAt) < LeftoverWarningInterval)
+            return;
+
+        _lastLeftoverWarningAt = Stopwatch.GetTimestamp();
+
+        Log.ForContext<ManagedExecutor>().Warning(
+            "Managed queues are not admitting jobs: {Count} process(es) left over from a previous " +
+            "run could not be killed and may still be using this host's GPUs — pid(s) {Pids}. " +
+            "Relay retries on every daemon tick and resumes on its own once they are gone.",
+            _unconfirmedLeftovers.Count,
+            string.Join(", ", _unconfirmedLeftovers.Select(r => r.Pid)));
+    }
+
+    private static readonly TimeSpan LeftoverWarningInterval = TimeSpan.FromMinutes(1);
 
     /// <summary>
     /// Cores are per-process in the job model (<c>Job.CoreCount</c>, Job.cs:347) while memory is
@@ -120,6 +207,15 @@ public sealed class ManagedExecutor
 
         lock (_sync)
         {
+            // Busy, not Reject, and this is the important part. A leftover the startup sweep could
+            // not confirm dead may still be holding a GPU the ledger below believes is free, so
+            // admitting now would double-book it. But it is transient — the daemon's reap tick
+            // re-kills survivors and drops the ones that have gone — so the job stays Waiting and
+            // starts by itself, rather than failing permanently or wedging with no explanation.
+            // The reason is logged, throttled, from RetryLeftoversLocked.
+            if (_unconfirmedLeftovers.Count > 0)
+                return AdmissionResult.IsBusy;
+
             Reconcile();
 
             if (_entries.TryGetValue(job, out var existing))
@@ -454,7 +550,12 @@ public sealed class ManagedExecutor
     public void Reap()
     {
         lock (_sync)
+        {
+            // Before reconciling, so a host wedged by an uncontainable leftover un-wedges itself as
+            // soon as that process dies, without a Relay restart.
+            RetryLeftoversLocked();
             Reconcile();
+        }
     }
 
     /// <summary>

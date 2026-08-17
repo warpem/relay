@@ -25,6 +25,16 @@ public record ManagedProcessRecord(int ProjectId, int SpaceId, int JobId,
                                    int Pid, int? Pgid, long StartTimeTicks,
                                    string StartToken = null);
 
+/// <summary>What the startup leftover sweep managed to do.</summary>
+/// <param name="Killed">Processes signalled and then confirmed gone.</param>
+/// <param name="Unconfirmed">
+/// Processes that were ours, were signalled, and were <em>still there</em> when the sweep gave up
+/// waiting. Each one may still be holding a GPU, so managed admission must report
+/// <see cref="AdmissionResult.Busy"/> — not Reject — until it clears: the condition is transient
+/// and the daemon retries the kill on every reap tick.
+/// </param>
+public record LeftoverSweepResult(int Killed, IReadOnlyList<ManagedProcessRecord> Unconfirmed);
+
 /// <summary>
 /// Persists which processes a managed queue launched, so leftovers from a crashed Relay can be
 /// killed at the next startup.
@@ -109,6 +119,14 @@ public sealed class ManagedProcessRegistry
     {
         lock (_sync)
             SaveLocked(new List<ManagedProcessRecord>());
+    }
+
+    /// <summary>Replace the whole file with <paramref name="records"/>. Used by the startup sweep,
+    /// which keeps exactly the leftovers it could not confirm dead.</summary>
+    public void ReplaceAll(IEnumerable<ManagedProcessRecord> records)
+    {
+        lock (_sync)
+            SaveLocked(records.ToList());
     }
 
     /// <summary>
@@ -201,6 +219,13 @@ public sealed class ManagedProcessRegistry
 
             var fields = stat[(close + 1)..].Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
 
+            // Field 3 (index 0) is the state, and 'Z' is a zombie: the process is over and holds no
+            // cores, memory or GPU — only a slot in its parent's wait queue. Reporting it as still
+            // present would leave the sweep unable to confirm any kill it made, since a leftover
+            // whose parent Relay crashed is a zombie until init gets round to reaping it.
+            if (fields.Length > 0 && fields[0] == "Z")
+                return null;
+
             return fields.Length > 19 && long.TryParse(fields[19], out var startJiffies)
                        ? $"{boot}:{startJiffies}"
                        : null;
@@ -251,14 +276,34 @@ public sealed class ManagedProcessRegistry
     }
 
     /// <summary>
-    /// Kills every recorded process that is still alive and still the same process, then clears the
-    /// file. Returns how many were killed. Call once at startup, before any job is admitted.
+    /// How long a killed leftover is given to actually disappear before the sweep gives up on it
+    /// and reports it as a survivor. SIGKILL is delivered synchronously and the process is torn
+    /// down on the next scheduling opportunity, so this only ever elapses when the signal did not
+    /// land at all — a permission failure, or an uninterruptible-sleep task in D state.
     /// </summary>
+    public static readonly TimeSpan DefaultConfirmWait = TimeSpan.FromSeconds(2);
+
+    private static readonly TimeSpan ConfirmPollInterval = TimeSpan.FromMilliseconds(50);
+
+    /// <summary>
+    /// Kills every recorded process that is still alive and still the same process, waits to see
+    /// each one actually go, and rewrites the file with exactly the ones it could not confirm dead.
+    /// Call once at startup, before any job is admitted.
+    /// </summary>
+    /// <remarks>
+    /// <b>Invoking the kill is not evidence that it worked.</b> The production kill path suppresses
+    /// both the group-signal error and the fallback's, so counting a kill as a success and clearing
+    /// the file unconditionally meant a failed kill left compute running on the host while Relay
+    /// went on to hand its GPU to the next job. Only a record whose process is confirmed gone — or
+    /// whose identity no longer matches, so it was never ours — is dropped;
+    /// <see cref="LeftoverSweepResult.Unconfirmed"/> carries the rest, and the caller is expected to
+    /// keep managed admission Busy until they clear.
+    /// </remarks>
     /// <param name="startTimeOf">
     /// Start time of the live process with this pid <b>in UTC</b>, or null if no such process
     /// exists. Injected so the recycling logic is testable without spawning anything.
     /// </param>
-    public static int KillLeftovers(string path, Func<int, DateTime?> startTimeOf) =>
+    public static LeftoverSweepResult KillLeftovers(string path, Func<int, DateTime?> startTimeOf) =>
         KillLeftovers(path, startTimeOf, KillRecord);
 
     /// <summary>Overload with the kill injected, so the identity rules can be tested without
@@ -267,14 +312,20 @@ public sealed class ManagedProcessRegistry
     /// The exact identity probe; see <see cref="StartTokenOf"/>. Only consulted for a record that
     /// carries a token of its own, so a test whose records have none never reaches it.
     /// </param>
-    internal static int KillLeftovers(string path, Func<int, DateTime?> startTimeOf,
-                                      Action<ManagedProcessRecord> kill,
-                                      Func<int, string> startTokenOf = null)
+    /// <param name="confirmWait">
+    /// How long to keep re-probing a killed process before declaring it a survivor; see
+    /// <see cref="DefaultConfirmWait"/>. Zero means one re-probe and no waiting.
+    /// </param>
+    internal static LeftoverSweepResult KillLeftovers(string path, Func<int, DateTime?> startTimeOf,
+                                                      Action<ManagedProcessRecord> kill,
+                                                      Func<int, string> startTokenOf = null,
+                                                      TimeSpan? confirmWait = null)
     {
         startTokenOf ??= StartTokenOf;
 
         var registry = new ManagedProcessRegistry(path);
         int killed = 0;
+        var unconfirmed = new List<ManagedProcessRecord>();
 
         foreach (var record in registry.Load())
         {
@@ -283,19 +334,77 @@ public sealed class ManagedProcessRegistry
             catch { continue; }                                  // unreadable: leave it alone
 
             // Gone, or the pid was recycled into somebody else's process. Either way not ours to
-            // kill: the stored pgid equals the pid, so getting this wrong SIGKILLs a stranger's
-            // whole process group.
+            // kill, and not ours to keep: the stored pgid equals the pid, so a record still in the
+            // file after the identity stopped matching would put a stranger's group in range of
+            // every future sweep.
             if (!stillOurs)
                 continue;
 
-            kill(record);
-            killed++;
+            if (TryContain(record, startTimeOf, startTokenOf, kill,
+                           confirmWait ?? DefaultConfirmWait))
+                killed++;
+            else
+                unconfirmed.Add(record);
         }
 
-        // Cleared whatever happened. A record we could not kill is not going to become killable on
-        // a later boot, and keeping it would put a stale pid in range of every future sweep.
-        registry.Clear();
-        return killed;
+        // Exactly the survivors, and nothing else. Clearing unconditionally is what let a failed
+        // kill vanish; keeping a record whose identity no longer matches is what puts a recycled
+        // pid in range of the next sweep.
+        registry.ReplaceAll(unconfirmed);
+
+        return new LeftoverSweepResult(killed, unconfirmed);
+    }
+
+    /// <summary>
+    /// Signal one leftover and wait, briefly, to see it go. True once its process is confirmed
+    /// gone — or its identity no longer matches, which means it was never ours in the first place.
+    /// </summary>
+    /// <remarks>
+    /// Re-used by the daemon's reap tick to retry a survivor, so a process that only dies later
+    /// releases the admission block without needing a Relay restart.
+    /// </remarks>
+    public static bool TryContain(ManagedProcessRecord record) =>
+        TryContain(record, LiveProcessStartTime, StartTokenOf, KillRecord, DefaultConfirmWait);
+
+    /// <summary>
+    /// The reap-tick retry. Identical containment, but with a much shorter wait: it runs under the
+    /// executor's host-wide lock on every daemon tick, and anything it misses is simply tried again
+    /// a tick later.
+    /// </summary>
+    public static bool RetryContainment(ManagedProcessRecord record) =>
+        TryContain(record, LiveProcessStartTime, StartTokenOf, KillRecord,
+                   TimeSpan.FromMilliseconds(100));
+
+    internal static bool TryContain(ManagedProcessRecord record,
+                                    Func<int, DateTime?> startTimeOf,
+                                    Func<int, string> startTokenOf,
+                                    Action<ManagedProcessRecord> kill,
+                                    TimeSpan confirmWait)
+    {
+        try { kill(record); }
+        catch { /* the probe below is the only verdict that counts */ }
+
+        var start = Stopwatch.GetTimestamp();
+
+        while (true)
+        {
+            try
+            {
+                if (!IsStillTheSameProcess(record, startTimeOf, startTokenOf))
+                    return true;
+            }
+            catch
+            {
+                // An unreadable probe is not a confirmation. Retaining the record costs a Busy
+                // queue that self-heals; dropping it costs a GPU nothing is tracking.
+                return false;
+            }
+
+            if (Stopwatch.GetElapsedTime(start) >= confirmWait)
+                return false;
+
+            Thread.Sleep(ConfirmPollInterval < confirmWait ? ConfirmPollInterval : confirmWait);
+        }
     }
 
     /// <summary>

@@ -1112,6 +1112,91 @@ public class ManagedExecutorTests : IDisposable
         Assert.Empty(registry.Load());
     }
 
+    #region Unconfirmed leftovers from a crashed Relay
+
+    private static ManagedProcessRecord Leftover(int pid = 4242) =>
+        new(ProjectId: 1, SpaceId: 1, JobId: 1, Pid: pid, Pgid: pid, StartTimeTicks: 999);
+
+    [Fact]
+    public void ASurvivingLeftover_MakesAdmissionBusy_NotRejected()
+    {
+        // A leftover the startup sweep could not confirm dead may still be holding a GPU this
+        // ledger believes is free, so nothing may be admitted onto it. Busy rather than Reject
+        // because the condition is transient: the job stays Waiting and starts by itself.
+        var executor = new ManagedExecutor(unconfirmedLeftovers: new[] { Leftover() },
+                                           containLeftover: _ => false);
+
+        Assert.True(executor.HasUnconfirmedLeftovers);
+        Assert.IsType<AdmissionResult.Busy>(executor.TryAdmit(NewJob(), Host));
+
+        // And no reservation was booked behind the refusal.
+        Assert.Empty(executor.LiveAllocations());
+    }
+
+    [Fact]
+    public void ASurvivorThatDiesLater_ReleasesTheBlockOnTheNextReapTick()
+    {
+        // The self-heal, and the reason the verdict is Busy. A permanent wedge that needed a Relay
+        // restart to clear is the worst failure this feature can have.
+        bool dead = false;
+        var executor = new ManagedExecutor(unconfirmedLeftovers: new[] { Leftover() },
+                                           containLeftover: _ => dead);
+
+        executor.Reap();
+        Assert.IsType<AdmissionResult.Busy>(executor.TryAdmit(NewJob(), Host));
+
+        dead = true;                       // the process finally exits
+        executor.Reap();
+
+        Assert.False(executor.HasUnconfirmedLeftovers);
+        Assert.IsType<AdmissionResult.Admit>(executor.TryAdmit(NewJob(), Host));
+    }
+
+    [Fact]
+    public void TheReapTick_RetriesTheKill_RatherThanOnlyProbing()
+    {
+        // "Retry the kill", not "wait and see": a signal that did not land the first time is worth
+        // sending again, and containment is one operation.
+        int attempts = 0;
+        var executor = new ManagedExecutor(unconfirmedLeftovers: new[] { Leftover() },
+                                           containLeftover: _ => { attempts++; return false; });
+
+        executor.Reap();
+        executor.Reap();
+
+        Assert.Equal(2, attempts);
+    }
+
+    [Fact]
+    public void AContainmentRetryThatThrows_KeepsTheBlock_RatherThanEscapingTheReap()
+    {
+        // Reap runs from the daemon tick; an escape there would stop every other entry being
+        // reconciled. And an unreadable verdict is not a confirmation, so the record stays.
+        var executor = new ManagedExecutor(
+            unconfirmedLeftovers: new[] { Leftover() },
+            containLeftover: _ => throw new InvalidOperationException("probe failed"));
+
+        executor.Reap();
+
+        Assert.True(executor.HasUnconfirmedLeftovers);
+    }
+
+    [Fact]
+    public void OnceEveryLeftoverIsGone_TheRegistryFileIsCleared()
+    {
+        // The survivors were retained on disk for the next startup to sweep. Contained, they must
+        // not stay there: their pids will be recycled.
+        var registry = NewRegistry();
+        registry.Record(Leftover());
+
+        var executor = new ManagedExecutor(registry, new[] { Leftover() }, _ => true);
+        executor.Reap();
+
+        Assert.Empty(registry.Load());
+    }
+
+    #endregion
+
     [Fact]
     public void AnExecutorWithNoRegistry_StillLaunchesAndReconciles()
     {

@@ -144,37 +144,78 @@ public class ManagedProcessRegistryTests : IDisposable
         new(ProjectId: 1, SpaceId: 1, JobId: jobId, Pid: pid, Pgid: pgid,
             StartTimeTicks: startTime.Ticks);
 
+    /// <summary>
+    /// A host whose processes actually die when they are signalled — unless told otherwise. The
+    /// sweep re-probes after killing and only counts, and only forgets, a process it has confirmed
+    /// gone, so a kill callback that quietly does nothing is a <em>failed</em> kill.
+    /// </summary>
+    private sealed class FakeHost
+    {
+        private readonly Dictionary<int, DateTime> _live = new();
+
+        /// <summary>Pids that survive being signalled, however often.</summary>
+        private readonly HashSet<int> _unkillable = new();
+
+        public List<ManagedProcessRecord> Signalled { get; } = new();
+
+        public FakeHost Alive(int pid, DateTime startTime)
+        {
+            _live[pid] = startTime;
+            return this;
+        }
+
+        public FakeHost Unkillable(int pid, DateTime startTime)
+        {
+            _unkillable.Add(pid);
+            return Alive(pid, startTime);
+        }
+
+        public DateTime? StartTimeOf(int pid) => _live.TryGetValue(pid, out var t) ? t : null;
+
+        public void Kill(ManagedProcessRecord record)
+        {
+            Signalled.Add(record);
+
+            if (!_unkillable.Contains(record.Pid))
+                _live.Remove(record.Pid);
+        }
+
+        /// <summary>The process finally exits — an operator killed it, or it simply finished.</summary>
+        public void Dies(int pid) { _unkillable.Remove(pid); _live.Remove(pid); }
+    }
+
+    /// <summary>Zero confirm wait: one re-probe, no sleeping, since the fake host is synchronous.</summary>
+    private LeftoverSweepResult Sweep(FakeHost host) =>
+        ManagedProcessRegistry.KillLeftovers(Path_, host.StartTimeOf, host.Kill,
+                                             confirmWait: TimeSpan.Zero);
+
     [Fact]
     public void KillLeftovers_KillsARecordWhosePidAndStartTimeBothStillMatch()
     {
         new ManagedProcessRegistry(Path_).Record(At(Launched));
 
-        var killed = new List<ManagedProcessRecord>();
-        var count = ManagedProcessRegistry.KillLeftovers(
-            Path_, startTimeOf: _ => Launched, kill: killed.Add);
+        var host = new FakeHost().Alive(4242, Launched);
+        var result = Sweep(host);
 
-        Assert.Equal(1, count);
-        Assert.Equal(4242, Assert.Single(killed).Pid);
+        Assert.Equal(1, result.Killed);
+        Assert.Equal(4242, Assert.Single(host.Signalled).Pid);
     }
 
     [Fact]
     public void KillLeftovers_StillKillsWhenTheTwoReadingsDisagreeByMilliseconds()
     {
-        // THE Linux test. The recorded time is read by the Relay that launched the job; the probed
-        // one by the Relay sweeping after it crashed. On Linux .NET derives Process.StartTime from
-        // a per-process cached BootTime (CLOCK_REALTIME_COARSE - CLOCK_BOOTTIME), and the coarse
-        // clock is quantised to a kernel tick — so two independent samples of one process differ by
-        // 1-4 ms, i.e. 10,000-40,000 ticks. Under exact equality the sweep skips every record,
-        // clears the file and reports 0: every orphan keeps its GPU, silently, on the deployment
-        // platform only. No in-process test can see this, because in-process reads share the cache.
+        // THE Linux test, for the records that have no exact token. The recorded time is read by
+        // the Relay that launched the job; the probed one by the Relay sweeping after it crashed.
+        // On Linux .NET derives Process.StartTime from a per-process cached BootTime
+        // (CLOCK_REALTIME_COARSE - CLOCK_BOOTTIME), and the coarse clock is quantised to a kernel
+        // tick, so two independent samples of one process differ by 1-4 ms. Under exact equality
+        // the sweep would skip every record and report 0: every orphan keeps its GPU, silently.
         new ManagedProcessRegistry(Path_).Record(At(Launched));
 
-        var killed = new List<ManagedProcessRecord>();
-        var count = ManagedProcessRegistry.KillLeftovers(
-            Path_, startTimeOf: _ => Launched.AddMilliseconds(4), kill: killed.Add);
+        var host = new FakeHost().Alive(4242, Launched.AddMilliseconds(4));
 
-        Assert.Equal(1, count);
-        Assert.Single(killed);
+        Assert.Equal(1, Sweep(host).Killed);
+        Assert.Single(host.Signalled);
     }
 
     [Theory]
@@ -186,25 +227,23 @@ public class ManagedProcessRegistryTests : IDisposable
     {
         new ManagedProcessRegistry(Path_).Record(At(Launched));
 
-        Assert.Equal(1, ManagedProcessRegistry.KillLeftovers(
-            Path_, _ => Launched.AddMilliseconds(millisecondsOff), _ => { }));
+        Assert.Equal(1, Sweep(new FakeHost().Alive(4242, Launched.AddMilliseconds(millisecondsOff)))
+                            .Killed);
     }
 
     [Fact]
     public void KillLeftovers_SkipsRecordsWhoseStartTimeNoLongerMatches()
     {
         // Pids are recycled. Killing on pid alone could terminate an unrelated process that
-        // happened to inherit the number after a crash. The tolerance above is loose enough to
-        // absorb two clock readings and nothing more: a minute out is a different process.
+        // happened to inherit the number after a crash.
         new ManagedProcessRegistry(Path_).Record(At(Launched));
 
-        var killed = new List<ManagedProcessRecord>();
-        var count = ManagedProcessRegistry.KillLeftovers(
-            Path_, startTimeOf: _ => Launched.AddMinutes(1),   // live, but a different process
-            kill: killed.Add);
+        var host = new FakeHost().Alive(4242, Launched.AddMinutes(1));   // live, different process
+        var result = Sweep(host);
 
-        Assert.Equal(0, count);
-        Assert.Empty(killed);                                  // nothing was signalled at all
+        Assert.Equal(0, result.Killed);
+        Assert.Empty(host.Signalled);                          // nothing was signalled at all
+        Assert.Empty(result.Unconfirmed);                      // and it is not held against us
     }
 
     [Fact]
@@ -217,8 +256,10 @@ public class ManagedProcessRegistryTests : IDisposable
         var justOutside = Launched + ManagedProcessRegistry.StartTimeTolerance +
                           TimeSpan.FromMilliseconds(1);
 
-        Assert.Equal(0, ManagedProcessRegistry.KillLeftovers(
-            Path_, _ => justOutside, _ => Assert.Fail("signalled a process outside the tolerance")));
+        var host = new FakeHost().Alive(4242, justOutside);
+
+        Assert.Equal(0, Sweep(host).Killed);
+        Assert.Empty(host.Signalled);
     }
 
     [Fact]
@@ -226,9 +267,12 @@ public class ManagedProcessRegistryTests : IDisposable
     {
         new ManagedProcessRegistry(Path_).Record(At(Launched));
 
-        var killed = new List<ManagedProcessRecord>();
-        Assert.Equal(0, ManagedProcessRegistry.KillLeftovers(Path_, _ => null, killed.Add));
-        Assert.Empty(killed);
+        var host = new FakeHost();                             // nothing alive at all
+        var result = Sweep(host);
+
+        Assert.Equal(0, result.Killed);
+        Assert.Empty(host.Signalled);
+        Assert.Empty(result.Unconfirmed);
     }
 
     [Fact]
@@ -239,19 +283,15 @@ public class ManagedProcessRegistryTests : IDisposable
         registry.Record(At(Launched, pid: 222, pgid: 222, jobId: 2));
         registry.Record(At(Launched, pid: 333, pgid: 333, jobId: 3));
 
-        var killed = new List<int>();
-        var count = ManagedProcessRegistry.KillLeftovers(
-            Path_,
-            startTimeOf: pid => pid switch
-            {
-                111 => Launched.AddMilliseconds(2),   // ours, read by a different process
-                222 => null,                          // gone
-                _   => Launched.AddHours(3),          // pid recycled into somebody else's process
-            },
-            kill: r => killed.Add(r.Pid));
+        var host = new FakeHost()
+            .Alive(111, Launched.AddMilliseconds(2))           // ours, read by a different process
+            .Alive(333, Launched.AddHours(3));                 // pid recycled into somebody else's
+        // 222 is simply gone.
 
-        Assert.Equal(1, count);
-        Assert.Equal(new[] { 111 }, killed);
+        var result = Sweep(host);
+
+        Assert.Equal(1, result.Killed);
+        Assert.Equal(new[] { 111 }, host.Signalled.Select(r => r.Pid));
     }
 
     [Fact]
@@ -263,39 +303,85 @@ public class ManagedProcessRegistryTests : IDisposable
         // could catch a pgid invented on the way in.
         new ManagedProcessRegistry(Path_).Record(At(Launched, pgid: null));
 
-        var killed = new List<ManagedProcessRecord>();
-        ManagedProcessRegistry.KillLeftovers(Path_, _ => Launched, killed.Add);
+        var host = new FakeHost().Alive(4242, Launched);
+        Sweep(host);
 
-        Assert.Null(Assert.Single(killed).Pgid);
+        Assert.Null(Assert.Single(host.Signalled).Pgid);
     }
 
     [Fact]
-    public void KillLeftovers_ClearsTheFileAfterSweeping()
+    public void KillLeftovers_ForgetsARecordWhoseProcessIsConfirmedGone()
     {
-        new ManagedProcessRegistry(Path_).Record(At(Launched));
+        // Both shapes: never there in the first place, and killed and confirmed. Keeping either
+        // would put a pid the kernel has since recycled in range of the next sweep.
+        new ManagedProcessRegistry(Path_).Record(At(Launched, pid: 111, pgid: 111, jobId: 1));
+        new ManagedProcessRegistry(Path_).Record(At(Launched, pid: 222, pgid: 222, jobId: 2));
 
-        ManagedProcessRegistry.KillLeftovers(Path_, startTimeOf: _ => null);
+        var result = Sweep(new FakeHost().Alive(222, Launched));
 
+        Assert.Equal(1, result.Killed);
+        Assert.Empty(result.Unconfirmed);
         Assert.Empty(new ManagedProcessRegistry(Path_).Load());
     }
 
     [Fact]
-    public void KillLeftovers_ClearsTheFileEvenWhenItKilledSomething()
+    public void KillLeftovers_RetainsAProcessItCouldNotConfirmDead_RatherThanCountingItKilled()
     {
-        // Otherwise the same pids are swept again on the next boot, by which time they belong to
-        // somebody else.
+        // The defect. Invoking the kill callback was treated as success: the production kill path
+        // suppresses both the group-signal error and the fallback's, killed was incremented
+        // regardless, and the file was then cleared unconditionally. Relay would go on to admit a
+        // job onto the GPU the survivor is still using, with nothing left on disk to find it by.
         new ManagedProcessRegistry(Path_).Record(At(Launched));
 
-        ManagedProcessRegistry.KillLeftovers(Path_, _ => Launched, _ => { });
+        var host = new FakeHost().Unkillable(4242, Launched);
+        var result = Sweep(host);
 
-        Assert.Empty(new ManagedProcessRegistry(Path_).Load());
+        Assert.Single(host.Signalled);                         // it really was signalled
+        Assert.Equal(0, result.Killed);                        // and it really did not die
+        Assert.Equal(4242, Assert.Single(result.Unconfirmed).Pid);
+
+        // Retained on disk, so the next startup has something to sweep.
+        Assert.Equal(4242, Assert.Single(new ManagedProcessRegistry(Path_).Load()).Pid);
+    }
+
+    [Fact]
+    public void KillLeftovers_RetainsOnlyTheSurvivors_NotTheWholeFile()
+    {
+        var registry = new ManagedProcessRegistry(Path_);
+        registry.Record(At(Launched, pid: 111, pgid: 111, jobId: 1));
+        registry.Record(At(Launched, pid: 222, pgid: 222, jobId: 2));
+
+        var host = new FakeHost().Alive(111, Launched).Unkillable(222, Launched);
+        var result = Sweep(host);
+
+        Assert.Equal(1, result.Killed);
+        Assert.Equal(222, Assert.Single(result.Unconfirmed).Pid);
+        Assert.Equal(222, Assert.Single(new ManagedProcessRegistry(Path_).Load()).Pid);
+    }
+
+    [Fact]
+    public void TryContain_ConfirmsASurvivorOnceItFinallyDies()
+    {
+        // The self-heal. A survivor that resisted the startup sweep and then exited — the job
+        // finished, an operator killed it — must be confirmable without restarting Relay, or one
+        // failed kill wedges the host permanently.
+        var record = At(Launched);
+        var host = new FakeHost().Unkillable(4242, Launched);
+
+        Assert.False(ManagedProcessRegistry.TryContain(record, host.StartTimeOf, _ => null,
+                                                       host.Kill, TimeSpan.Zero));
+
+        host.Dies(4242);
+
+        Assert.True(ManagedProcessRegistry.TryContain(record, host.StartTimeOf, _ => null,
+                                                      host.Kill, TimeSpan.Zero));
     }
 
     [Fact]
     public void KillLeftovers_OnAnAbsentFile_IsANoOp()
     {
         Assert.Equal(0, ManagedProcessRegistry.KillLeftovers(
-            Path_, _ => throw new InvalidOperationException("nothing should be probed")));
+            Path_, _ => throw new InvalidOperationException("nothing should be probed")).Killed);
     }
 
     #endregion
@@ -353,10 +439,12 @@ public class ManagedProcessRegistryTests : IDisposable
                 new ManagedProcessRecord(1, 1, 1, child.Id, null,
                                          StartTimeTicks: Launched.Ticks, StartToken: token));
 
+            // A real kill, and the sweep confirms it before reporting it: the token stops
+            // resolving the moment the process is reaped.
             Assert.Equal(1, ManagedProcessRegistry.KillLeftovers(
                 Path_, _ => throw new InvalidOperationException(
                     "the exact token must not fall back to start times"),
-                _ => { }));
+                kill: r => { try { Process.GetProcessById(r.Pid).Kill(true); } catch { } }).Killed);
         }
         finally
         {
@@ -377,7 +465,7 @@ public class ManagedProcessRegistryTests : IDisposable
             Path_,
             startTimeOf: _ => Launched,                        // identical to the recorded time
             kill: _ => Assert.Fail("signalled a process whose exact identity did not match"),
-            startTokenOf: _ => "boot-a:901"));                 // one jiffy later: somebody else
+            startTokenOf: _ => "boot-a:901").Killed);          // one jiffy later: somebody else
     }
 
     [Fact]
@@ -386,10 +474,13 @@ public class ManagedProcessRegistryTests : IDisposable
         // Records written by an older Relay, and every non-Linux host.
         new ManagedProcessRegistry(Path_).Record(At(Launched));
 
+        var host = new FakeHost().Alive(4242, Launched.AddMilliseconds(3));
+
         Assert.Equal(1, ManagedProcessRegistry.KillLeftovers(
-            Path_, _ => Launched.AddMilliseconds(3), _ => { },
+            Path_, host.StartTimeOf, host.Kill,
             startTokenOf: _ => throw new InvalidOperationException(
-                "a record with no token has no exact identity to check")));
+                "a record with no token has no exact identity to check"),
+            confirmWait: TimeSpan.Zero).Killed);
     }
 
     [Fact]
@@ -427,8 +518,10 @@ public class ManagedProcessRegistryTests : IDisposable
             new ManagedProcessRegistry(Path_).Record(
                 new ManagedProcessRecord(1, 1, 1, child.Id, null, recorded));
 
+            var host = new FakeHost().Alive(child.Id, reread.Value.AddMilliseconds(4));
+
             Assert.Equal(1, ManagedProcessRegistry.KillLeftovers(
-                Path_, _ => reread.Value.AddMilliseconds(4), _ => { }));
+                Path_, host.StartTimeOf, host.Kill, confirmWait: TimeSpan.Zero).Killed);
         }
         finally
         {
