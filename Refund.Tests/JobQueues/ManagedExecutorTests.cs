@@ -338,6 +338,157 @@ public class ManagedExecutorTests
         Assert.Equal(ClusterJobStatus.Failed, executor.GetStatus(job));   // untracked again
     }
 
+    [Fact]
+    public void ACondemnedProcessIsSignalledOnce_NotOnEveryPass()
+    {
+        // Reconcile runs on every daemon poll and on every admission decision, and KillTree is
+        // called under the host-wide lock. Re-signalling each pass means an unbounded number of
+        // blocking-ish calls holding that lock for one dying job.
+        var executor = new ManagedExecutor();
+        var job = NewJob();
+        executor.TryAdmit(job, Host);
+        var process = new FakeProcess();
+        executor.Attach(job, process);
+
+        job.Status = JobStatus.Aborted;
+        executor.Reap();
+        executor.Reap();
+        executor.Reap();
+
+        Assert.Equal(1, process.KillCount);
+    }
+
+    [Fact]
+    public void RequeueingAJobWhoseProcessOutlivedTheAbort_NeitherOrphansItNorReusesItsBooking()
+    {
+        // The reachable double-process path. A job is force-marked Aborted after 30s whether or
+        // not the kill landed; Aborted -> Building -> Waiting is a legal re-queue (Job.cs:1346).
+        // If the old entry were handed back, the relaunch would inherit a stale allocation and
+        // stale GPU indices, and attaching would overwrite — and so orphan — the live process.
+        var executor = new ManagedExecutor();
+        var oneGpu = new ResourceTotals(Cores: 8, MemoryGb: 32, Gpus: 1);
+
+        var job = NewGpuJob();
+        Assert.IsType<AdmissionResult.Admit>(executor.TryAdmit(job, oneGpu));
+        var stubborn = new FakeProcess();
+        Assert.True(executor.Attach(job, stubborn));
+
+        job.Status = JobStatus.Aborted;
+        executor.Reap();
+        Assert.True(stubborn.WasKilled);
+
+        // The user re-queues it while the old process is still alive.
+        job.Status = JobStatus.Building;
+        executor.Reap();
+        job.Status = JobStatus.Waiting;
+
+        // Not admitted onto the stale booking...
+        Assert.IsType<AdmissionResult.Busy>(executor.TryAdmit(job, oneGpu));
+        // ...the live process is not displaced...
+        Assert.False(executor.Attach(job, new FakeProcess()));
+        // ...it still holds its GPU, and the job cannot read those devices for a new launch.
+        Assert.Single(executor.LiveAllocations());
+        Assert.Empty(executor.GpuIndicesFor(job));
+
+        // Once it finally dies the entry is retired and the job gets a fresh booking.
+        stubborn.Exit(137);
+        Assert.IsType<AdmissionResult.Admit>(executor.TryAdmit(job, oneGpu));
+
+        var relaunched = new FakeProcess();
+        Assert.True(executor.Attach(job, relaunched));
+        Assert.Equal(new[] { 0 }, executor.GpuIndicesFor(job));
+        Assert.Equal(ClusterJobStatus.Running, executor.GetStatus(job));
+    }
+
+    [Fact]
+    public void CondemnationSurvivesTheJobBecomingActiveAgain()
+    {
+        // Isolates the stickiness: without it, the re-queued job's Waiting status makes the entry
+        // "active" again, Reconcile stops killing it, and the leftover process is immortal.
+        var executor = new ManagedExecutor();
+        var job = NewJob();
+        executor.TryAdmit(job, Host);
+        var process = new FakeProcess();
+        executor.Attach(job, process);
+
+        executor.Kill(job);
+        job.Status = JobStatus.Waiting;
+        executor.Reap();
+
+        process.Exit(0);
+        executor.Reap();
+
+        Assert.False(executor.HasEntries(_ => true));   // retired despite the job being active
+    }
+
+    #endregion
+
+    #region Self-reconciliation
+
+    [Fact]
+    public void TryAdmit_ReconcilesBeforeDeciding()
+    {
+        // The daemon's Waiting handler calls TryAdmit with no Reap in between, so the one core
+        // held by a dead process has to be seen as free on this very call.
+        var executor = new ManagedExecutor();
+        var oneCore = new ResourceTotals(Cores: 1, MemoryGb: 64, Gpus: 0);
+
+        var done = NewJob();
+        Assert.IsType<AdmissionResult.Admit>(executor.TryAdmit(done, oneCore));
+        var process = new FakeProcess();
+        executor.Attach(done, process);
+        process.Exit(0);
+
+        // No Reap(), no LiveAllocations().
+        Assert.IsType<AdmissionResult.Admit>(executor.TryAdmit(NewJob(), oneCore));
+    }
+
+    [Fact]
+    public void TryAdmit_ReconcilesAwayAnAbandonedReservation()
+    {
+        var executor = new ManagedExecutor();
+        var oneCore = new ResourceTotals(Cores: 1, MemoryGb: 64, Gpus: 0);
+
+        var stuck = NewJob();
+        Assert.IsType<AdmissionResult.Admit>(executor.TryAdmit(stuck, oneCore));
+        stuck.Status = JobStatus.Failed;
+
+        // No Reap().
+        Assert.IsType<AdmissionResult.Admit>(executor.TryAdmit(NewJob(), oneCore));
+    }
+
+    [Fact]
+    public void GetStatus_ReconcilesBeforeAnswering()
+    {
+        // Task 5's wait loop polls GetStatus with no Reap between iterations. Without the internal
+        // reconcile an exited process reports Running forever — exactly the silent hang this class
+        // exists to prevent.
+        var executor = new ManagedExecutor();
+        var job = NewJob();
+        executor.TryAdmit(job, Host);
+        var process = new FakeProcess();
+        executor.Attach(job, process);
+
+        process.Exit(0);
+
+        Assert.Equal(ClusterJobStatus.Finished, executor.GetStatus(job));   // no Reap()
+    }
+
+    [Fact]
+    public void GpuIndicesFor_ReconcilesBeforeAnswering()
+    {
+        var executor = new ManagedExecutor();
+        var job = NewGpuJob();
+        executor.TryAdmit(job, Host);
+        var process = new FakeProcess();
+        executor.Attach(job, process);
+
+        process.Exit(0);
+        job.Status = JobStatus.Finished;
+
+        Assert.Empty(executor.GpuIndicesFor(job));   // no Reap(); the entry is gone
+    }
+
     #endregion
 
     #region Status
@@ -408,14 +559,28 @@ public class ManagedExecutorTests
     }
 
     [Fact]
-    public void Kill_ForAnUntrackedOrUnlaunchedJob_IsANoOp()
+    public void Kill_ForAnUntrackedJob_IsANoOp()
     {
-        var executor = new ManagedExecutor();
-        var reserved = NewJob();
-        executor.TryAdmit(reserved, Host);
+        new ManagedExecutor().Kill(NewJob());
+    }
 
-        executor.Kill(reserved);            // admitted, no process yet
-        executor.Kill(NewJob());            // never admitted at all
+    [Fact]
+    public void Kill_ForAnUnlaunchedReservation_ReleasesItEvenWhileTheJobIsActive()
+    {
+        // Killing during Staging: the reservation exists but no process ever will, because Attach
+        // refuses a condemned entry. Nothing else would ever retire it while the job stays active,
+        // so the booking would be held for the lifetime of the host.
+        var executor = new ManagedExecutor();
+        var oneCore = new ResourceTotals(Cores: 1, MemoryGb: 64, Gpus: 0);
+
+        var reserved = NewJob();
+        reserved.Status = JobStatus.Staging;
+        Assert.IsType<AdmissionResult.Admit>(executor.TryAdmit(reserved, oneCore));
+
+        executor.Kill(reserved);
+
+        Assert.Empty(executor.LiveAllocations());
+        Assert.IsType<AdmissionResult.Admit>(executor.TryAdmit(NewJob(), oneCore));
     }
 
     [Fact]
@@ -429,6 +594,63 @@ public class ManagedExecutorTests
 
         Assert.True(executor.Attach(admitted, new FakeProcess()));
         Assert.False(executor.Attach(NewJob(), new FakeProcess()));
+    }
+
+    [Fact]
+    public void Attach_RefusesToDisplaceALiveProcess()
+    {
+        // The second orphan route: overwriting Entry.Process makes the old one unreachable, so
+        // Reconcile never sees it, nothing kills it, and it holds its resources forever.
+        var executor = new ManagedExecutor();
+        var job = NewJob();
+        executor.TryAdmit(job, Host);
+        var first = new FakeProcess();
+        Assert.True(executor.Attach(job, first));
+
+        var second = new FakeProcess();
+        Assert.False(executor.Attach(job, second));
+
+        executor.Kill(job);
+        Assert.True(first.WasKilled);       // still the tracked one
+        Assert.False(second.WasKilled);
+    }
+
+    [Fact]
+    public void Attach_RefusesASpentReservation()
+    {
+        // The process ran and exited but the job has not settled, so the entry survives to carry
+        // the exit code. It is not a booking anyone may launch into again.
+        var executor = new ManagedExecutor();
+        var job = NewJob();
+        job.Status = JobStatus.Running;
+        executor.TryAdmit(job, Host);
+        var process = new FakeProcess();
+        executor.Attach(job, process);
+
+        process.Exit(0);
+        executor.Reap();
+
+        Assert.False(executor.Attach(job, new FakeProcess()));
+        Assert.Equal(ClusterJobStatus.Finished, executor.GetStatus(job));   // exit code intact
+    }
+
+    [Fact]
+    public void GpuIndicesFor_ReturnsNothingForASpentReservation()
+    {
+        // Same rule as Attach: you may only read the devices of a booking you could still launch
+        // into. These belong to a run that is over.
+        var executor = new ManagedExecutor();
+        var job = NewGpuJob();
+        job.Status = JobStatus.Running;
+        executor.TryAdmit(job, Host);
+        var process = new FakeProcess();
+        executor.Attach(job, process);
+
+        Assert.Equal(new[] { 0 }, executor.GpuIndicesFor(job));
+
+        process.Exit(0);
+
+        Assert.Empty(executor.GpuIndicesFor(job));
     }
 
     [Fact]
