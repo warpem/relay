@@ -629,10 +629,20 @@ public sealed class ManagedExecutor
     /// </param>
     /// <remarks>
     /// The guard suspends admission rather than holding <see cref="_sync"/> across the callback, and
-    /// that is deliberate. The callback ends in QueueRepository.UpdateQueue, which takes the
-    /// repository's save lock — and the daemon takes that same save lock before calling SubmitJob,
-    /// which comes back here for <see cref="Launch(Job, string, string)"/>. Holding this lock across
-    /// foreign code would invert that order and deadlock the host.
+    /// that is deliberate — though not, as an earlier version of this comment claimed, because of a
+    /// lock-order inversion with the repository's save lock. There is no such inversion: the daemon
+    /// does hold that save lock while calling ClusterQueue.SubmitJob, but SubmitJob only queues a
+    /// <c>Task.Run</c>, and the <see cref="Launch(Job, string, string)"/> inside it runs later on a
+    /// thread-pool thread holding neither lock. No path in the repository takes the save lock and
+    /// then <see cref="_sync"/>.
+    /// <para>
+    /// The real reason is scope. <paramref name="change"/> is arbitrary caller code that ends in a
+    /// repository mutation and a save; holding a host-wide lock — the one every admission, reap
+    /// tick and status query contends on — across all of that would stall the whole host for the
+    /// duration of a disk write, and would be an open invitation to precisely the inversion above
+    /// the moment someone adds a save-lock-then-executor path. Suspending admission blocks only
+    /// what actually has to be blocked.
+    /// </para>
     /// <para>
     /// Without the guard, <see cref="TryAdmit"/> could reserve between the check and the mutation,
     /// so a totals or scheduler edit that was supposed to be refused went through anyway. If the

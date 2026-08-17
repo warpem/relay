@@ -262,6 +262,19 @@ public sealed class SystemManagedProcess : IManagedProcess
     /// Returns as soon as the signal is away, as the threading contract on
     /// <see cref="IManagedProcess"/> requires; it is called under the executor's host-wide lock.
     /// </para>
+    /// <para>
+    /// <b>Known residual, deliberately accepted: the live path has no recycled-pgid guard.</b>
+    /// Signalling the group before consulting leader liveness — the paragraph above — is what makes
+    /// the group signal reach surviving descendants, but it also means there is no liveness probe
+    /// left in front of it. ManagedExecutor.Kill reaches Condemn, and Condemn calls
+    /// <see cref="KillTree()"/> without a preceding Reconcile, so between .NET reaping the child
+    /// and the kill landing the kernel could in principle recycle the pgid and the signal would go
+    /// to a stranger's group. The window is small and the alternative — probing first — reinstates
+    /// the far likelier bug of leaving mpirun ranks computing on a released GPU. Closing it
+    /// properly needs OS-level containment (a cgroup per job), not another check here. The
+    /// <em>registry</em> path has no such residual: ManagedProcessRegistry.TryContain probes
+    /// identity before it signals, because its caller retries on a timer with no gate of its own.
+    /// </para>
     /// </remarks>
     internal static void KillTree(int pid, int? pgid, Action fallbackKill, Func<bool> hasExited) =>
         KillTree(pid, pgid, fallbackKill, hasExited, Kill);
