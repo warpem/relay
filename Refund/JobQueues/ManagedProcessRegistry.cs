@@ -136,6 +136,25 @@ public sealed class ManagedProcessRegistry
         }
     }
 
+    /// <summary>
+    /// Drop exactly this record, and only if the file still holds it. Unlike
+    /// <see cref="Forget(int, int, int)"/> this leaves a <em>later</em> record for the same job
+    /// alone, which is what the failed-attach path needs: the run that displaced it may have
+    /// recorded a live process under the same key in the meantime.
+    /// </summary>
+    public void Forget(ManagedProcessRecord record)
+    {
+        lock (_sync)
+        {
+            var all = LoadLocked();
+            if (all.RemoveAll(r => IsSameJob(r, record.ProjectId, record.SpaceId, record.JobId) &&
+                                   r.Pid == record.Pid) == 0)
+                return;
+
+            SaveLocked(all);
+        }
+    }
+
     /// <summary>All three parts, because Job.Id alone is only unique within its space.</summary>
     private static bool IsSameJob(ManagedProcessRecord record, int projectId, int spaceId, int jobId) =>
         record.ProjectId == projectId && record.SpaceId == spaceId && record.JobId == jobId;

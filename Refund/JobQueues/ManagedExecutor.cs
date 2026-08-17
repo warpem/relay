@@ -372,6 +372,14 @@ public sealed class ManagedExecutor
 
         var process = spawn(gpus);
 
+        // Before the attach, not after. Shutdown cannot cancel a staging task that is already
+        // inside spawn(), so one can return after KillAllAsync has taken its snapshot and finished;
+        // the child was launched with setsid, so it outlives Relay. Recording only on a successful
+        // attach made such a process invisible to the next startup's sweep as well — a GPU held by
+        // something nothing on the host knows about. The window is still open; what changes is that
+        // whatever falls into it is now written down, and the next startup kills it.
+        var record = RecordLaunch(job, process, reservation);
+
         if (!Attach(job, process, reservation))
         {
             // The reservation was retired, or replaced by a later one, while the process was
@@ -384,12 +392,16 @@ public sealed class ManagedExecutor
             // by the caller that owns it rather than left with nothing to signal it.
             KillUnaccounted(job, process);
 
+            // Only now, and deliberately after the kill rather than before it: the record above
+            // describes a process that is about to die here, so an ordinary failed attach must not
+            // leave the next startup sweeping for a pid that is gone — but until the signal is
+            // away, that record is the only trace anything has of it.
+            ForgetLaunchRecord(job, record);
+
             throw new InvalidOperationException(
                 $"Job {job.Id}'s reservation was retired or replaced while its process was " +
                 "starting; the process has been killed rather than left running unaccounted for.");
         }
-
-        RecordLaunch(job, process);
 
         return process;
     }
@@ -410,9 +422,16 @@ public sealed class ManagedExecutor
 
     /// <summary>
     /// Persist the launched process so a restarted Relay can kill it if this one dies first.
-    /// Written only once the process is attached: an attach that failed has already killed it, and
-    /// recording under the job's id would clobber the record of whichever run displaced it.
+    /// Written as soon as the spawn returns — before the attach — so that a process orphaned in
+    /// the window between the two is at least <em>visible</em> to the next startup.
     /// </summary>
+    /// <returns>
+    /// The record written, or null if nothing was: there is no registry, or the job's reservation
+    /// has already been replaced by a later one. That last case is the one exception to writing
+    /// unconditionally, and it has to be: records are keyed by job, so writing would drop the
+    /// replacement run's record — which describes a <em>live</em> process — in favour of one whose
+    /// process the failed attach below is about to kill.
+    /// </returns>
     /// <remarks>
     /// <b>Pgid is read here, at persist time, and re-read later if it is still null.</b> It resolves
     /// lazily against the OS (see <see cref="SystemManagedProcess.Pgid"/>) because the child has not
@@ -421,10 +440,10 @@ public sealed class ManagedExecutor
     /// file would make the startup sweep fall back to a tree walk it cannot do without a Process
     /// handle, i.e. into nothing, on the one platform that has process groups at all.
     /// </remarks>
-    private void RecordLaunch(Job job, IManagedProcess process)
+    private ManagedProcessRecord RecordLaunch(Job job, IManagedProcess process, long reservation)
     {
         if (_registry == null)
-            return;
+            return null;
 
         // Space and Project can be absent in tests and in a job that was never filed; -1 is then
         // simply another identity, and every record of such a job shares it consistently.
@@ -440,14 +459,39 @@ public sealed class ManagedExecutor
 
         lock (_sync)
         {
-            // Only if this process is still the tracked one. Between the attach above and here the
-            // entry can have been retired, and writing then would leave a record no Forget clears.
-            if (!_entries.TryGetValue(job, out var entry) || !ReferenceEquals(entry.Process, process))
-                return;
+            _entries.TryGetValue(job, out var entry);
 
-            entry.Record = record;
+            // Displaced: this job holds a *different* reservation now, and that run's own launch
+            // has recorded, or is about to record, its own process under this key.
+            if (entry != null && entry.Token != reservation)
+                return null;
+
+            // An entry that is gone entirely still gets its process written down — that is the
+            // shutdown case this ordering exists for. There is simply no Entry left to hang the
+            // bookkeeping copy on, and none is needed: the attach below will fail, and the record
+            // is forgotten there.
+            if (entry != null)
+                entry.Record = record;
+
             _registry.Record(record);
+            return record;
         }
+    }
+
+    /// <summary>Drop a record written by a launch that then failed to attach.</summary>
+    private void ForgetLaunchRecord(Job job, ManagedProcessRecord record)
+    {
+        if (_registry == null || record == null)
+            return;
+
+        // By pid, not only by job: a run that displaced this one may have recorded its own process
+        // under the same key between the write and here, and dropping that would hide a process
+        // that is very much alive.
+        _registry.Forget(record);
+
+        lock (_sync)
+            if (_entries.TryGetValue(job, out var entry) && ReferenceEquals(entry.Record, record))
+                entry.Record = null;
     }
 
     /// <summary>The group we created for this process, or null — including for every non-system

@@ -55,8 +55,12 @@ public class ManagedExecutorTests : IDisposable
         public bool WasKilled => KillCount > 0;
         public int KillCount { get; private set; }
 
+        /// <summary>Fired inside <see cref="KillTree"/>, for tests that need to look at the world
+        /// at the moment the executor is disowning this process.</summary>
+        public Action OnKill { get; init; }
+
         public void Exit(int code) { ExitCode = code; HasExited = true; }
-        public void KillTree() { KillCount++; }
+        public void KillTree() { KillCount++; OnKill?.Invoke(); }
         public Task WaitForExitAsync(CancellationToken ct = default) => Task.CompletedTask;
     }
 
@@ -1048,6 +1052,38 @@ public class ManagedExecutorTests : IDisposable
             return new FakeProcess();
         }));
 
+        Assert.Empty(registry.Load());
+    }
+
+    [Fact]
+    public void ALaunchIsRecorded_BeforeItIsAttached()
+    {
+        // Shutdown cannot cancel a staging task that is already inside the spawn, and the child is
+        // launched with setsid, so it survives Relay. Recording only after a successful attach left
+        // such a process invisible to the next startup's sweep as well: nothing on the host, now or
+        // later, knew it was holding a GPU. The window cannot be closed cheaply; what it costs is
+        // now recoverable, because the process is written down before anything can go wrong.
+        var registry = NewRegistry();
+        var executor = new ManagedExecutor(registry);
+
+        var job = NewJob();
+        executor.TryAdmit(job, Host);
+
+        IReadOnlyList<ManagedProcessRecord> whenDisowned = null;
+        var process = new FakeProcess { Pid = 777, OnKill = () => whenDisowned = registry.Load() };
+
+        Assert.Throws<InvalidOperationException>(() => executor.Launch(job, _ =>
+        {
+            executor.BeginShutdown();          // Relay started shutting down mid-spawn
+            return process;
+        }));
+
+        // Had Relay died in that window, this is what the next startup would have found — and
+        // killed. Under the old ordering it found nothing at all.
+        Assert.Equal(777, Assert.Single(whenDisowned).Pid);
+
+        // And a failed attach that does reach its own cleanup still leaves nothing behind: the
+        // process it described was killed here.
         Assert.Empty(registry.Load());
     }
 
