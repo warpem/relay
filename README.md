@@ -147,11 +147,13 @@ umask 007
 Things worth knowing:
 
 - **Cores and memory are accounting, not enforcement.** Relay will not start a job unless its declared requirements fit, but nothing stops a running job from exceeding them. GPUs are the exception: each job sees only its assigned devices via `CUDA_VISIBLE_DEVICES`.
-- **One managed queue per host.** A second would double-book the same machine, so Relay refuses to create or configure one.
+- **One managed queue per host.** A second would double-book the same machine, so Relay refuses to create one or to switch an existing queue to `Managed` when one already exists. This is enforced when queues are edited, not when they are loaded, so a hand-edited state file can still carry two — harmless in practice, since a host has a single executor and therefore a single set of live allocations, but the two queues' reported totals will disagree with each other.
 - **Jobs do not survive a Relay restart.** They are killed on shutdown, and anything left behind by a crash is killed at the next startup. Jobs that were running are marked failed.
 - **Worker pools cannot use a managed queue.** Pools submit bare scripts with no resource request attached, so there is nothing to admit against.
 - **Jobs run in order of fit, not strictly in order of submission.** A small job may start ahead of a queued larger one. On a multi-GPU host a large job can in principle be held off indefinitely by a stream of small ones.
 - **macOS is a development-only configuration.** `setsid` is absent there, so Relay cannot clean up compute processes left behind by a crash — only by a graceful shutdown. On Linux both work.
+
+**Change note — 2D classification memory.** `Class2D` now declares its real memory footprint — 16 GB per MPI worker rank, `(processes - 1) x 16 GB` — instead of the flat 16 GB it inherited before. A VDAM run with 8 processes therefore asks for 112 GB, which does not fit the default managed-queue total of 64 GB, so it is rejected outright with a message naming both figures rather than queued to wait for memory that will never appear. Raise **Memory (GB)** to match the host, or lower the job's process count.
 
 The cores, memory and GPU totals can only be changed while the queue is idle. If jobs are still running on it, the edit is refused rather than leaving the accounting to disagree with what is on the host.
 
