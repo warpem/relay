@@ -332,7 +332,10 @@ public sealed class ManagedExecutor
                                               job.Id,
                                               process.Pid,
                                               PgidOf(process),
-                                              ManagedProcessRegistry.UtcTicksOf(process.StartTime));
+                                              ManagedProcessRegistry.UtcTicksOf(process.StartTime),
+                                              // The exact identity, where the platform has one.
+                                              // Read now, while the process is certainly alive.
+                                              ManagedProcessRegistry.StartTokenOf(process.Pid));
 
         lock (_sync)
         {

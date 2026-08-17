@@ -14,11 +14,16 @@ namespace Refund.JobQueues;
 /// <param name="StartTimeTicks">
 /// <b>UTC</b> ticks. Process.StartTime is DateTimeKind.Local, and a DST or timezone change between
 /// the crash and the restart would shift a local value by an hour — enough to make the process
-/// unrecognisable. Compared with a tolerance, never for equality; see
-/// <see cref="ManagedProcessRegistry.StartTimeTolerance"/>.
+/// unrecognisable. The <em>fallback</em> identity, compared with a tolerance and only when
+/// <paramref name="StartToken"/> is absent; see <see cref="ManagedProcessRegistry.StartTimeTolerance"/>.
+/// </param>
+/// <param name="StartToken">
+/// The exact, tolerance-free process identity on Linux; null on every other platform and on records
+/// written by an older Relay. See <see cref="ManagedProcessRegistry.StartTokenOf"/>.
 /// </param>
 public record ManagedProcessRecord(int ProjectId, int SpaceId, int JobId,
-                                   int Pid, int? Pgid, long StartTimeTicks);
+                                   int Pid, int? Pgid, long StartTimeTicks,
+                                   string StartToken = null);
 
 /// <summary>
 /// Persists which processes a managed queue launched, so leftovers from a crashed Relay can be
@@ -124,7 +129,9 @@ public sealed class ManagedProcessRegistry
 
     /// <summary>
     /// How far apart two readings of one process's start time may be and still be believed to
-    /// describe the same process.
+    /// describe the same process. <b>Only consulted when a record has no
+    /// <see cref="ManagedProcessRecord.StartToken"/></b> — i.e. off Linux, or for a record written
+    /// by an older Relay.
     /// </summary>
     /// <remarks>
     /// <b>Exact tick equality does not hold across a restart on Linux, which is the deployment
@@ -138,15 +145,110 @@ public sealed class ManagedProcessRegistry
     /// where the kernel hands back an absolute p_starttime and the two reads agree exactly, and
     /// invisible to any single-process test, where both reads share the cached boot time.
     /// <para>
-    /// A few seconds costs nothing against pid recycling: for a stale record to be mistaken for a
-    /// live process, the kernel would have to have recycled that exact pid into a process started
-    /// within this window of the recorded launch.
+    /// <b>Sized to measured drift, and to nothing else.</b> The measurement above is 1-4 ms of
+    /// tick quantisation plus whatever realtime slew NTP applied between the two samples; 250 ms is
+    /// two orders of magnitude of headroom over that and still 20x tighter than the window a pid
+    /// would have to be recycled into for an unrelated process to be mistaken for ours and have its
+    /// group SIGKILLed. It is emphatically <em>not</em> sized to a test that reads whole-second
+    /// timestamps out of <c>ps</c>: on Linux, which is where the drift lives, the exact
+    /// <see cref="StartTokenOf"/> identity is used instead and no tolerance applies at all.
     /// </para>
     /// </remarks>
-    public static readonly TimeSpan StartTimeTolerance = TimeSpan.FromSeconds(5);
+    public static readonly TimeSpan StartTimeTolerance = TimeSpan.FromMilliseconds(250);
 
     /// <summary>UTC ticks, for storing in a record; see ManagedProcessRecord.StartTimeTicks.</summary>
     public static long UtcTicksOf(DateTime startTime) => startTime.ToUniversalTime().Ticks;
+
+    /// <summary>
+    /// An exact, tolerance-free identity for a live process on Linux, or null anywhere else.
+    /// Two different processes can never share one; one process always reads back the same one,
+    /// from any process, at any later time in the same boot.
+    /// </summary>
+    /// <remarks>
+    /// <c>"&lt;boot_id&gt;:&lt;starttime&gt;"</c>, where <c>starttime</c> is field 22 of
+    /// <c>/proc/&lt;pid&gt;/stat</c> — the process's start in jiffies since boot, an integer the
+    /// kernel stores and hands back verbatim to every reader. Unlike Process.StartTime it is not
+    /// derived from a per-process cached boot time, so it needs no tolerance: the Relay that
+    /// launched the job and the Relay sweeping after it crashed read the identical number.
+    /// <para>
+    /// Paired with the boot id because jiffies-since-boot is only unique <em>within</em> a boot, and
+    /// a leftover file survives a reboot. <c>/proc/sys/kernel/random/boot_id</c> is a UUID generated
+    /// once per boot and is stable for its whole life — unlike <c>/proc/stat</c>'s <c>btime</c>,
+    /// which the kernel recomputes as <c>walltime - uptime</c> on every read and which therefore
+    /// moves by a second under rounding and NTP slew, i.e. is exactly the kind of value this is
+    /// meant to replace.
+    /// </para>
+    /// </remarks>
+    public static string StartTokenOf(int pid)
+    {
+        try
+        {
+            if (!OperatingSystem.IsLinux())
+                return null;
+
+            var boot = BootId;
+            if (boot == null)
+                return null;
+
+            var stat = File.ReadAllText($"/proc/{pid}/stat");
+
+            // comm (field 2) is parenthesised and may itself contain spaces and parentheses, so
+            // the only safe split point is the *last* closing paren. Everything after it is
+            // fields 3..52, whitespace-separated, so field 22 (starttime) is index 19.
+            int close = stat.LastIndexOf(')');
+            if (close < 0)
+                return null;
+
+            var fields = stat[(close + 1)..].Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
+
+            return fields.Length > 19 && long.TryParse(fields[19], out var startJiffies)
+                       ? $"{boot}:{startJiffies}"
+                       : null;
+        }
+        catch
+        {
+            // No /proc entry means no such process, which the liveness probe reports separately;
+            // an unreadable one means the fallback identity has to carry it.
+            return null;
+        }
+    }
+
+    /// <summary>Constant for the life of the boot, so read once.</summary>
+    private static readonly string BootId = ReadBootId();
+
+    private static string ReadBootId()
+    {
+        try
+        {
+            return OperatingSystem.IsLinux()
+                       ? File.ReadAllText("/proc/sys/kernel/random/boot_id").Trim()
+                       : null;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// Whether the pid in <paramref name="record"/> is still occupied by the very process that
+    /// record describes, rather than by an unrelated one the kernel recycled the number into.
+    /// </summary>
+    /// <remarks>
+    /// The exact token wins outright where there is one on both sides: it is reproducible to the
+    /// jiffy, so a mismatch is a different process and no amount of tolerance should rescue it.
+    /// Only a record with no token — an older file, or a non-Linux host — falls back to comparing
+    /// start times within <see cref="StartTimeTolerance"/>.
+    /// </remarks>
+    private static bool IsStillTheSameProcess(ManagedProcessRecord record,
+                                              Func<int, DateTime?> startTimeOf,
+                                              Func<int, string> startTokenOf)
+    {
+        if (!string.IsNullOrEmpty(record.StartToken))
+            return record.StartToken == startTokenOf(record.Pid);
+
+        var actual = startTimeOf(record.Pid);
+
+        return actual != null &&
+               Math.Abs(actual.Value.Ticks - record.StartTimeTicks) <= StartTimeTolerance.Ticks;
+    }
 
     /// <summary>
     /// Kills every recorded process that is still alive and still the same process, then clears the
@@ -161,25 +263,30 @@ public sealed class ManagedProcessRegistry
 
     /// <summary>Overload with the kill injected, so the identity rules can be tested without
     /// putting real pids in range of a real SIGKILL.</summary>
+    /// <param name="startTokenOf">
+    /// The exact identity probe; see <see cref="StartTokenOf"/>. Only consulted for a record that
+    /// carries a token of its own, so a test whose records have none never reaches it.
+    /// </param>
     internal static int KillLeftovers(string path, Func<int, DateTime?> startTimeOf,
-                                      Action<ManagedProcessRecord> kill)
+                                      Action<ManagedProcessRecord> kill,
+                                      Func<int, string> startTokenOf = null)
     {
+        startTokenOf ??= StartTokenOf;
+
         var registry = new ManagedProcessRegistry(path);
         int killed = 0;
 
         foreach (var record in registry.Load())
         {
-            DateTime? actual;
-            try { actual = startTimeOf(record.Pid); }
+            bool stillOurs;
+            try { stillOurs = IsStillTheSameProcess(record, startTimeOf, startTokenOf); }
             catch { continue; }                                  // unreadable: leave it alone
 
-            if (actual == null)
-                continue;                                        // already gone
-
-            // Tolerance, not equality: the two readings come from two different processes. See
-            // StartTimeTolerance — this is the whole reason the sweep works on Linux at all.
-            if (Math.Abs(actual.Value.Ticks - record.StartTimeTicks) > StartTimeTolerance.Ticks)
-                continue;                                        // pid recycled: not our process
+            // Gone, or the pid was recycled into somebody else's process. Either way not ours to
+            // kill: the stored pgid equals the pid, so getting this wrong SIGKILLs a stranger's
+            // whole process group.
+            if (!stillOurs)
+                continue;
 
             kill(record);
             killed++;

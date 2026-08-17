@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Globalization;
 using Refund.JobQueues;
 
 namespace Refund.Tests.JobQueues;
@@ -181,8 +180,8 @@ public class ManagedProcessRegistryTests : IDisposable
     [Theory]
     [InlineData(-4)]      // the probe can land either side: the two clocks are independent
     [InlineData(4)]
-    [InlineData(-900)]
-    [InlineData(900)]
+    [InlineData(-200)]    // measured drift is 1-4 ms; 200 ms is already far past realistic slew
+    [InlineData(200)]
     public void KillLeftovers_ToleratesADisagreementOnEitherSide(int millisecondsOff)
     {
         new ManagedProcessRegistry(Path_).Record(At(Launched));
@@ -330,42 +329,34 @@ public class ManagedProcessRegistryTests : IDisposable
     }
 
     [Fact]
-    public void AStartTimeRecordedHere_StillMatchesWhenADifferentProcessReadsIt()
+    public void OnLinux_TheStartTokenIsExact_AndAnUnrelatedProgramReadsTheSameOne()
     {
-        // The cross-process check the tolerance exists for. `ps` is a genuinely separate program
-        // asking the kernel independently — it does not share .NET's per-process cached BootTime,
-        // which is what makes every in-process comparison agree to the tick and hide the bug.
-        //
-        // `ps -o lstart=` reports whole seconds in local time, so this also proves the sizing: any
-        // tolerance below a second could not survive even this reading, let alone Linux's.
-        using var child = Process.Start(new ProcessStartInfo("/bin/sh")
-        {
-            ArgumentList = { "-c", "sleep 20" },
-            UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true
-        });
-        Assert.NotNull(child);
+        // The deployment platform's identity, and the reason it needs no tolerance at all: field 22
+        // of /proc/<pid>/stat is an integer the kernel stores and hands back verbatim, not a value
+        // derived from .NET's per-process cached BootTime. `cat` is a genuinely separate program
+        // asking the kernel independently, and it reads the identical number.
+        if (!OperatingSystem.IsLinux())
+            return;                         // /proc is the mechanism; there is nothing to check here
+
+        using var child = StartSleeper();
 
         try
         {
-            var recorded = ManagedProcessRegistry.UtcTicksOf(child.StartTime);
+            var token = ManagedProcessRegistry.StartTokenOf(child.Id);
+            Assert.False(string.IsNullOrEmpty(token));
 
-            var asSeenByPs = StartTimeAccordingToPs(child.Id);
-            Assert.NotNull(asSeenByPs);
+            Assert.Equal(token, StartTokenAccordingToCat(child.Id));
 
-            var drift = TimeSpan.FromTicks(
-                Math.Abs(ManagedProcessRegistry.UtcTicksOf(asSeenByPs.Value) - recorded));
-
-            Assert.True(drift <= ManagedProcessRegistry.StartTimeTolerance,
-                        $"an independent process read this start time {drift.TotalMilliseconds:F0} ms " +
-                        $"away from ours, outside the {ManagedProcessRegistry.StartTimeTolerance
-                            .TotalSeconds:F0} s tolerance");
-
-            // And the sweep, driven by that independent reading, actually kills.
+            // And the sweep believes it even when the *fallback* identity is hours out — which is
+            // the point: the token decides, so no tolerance is consulted.
             new ManagedProcessRegistry(Path_).Record(
-                new ManagedProcessRecord(1, 1, 1, child.Id, null, recorded));
+                new ManagedProcessRecord(1, 1, 1, child.Id, null,
+                                         StartTimeTicks: Launched.Ticks, StartToken: token));
 
             Assert.Equal(1, ManagedProcessRegistry.KillLeftovers(
-                Path_, _ => asSeenByPs.Value.ToUniversalTime(), _ => { }));
+                Path_, _ => throw new InvalidOperationException(
+                    "the exact token must not fall back to start times"),
+                _ => { }));
         }
         finally
         {
@@ -373,28 +364,110 @@ public class ManagedProcessRegistryTests : IDisposable
         }
     }
 
-    /// <summary>The child's start time as an unrelated program sees it, or null if ps could not
-    /// be read in a form we understand.</summary>
-    private static DateTime? StartTimeAccordingToPs(int pid)
+    [Fact]
+    public void AStartTokenThatDoesNotMatch_IsNotOurProcess_HoweverCloseTheStartTimes()
     {
-        using var ps = Process.Start(new ProcessStartInfo("/bin/ps", $"-o lstart= -p {pid}")
+        // A recycled pid whose new process started in the same millisecond used to be accepted, and
+        // since the stored pgid equals the pid the sweep then SIGKILLed that stranger's whole
+        // process group. With an exact token there is no window to hit.
+        new ManagedProcessRegistry(Path_).Record(
+            new ManagedProcessRecord(1, 1, 1, 4242, 4242, Launched.Ticks, StartToken: "boot-a:900"));
+
+        Assert.Equal(0, ManagedProcessRegistry.KillLeftovers(
+            Path_,
+            startTimeOf: _ => Launched,                        // identical to the recorded time
+            kill: _ => Assert.Fail("signalled a process whose exact identity did not match"),
+            startTokenOf: _ => "boot-a:901"));                 // one jiffy later: somebody else
+    }
+
+    [Fact]
+    public void ARecordWithNoStartToken_StillUsesTheStartTimeFallback()
+    {
+        // Records written by an older Relay, and every non-Linux host.
+        new ManagedProcessRegistry(Path_).Record(At(Launched));
+
+        Assert.Equal(1, ManagedProcessRegistry.KillLeftovers(
+            Path_, _ => Launched.AddMilliseconds(3), _ => { },
+            startTokenOf: _ => throw new InvalidOperationException(
+                "a record with no token has no exact identity to check")));
+    }
+
+    [Fact]
+    public void TheStartTimeFallbackTolerance_IsSizedToMeasuredDrift_NotToPsOutput()
+    {
+        // Measured Linux cross-process drift is a kernel tick, 1-4 ms, plus realtime slew. The old
+        // five seconds was sized to a test that read whole-second timestamps out of `ps`; that test
+        // is gone, and the tolerance now only has to cover the drift it was always about.
+        Assert.InRange(ManagedProcessRegistry.StartTimeTolerance,
+                       TimeSpan.FromMilliseconds(50), TimeSpan.FromMilliseconds(500));
+    }
+
+    [Fact]
+    public void AStartTimeRecordedHere_StillMatchesWhenADifferentProcessReadsIt()
+    {
+        // The fallback path's cross-process check, for the hosts that have no /proc. .NET's own
+        // reading is what both sides use there, and on macOS — the only such host in practice — the
+        // kernel hands back an absolute p_starttime, so two reads agree exactly.
+        using var child = StartSleeper();
+
+        try
+        {
+            var recorded = ManagedProcessRegistry.UtcTicksOf(child.StartTime);
+            var reread = ManagedProcessRegistry.LiveProcessStartTime(child.Id);
+            Assert.NotNull(reread);
+
+            var drift = TimeSpan.FromTicks(Math.Abs(reread.Value.Ticks - recorded));
+
+            Assert.True(drift <= ManagedProcessRegistry.StartTimeTolerance,
+                        $"a re-read of this start time was {drift.TotalMilliseconds:F0} ms away " +
+                        $"from ours, outside the {ManagedProcessRegistry.StartTimeTolerance
+                            .TotalMilliseconds:F0} ms tolerance");
+
+            // And the sweep, driven by a reading offset by realistic drift, actually kills.
+            new ManagedProcessRegistry(Path_).Record(
+                new ManagedProcessRecord(1, 1, 1, child.Id, null, recorded));
+
+            Assert.Equal(1, ManagedProcessRegistry.KillLeftovers(
+                Path_, _ => reread.Value.AddMilliseconds(4), _ => { }));
+        }
+        finally
+        {
+            try { child.Kill(entireProcessTree: true); } catch { }
+        }
+    }
+
+    private static Process StartSleeper()
+    {
+        var child = Process.Start(new ProcessStartInfo("/bin/sh")
+        {
+            ArgumentList = { "-c", "sleep 20" },
+            UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true
+        });
+        Assert.NotNull(child);
+        return child;
+    }
+
+    /// <summary>The child's start token as an unrelated program reads it, built from the same two
+    /// /proc files but with the per-pid one fetched by `cat` rather than by us.</summary>
+    private static string StartTokenAccordingToCat(int pid)
+    {
+        using var cat = Process.Start(new ProcessStartInfo("/bin/cat", $"/proc/{pid}/stat")
         {
             UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true
         });
-        if (ps == null)
-            return null;
+        Assert.NotNull(cat);
 
-        var text = ps.StandardOutput.ReadToEnd().Trim();
-        ps.WaitForExit();
+        var stat = cat.StandardOutput.ReadToEnd();
+        cat.WaitForExit();
 
-        // "Mon Aug 17 13:42:29 2026", with the day possibly space-padded.
-        var collapsed = string.Join(" ", text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        // comm is parenthesised and may contain spaces, so split after the last ')'; field 22
+        // (starttime) is then index 19.
+        var fields = stat[(stat.LastIndexOf(')') + 1)..]
+            .Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
 
-        return DateTime.TryParseExact(collapsed, "ddd MMM d HH:mm:ss yyyy",
-                                      CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal,
-                                      out var parsed)
-                   ? parsed
-                   : null;
+        var bootId = File.ReadAllText("/proc/sys/kernel/random/boot_id").Trim();
+
+        return $"{bootId}:{fields[19]}";
     }
 
     #endregion
