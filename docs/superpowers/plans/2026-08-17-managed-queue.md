@@ -1429,3 +1429,381 @@ EOF
 ```
 
 ---
+
+### Task 6: Containment — leftover registry and a shutdown hook that runs
+
+"Managed jobs die with Relay" is a property that has to be built. Child processes do not die with their parent, and the hook the design first named is **unreachable**: `QueueRepository.Dispose(bool)` (`:316`) is never called, because `DataManager` implements no disposal across any of its twelve partial files and is registered as `AddSingleton<DataManager>(new DataManager(relayOptions))` (`Relay/Program.cs:88`) — an externally-constructed instance, which the DI container does not dispose. There are no `ApplicationStopping` hooks.
+
+Three parts: a persisted registry, a startup sweep, and a shutdown path that actually executes.
+
+**Files:**
+- Create: `Refund/JobQueues/ManagedProcessRegistry.cs`
+- Modify: `Refund/JobQueues/ManagedExecutor.cs`
+- Test: `Refund.Tests/JobQueues/ManagedProcessRegistryTests.cs`
+
+**Interfaces:**
+- Consumes: `IManagedProcess`, `SystemManagedProcess.KillTree` (Tasks 4–5).
+- Produces, used by Tasks 8 and 9:
+  - `record ManagedProcessRecord(int JobId, int Pid, int? Pgid, long StartTimeTicks)`
+  - `ManagedProcessRegistry(string path)` with `Record(...)`, `Forget(int jobId)`, `Load()`, `Clear()`
+  - `static int ManagedProcessRegistry.KillLeftovers(string path, Func<int, DateTime?> startTimeOf)`
+  - `ManagedExecutor.BeginShutdown()`, `ManagedExecutor.KillAllAsync()`
+
+- [ ] **Step 1: Write the failing tests**
+
+Create `Refund.Tests/JobQueues/ManagedProcessRegistryTests.cs`:
+
+```csharp
+using Refund.JobQueues;
+
+namespace Refund.Tests.JobQueues;
+
+public class ManagedProcessRegistryTests : IDisposable
+{
+    private readonly string _dir = Path.Combine(Path.GetTempPath(), "relay-registry-" + Guid.NewGuid());
+    private string Path_ => System.IO.Path.Combine(_dir, "managed-processes.json");
+
+    public ManagedProcessRegistryTests() => Directory.CreateDirectory(_dir);
+    public void Dispose() { try { Directory.Delete(_dir, true); } catch { } }
+
+    [Fact]
+    public void RecordsSurviveAReload()
+    {
+        var registry = new ManagedProcessRegistry(Path_);
+        registry.Record(new ManagedProcessRecord(JobId: 7, Pid: 111, Pgid: 111, StartTimeTicks: 999));
+
+        var reloaded = new ManagedProcessRegistry(Path_).Load();
+
+        var record = Assert.Single(reloaded);
+        Assert.Equal(7, record.JobId);
+        Assert.Equal(111, record.Pid);
+        Assert.Equal(111, record.Pgid);
+        Assert.Equal(999, record.StartTimeTicks);
+    }
+
+    [Fact]
+    public void Forget_RemovesOnlyThatJob()
+    {
+        var registry = new ManagedProcessRegistry(Path_);
+        registry.Record(new ManagedProcessRecord(1, 111, 111, 5));
+        registry.Record(new ManagedProcessRecord(2, 222, 222, 6));
+
+        registry.Forget(1);
+
+        Assert.Equal(2, Assert.Single(new ManagedProcessRegistry(Path_).Load()).JobId);
+    }
+
+    [Fact]
+    public void CorruptFile_LoadsAsEmptyRatherThanThrowing()
+    {
+        // A half-written file after a crash must not stop Relay from starting.
+        File.WriteAllText(Path_, "{ not json");
+        Assert.Empty(new ManagedProcessRegistry(Path_).Load());
+    }
+
+    [Fact]
+    public void KillLeftovers_SkipsRecordsWhoseStartTimeNoLongerMatches()
+    {
+        // Pids are recycled. Killing on pid alone could terminate an unrelated process that
+        // happened to inherit the number after a crash.
+        var registry = new ManagedProcessRegistry(Path_);
+        registry.Record(new ManagedProcessRecord(JobId: 1, Pid: 4242, Pgid: 4242, StartTimeTicks: 1000));
+
+        var killed = ManagedProcessRegistry.KillLeftovers(
+            Path_, startTimeOf: _ => new DateTime(9999));   // live, but a different process
+
+        Assert.Equal(0, killed);
+    }
+
+    [Fact]
+    public void KillLeftovers_SkipsRecordsWithNoLiveProcess()
+    {
+        var registry = new ManagedProcessRegistry(Path_);
+        registry.Record(new ManagedProcessRecord(1, 4242, 4242, 1000));
+
+        Assert.Equal(0, ManagedProcessRegistry.KillLeftovers(Path_, startTimeOf: _ => null));
+    }
+
+    [Fact]
+    public void KillLeftovers_ClearsTheFileAfterSweeping()
+    {
+        var registry = new ManagedProcessRegistry(Path_);
+        registry.Record(new ManagedProcessRecord(1, 4242, 4242, 1000));
+
+        ManagedProcessRegistry.KillLeftovers(Path_, startTimeOf: _ => null);
+
+        Assert.Empty(new ManagedProcessRegistry(Path_).Load());
+    }
+}
+```
+
+- [ ] **Step 2: Run and watch them fail**
+
+Run: `dotnet test Refund.Tests/Refund.Tests.csproj --nologo -v q --filter "FullyQualifiedName~ManagedProcessRegistryTests"`
+Expected: FAIL to compile — `ManagedProcessRegistry` does not exist.
+
+- [ ] **Step 3: Implement the registry**
+
+Create `Refund/JobQueues/ManagedProcessRegistry.cs`:
+
+```csharp
+using System.Diagnostics;
+using System.Text.Json;
+
+namespace Refund.JobQueues;
+
+/// <summary>One launched job, identified well enough to be killed after a Relay restart.</summary>
+/// <param name="Pgid">Null when the platform had no setsid; see SystemManagedProcess.Pgid.</param>
+public record ManagedProcessRecord(int JobId, int Pid, int? Pgid, long StartTimeTicks);
+
+/// <summary>
+/// Persists which processes a managed queue launched, so leftovers from a crashed Relay can be
+/// killed at the next startup.
+/// </summary>
+/// <remarks>
+/// Graceful shutdown cannot cover SIGKILL or a hard crash, and an orphan holding a GPU makes every
+/// later job on a single-GPU host wait or be rejected. Identity is pid <em>plus start time</em>:
+/// pids are recycled, and killing on pid alone could take out an unrelated process.
+/// </remarks>
+public sealed class ManagedProcessRegistry
+{
+    private readonly string _path;
+    private readonly object _sync = new();
+
+    public ManagedProcessRegistry(string path) => _path = path;
+
+    public IReadOnlyList<ManagedProcessRecord> Load()
+    {
+        lock (_sync)
+            return LoadLocked();
+    }
+
+    private List<ManagedProcessRecord> LoadLocked()
+    {
+        try
+        {
+            if (!File.Exists(_path))
+                return new List<ManagedProcessRecord>();
+
+            return JsonSerializer.Deserialize<List<ManagedProcessRecord>>(File.ReadAllText(_path))
+                   ?? new List<ManagedProcessRecord>();
+        }
+        catch
+        {
+            // A half-written file after a crash must never stop Relay from starting.
+            return new List<ManagedProcessRecord>();
+        }
+    }
+
+    public void Record(ManagedProcessRecord record)
+    {
+        lock (_sync)
+        {
+            var all = LoadLocked();
+            all.RemoveAll(r => r.JobId == record.JobId);
+            all.Add(record);
+            SaveLocked(all);
+        }
+    }
+
+    public void Forget(int jobId)
+    {
+        lock (_sync)
+        {
+            var all = LoadLocked();
+            all.RemoveAll(r => r.JobId == jobId);
+            SaveLocked(all);
+        }
+    }
+
+    public void Clear()
+    {
+        lock (_sync)
+            SaveLocked(new List<ManagedProcessRecord>());
+    }
+
+    private void SaveLocked(List<ManagedProcessRecord> records)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+
+        var tmp = _path + ".tmp." + Environment.ProcessId;
+        File.WriteAllText(tmp, JsonSerializer.Serialize(records,
+            new JsonSerializerOptions { WriteIndented = true }));
+        File.Move(tmp, _path, overwrite: true);
+    }
+
+    /// <summary>
+    /// Kills every recorded process that is still alive and still the same process, then clears the
+    /// file. Returns how many were killed. Call once at startup, before any job is admitted.
+    /// </summary>
+    /// <param name="startTimeOf">
+    /// Start time of the live process with this pid, or null if no such process exists. Injected so
+    /// the recycling logic is testable without spawning anything.
+    /// </param>
+    public static int KillLeftovers(string path, Func<int, DateTime?> startTimeOf)
+    {
+        var registry = new ManagedProcessRegistry(path);
+        int killed = 0;
+
+        foreach (var record in registry.Load())
+        {
+            var actual = startTimeOf(record.Pid);
+
+            if (actual == null)
+                continue;                                        // already gone
+
+            if (actual.Value.Ticks != record.StartTimeTicks)
+                continue;                                        // pid recycled: not our process
+
+            SystemManagedProcess.KillTree(
+                record.Pid, record.Pgid,
+                fallbackKill: () => KillByPid(record.Pid),
+                hasExited: () => false);
+
+            killed++;
+        }
+
+        registry.Clear();
+        return killed;
+    }
+
+    /// <summary>Default start-time probe for production use.</summary>
+    public static DateTime? LiveProcessStartTime(int pid)
+    {
+        try { return Process.GetProcessById(pid).StartTime; }
+        catch { return null; }
+    }
+
+    private static void KillByPid(int pid)
+    {
+        try { Process.GetProcessById(pid).Kill(entireProcessTree: true); } catch { }
+    }
+}
+```
+
+- [ ] **Step 4: Add shutdown ordering to `ManagedExecutor`**
+
+An admitted entry can have no `Process` yet because its staging task is still writing the script. A naive `KillAll` would find nothing to kill, return, and let that task launch a process *during* shutdown. So admission closes first.
+
+Add to `ManagedExecutor`:
+
+```csharp
+    private volatile bool _shuttingDown;
+
+    /// <summary>
+    /// Stops admitting. Call before killing anything: an entry admitted but not yet launched has no
+    /// process to find, and its staging task would otherwise spawn one after the sweep had passed.
+    /// </summary>
+    public void BeginShutdown() => _shuttingDown = true;
+
+    /// <summary>Kills every tracked process tree and waits for them to actually exit.</summary>
+    public async Task KillAllAsync()
+    {
+        BeginShutdown();
+
+        List<IManagedProcess> processes;
+        lock (_sync)
+            processes = _entries.Values.Select(e => e.Process).Where(p => p != null).ToList();
+
+        foreach (var process in processes)
+            process.KillTree();
+
+        await Task.WhenAll(processes.Select(p => p.WaitForExitAsync()));
+
+        lock (_sync)
+            _entries.Clear();
+    }
+```
+
+Guard both entry points. At the top of `TryAdmit`:
+
+```csharp
+        if (_shuttingDown)
+            return AdmissionResult.IsBusy;
+```
+
+At the top of `Launch`, before spawning:
+
+```csharp
+        if (_shuttingDown)
+            throw new InvalidOperationException(
+                $"Relay is shutting down; refusing to launch job {job.Id}.");
+```
+
+- [ ] **Step 5: Record and forget around launch**
+
+Give `ManagedExecutor` an optional registry (constructor parameter `ManagedProcessRegistry registry = null`), write the record immediately after `SystemManagedProcess.Start` returns in `Launch`:
+
+```csharp
+        if (process is SystemManagedProcess system)
+            _registry?.Record(new ManagedProcessRecord(
+                job.Id, system.Pid, system.Pgid, system.StartTime.Ticks));
+```
+
+and drop it in `Reconcile`, in the branch that removes a settled entry:
+
+```csharp
+                if (!IsJobActive(job))
+                {
+                    _entries.Remove(job);
+                    _registry?.Forget(job.Id);
+                }
+```
+
+- [ ] **Step 6: Add the shutdown-cannot-launch test**
+
+Append to `Refund.Tests/JobQueues/ManagedExecutorTests.cs`:
+
+```csharp
+    [Fact]
+    public void OnceShutdownBegins_NothingNewIsAdmittedOrLaunched()
+    {
+        var executor = new ManagedExecutor();
+        var job = NewJob();
+        Assert.IsType<AdmissionResult.Admit>(executor.TryAdmit(job, Host));
+
+        executor.BeginShutdown();
+
+        Assert.IsType<AdmissionResult.Busy>(executor.TryAdmit(NewJob(), Host));
+        Assert.Throws<InvalidOperationException>(
+            () => executor.Launch(job, "/tmp/does-not-matter.sh", "/tmp"));
+    }
+```
+
+- [ ] **Step 7: Run and watch them pass**
+
+Run: `dotnet test Refund.Tests/Refund.Tests.csproj --nologo -v q --filter "FullyQualifiedName~ManagedProcessRegistryTests|FullyQualifiedName~ManagedExecutorTests"`
+Expected: PASS — 6 registry tests, 11 executor tests.
+
+- [ ] **Step 8: Run the whole suite**
+
+Run: `dotnet test Refund.Tests/Refund.Tests.csproj --nologo -v q`
+Expected: all pass.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add Refund/JobQueues/ManagedProcessRegistry.cs Refund/JobQueues/ManagedExecutor.cs \
+        Refund.Tests/JobQueues/ManagedProcessRegistryTests.cs \
+        Refund.Tests/JobQueues/ManagedExecutorTests.cs
+git commit -m "$(cat <<'EOF'
+feat: kill leftover managed processes and order shutdown
+
+Children do not die with their parent, so "managed jobs die with Relay" has to
+be built. Graceful shutdown cannot cover SIGKILL or a crash, and an orphan
+holding a GPU makes every later job on a single-GPU host wait or be rejected.
+
+The registry persists pid, pgid and start time per launched job; the startup
+sweep kills anything still alive whose start time still matches. Matching on
+start time as well as pid is what makes this safe against pid recycling.
+
+Shutdown closes admission before killing, because an entry admitted but not
+yet launched has no process to find and its staging task would otherwise spawn
+one after the sweep had already passed it.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
