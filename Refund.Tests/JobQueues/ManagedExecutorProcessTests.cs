@@ -1215,5 +1215,68 @@ public class ManagedExecutorProcessTests : IDisposable
         Assert.Single(given!);
     }
 
+    /// <summary>
+    /// A registry path whose parent is a plain file, so every write throws where it does in
+    /// production — inside SaveLocked's directory/file I/O — without needing permissions or a
+    /// full disk.
+    /// </summary>
+    private ManagedProcessRegistry UnwritableRegistry()
+    {
+        var blocker = Path.Combine(_dir, "not-a-directory");
+        File.WriteAllText(blocker, "");
+        var registry = new ManagedProcessRegistry(Path.Combine(blocker, "managed-processes.json"));
+
+        // Self-check: the tests below are worthless if this path ever stops throwing.
+        Assert.ThrowsAny<Exception>(
+            () => registry.Record(new ManagedProcessRecord(-1, -1, -1, 1, null, 0)));
+
+        return registry;
+    }
+
+    [Fact]
+    public void Launch_WhenTheLaunchRecordCannotBeWritten_StillAttachesAndTracksTheProcess()
+    {
+        // The record is written between the spawn and the attach, and it does real file I/O. If
+        // that throws out of Launch the process is left spawned, unattached, unkilled and
+        // untracked — the orphaned GPU this path exists to prevent, and strictly worse than the
+        // pre-move ordering, which at least left the process in the executor's hands.
+        var executor = new ManagedExecutor(UnwritableRegistry());
+        var job = NewJob();
+        executor.TryAdmit(job, new ResourceTotals(8, 32, 0));
+
+        var process = new FakeProcess();
+        var returned = executor.Launch(job, _ => process);
+
+        Assert.Same(process, returned);
+        Assert.Equal(ClusterJobStatus.Running, executor.GetStatus(job));
+        Assert.Equal(0, process.KillCount);
+
+        // Tracked, therefore condemnable: the property that a thrown write would have cost us.
+        executor.Kill(job);
+        Assert.Equal(1, process.KillCount);
+    }
+
+    [Fact]
+    public void Launch_WithAnUnwritableRegistry_StillReportsAFailedAttachAsSuch()
+    {
+        // The registry being broken must not change what a lost reservation looks like to the
+        // caller: the process is still killed, and the error still says why.
+        var executor = new ManagedExecutor(UnwritableRegistry());
+        var job = NewJob();
+        executor.TryAdmit(job, new ResourceTotals(8, 32, 0));
+
+        var orphan = new FakeProcess();
+
+        var exc = Assert.Throws<InvalidOperationException>(() => executor.Launch(job, _ =>
+        {
+            executor.Kill(job);
+            executor.Reap();
+            return orphan;
+        }));
+
+        Assert.Contains("killed rather than left running", exc.Message);
+        Assert.Equal(1, orphan.KillCount);
+    }
+
     #endregion
 }

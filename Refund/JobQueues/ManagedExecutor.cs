@@ -378,7 +378,24 @@ public sealed class ManagedExecutor
         // attach made such a process invisible to the next startup's sweep as well — a GPU held by
         // something nothing on the host knows about. The window is still open; what changes is that
         // whatever falls into it is now written down, and the next startup kills it.
-        var record = RecordLaunch(job, process, reservation);
+        // Never at the cost of the attach. SaveLocked does real file I/O — a full disk, a read-only
+        // state directory, a permissions change — and letting that throw out of Launch would leave
+        // the process spawned, unattached, unkilled and untracked: precisely the orphaned GPU this
+        // whole path exists to prevent, and strictly worse than the unrecorded-but-tracked process
+        // we get by carrying on. Being tracked without a record costs one restart's visibility;
+        // being recorded without tracking costs nothing at all, because there is no such state.
+        ManagedProcessRecord record = null;
+        try
+        {
+            record = RecordLaunch(job, process, reservation);
+        }
+        catch (Exception exc)
+        {
+            Log.ForContext<ManagedExecutor>().Error(
+                exc, "Could not record the launch of job {JobId}'s process {Pid} in the managed " +
+                     "process registry; it is still tracked by this Relay, but a restart before it " +
+                     "exits will not know to kill it.", job.Id, process.Pid);
+        }
 
         if (!Attach(job, process, reservation))
         {
@@ -487,7 +504,22 @@ public sealed class ManagedExecutor
         // By pid, not only by job: a run that displaced this one may have recorded its own process
         // under the same key between the write and here, and dropping that would hide a process
         // that is very much alive.
-        _registry.Forget(record);
+        //
+        // Wrapped for the same reason the write is: a failing registry must not replace the
+        // InvalidOperationException the caller is about to throw with an I/O error about
+        // bookkeeping. The process has already been killed by this point, so the worst a retained
+        // record costs is one identity-mismatched entry for the next sweep to drop.
+        try
+        {
+            _registry.Forget(record);
+        }
+        catch (Exception exc)
+        {
+            Log.ForContext<ManagedExecutor>().Error(
+                exc, "Could not drop job {JobId}'s registry record for the killed process {Pid}; " +
+                     "the next startup sweep will find it no longer matches and discard it.",
+                job.Id, record.Pid);
+        }
 
         lock (_sync)
             if (_entries.TryGetValue(job, out var entry) && ReferenceEquals(entry.Record, record))
