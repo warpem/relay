@@ -11,6 +11,16 @@ public sealed class ManagedExecutor
 {
     private sealed class Entry
     {
+        private static long _nextToken;
+
+        /// <summary>
+        /// Identifies this reservation, as opposed to the job it belongs to. _entries is keyed by
+        /// Job, so a job that is aborted and re-admitted gets a <em>different</em> Entry under the
+        /// same key — and a launch in flight across that swap must not be allowed to bind its
+        /// process to the replacement. See <see cref="Launch(Job, Func{IReadOnlyList{int}, IManagedProcess})"/>.
+        /// </summary>
+        public long Token { get; } = Interlocked.Increment(ref _nextToken);
+
         public required ResourceAllocation Allocation { get; init; }
         public IManagedProcess Process { get; set; }
         public int? ExitCode { get; set; }
@@ -150,11 +160,31 @@ public sealed class ManagedExecutor
     /// its own.
     /// </para>
     /// </returns>
-    public bool Attach(Job job, IManagedProcess process)
+    public bool Attach(Job job, IManagedProcess process) => Attach(job, process, reservation: null);
+
+    /// <summary>
+    /// Overload that binds to one specific reservation rather than to whatever the job holds now.
+    /// </summary>
+    /// <param name="reservation">
+    /// The <see cref="Entry.Token"/> the caller reserved against, or null to accept the job's
+    /// current reservation whatever it is.
+    /// <para>
+    /// Passing it closes a fourth orphan route that the presence-and-usability checks cannot see.
+    /// A job that is aborted and re-queued while its process is starting has its old entry retired
+    /// and a <em>new</em> one booked under the same Job key, and that new entry is present, usable
+    /// and process-less — so it accepts the attach. The process then runs on the old entry's GPUs
+    /// while the ledger believes it is on the new entry's, leaving the GPUs it is really using free
+    /// to be handed to somebody else.
+    /// </para>
+    /// </param>
+    internal bool Attach(Job job, IManagedProcess process, long? reservation)
     {
         lock (_sync)
         {
             if (!_entries.TryGetValue(job, out var entry))
+                return false;
+
+            if (reservation is { } token && entry.Token != token)
                 return false;
 
             if (entry.Process != null || !entry.IsUsableReservation)
@@ -182,6 +212,7 @@ public sealed class ManagedExecutor
     internal IManagedProcess Launch(Job job, Func<IReadOnlyList<int>, IManagedProcess> spawn)
     {
         IReadOnlyList<int> gpus;
+        long reservation;
         lock (_sync)
         {
             // Presence is not enough. An entry can exist while condemned, or spent by a process
@@ -192,15 +223,20 @@ public sealed class ManagedExecutor
                     $"Job {job.Id} holds no usable reservation; refusing to launch it unaccounted for.");
 
             gpus = entry.Allocation.GpuIndices;
+
+            // Which reservation these GPUs came from, not just which job. The lock is dropped
+            // across the spawn below, and the job can be aborted and re-admitted in that window.
+            reservation = entry.Token;
         }
 
         var process = spawn(gpus);
 
-        if (!Attach(job, process))
+        if (!Attach(job, process, reservation))
         {
-            // The reservation was retired while the process was starting — an abort, typically.
-            // We now own a running process nothing is accounting for, and leaving it alive would
-            // hold cores, memory and GPUs that no ledger can ever reclaim.
+            // The reservation was retired, or replaced by a later one, while the process was
+            // starting — an abort, typically. We now own a running process nothing is accounting
+            // for, and leaving it alive would hold cores, memory and GPUs that no ledger can ever
+            // reclaim, on top of whatever the replacement reservation booked.
             try
             {
                 process.KillTree();
@@ -213,8 +249,8 @@ public sealed class ManagedExecutor
             }
 
             throw new InvalidOperationException(
-                $"Job {job.Id}'s reservation was retired while its process was starting; " +
-                "the process has been killed rather than left running unaccounted for.");
+                $"Job {job.Id}'s reservation was retired or replaced while its process was " +
+                "starting; the process has been killed rather than left running unaccounted for.");
         }
 
         return process;
