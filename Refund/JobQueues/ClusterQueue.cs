@@ -68,6 +68,33 @@ public class ClusterQueue : JobQueue, IPoolQueue
     [RelayProperty]
     public ClusterScheduler SchedulerType { get; set; } = ClusterScheduler.Slurm;
 
+    /// <summary>Total CPU cores a managed queue may hand out. Ignored unless SchedulerType is Managed.</summary>
+    [RelayProperty]
+    public int ManagedCores { get; set; } = Environment.ProcessorCount;
+
+    /// <summary>Total memory in GB a managed queue may hand out. Ignored unless SchedulerType is Managed.</summary>
+    [RelayProperty]
+    public int ManagedMemoryGb { get; set; } = 64;
+
+    /// <summary>Number of GPUs on this host. Ignored unless SchedulerType is Managed.</summary>
+    [RelayProperty]
+    public int ManagedGpus { get; set; } = 1;
+
+    /// <summary>True when Relay schedules this queue's jobs itself.</summary>
+    public bool IsManaged => SchedulerType == ClusterScheduler.Managed;
+
+    /// <summary>
+    /// Read fresh on every use rather than snapshotted: this object is constructed before
+    /// ReadFromJson hydrates the persisted values, and the editor can change them later.
+    /// </summary>
+    public ResourceTotals ManagedTotals => new(ManagedCores, ManagedMemoryGb, ManagedGpus);
+
+    /// <summary>
+    /// The host-wide executor, injected by QueueRepository. Null on a queue that was constructed
+    /// outside the repository (templates, copies, tests).
+    /// </summary>
+    public ManagedExecutor Executor { get; set; }
+
     /// <summary>
     /// Custom shell executable path for running cluster commands.
     /// When empty, defaults to cmd.exe on Windows or /bin/bash on Unix/Linux.
@@ -448,6 +475,19 @@ public class ClusterQueue : JobQueue, IPoolQueue
                     string scriptPath = await PrepareAndWriteScript(job, customValues);
                     cts.Token.ThrowIfCancellationRequested();
 
+                    // Managed: there is no scheduler to hand the script to. The script itself is
+                    // the same one a cluster queue would submit, minus the #SBATCH/#FLUX header.
+                    if (IsManaged)
+                    {
+                        var process = Executor.Launch(job, scriptPath, job.RunDirectory);
+                        await job.WriteToLifecycleLog(
+                            $"Launched locally as pid {process.Pid} on GPUs " +
+                            $"[{string.Join(",", Executor.GpuIndicesFor(job))}]");
+
+                        JobUpdateCallback(job, j => { j.ClusterJobId = process.Pid.ToString(); });
+                        return;
+                    }
+
                     lock (Sync)
                         JobsInLimbo.Add(job);
 
@@ -691,7 +731,12 @@ public class ClusterQueue : JobQueue, IPoolQueue
         lock (Sync)
             if (StagingJobs.ContainsKey(job))
                 return (ClusterJobStatus.Pending, "");
-        
+
+        // The executor is the only authority on a managed job. No executor means nothing is
+        // running this job and nothing ever will, which is Failed, not Unknown.
+        if (IsManaged)
+            return (Executor?.GetStatus(job) ?? ClusterJobStatus.Failed, "");
+
         if (string.IsNullOrWhiteSpace(job.ClusterJobId))
             return (ClusterJobStatus.Unknown, "");
         
@@ -714,7 +759,19 @@ public class ClusterQueue : JobQueue, IPoolQueue
     public override void AbortJob(Job job)
     {
         base.AbortJob(job);
-        
+
+        // Before the staging/limbo dance: a managed job has no cluster job ID to wait for, and
+        // AbortJobTemplate is meaningless for it. Kill is idempotent and safe on an unknown job.
+        if (IsManaged)
+        {
+            lock (Sync)
+                if (StagingJobs.TryGetValue(job, out var staging) && !staging.IsCancellationRequested)
+                    staging.Cancel();
+
+            Executor?.Kill(job);
+            return;
+        }
+
         lock (Sync)
             if (StagingJobs.ContainsKey(job))
             {
@@ -981,6 +1038,11 @@ public class ClusterQueue : JobQueue, IPoolQueue
     /// </remarks>
     internal string ParseClusterJobId(string output)
     {
+        if (IsManaged)
+            throw new InvalidOperationException(
+                "A managed queue has no scheduler output to parse; job IDs are process ids " +
+                "assigned by ManagedExecutor. Reaching this is a wiring mistake.");
+
         if (!JobIdParsers.TryGetValue(SchedulerType, out var parser))
             throw new Exception($"No job ID parser for scheduler {SchedulerType}.");
 
@@ -1021,6 +1083,11 @@ public class ClusterQueue : JobQueue, IPoolQueue
     /// </remarks>
     internal ClusterJobStatus ParseClusterJobStatus(string output)
     {
+        // Unknown rather than a throw: unlike ParseClusterJobId this is reachable from
+        // ClassifyState, and the daemon's state handlers are written around Unknown.
+        if (IsManaged)
+            return ClusterJobStatus.Unknown;
+
         if (!JobStatusParsers.TryGetValue(SchedulerType, out var parser))
             return ClusterJobStatus.Unknown;
 
@@ -1032,6 +1099,23 @@ public class ClusterQueue : JobQueue, IPoolQueue
         {
             return ClusterJobStatus.Unknown;
         }
+    }
+
+    /// <summary>
+    /// Whether this queue can start <paramref name="job"/> right now. Queues backed by an external
+    /// scheduler always admit — the scheduler does the arbitration.
+    /// </summary>
+    public override AdmissionResult CanAdmit(Job job)
+    {
+        if (!IsManaged)
+            return AdmissionResult.Admitted;      // the external scheduler arbitrates
+
+        if (Executor == null)
+            return new AdmissionResult.Reject(
+                $"Queue \"{Alias}\" is managed but has no executor attached. This is a Relay wiring " +
+                "fault, not a job problem; refusing to run the job unaccounted for.");
+
+        return Executor.TryAdmit(job, ManagedTotals);
     }
 
     /// <summary>

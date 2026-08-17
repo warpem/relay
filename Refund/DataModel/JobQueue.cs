@@ -248,7 +248,17 @@ namespace Refund.DataModel
         /// Anything else. Job IDs are read with <see cref="Refund.JobQueues.ClusterQueue.JobIdParseRegex"/>
         /// and states with the JobStatusParseTemplate* patterns.
         /// </summary>
-        Custom = 5
+        Custom = 5,
+
+        /// <summary>
+        /// No external scheduler: Relay runs the job as a local process and accounts for the host's
+        /// cores, memory and GPUs itself. Not a scheduler in the sense the other values are — the
+        /// job ID and status parsers are never consulted for a managed queue.
+        /// </summary>
+        /// <remarks>
+        /// 6, not 5: <see cref="Custom"/> already owns 5 and its persisted value must not shift.
+        /// </remarks>
+        Managed = 6
     }
 
     /// <summary>
