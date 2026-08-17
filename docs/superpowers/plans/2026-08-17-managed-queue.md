@@ -1020,6 +1020,7 @@ Two details are easy to get wrong:
 
 - **stdout/stderr go through .NET redirection, pumped line-by-line with a flush.** Not shell redirection — job directory paths would need quoting. Not `CopyToAsync` — its 80 KiB buffer would stall `TrackProgressLogs`, which tails these files for the live UI.
 - **Terminal status waits for the pumps.** `Process.HasExited` can go true while buffered output is still unwritten, and `HandleJobCompletion` runs final progress tracking then dequeues — so reporting `Finished` too early silently drops a job's last log lines.
+- **`setsid` is Linux-only; macOS is the dev environment.** Verified absent from macOS's base system (no `/usr/bin/setsid`, not on `PATH`). Without it the child inherits **Relay's own process group**, so `kill(-pgid)` would kill Relay. `Pgid` is therefore `int?`, non-null only when we actually created a group, and a null must never become a group kill — including in Task 6's startup sweep. macOS falls back to `Process.Kill(entireProcessTree: true)`, which works for live kills but cannot clean up after a Relay crash. That limitation is dev-only and is recorded in the README in Task 11.
 
 **Files:**
 - Create: `Refund/JobQueues/SystemManagedProcess.cs`
@@ -1165,6 +1166,38 @@ public class ManagedExecutorProcessTests : IDisposable
         var expected = string.Join(",", executor.GpuIndicesFor(job));
         Assert.Contains($"visible={expected}", await File.ReadAllTextAsync(job.PathStdOut));
     }
+
+    [Fact]
+    public void GroupKill_IsNeverUsedForAGroupWeDidNotCreate()
+    {
+        // Without setsid (macOS) the child inherits Relay's process group. Turning that pgid into
+        // kill(-pgid) would terminate Relay itself. Assert the interlock directly: a null pgid, or
+        // one that is not the child's own pid, must take the fallback path and never signal a group.
+        var fallbackCalled = false;
+
+        SystemManagedProcess.KillTree(pid: 1234, pgid: null,
+                                      fallbackKill: () => fallbackCalled = true,
+                                      hasExited: () => false);
+        Assert.True(fallbackCalled);
+
+        fallbackCalled = false;
+        SystemManagedProcess.KillTree(pid: 1234, pgid: 1,      // pgid != pid: not ours
+                                      fallbackKill: () => fallbackCalled = true,
+                                      hasExited: () => false);
+        Assert.True(fallbackCalled);
+    }
+
+    [Fact]
+    public void KillTree_DoesNothingForAnAlreadyExitedProcess()
+    {
+        var fallbackCalled = false;
+
+        SystemManagedProcess.KillTree(pid: 1234, pgid: null,
+                                      fallbackKill: () => fallbackCalled = true,
+                                      hasExited: () => true);
+
+        Assert.False(fallbackCalled);
+    }
 }
 ```
 
@@ -1197,7 +1230,15 @@ public sealed class SystemManagedProcess : IManagedProcess
     private readonly Task _pumps;
 
     public int Pid { get; }
-    public int Pgid { get; }
+
+    /// <summary>
+    /// The process group we created for this job, or null when the platform has no
+    /// <c>setsid</c> (macOS). Null means the child inherited <em>Relay's own</em> group, and
+    /// group-signalling it would kill Relay — so a null here must never be turned into a
+    /// group kill anywhere, including the startup leftover sweep.
+    /// </summary>
+    public int? Pgid { get; }
+
     public DateTime StartTime { get; }
 
     /// <summary>True only once the process has exited AND its output has been fully flushed.</summary>
@@ -1205,14 +1246,25 @@ public sealed class SystemManagedProcess : IManagedProcess
 
     public int ExitCode => _process.ExitCode;
 
-    private SystemManagedProcess(Process process, Task pumps)
+    private SystemManagedProcess(Process process, Task pumps, bool ownGroup)
     {
         _process = process;
         _pumps = pumps;
         Pid = process.Id;
-        Pgid = process.Id;             // setsid makes the child its own group leader: pgid == pid
         StartTime = process.StartTime;
+
+        // setsid makes the child its own group leader, so pgid == pid by construction. If we did
+        // not launch through setsid we have no group of our own — record null rather than guessing.
+        Pgid = ownGroup ? process.Id : null;
     }
+
+    /// <summary>
+    /// setsid(1) is present on Linux but not in macOS's base system. Probed once: on Linux we get
+    /// our own process group and can signal the whole tree by group id even after losing the
+    /// handle; on macOS we fall back to .NET's tree walk, which cannot survive a Relay crash.
+    /// </summary>
+    private static readonly string SetsidPath =
+        new[] { "/usr/bin/setsid", "/bin/setsid" }.FirstOrDefault(File.Exists);
 
     public static SystemManagedProcess Start(string scriptPath,
                                              string workingDirectory,
@@ -1220,17 +1272,21 @@ public sealed class SystemManagedProcess : IManagedProcess
                                              string stdOutPath,
                                              string stdErrPath)
     {
+        bool ownGroup = SetsidPath != null;
+
         var info = new ProcessStartInfo
         {
-            // setsid puts the script in a fresh process group so the whole tree can be signalled.
-            FileName = "/usr/bin/setsid",
+            // With setsid the script gets a fresh process group, so the whole tree can be signalled
+            // by group id. Without it (macOS) we run bash directly and rely on .NET's tree walk.
+            FileName = ownGroup ? SetsidPath : "/bin/bash",
             WorkingDirectory = workingDirectory,
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             CreateNoWindow = true,
         };
-        info.ArgumentList.Add("/bin/bash");
+        if (ownGroup)
+            info.ArgumentList.Add("/bin/bash");
         info.ArgumentList.Add(scriptPath);
 
         // Enforced, unlike cores and memory: CUDA renumbers these to 0..n-1, which is what jobs
@@ -1266,22 +1322,33 @@ public sealed class SystemManagedProcess : IManagedProcess
             await writer.WriteLineAsync(line);
     }
 
-    public void KillTree()
+    public void KillTree() => KillTree(Pid, Pgid, () => _process.Kill(entireProcessTree: true),
+                                       () => _process.HasExited);
+
+    /// <summary>
+    /// Shared by the live path and the startup leftover sweep, which has no Process handle.
+    /// </summary>
+    /// <remarks>
+    /// The <paramref name="pgid"/> null check is a safety interlock, not an optimisation. A null
+    /// group means the child inherited Relay's group; <c>kill(-pgid)</c> would then take Relay down
+    /// with it. Only a group we created ourselves is ever signalled as a group.
+    /// </remarks>
+    internal static void KillTree(int pid, int? pgid, Action fallbackKill, Func<bool> hasExited)
     {
         try
         {
-            if (_process.HasExited)
+            if (hasExited())
                 return;
 
-            // Negative pid signals the whole group.
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux) ||
-                RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-                Kill(-Pgid, 9);
+            if (pgid is { } group && group == pid)   // our own group: pgid == pid by construction
+                Kill(-group, SIGKILL);               // negative pid signals the whole group
             else
-                _process.Kill(entireProcessTree: true);
+                fallbackKill();                      // .NET walks the child tree
         }
         catch { /* already gone */ }
     }
+
+    private const int SIGKILL = 9;
 
     public async Task WaitForExitAsync(CancellationToken ct = default)
     {
@@ -1323,7 +1390,7 @@ public sealed class SystemManagedProcess : IManagedProcess
 - [ ] **Step 5: Run and watch them pass**
 
 Run: `dotnet test Refund.Tests/Refund.Tests.csproj --nologo -v q --filter "FullyQualifiedName~ManagedExecutorProcessTests"`
-Expected: PASS, 5 tests.
+Expected: PASS, 7 tests — on both Linux and macOS. If the tree-kill test fails on macOS, the fallback is not reaching the grandchild; fix the fallback rather than skipping the test.
 
 - [ ] **Step 6: Run the whole suite**
 
@@ -1349,6 +1416,12 @@ and stall TrackProgressLogs, which tails these files for the live job card.
 HasExited is deliberately "process exited AND pumps drained": reporting a
 terminal status early lets HandleJobCompletion finalise and dequeue before the
 last log lines are on disk.
+
+setsid is absent from macOS, the dev environment, so Pgid is nullable and null
+means "the child inherited Relay's own group". Only a group we created is ever
+signalled as a group — otherwise kill(-pgid) would take Relay down with it.
+macOS falls back to .NET's process-tree walk, which handles live kills but
+cannot clean up after a Relay crash.
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 EOF
