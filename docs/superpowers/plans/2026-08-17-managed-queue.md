@@ -2096,3 +2096,244 @@ EOF
 ```
 
 ---
+
+### Task 8: `QueueRepository` — own the executor, guard admission, run shutdown
+
+The executor is created once here, not per queue: a host has one set of GPUs, so it has one ledger. Per-queue executors would let two managed queues each reserve the whole host and both assign CUDA device 0.
+
+**Files:**
+- Modify: `Refund/Services/Core/Repositories/QueueRepository.cs`
+- Modify: `Refund/Services/Core/Repositories/QueueRepository.StateHandlers.cs`
+- Modify: `Refund/Services/Core/DataManager/DataManager.cs`
+- Modify: `Relay/Program.cs`
+- Test: `Refund.Tests/JobQueues/AdmissionGuardTests.cs`
+
+**Interfaces:**
+- Consumes: `ManagedExecutor`, `ManagedProcessRegistry` (Tasks 4–6); `ClusterQueue.Executor`, `IsManaged` (Task 7).
+- Produces: `QueueRepository.ManagedExecutor`; `QueueRepository.ShutdownAsync()`; `DataManager.ShutdownAsync()`.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `Refund.Tests/JobQueues/AdmissionGuardTests.cs`:
+
+```csharp
+using Refund.DataModel;
+using Refund.JobQueues;
+using MaskJob = Refund.Jobs.Refinement.Masks.CreateMask.CreateMask;
+
+namespace Refund.Tests.JobQueues;
+
+[Collection("JobRegistry")]
+public class AdmissionGuardTests
+{
+    private static readonly object _populateLock = new();
+
+    private static void EnsurePopulated()
+    {
+        lock (_populateLock)
+        {
+            if (Job.Types.Count == 0)
+                Job.PopulateStatic();
+        }
+    }
+
+    private static Job NewJob()
+    {
+        EnsurePopulated();
+        return new MaskJob { Space = new Space { RootDirectory = "/tmp/relay-test" },
+                             Status = JobStatus.Waiting };
+    }
+
+    private static ClusterQueue ManagedQueue(int cores, int gpus, ManagedExecutor executor) =>
+        new ClusterQueue((_, _) => { })
+        {
+            SchedulerType = ClusterScheduler.Managed,
+            ManagedCores = cores,
+            ManagedMemoryGb = 1024,
+            ManagedGpus = gpus,
+            Executor = executor,
+        };
+
+    [Fact]
+    public void ABusyQueue_ReportsBusy_SoTheJobStaysWaiting()
+    {
+        var executor = new ManagedExecutor();
+        var queue = ManagedQueue(cores: 1, gpus: 0, executor);
+
+        var first = NewJob();
+        Assert.IsType<AdmissionResult.Admit>(queue.CanAdmit(first));
+        executor.Attach(first, null);   // admitted; process attaches later
+
+        Assert.IsType<AdmissionResult.Busy>(queue.CanAdmit(NewJob()));
+    }
+
+    [Fact]
+    public void AnImpossibleRequest_IsRejectedWithAReasonNamingBothSides()
+    {
+        var queue = ManagedQueue(cores: 1, gpus: 0, new ManagedExecutor());
+
+        var reject = Assert.IsType<AdmissionResult.Reject>(queue.CanAdmit(NewJob()));
+
+        Assert.Contains("never", reject.Reason, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("1 cores", reject.Reason);
+    }
+}
+```
+
+Note: the first test admits a job whose `GpuCount` is 0 after Task 1, so `gpus: 0` is satisfiable; the second uses a job needing more cores than the queue has.
+
+- [ ] **Step 2: Run and watch it fail**
+
+Run: `dotnet test Refund.Tests/Refund.Tests.csproj --nologo -v q --filter "FullyQualifiedName~AdmissionGuardTests"`
+Expected: FAIL — `CanAdmit` currently admits everything, so the Busy and Reject assertions fail.
+
+- [ ] **Step 3: Create and inject the executor**
+
+In `QueueRepository.cs`, next to the other fields:
+
+```csharp
+    /// <summary>
+    /// One executor per host, shared by every managed queue. A host has one set of GPUs, so it has
+    /// one ledger — per-queue executors would let two managed queues each reserve the whole machine
+    /// and both hand out CUDA device 0.
+    /// </summary>
+    public ManagedExecutor ManagedExecutor { get; }
+```
+
+In the constructor, after `_statePath` is known:
+
+```csharp
+        var registryPath = Path.Combine(Path.GetDirectoryName(_statePath)!, "managed-processes.json");
+
+        // Before anything is admitted: kill compute left running by a Relay that crashed rather
+        // than shut down. An orphan holding a GPU blocks every later job on a single-GPU host.
+        int leftovers = ManagedProcessRegistry.KillLeftovers(
+            registryPath, ManagedProcessRegistry.LiveProcessStartTime);
+        if (leftovers > 0)
+            _logger.Warning("Killed {Count} managed process(es) left over from a previous run", leftovers);
+
+        ManagedExecutor = new ManagedExecutor(new ManagedProcessRegistry(registryPath));
+```
+
+Attach it wherever a cluster queue enters the repository — in `CreateClusterQueue` after `_clusterQueues.Add(queue)`, and in `LoadState` after each queue is deserialized:
+
+```csharp
+            queue.Executor = ManagedExecutor;
+```
+
+- [ ] **Step 4: Add the guard to `HandleWaitingState`**
+
+In `QueueRepository.StateHandlers.cs`, inside `HandleWaitingState`'s `try`, after the pool validation and immediately before the transition to `Staging`:
+
+```csharp
+                switch (queue.CanAdmit(job))
+                {
+                    case AdmissionResult.Busy:
+                        return;      // resources in use; the daemon asks again next tick
+
+                    case AdmissionResult.Reject reject:
+                        await job.WriteToErrorLog(reject.Reason);
+                        _jobUpdateCallback(job, j =>
+                        {
+                            j.Status = JobStatus.Failed;
+                            j.AddEvent(EventType.Failed);
+                        });
+                        _logger.Warning("Job {JobId} rejected by queue {QueueAlias}: {Reason}",
+                                        job.Id, queue.Alias, reject.Reason);
+                        return;
+                }
+```
+
+`Reject` transitions the job out of `Waiting`, which is what stops the message repeating every tick.
+
+- [ ] **Step 5: Reject managed queues as pool queues**
+
+Pools submit bare scripts through `IPoolQueue.SubmitScript`, which carries no resource request and so cannot be admitted. In the same method's existing pool validation block, after the `CancelManyJobsTemplate` check:
+
+```csharp
+                    if (poolQueue.IsManaged)
+                        throw new InvalidOperationException(
+                            $"Pool queue \"{poolQueue.Alias}\" is a managed queue. Worker pools submit " +
+                            "bare scripts with no resource request attached, so a managed queue cannot " +
+                            "admit them. Pick a queue backed by an external scheduler.");
+```
+
+- [ ] **Step 6: Add a shutdown path that actually runs**
+
+In `QueueRepository.cs`:
+
+```csharp
+    /// <summary>
+    /// Stops the daemon and kills every managed process tree. Ordered: admission closes first, so a
+    /// job admitted but not yet launched cannot have its staging task spawn a process after the
+    /// sweep has passed.
+    /// </summary>
+    public async Task ShutdownAsync()
+    {
+        ManagedExecutor.BeginShutdown();
+        StopDaemon();
+        await ManagedExecutor.KillAllAsync();
+    }
+```
+
+In `DataManager.cs`:
+
+```csharp
+    /// <summary>Called from the host's ApplicationStopping hook.</summary>
+    public Task ShutdownAsync() => _queueRepository.ShutdownAsync();
+```
+
+In `Relay/Program.cs`, after the app is built:
+
+```csharp
+// QueueRepository.Dispose is unreachable: DataManager implements no disposal and is registered as
+// an externally-constructed singleton, which the DI container does not dispose. Without this hook
+// nothing would kill managed processes on a graceful shutdown.
+app.Lifetime.ApplicationStopping.Register(() =>
+    app.Services.GetRequiredService<DataManager>().ShutdownAsync().GetAwaiter().GetResult());
+```
+
+- [ ] **Step 7: Run and watch them pass**
+
+Run: `dotnet test Refund.Tests/Refund.Tests.csproj --nologo -v q --filter "FullyQualifiedName~AdmissionGuardTests"`
+Expected: PASS, 2 tests.
+
+- [ ] **Step 8: Run the whole suite and build**
+
+```bash
+dotnet test Refund.Tests/Refund.Tests.csproj --nologo -v q
+dotnet build Relay/Relay.csproj --nologo -v q
+```
+Expected: all pass; build succeeds with 0 errors.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add Refund/Services/Core/Repositories/QueueRepository.cs \
+        Refund/Services/Core/Repositories/QueueRepository.StateHandlers.cs \
+        Refund/Services/Core/DataManager/DataManager.cs Relay/Program.cs \
+        Refund.Tests/JobQueues/AdmissionGuardTests.cs
+git commit -m "$(cat <<'EOF'
+feat: gate job start on available resources
+
+QueueRepository owns one ManagedExecutor for the host and injects it into
+every cluster queue. One host has one set of GPUs, so it has one ledger;
+per-queue executors would let two managed queues each reserve the whole
+machine and both hand out CUDA device 0.
+
+HandleWaitingState now asks the queue before transitioning to Staging. Busy
+leaves the job Waiting for the next tick; Reject fails it once with a reason,
+which also stops the message repeating because the job leaves Waiting.
+
+Shutdown runs from an ApplicationStopping hook. QueueRepository.Dispose was
+never reachable: DataManager implements no disposal and is registered as an
+externally-constructed singleton, which the DI container does not dispose.
+
+Startup kills leftovers from a crashed run before admitting anything.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
