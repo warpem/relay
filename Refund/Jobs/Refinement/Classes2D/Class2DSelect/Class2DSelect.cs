@@ -55,6 +55,9 @@ public class Class2DSelect : Job, ILocalJob
     /// The queue type requirement for this job - always runs locally since it's a simple file operation
     /// </summary>
     public override JobQueueType QueueType => JobQueueType.Local;
+
+    /// <summary>Runs locally on the CPU; requests no GPUs.</summary>
+    public override int GpuCount => 0;
     
     /// <summary>
     /// Specifies the component type to use for the expanded view of this job

@@ -29,27 +29,48 @@ public partial class QueueRepository
         {
             try
             {
-                await job.WriteToLifecycleLog($"Staging started");
-
-                // If this is a pooled job, the pool queue must exist and have the batch
-                // templates configured before we submit the Manager. Fail fast otherwise.
-                if (job is IPooledJob pooledJob && pooledJob.PoolQueueId > 0)
+                // If this is a pooled job, the pool queue must exist and have the batch templates
+                // configured before we submit the Manager. Fail the job outright rather than
+                // throwing: none of these are transient, so leaving it Waiting would re-log the
+                // same reason on every ~1s daemon tick, forever.
+                if (job is IPooledJob pooledJob && pooledJob.PoolQueueId > 0 &&
+                    PoolPreflightError(pooledJob) is { } poolError)
                 {
-                    if (FindQueue(pooledJob.PoolQueueId) is not ClusterQueue poolQueue)
-                        throw new InvalidOperationException(
-                            $"Pool queue {pooledJob.PoolQueueId} not found. " +
-                            "Select a valid pool queue in the job settings.");
-                    if (string.IsNullOrWhiteSpace(poolQueue.ListJobsTemplate))
-                        throw new InvalidOperationException(
-                            $"Pool queue \"{poolQueue.Alias}\" has no List Jobs template configured. " +
-                            "Add a ListJobsTemplate that prints \"<id> <state>\" per line, using a " +
-                            "space-free format so it survives a remote shell hop such as ssh " +
-                            "(e.g. \"squeue -u $USER -h -o \\\"%i,%T\\\"\"), before using it as a pool queue.");
-                    if (string.IsNullOrWhiteSpace(poolQueue.CancelManyJobsTemplate))
-                        throw new InvalidOperationException(
-                            $"Pool queue \"{poolQueue.Alias}\" has no Cancel Many Jobs template configured. " +
-                            "Add a CancelManyJobsTemplate (e.g. \"scancel {{job_ids}}\") before using it as a pool queue.");
+                    await FailWaitingJob(job, queue, poolError);
+                    return;
                 }
+
+                // Ask the queue before moving the job out of Waiting, never after. A job rejected
+                // after the transition would strand in Staging, and the whole point of returning
+                // Busy rather than throwing is that the daemon can retry cleanly from Waiting.
+                switch (queue.CanAdmit(job))
+                {
+                    case AdmissionResult.Admit:
+                        break;                              // proceed to staging
+
+                    case AdmissionResult.Busy:
+                        return;                             // resources in use; the daemon asks again next tick
+
+                    case AdmissionResult.Reject reject:
+                        // Fail it once. Leaving it Waiting would re-log the same reason every tick.
+                        await FailWaitingJob(job, queue, reject.Reason);
+                        return;
+
+                    // AdmissionResult's private constructor does not actually close the hierarchy —
+                    // a record's protected copy constructor can be chained — and C# would not treat
+                    // the switch as exhaustive even if it did. Refusing to start is the safe answer
+                    // for a verdict this code does not understand.
+                    default:
+                        _logger.Error("Queue {QueueAlias} returned an unrecognised admission verdict " +
+                                      "for job {JobId}; leaving it Waiting.", queue.Alias, job.Id);
+                        return;
+                }
+
+                // Only now, once admission has actually granted the job its resources. Written
+                // before the switch this appended a line per waiting job per daemon tick, which a
+                // long-lived Waiting state (the point of a managed queue) turns into an unbounded
+                // lifecycle log.
+                await job.WriteToLifecycleLog($"Staging started");
 
                 // Transition to Staging state
                 _jobUpdateCallback(job, j =>
@@ -74,6 +95,57 @@ public partial class QueueRepository
                               job.Id, queue.GetType().Name, job.Alias, exc.ToString());
             }
         }
+    }
+
+    /// <summary>
+    /// Why this pooled job cannot start, or null if its pool queue is usable. Every case here is a
+    /// configuration fault that no amount of waiting fixes.
+    /// </summary>
+    private string PoolPreflightError(IPooledJob pooledJob)
+    {
+        if (FindQueue(pooledJob.PoolQueueId) is not ClusterQueue poolQueue)
+            return $"Pool queue {pooledJob.PoolQueueId} not found. " +
+                   "Select a valid pool queue in the job settings.";
+
+        // Before either template check, and the order is the whole point. A managed queue's
+        // ListJobsTemplate and CancelManyJobsTemplate are empty because the editor hides those
+        // fields for it, so checking them first tells the user to add a List Jobs template — advice
+        // the UI gives them no way to follow, for a queue that could not back a pool even if they
+        // could. The managed verdict is the true one and has an action attached: pick another queue.
+        if (poolQueue.IsManaged)
+            return $"Pool queue \"{poolQueue.Alias}\" is a managed queue. Worker pools submit " +
+                   "bare scripts with no resource request attached, so a managed queue cannot " +
+                   "admit them. Pick a queue backed by an external scheduler.";
+
+        if (string.IsNullOrWhiteSpace(poolQueue.ListJobsTemplate))
+            return $"Pool queue \"{poolQueue.Alias}\" has no List Jobs template configured. " +
+                   "Add a ListJobsTemplate that prints \"<id> <state>\" per line, using a " +
+                   "space-free format so it survives a remote shell hop such as ssh " +
+                   "(e.g. \"squeue -u $USER -h -o \\\"%i,%T\\\"\"), before using it as a pool queue.";
+
+        if (string.IsNullOrWhiteSpace(poolQueue.CancelManyJobsTemplate))
+            return $"Pool queue \"{poolQueue.Alias}\" has no Cancel Many Jobs template configured. " +
+                   "Add a CancelManyJobsTemplate (e.g. \"scancel {{job_ids}}\") before using it as a pool queue.";
+
+        return null;
+    }
+
+    /// <summary>
+    /// Fails a job that can never leave Waiting, writing the reason exactly once. The alternative —
+    /// logging and leaving it Waiting — has the daemon repeat the same write every tick.
+    /// </summary>
+    private async Task FailWaitingJob(Job job, JobQueue queue, string reason)
+    {
+        await job.WriteToErrorLog(reason);
+
+        _jobUpdateCallback(job, j =>
+        {
+            j.Status = JobStatus.Failed;
+            j.AddEvent(EventType.Failed);
+        });
+
+        _logger.Warning("Job {JobId} cannot start on queue {QueueAlias}: {Reason}",
+                        job.Id, queue.Alias, reason);
     }
 
     /// <summary>
@@ -167,7 +239,7 @@ public partial class QueueRepository
                         await job.WriteToLifecycleLog(
                             $"Worker pool created on pool queue {pooledJob.PoolQueueId}, target {pooledJob.PoolSize} worker(s)");
 
-                    int submittedBefore = ((WarpJobGpu)job).PoolWorkersSubmitted;
+                    int submittedBefore = pooledJob.PoolWorkersSubmitted;
 
                     var (alive, running, submitted) = await pool.Tick();
 
@@ -179,16 +251,16 @@ public partial class QueueRepository
                             $"Spawned {submitted - submittedBefore} pool worker(s); " +
                             $"{alive}/{pooledJob.PoolSize} alive ({running} running), {submitted} submitted in total");
 
-                    var warpJob = (WarpJobGpu)job;
-                    if (warpJob.PoolWorkersAlive   != alive   ||
-                        warpJob.PoolWorkersRunning != running ||
-                        warpJob.PoolWorkersSubmitted != submitted)
+                    if (pooledJob.PoolWorkersAlive     != alive   ||
+                        pooledJob.PoolWorkersRunning   != running ||
+                        pooledJob.PoolWorkersSubmitted != submitted)
                     {
                         _jobUpdateCallback(job, j =>
                         {
-                            ((WarpJobGpu)j).PoolWorkersAlive = alive;
-                            ((WarpJobGpu)j).PoolWorkersRunning = running;
-                            ((WarpJobGpu)j).PoolWorkersSubmitted = submitted;
+                            var p = (IPooledJob)j;
+                            p.PoolWorkersAlive     = alive;
+                            p.PoolWorkersRunning   = running;
+                            p.PoolWorkersSubmitted = submitted;
                         });
                     }
                 }
@@ -315,9 +387,18 @@ public partial class QueueRepository
         // Check the job's status on the cluster or local machine
         (var clusterStatus, _) = await queue.CheckStatus(job);
 
+        // A managed job's ClusterJobId is its pid, and that is written only after Launch has
+        // already returned. Gating the abort on one would make the whole staging window
+        // unabortable: the staging task would go on to spawn a process for a job the user has
+        // abandoned, and HandleAbortingState's 30-second clause below would then mark the job
+        // Aborted and dequeue it with that process still computing. The executor is the handle in
+        // that window, so ask it instead of the job's ID.
+        bool hasSomethingToAbort = !string.IsNullOrWhiteSpace(job.ClusterJobId) ||
+                                   queue is ClusterQueue { IsManaged: true };
+
         if (clusterStatus != ClusterJobStatus.Failed &&
             clusterStatus != ClusterJobStatus.Finished &&
-            !string.IsNullOrWhiteSpace(job.ClusterJobId))
+            hasSomethingToAbort)
             queue.AbortJob(job);
 
         // Check the job's status again after aborting

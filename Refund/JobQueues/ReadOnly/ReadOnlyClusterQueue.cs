@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using Refund.DataModel;
 using Refund.DataModel.ReadOnly;
 
 namespace Refund.JobQueues.ReadOnly;
@@ -20,6 +21,23 @@ public sealed class ReadOnlyClusterQueue : ReadOnlyJobQueue
     {
         _queue = queue;
     }
+
+    /// <summary>
+    /// Gets which scheduler this queue talks to, selecting the job ID and job state parsers.
+    /// </summary>
+    public ClusterScheduler SchedulerType => _queue.SchedulerType;
+
+    /// <summary>Gets the total CPU cores a managed queue may hand out.</summary>
+    public int ManagedCores => _queue.ManagedCores;
+
+    /// <summary>Gets the total memory in GB a managed queue may hand out.</summary>
+    public int ManagedMemoryGb => _queue.ManagedMemoryGb;
+
+    /// <summary>Gets the number of GPUs on this host.</summary>
+    public int ManagedGpus => _queue.ManagedGpus;
+
+    /// <summary>Gets whether Relay schedules this queue's jobs itself.</summary>
+    public bool IsManaged => _queue.IsManaged;
 
     /// <summary>
     /// Gets the custom shell executable path for running cluster commands.

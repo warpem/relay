@@ -10,6 +10,13 @@ public class UiQueue : UiFieldBase
     public override Type ViewType => typeof(UiQueueView);
 
     /// <summary>
+    /// When false, the dropdown omits the "Local (no pool)" entry, so a real cluster queue must be
+    /// chosen. Used for pool-queue pickers that are only shown once a boolean toggle has already
+    /// enabled pooling — selecting "Local" there would be contradictory.
+    /// </summary>
+    public bool IncludeLocal = true;
+
+    /// <summary>
     /// Creates a new queue picker field.
     /// </summary>
     /// <param name="label">Display label in the UI.</param>

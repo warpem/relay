@@ -40,6 +40,9 @@ public class ImportAlignments : WarpJob, IClusterJob
 
     public override int MemoryGb => 8;
 
+    /// <summary>CPU-only tool; requests no GPUs.</summary>
+    public override int GpuCount => 0;
+
     public override string[] SupportedModules => base.SupportedModules.Concat(["cpu"]).ToArray();
 
     public override string[] RequiredModules => base.RequiredModules.Concat(["cpu"]).ToArray();

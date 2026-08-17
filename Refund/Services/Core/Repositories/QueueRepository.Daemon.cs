@@ -34,6 +34,11 @@ public partial class QueueRepository
     /// </summary>
     public void StopDaemon()
     {
+        // Before the Dispose, not after: an iteration already in flight reaches its finally with
+        // the timer gone, and rescheduling a disposed timer throws ObjectDisposedException into an
+        // unobserved continuation. _disposed alone did not cover this — only Dispose sets it, and
+        // ShutdownAsync stops the daemon without disposing the repository.
+        _daemonStopped = true;
         _daemonTimer?.Dispose();
     }
 
@@ -59,8 +64,8 @@ public partial class QueueRepository
             }
             finally
             {
-                // Reschedule the daemon if not disposed
-                if (!_disposed)
+                // Reschedule the daemon if it is still meant to run
+                if (!_disposed && !_daemonStopped)
                     _daemonTimer?.Change(_daemonInterval, Timeout.Infinite);
 
                 _logger.Debug("Daemon iteration finished at {Timestamp}", DateTime.Now.ToString("HH:mm:ss"));
@@ -73,6 +78,14 @@ public partial class QueueRepository
     /// </summary>
     private async Task RunDaemonAsync()
     {
+        // Unconditionally, and before any queue work: reconciliation is otherwise only a side
+        // effect of some *other* job asking the executor a question (TryAdmit, GetStatus,
+        // LiveAllocations). Abort the last job on an idle single-GPU workstation and nothing would
+        // ever ask again, so its process would keep the GPU booked indefinitely. One cheap call per
+        // tick on a lock this path already contends for removes the whole class.
+        try { ManagedExecutor.Reap(); }
+        catch (Exception ex) { _logger.Error(ex, "Error reaping managed processes"); }
+
         var tasks = new List<Task>();
         var maxConcurrentQueues = Math.Max(1, Environment.ProcessorCount / 2);
         using var semaphore = new SemaphoreSlim(maxConcurrentQueues);

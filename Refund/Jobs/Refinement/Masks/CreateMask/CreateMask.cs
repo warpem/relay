@@ -62,6 +62,9 @@ public class CreateMask : RelionJob, IClusterJob
     public override int CoreCount => NThreads;
 
     public override int MemoryGb => 8;
+
+    /// <summary>CPU-only tool; requests no GPUs.</summary>
+    public override int GpuCount => 0;
     
     #region Parameters
     

@@ -41,7 +41,7 @@
 
             @foreach (var item in VisibleItems)
             {
-                <Thumbnail @key="item.Data.ImagePath"
+                <Thumbnail @key="item.Key"
                            Data="item.Data"
                            ThumbnailSize="ThumbnailSize"
                            IsSelected="item.IsSelected"

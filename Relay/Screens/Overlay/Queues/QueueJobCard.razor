@@ -94,16 +94,16 @@
         }
     </div>
 
-    @if (Job is ReadOnlyWarpJobGpu gpuJob && gpuJob.PoolQueueId > 0)
+    @if (Job is IPoolStatus pool && pool.IsPooled)
     {
         <div style="display: flex; align-items: flex-start; gap: 4px;">
             <span style="flex-shrink: 0; display: inline-flex; margin-top: 2px;">
                 <FluentIcon Value="@(new Icons.Regular.Size12.Server())"/>
             </span>
             <span style="display: flex; flex-wrap: wrap; column-gap: 5px; row-gap: 2px; align-items: center;">
-                <span style="white-space: nowrap;">Pool: @gpuJob.PoolWorkersRunning/@gpuJob.PoolSize running,</span>
-                <span style="white-space: nowrap;">@(gpuJob.PoolWorkersAlive - gpuJob.PoolWorkersRunning) pending</span>
-                <FluentBadge>@gpuJob.PoolWorkersSubmitted submitted</FluentBadge>
+                <span style="white-space: nowrap;">Pool: @pool.PoolWorkersRunning/@pool.PoolSize running,</span>
+                <span style="white-space: nowrap;">@(pool.PoolWorkersAlive - pool.PoolWorkersRunning) pending</span>
+                <FluentBadge>@pool.PoolWorkersSubmitted submitted</FluentBadge>
             </span>
         </div>
     }

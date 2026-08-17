@@ -75,6 +75,7 @@ public partial class ThumbnailPanel : ComponentBase, IAsyncDisposable
     private IJSObjectReference _module;
     private bool _moduleLoaded = false;
     private bool _firstRenderCompleted = false;
+    private bool _disposed = false;
     
     private ElementReference thumbnailPanelElement;
     
@@ -129,10 +130,24 @@ public partial class ThumbnailPanel : ComponentBase, IAsyncDisposable
     {
         if (Thumbnails != null)
         {
-            if (SelectedThumbnail != null && !Thumbnails.Contains(SelectedThumbnail))
+            if (SelectedThumbnail != null)
             {
-                SelectedThumbnail = null;
-                await SelectedThumbnailChanged.InvokeAsync(null);
+                ThumbnailData resolved = ResolveInCurrentList(Thumbnails, SelectedThumbnail);
+
+                if (resolved == null)
+                {
+                    // The selected item is really gone from the list
+                    SelectedThumbnail = null;
+                    await SelectedThumbnailChanged.InvokeAsync(null);
+                }
+                else
+                {
+                    // Parents rebuild their list on every reload, which replaces the instances.
+                    // Re-point at the new instance for the same item, but stay silent: raising the
+                    // change event here would re-run the parent's selection handler — and whatever
+                    // it does, such as switching tabs — on every job update.
+                    SelectedThumbnail = resolved;
+                }
             }
 
             if (_firstRenderCompleted && _moduleLoaded)
@@ -173,6 +188,7 @@ public partial class ThumbnailPanel : ComponentBase, IAsyncDisposable
                 await UpdateVisibleItems();
         }
         catch (TaskCanceledException) { }
+        catch (JSDisconnectedException) { }
     }
 
     private async Task ScrollLeft()
@@ -358,31 +374,52 @@ public partial class ThumbnailPanel : ComponentBase, IAsyncDisposable
 
     private async Task UpdateVisibleItems()
     {
-        if (!_moduleLoaded)
+        if (!_moduleLoaded || _disposed || Thumbnails == null)
             return;
 
         var scrollInfo = await _module.InvokeAsync<ScrollInfo>("getScrollInfo", thumbnailContainer);
-        int firstVisibleIndex = (int)(scrollInfo.ScrollLeft / ThumbnailWidth);
-        int visibleItemCount = Math.Min((int)((scrollInfo.ClientWidth + ThumbnailWidth - 1) / ThumbnailWidth), Thumbnails.Count);
-        int firstVisibleIndexWithMargin = Math.Max(0, firstVisibleIndex - visibleItemCount); 
-        
-        var newVisibleItems = Thumbnails
+
+        VisibleItems = BuildVisibleItems(Thumbnails,
+                                         scrollInfo.ScrollLeft,
+                                         scrollInfo.ClientWidth,
+                                         ThumbnailWidth,
+                                         SelectedThumbnail,
+                                         out int firstVisibleIndex,
+                                         out int visibleItemCount);
+        StateHasChanged();
+
+        // Update highlight segments in status bar(s)
+        if (ShowStatusBar)
+            UpdateHighlight(firstVisibleIndex, visibleItemCount);
+    }
+
+    /// <summary>
+    /// Computes the virtualized window of thumbnails to render for a given scroll position,
+    /// padded by one screenful on either side. Kept free of JS interop so it can be tested.
+    /// </summary>
+    internal static List<ThumbnailItem> BuildVisibleItems(List<ThumbnailData> thumbnails,
+                                                          double scrollLeft,
+                                                          double clientWidth,
+                                                          int thumbnailWidth,
+                                                          ThumbnailData selectedThumbnail,
+                                                          out int firstVisibleIndex,
+                                                          out int visibleItemCount)
+    {
+        firstVisibleIndex = (int)(scrollLeft / thumbnailWidth);
+        visibleItemCount = Math.Min((int)((clientWidth + thumbnailWidth - 1) / thumbnailWidth), thumbnails.Count);
+        int firstVisibleIndexWithMargin = Math.Max(0, firstVisibleIndex - visibleItemCount);
+
+        return thumbnails
             .Skip(firstVisibleIndexWithMargin)
             .Take(visibleItemCount * 3)
             .Select((data, index) => new ThumbnailItem
             {
+                Index = firstVisibleIndexWithMargin + index,
                 Data = data,
-                IsSelected = data.Equals(SelectedThumbnail),
-                PositionLeft = (firstVisibleIndexWithMargin + index) * ThumbnailWidth
+                IsSelected = ReferenceEquals(data, selectedThumbnail),
+                PositionLeft = (firstVisibleIndexWithMargin + index) * thumbnailWidth
             })
             .ToList();
-
-        VisibleItems = newVisibleItems;
-        StateHasChanged();
-        
-        // Update highlight segments in status bar(s)
-        if (ShowStatusBar)
-            UpdateHighlight(firstVisibleIndex, visibleItemCount);
     }
 
     private async Task OnThumbnailSelected(ThumbnailData data)
@@ -392,9 +429,38 @@ public partial class ThumbnailPanel : ComponentBase, IAsyncDisposable
 
         // Update the selection state of visible items
         foreach (var item in VisibleItems)
-            item.IsSelected = item.Data.Equals(data);
+            item.IsSelected = ReferenceEquals(item.Data, data);
 
         StateHasChanged();
+    }
+
+    /// <summary>
+    /// Finds the entry in the current list standing for the same item as <paramref name="thumbnail"/>,
+    /// or null if it is gone.
+    ///
+    /// Returns the instance itself while it is still in the list. Once the parent rebuilds the list
+    /// the instances differ, so fall back to matching on position and image path together — position
+    /// first, so that two entries sharing an image path don't both collapse onto the earlier one.
+    /// </summary>
+    internal static ThumbnailData ResolveInCurrentList(List<ThumbnailData> thumbnails, ThumbnailData thumbnail)
+    {
+        if (thumbnails == null || thumbnail == null)
+            return null;
+
+        foreach (var candidate in thumbnails)
+            if (ReferenceEquals(candidate, thumbnail))
+                return candidate;
+
+        foreach (var candidate in thumbnails)
+            if (candidate.Index == thumbnail.Index && candidate.ImagePath == thumbnail.ImagePath)
+                return candidate;
+
+        // The list was reordered or resized; image path is all that is left to go on
+        foreach (var candidate in thumbnails)
+            if (candidate.ImagePath == thumbnail.ImagePath)
+                return candidate;
+
+        return null;
     }
     
     /// <summary>
@@ -404,12 +470,15 @@ public partial class ThumbnailPanel : ComponentBase, IAsyncDisposable
     /// <returns>Task representing the asynchronous operation</returns>
     public async Task SetSelectedThumbnailAsync(ThumbnailData thumbnail)
     {
-        if (thumbnail == null || Thumbnails == null || !Thumbnails.Contains(thumbnail))
+        // Callers may hold an instance from before the last rebuild, so resolve it against the
+        // current list rather than rejecting it outright
+        thumbnail = ResolveInCurrentList(Thumbnails, thumbnail);
+        if (thumbnail == null)
             return;
-            
+
         // Set the selected thumbnail without triggering the event
         SelectedThumbnail = thumbnail;
-        
+
         // Find the index of the thumbnail to scroll to
         int thumbnailIndex = Thumbnails.IndexOf(thumbnail);
         if (thumbnailIndex >= 0)
@@ -453,6 +522,9 @@ public partial class ThumbnailPanel : ComponentBase, IAsyncDisposable
     [JSInvokable]
     public async Task OnComponentResized(double newWidth)
     {
+        if (_disposed)
+            return;
+
         ComponentWidth = newWidth;
         CalculateStatusBars();
         
@@ -470,14 +542,31 @@ public partial class ThumbnailPanel : ComponentBase, IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        if (_module != null)
-        {
-            await _module.InvokeVoidAsync("unobserveResize", thumbnailPanelElement);
-            await _module.DisposeAsync();
-        }
-
-        _dotNetHelper?.Dispose();
+        _disposed = true;
         _scrollCts?.Cancel();
+
+        try
+        {
+            if (_module != null)
+            {
+                await _module.InvokeVoidAsync("unobserveResize", thumbnailPanelElement);
+                await _module.DisposeAsync();
+            }
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit already gone; nothing left to clean up on the JS side.
+        }
+        catch (OperationCanceledException)
+        {
+            // Interop timed out or was cancelled during teardown.
+        }
+        finally
+        {
+            // Must run even when the JS calls above fail, otherwise the reference stays
+            // registered and any late resize callback reports a leaked object id.
+            _dotNetHelper?.Dispose();
+        }
     }
     
     #endregion
@@ -512,9 +601,28 @@ public partial class ThumbnailPanel : ComponentBase, IAsyncDisposable
 
     public class ThumbnailItem
     {
+        /// <summary>
+        /// Position of this item within the full <see cref="Thumbnails"/> list.
+        /// </summary>
+        public int Index { get; set; }
         public ThumbnailData Data { get; set; }
         public bool IsSelected { get; set; }
         public int PositionLeft { get; set; }
+
+        /// <summary>
+        /// Render-tree key for the corresponding Thumbnail component.
+        ///
+        /// Combines the image path with the list position on purpose:
+        /// - The path alone is not unique. Acquisition software can emit several tilt series
+        ///   that reference the same tilt image (e.g. PACE writing both "x.mdoc" and
+        ///   "x_unsorted.mdoc"), which made Blazor throw "More than one sibling has the same
+        ///   key value" and tear down the circuit.
+        /// - The index alone is unique but not tied to the content, so a component could be
+        ///   reused for a different image when the list shifts.
+        /// Together they are unique, stable while merely scrolling a fixed list, and force a
+        /// fresh component whenever an index starts showing a different image.
+        /// </summary>
+        public (string ImagePath, int Index) Key => (Data?.ImagePath, Index);
     }
     
     #endregion
@@ -655,8 +763,9 @@ public class ThumbnailData
     /// ImagePath = _job.VisThumbnail(_processedItems[i].Path)
     /// </code>
     /// 
-    /// This property is used to uniquely identify thumbnails (see Equals and GetHashCode),
-    /// and is used by the Thumbnail component to display the actual image.
+    /// Not an identity: two entries in the same list may legitimately point at the same image.
+    /// It is used by the Thumbnail component to display the image, and together with Index to
+    /// recover a selection after the parent rebuilds its list.
     /// </summary>
     public string ImagePath { get; set; }
     
@@ -701,32 +810,16 @@ public class ThumbnailData
     /// </summary>
     public bool? Check { get; set; } = null;
 
-    /// <summary>
-    /// Determines if this ThumbnailData is equal to another object.
-    /// 
-    /// Two ThumbnailData objects are considered equal if they have the same ImagePath.
-    /// This is used extensively for selection state tracking and rendering optimizations.
-    /// This method is called in various contexts, including collection operations and
-    /// when checking if a thumbnail is currently selected.
-    /// </summary>
-    /// <param name="obj">The object to compare with this instance</param>
-    /// <returns>True if the objects are equal, False otherwise</returns>
-    public override bool Equals(object obj)
-    {
-        return obj is ThumbnailData data && ImagePath == data.ImagePath;
-    }
-
-    /// <summary>
-    /// Gets a hash code for this ThumbnailData based on its ImagePath.
-    /// 
-    /// This method is used in conjunction with Equals to support proper behavior in
-    /// collections like HashSet and Dictionary.
-    /// </summary>
-    /// <returns>A hash code derived from the ImagePath property</returns>
-    public override int GetHashCode()
-    {
-        return ImagePath.GetHashCode();
-    }
+    // ThumbnailData deliberately does NOT override Equals/GetHashCode, so each instance is its
+    // own identity and Contains/IndexOf/selection comparisons resolve to the exact item clicked.
+    //
+    // These used to compare by ImagePath, which broke whenever a list held two entries with the
+    // same image: selecting one resolved to the other, and both were highlighted. That happens
+    // for real, e.g. when duplicate MDOCs make two tilt series share their middle tilt.
+    //
+    // Callers therefore have to pass the instance that is actually in the list. ThumbnailPanel
+    // re-resolves its SelectedThumbnail when the parent rebuilds the list; see
+    // ThumbnailPanel.ResolveInCurrentList.
 }
 
 /// <summary>

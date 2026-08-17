@@ -355,8 +355,10 @@ public abstract class Job : RelayBase, IFolderContent
     /// <summary>
     /// Number of GPUs to allocate when running this job.
     /// Default is 0 (no GPUs), but can be overridden by job implementations that use GPU acceleration.
+    /// Every concrete job type states this explicitly; the default exists so a new type that forgets
+    /// cannot silently reserve a GPU.
     /// </summary>
-    public virtual int GpuCount => 1;
+    public virtual int GpuCount => 0;
 
     /// <summary>
     /// Amount of GPU memory in gigabytes required per GPU when running this job.
@@ -1135,7 +1137,9 @@ public abstract class Job : RelayBase, IFolderContent
                 if (value is decimal decimalValue)
                     result.Add(attribute.CliName, decimalValue.ToString(CultureInfo.InvariantCulture));
                 else if (value is string)
-                    result.Add(attribute.CliName, $"\"{value}\"");
+                    // Stored raw: JobTools.ComposeArgumentString quotes every value on its way into
+                    // the submission script, so quoting here as well would nest the quotes.
+                    result.Add(attribute.CliName, (string)value);
                 else
                     result.Add(attribute.CliName, value.ToString());
             }
@@ -1651,6 +1655,27 @@ public interface IItemProgress
 }
 
 /// <summary>
+/// Pure read contract exposing a pooled job's live worker-fleet status to the UI. Get-only, so the
+/// ReadOnly source generator mirrors it onto the generated read-only wrappers automatically (the same
+/// mechanism as <see cref="IItemProgress"/>). This lets the queue job card show pool state for ANY
+/// pooled job type (WarpTools GPU or RELION CPU) by gating on the capability rather than on a concrete
+/// class. The mutable <see cref="IPooledJob"/> is behavioral (has methods) so it is NOT mirrored;
+/// this interface is the read-only-friendly subset the card needs.
+/// </summary>
+public interface IPoolStatus
+{
+    /// <summary>True when this job is actually running as a pool manager.</summary>
+    bool IsPooled { get; }
+
+    /// <summary>Target number of workers in the pool.</summary>
+    int PoolSize { get; }
+
+    int PoolWorkersAlive { get; }
+    int PoolWorkersRunning { get; }
+    int PoolWorkersSubmitted { get; }
+}
+
+/// <summary>
 /// Implemented by WarpTools GPU jobs that maintain a fleet of short-lived cluster
 /// worker jobs alongside the single Manager cluster job.
 /// </summary>
@@ -1690,6 +1715,14 @@ public interface IPooledJob
     /// Example: "cd /run && WarpWorker2 --queue-dir /data/1/tasks --device 2 --log-dir /data/1/logs"
     /// </summary>
     string GetWorkerCommand(int deviceIndex);
+
+    /// <summary>
+    /// Live pool-worker counters written by QueueRepository each daemon tick and read by the pool UI.
+    /// Implementors expose them as [RelayProperty][Clearable] ints so they persist and reset with the job.
+    /// </summary>
+    int PoolWorkersAlive { get; set; }
+    int PoolWorkersRunning { get; set; }
+    int PoolWorkersSubmitted { get; set; }
 }
 
 public enum JobStatus

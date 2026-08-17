@@ -126,6 +126,23 @@
                             </div>
 
                             <div class="settings-field">
+                                <span>Scheduler</span>
+
+                                <div class="setting-variable-chips">
+                                    Which scheduler this queue submits to. Determines how job IDs and
+                                    job states are read from the command output below. Pick
+                                    <span style="font-family: monospace;">Custom</span> to supply your
+                                    own parsing patterns in the Advanced settings tab.
+                                </div>
+
+                                <FluentSelect Items="@Schedulers"
+                                              Value="@_selectedQueue.SchedulerType.ToString()"
+                                              ValueChanged="@(value => HandleFieldChanged(Enum.Parse<ClusterScheduler>(value), nameof(ClusterQueue.SchedulerType)))"/>
+                            </div>
+
+                            @if (ShowCommandTemplates)
+                            {
+                            <div class="settings-field">
                                 <span>Send command template</span>
                                 
                                 <div class="setting-variable-chips">
@@ -259,6 +276,41 @@
                                 <FluentTextField Value="@_selectedQueue.CancelManyJobsTemplate"
                                                  ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.CancelManyJobsTemplate)))" />
                             </div>
+                            }
+
+                            @if (IsManagedQueue)
+                            {
+                                <div class="settings-field">
+                                    <span>Host resources</span>
+
+                                    <div class="setting-variable-chips">
+                                        Relay starts a job only when this much is free. Cores and memory are used for
+                                        admission decisions, not enforced — a job that overruns its declared memory is not
+                                        killed. GPUs are enforced: each job sees only the devices assigned to it.
+                                    </div>
+                                </div>
+
+                                <div class="settings-field">
+                                    <span>CPU cores</span>
+                                    <FluentNumberField Value="@_selectedQueue.ManagedCores"
+                                                       ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.ManagedCores)))"
+                                                       TValue="int" Min="1" />
+                                </div>
+
+                                <div class="settings-field">
+                                    <span>Memory (GB)</span>
+                                    <FluentNumberField Value="@_selectedQueue.ManagedMemoryGb"
+                                                       ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.ManagedMemoryGb)))"
+                                                       TValue="int" Min="1" />
+                                </div>
+
+                                <div class="settings-field">
+                                    <span>GPUs</span>
+                                    <FluentNumberField Value="@_selectedQueue.ManagedGpus"
+                                                       ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.ManagedGpus)))"
+                                                       TValue="int" Min="0" />
+                                </div>
+                            }
                         </div>
                     </FluentTab>
                     
@@ -313,29 +365,61 @@
                                                  ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.CustomShellArguments)))" />
                             </div>
 
-                            <div class="settings-field">
-                                <span>Job ID parsing regular expression</span>
-                                <FluentTextField Value="@_selectedQueue.JobIdParseRegex"
-                                                 ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.JobIdParseRegex)))" />
-                            </div>
+                            @if (ShowCustomParsingFields)
+                            {
+                                <div class="settings-field">
+                                    <span>Job ID parsing regular expression</span>
 
-                            <div class="settings-field">
-                                <span>Job status parsing template (Pending)</span>
-                                <FluentTextField Value="@_selectedQueue.JobStatusParseTemplatePending"
-                                                 ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.JobStatusParseTemplatePending)))" />
-                            </div>
+                                    <div class="setting-variable-chips">
+                                        The job ID is taken from the first capture group, e.g.
+                                        <span style="font-family: monospace;">accepted as (\w+)</span>.
+                                    </div>
 
-                            <div class="settings-field">
-                                <span>Job status parsing template (Running)</span>
-                                <FluentTextField Value="@_selectedQueue.JobStatusParseTemplateRunning"
-                                                 ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.JobStatusParseTemplateRunning)))" />
-                            </div>
+                                    <FluentTextField Value="@_selectedQueue.JobIdParseRegex"
+                                                     ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.JobIdParseRegex)))" />
+                                </div>
 
-                            <div class="settings-field">
-                                <span>Job status parsing template (Failed)</span>
-                                <FluentTextField Value="@_selectedQueue.JobStatusParseTemplateFailed"
-                                                 ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.JobStatusParseTemplateFailed)))" />
-                            </div>
+                                <div class="settings-field">
+                                    <span>Job status parsing template (Pending)</span>
+                                    <FluentTextField Value="@_selectedQueue.JobStatusParseTemplatePending"
+                                                     ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.JobStatusParseTemplatePending)))" />
+                                </div>
+
+                                <div class="settings-field">
+                                    <span>Job status parsing template (Running)</span>
+                                    <FluentTextField Value="@_selectedQueue.JobStatusParseTemplateRunning"
+                                                     ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.JobStatusParseTemplateRunning)))" />
+                                </div>
+
+                                <div class="settings-field">
+                                    <span>Job status parsing template (Failed)</span>
+                                    <FluentTextField Value="@_selectedQueue.JobStatusParseTemplateFailed"
+                                                     ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.JobStatusParseTemplateFailed)))" />
+                                </div>
+                            }
+                            else if (IsManagedQueue)
+                            {
+                                <div class="settings-field">
+                                    <span>Job ID and status parsing</span>
+
+                                    <div class="setting-variable-chips">
+                                        Not applicable. A managed queue has no scheduler output to parse — Relay tracks
+                                        its jobs by process id directly.
+                                    </div>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="settings-field">
+                                    <span>Job ID and status parsing</span>
+
+                                    <div class="setting-variable-chips">
+                                        Handled by the built-in @_selectedQueue.SchedulerType.ToString() parser.
+                                        Set the scheduler to <span style="font-family: monospace;">Custom</span>
+                                        in the Settings tab to supply your own patterns.
+                                    </div>
+                                </div>
+                            }
                         </div>
                     </FluentTab>
                 </FluentTabs>

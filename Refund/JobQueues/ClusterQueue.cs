@@ -15,8 +15,9 @@ namespace Refund.JobQueues;
 
 /// <summary>
 /// Manages job submission and execution on a remote computing cluster.
-/// Supports various cluster schedulers including SLURM, LSF, PBS, and SGE,
-/// with configurable templates for each phase of job submission and monitoring.
+/// Supports various cluster schedulers including SLURM, LSF, PBS, SGE and Flux — selected with
+/// <see cref="SchedulerType"/> — with configurable templates for each phase of job submission
+/// and monitoring.
 /// </summary>
 /// <remarks>
 /// ClusterQueue is a central component in the distributed job execution system:
@@ -55,6 +56,52 @@ public class ClusterQueue : JobQueue, IPoolQueue
     /// Semaphore to limit concurrent cluster command executions
     /// </summary>
     private readonly SemaphoreSlim _clusterCommandSemaphore = new(Environment.ProcessorCount);
+
+    /// <summary>
+    /// Which scheduler this queue talks to. Selects the parsers used to read job IDs and job
+    /// states out of scheduler output.
+    /// </summary>
+    /// <remarks>
+    /// Defaults to <see cref="ClusterScheduler.Slurm"/>, which is what every queue was effectively
+    /// getting before this field existed — see the remarks on <see cref="ClusterScheduler"/>.
+    /// </remarks>
+    [RelayProperty]
+    public ClusterScheduler SchedulerType { get; set; } = ClusterScheduler.Slurm;
+
+    /// <summary>Total CPU cores a managed queue may hand out. Ignored unless SchedulerType is Managed.</summary>
+    [RelayProperty]
+    public int ManagedCores { get; set; } = Environment.ProcessorCount;
+
+    /// <summary>Total memory in GB a managed queue may hand out. Ignored unless SchedulerType is Managed.</summary>
+    [RelayProperty]
+    public int ManagedMemoryGb { get; set; } = 64;
+
+    /// <summary>Number of GPUs on this host. Ignored unless SchedulerType is Managed.</summary>
+    [RelayProperty]
+    public int ManagedGpus { get; set; } = 1;
+
+    /// <summary>True when Relay schedules this queue's jobs itself.</summary>
+    public bool IsManaged => SchedulerType == ClusterScheduler.Managed;
+
+    /// <summary>
+    /// Why this managed queue is not allowed to admit anything, or null in the normal case.
+    /// Deliberately not persisted: it is a verdict on the configuration as loaded, recomputed each
+    /// startup by <see cref="ManagedQueueRules.DisableDuplicateManagedQueues"/> and cleared as soon
+    /// as the queue is edited, since the edit itself goes through the same rules.
+    /// </summary>
+    public string ManagedDisabledReason { get; set; }
+
+    /// <summary>
+    /// Read fresh on every use rather than snapshotted: this object is constructed before
+    /// ReadFromJson hydrates the persisted values, and the editor can change them later.
+    /// </summary>
+    public ResourceTotals ManagedTotals => new(ManagedCores, ManagedMemoryGb, ManagedGpus);
+
+    /// <summary>
+    /// The host-wide executor, injected by QueueRepository. Null on a queue that was constructed
+    /// outside the repository (templates, copies, tests).
+    /// </summary>
+    public ManagedExecutor Executor { get; set; }
 
     /// <summary>
     /// Custom shell executable path for running cluster commands.
@@ -100,29 +147,30 @@ public class ClusterQueue : JobQueue, IPoolQueue
     public string AbortJobTemplate { get; set; } = "";
 
     /// <summary>
-    /// Regular expression for extracting the job ID from the cluster scheduler output.
-    /// Used when scheduler type is set to 'custom'.
+    /// Regular expression for extracting the job ID from the cluster scheduler output; the ID is
+    /// taken from the first capture group. Used only when <see cref="SchedulerType"/> is
+    /// <see cref="ClusterScheduler.Custom"/>.
     /// </summary>
     [RelayProperty]
     public string JobIdParseRegex { get; set; } = "";
 
     /// <summary>
     /// String pattern that indicates a job is pending in the cluster queue.
-    /// Used when scheduler type is set to 'custom'.
+    /// Used only when <see cref="SchedulerType"/> is <see cref="ClusterScheduler.Custom"/>.
     /// </summary>
     [RelayProperty]
     public string JobStatusParseTemplatePending { get; set; } = "";
 
     /// <summary>
     /// String pattern that indicates a job is running on the cluster.
-    /// Used when scheduler type is set to 'custom'.
+    /// Used only when <see cref="SchedulerType"/> is <see cref="ClusterScheduler.Custom"/>.
     /// </summary>
     [RelayProperty]
     public string JobStatusParseTemplateRunning { get; set; } = "";
 
     /// <summary>
     /// String pattern that indicates a job has failed on the cluster.
-    /// Used when scheduler type is set to 'custom'.
+    /// Used only when <see cref="SchedulerType"/> is <see cref="ClusterScheduler.Custom"/>.
     /// </summary>
     [RelayProperty]
     public string JobStatusParseTemplateFailed { get; set; } = "";
@@ -183,16 +231,18 @@ public class ClusterQueue : JobQueue, IPoolQueue
     public Dictionary<string, (string description, string defaultValue)> CustomVariables { get; set; } = new();
 
     /// <summary>
-    /// Collection of parser functions for extracting job IDs from cluster output.
-    /// Each parser handles a specific scheduler type (slurm, lsf, pbs, sge, or custom).
+    /// Parser functions for extracting job IDs from scheduler output, one per scheduler.
+    /// The one used is selected by <see cref="SchedulerType"/>; parsers return null when the
+    /// output holds no ID they recognise.
     /// </summary>
-    private Dictionary<string, Func<string, string>> JobIdParsers;
-    
+    private Dictionary<ClusterScheduler, Func<string, string>> JobIdParsers;
+
     /// <summary>
-    /// Collection of parser functions for determining job status from cluster output.
-    /// Each parser handles a specific scheduler type (slurm, lsf, pbs, sge, or custom).
+    /// Parser functions for determining job status from scheduler output, one per scheduler.
+    /// The one used is selected by <see cref="SchedulerType"/>; parsers return null when the
+    /// output holds no state they recognise.
     /// </summary>
-    private Dictionary<string, Func<string, ClusterJobStatus?>> JobStatusParsers;
+    private Dictionary<ClusterScheduler, Func<string, ClusterJobStatus?>> JobStatusParsers;
 
     /// <summary>
     /// Initializes a new instance of the ClusterQueue class with job update callback.
@@ -218,7 +268,7 @@ public class ClusterQueue : JobQueue, IPoolQueue
         JobIdParsers = new()
         {
             {
-                "slurm",
+                ClusterScheduler.Slurm,
                 (output) =>
                 {
                     var match = Regex.Match(output, @"Submitted batch job (\d+)");
@@ -226,7 +276,7 @@ public class ClusterQueue : JobQueue, IPoolQueue
                 }
             },
             {
-                "lsf",
+                ClusterScheduler.Lsf,
                 (output) =>
                 {
                     var match = Regex.Match(output, @"Job <(\d+)> is submitted");
@@ -234,7 +284,7 @@ public class ClusterQueue : JobQueue, IPoolQueue
                 }
             },
             {
-                "pbs",
+                ClusterScheduler.Pbs,
                 (output) =>
                 {
                     var match = Regex.Match(output, @"(\d+)\.(\w+)");
@@ -242,7 +292,7 @@ public class ClusterQueue : JobQueue, IPoolQueue
                 }
             },
             {
-                "sge",
+                ClusterScheduler.Sge,
                 (output) =>
                 {
                     var match = Regex.Match(output, @"Your job (\d+)");
@@ -250,7 +300,21 @@ public class ClusterQueue : JobQueue, IPoolQueue
                 }
             },
             {
-                "custom",
+                ClusterScheduler.Flux,
+                (output) =>
+                {
+                    // flux batch prints the job ID alone on stdout, in whichever encoding the submit
+                    // template asked for: F58 ("ƒ2ELdc8V", or "f2ELdc8V" under FLUX_F58_FORCE_ASCII)
+                    // or decimal. Rather than enumerate encodings — flux also speaks hex, dothex and
+                    // words — accept any single bare token. Requiring exactly one token still rejects
+                    // error text, so a misconfigured submit command fails loudly here instead of
+                    // handing the daemon a job ID that no status query will ever match.
+                    string trimmed = output.Trim();
+                    return trimmed.Length > 0 && !trimmed.Any(char.IsWhiteSpace) ? trimmed : null;
+                }
+            },
+            {
+                ClusterScheduler.Custom,
                 (output) =>
                 {
                     if (string.IsNullOrEmpty(JobIdParseRegex))
@@ -265,22 +329,26 @@ public class ClusterQueue : JobQueue, IPoolQueue
         JobStatusParsers = new()
         {
             {
-                "slurm",
+                ClusterScheduler.Slurm,
                 (output) =>
                 {
                     // Check for single-character state codes (default squeue output)
                     if (output.Contains(" PD ") || output.Contains("PENDING")) return ClusterJobStatus.Pending;
                     if (output.Contains(" R ") || output.Contains("RUNNING")) return ClusterJobStatus.Running;
                     if (output.Contains(" CD ") || output.Contains("COMPLETED")) return ClusterJobStatus.Finished;
-                    if (output.Contains(" F ") || output.Contains(" CA ") || output.Contains(" TO ") || 
+                    if (output.Contains(" F ") || output.Contains(" CA ") || output.Contains(" TO ") ||
                         output.Contains("FAILED") || output.Contains("CANCELLED") || output.Contains("TIMEOUT")) return ClusterJobStatus.Failed;
                     if (output.Contains(" CG ") || output.Contains("COMPLETING")) return ClusterJobStatus.Running; // Still running
 
-                    return ClusterJobStatus.Unknown;
+                    // Decline rather than reporting Unknown. Returning a value here used to
+                    // short-circuit the try-each-parser loop this dictionary was iterated with,
+                    // which made every other parser — including the queue's own custom patterns —
+                    // unreachable. Callers turn a declined parse into Unknown themselves.
+                    return null;
                 }
             },
             {
-                "lsf",
+                ClusterScheduler.Lsf,
                 (output) =>
                 {
                     if (output.Contains("PEND")) return ClusterJobStatus.Pending;
@@ -292,7 +360,7 @@ public class ClusterQueue : JobQueue, IPoolQueue
                 }
             },
             {
-                "pbs",
+                ClusterScheduler.Pbs,
                 (output) =>
                 {
                     if (output.Contains(" Q ")) return ClusterJobStatus.Pending;
@@ -303,7 +371,7 @@ public class ClusterQueue : JobQueue, IPoolQueue
                 }
             },
             {
-                "sge",
+                ClusterScheduler.Sge,
                 (output) =>
                 {
                     if (output.Contains(" qw ")) return ClusterJobStatus.Pending;
@@ -314,7 +382,41 @@ public class ClusterQueue : JobQueue, IPoolQueue
                 }
             },
             {
-                "custom",
+                ClusterScheduler.Flux,
+                (output) =>
+                {
+                    // flux jobs -no "{status}" prints exactly one token per job; {status_abbrev}
+                    // prints its short form. Match the whole token: the abbreviations overlap by
+                    // prefix ("C" for CLEANUP is a prefix of both "CD" and "CA"), so a Contains-style
+                    // test would read a finished job as still running.
+                    return output.Trim() switch
+                    {
+                        "DEPEND" or "PRIORITY" or "SCHED" or
+                        "D" or "P" or "S"
+                            => ClusterJobStatus.Pending,
+
+                        // CLEANUP is where a job flushes its output and releases resources. It is
+                        // brief but every job passes through it, so a poll can easily land there;
+                        // anything other than Running here makes HandleRunningState finalise the
+                        // job as Failed on its way to succeeding.
+                        "RUN" or "CLEANUP" or
+                        "R" or "C"
+                            => ClusterJobStatus.Running,
+
+                        "COMPLETED" or "CD"
+                            => ClusterJobStatus.Finished,
+
+                        // Flux spells it CANCELED, with one L.
+                        "FAILED" or "CANCELED" or "TIMEOUT" or
+                        "F" or "CA" or "TO"
+                            => ClusterJobStatus.Failed,
+
+                        _ => null
+                    };
+                }
+            },
+            {
+                ClusterScheduler.Custom,
                 (output) =>
                 {
                     // Treat empty templates as "not configured" — otherwise string.Contains("")
@@ -368,21 +470,48 @@ public class ClusterQueue : JobQueue, IPoolQueue
             CancellationTokenSource cts = new();
             StagingJobs.Add(job, cts);
 
+            // Deliberately *not* Task.Run(..., cts.Token). Passing the token as the task's
+            // scheduling token means a cancel landing between the task being queued and its
+            // delegate starting stops the delegate running at all — including its finally. The job
+            // then stayed in StagingJobs forever, and every requeue threw "already staging", so an
+            // abort in that window made the job permanently unrunnable. Cancellation is observed
+            // inside the delegate instead, where the cleanup below always runs.
             Task.Run(async () =>
             {
                 try
                 {
+                    // The window the scheduling token used to swallow: an abort that arrived while
+                    // this task sat in the thread pool queue.
+                    cts.Token.ThrowIfCancellationRequested();
+
                     JobUpdateCallback(job, j =>
                     {
                         j.DirectoryName = j.Id.ToString();
                         j.Status = JobStatus.Staging;
                     });
 
+                    // Before the work, not only after it. Script preparation deletes and recreates
+                    // the job directory and can throw for reasons of its own, and an abort that
+                    // was already pending must not come back as one of those failures.
+                    cts.Token.ThrowIfCancellationRequested();
+
                     string scriptPath = await PrepareAndWriteScript(job, customValues);
                     cts.Token.ThrowIfCancellationRequested();
 
-                    lock (Sync)
-                        JobsInLimbo.Add(job);
+                    // Managed: there is no scheduler to hand the script to. The script itself is
+                    // the same one a cluster queue would submit, minus the #SBATCH/#FLUX header.
+                    if (IsManaged)
+                    {
+                        var process = Executor.Launch(job, scriptPath, job.RunDirectory);
+                        await job.WriteToLifecycleLog(
+                            $"Launched locally as pid {process.Pid} on GPUs " +
+                            $"[{string.Join(",", Executor.GpuIndicesFor(job))}]");
+
+                        JobUpdateCallback(job, j => { j.ClusterJobId = process.Pid.ToString(); });
+                        return;
+                    }
+
+                    EnterLimbo(job);
 
                     await job.WriteToLifecycleLog($"Submitting script: {scriptPath}");
 
@@ -393,6 +522,37 @@ public class ClusterQueue : JobQueue, IPoolQueue
 
                     JobUpdateCallback(job, j => { j.ClusterJobId = jobId; });
                 }
+                catch (OperationCanceledException) when (cts.IsCancellationRequested)
+                {
+                    // An explicit abort, not a staging failure. Rewritten to Failed by the generic
+                    // catch below, a job the user deliberately stopped ended up indistinguishable
+                    // from one whose script could not be written, with a stack trace in error.txt.
+                    await job.WriteToLifecycleLog(
+                        $"Job {job.Id} was aborted before it reached the cluster");
+                    JobUpdateCallback(job, j => j.Status = JobStatus.Aborted);
+                }
+                catch (Exception exc) when (cts.IsCancellationRequested)
+                {
+                    // An abort that surfaced as something other than OperationCanceledException.
+                    // It can arrive after the last ThrowIfCancellationRequested above and still
+                    // condemn the executor reservation before the managed launch reads it, and
+                    // Executor.Launch then throws InvalidOperationException — which the catch above
+                    // does not match. What the user asked for is what the job must end up as: an
+                    // abort is an abort whatever exception carried it here.
+                    await job.WriteToLifecycleLog(
+                        $"Job {job.Id} was aborted while it was being staged: {exc.Message}");
+
+                    // The full exception, in the log a user diagnosing a failure actually opens.
+                    // Cancellation wins the *status*, but this catch also collects a genuine
+                    // staging failure that merely happened to coincide with an abort — a script
+                    // that could not be written, a missing input — and the message alone would
+                    // throw away the stack trace that says which.
+                    await job.WriteToErrorLog(
+                        $"Job {job.Id} was aborted while it was being staged; the exception that " +
+                        $"carried it here follows, and may be an unrelated staging failure:\n{exc}");
+
+                    JobUpdateCallback(job, j => j.Status = JobStatus.Aborted);
+                }
                 catch (Exception exc)
                 {
                     await job.WriteToErrorLog($"Job {job.Id} cancelled before it went to cluster:\n{exc}");
@@ -400,15 +560,78 @@ public class ClusterQueue : JobQueue, IPoolQueue
                 }
                 finally
                 {
-                    lock (Sync)
-                    {
-                        StagingJobs.Remove(job);
-                        if (!JobsInLimbo.Contains(job))
-                            JobsInLimbo.Remove(job);
-                    }
+                    // Reached on every path now, cancellation included. It is the only thing that
+                    // lets the job be queued again.
+                    SettleStaging(job);
                 }
-            }, cts.Token);
+            });
         }
+    }
+
+    /// <summary>The script is written and the job is now waiting for the scheduler to name it.</summary>
+    internal void EnterLimbo(Job job)
+    {
+        lock (Sync)
+            JobsInLimbo.Add(job);
+    }
+
+    internal bool IsInLimbo(Job job)
+    {
+        lock (Sync)
+            return JobsInLimbo.Contains(job);
+    }
+
+    /// <summary>
+    /// Drops both pieces of per-run staging bookkeeping, on every exit path.
+    /// </summary>
+    /// <remarks>
+    /// The limbo removal is unconditional, and has to be: the guard that used to stand here was
+    /// inverted — it removed the job only when the set did <em>not</em> contain it — so limbo was
+    /// never cleared for any queue, SLURM and Flux included. <see cref="HashSet{T}.Remove"/> is
+    /// already a no-op for a job that never entered limbo, so no guard is wanted at all. A stale
+    /// entry is what <see cref="AbortJob"/> then waited on forever.
+    /// </remarks>
+    internal void SettleStaging(Job job)
+    {
+        lock (Sync)
+        {
+            StagingJobs.Remove(job);
+            JobsInLimbo.Remove(job);
+        }
+    }
+
+    /// <summary>
+    /// How long an abort waits for a staged job's cluster job id to appear. Generous, because the
+    /// id comes back from a submission command that may be an ssh round trip to a loaded
+    /// scheduler — but bounded, because <see cref="AbortJob"/> runs on the daemon thread and an
+    /// unbounded wait there stops every other job on the host.
+    /// </summary>
+    internal static readonly TimeSpan LimboJobIdWait = TimeSpan.FromSeconds(60);
+
+    private static readonly TimeSpan LimboPollInterval = TimeSpan.FromMilliseconds(100);
+
+    /// <summary>
+    /// Blocks until the job leaves limbo or its cluster job id appears, whichever happens first,
+    /// and gives up after <paramref name="timeout"/>. True only when there is an id to abort with.
+    /// </summary>
+    /// <remarks>
+    /// A job whose staging failed after it entered limbo never gets an id at all, so the exit on
+    /// timeout is not belt-and-braces: it is the only thing that ends the wait if some future path
+    /// leaves an entry behind again.
+    /// </remarks>
+    internal bool WaitForClusterJobId(Job job, TimeSpan timeout)
+    {
+        long start = Stopwatch.GetTimestamp();
+
+        while (IsInLimbo(job) && string.IsNullOrWhiteSpace(job.ClusterJobId))
+        {
+            if (Stopwatch.GetElapsedTime(start) >= timeout)
+                break;
+
+            Thread.Sleep(LimboPollInterval < timeout ? LimboPollInterval : timeout);
+        }
+
+        return !string.IsNullOrWhiteSpace(job.ClusterJobId);
     }
 
     /// <summary>
@@ -439,9 +662,7 @@ public class ClusterQueue : JobQueue, IPoolQueue
         StringBuilder jobCommand = new StringBuilder();
         jobCommand.AppendLine($"cd {job.RunDirectory}\n");
         jobCommand.Append(job.CommandPrefix);
-        jobCommand.Append($"{commandName} {string.Join(" ", arguments.Select(kv => string.IsNullOrWhiteSpace(kv.Value) ?
-                                                                                   $"--{kv.Key}" :
-                                                                                   $"--{kv.Key} {kv.Value}"))}");
+        jobCommand.Append($"{commandName} {JobTools.ComposeArgumentString(arguments)}");
         jobCommand.AppendLine(job.CommandSuffix);
 
         string script = ProcessSubmissionScript(
@@ -626,7 +847,12 @@ public class ClusterQueue : JobQueue, IPoolQueue
         lock (Sync)
             if (StagingJobs.ContainsKey(job))
                 return (ClusterJobStatus.Pending, "");
-        
+
+        // The executor is the only authority on a managed job. No executor means nothing is
+        // running this job and nothing ever will, which is Failed, not Unknown.
+        if (IsManaged)
+            return (Executor?.GetStatus(job) ?? ClusterJobStatus.Failed, "");
+
         if (string.IsNullOrWhiteSpace(job.ClusterJobId))
             return (ClusterJobStatus.Unknown, "");
         
@@ -643,13 +869,26 @@ public class ClusterQueue : JobQueue, IPoolQueue
     /// <remarks>
     /// This method handles aborting jobs in different states:
     /// 1. For jobs still in staging phase, it cancels the staging task
-    /// 2. For jobs in limbo (staged but waiting for cluster job ID), it waits for the ID to be assigned
+    /// 2. For jobs in limbo (staged but waiting for cluster job ID), it waits — for a bounded time,
+    ///    see <see cref="LimboJobIdWait"/> — for the ID to be assigned
     /// 3. For jobs running on the cluster, it sends an abort command to the cluster scheduler
     /// </remarks>
     public override void AbortJob(Job job)
     {
         base.AbortJob(job);
-        
+
+        // Before the staging/limbo dance: a managed job has no cluster job ID to wait for, and
+        // AbortJobTemplate is meaningless for it. Kill is idempotent and safe on an unknown job.
+        if (IsManaged)
+        {
+            lock (Sync)
+                if (StagingJobs.TryGetValue(job, out var staging) && !staging.IsCancellationRequested)
+                    staging.Cancel();
+
+            Executor?.Kill(job);
+            return;
+        }
+
         lock (Sync)
             if (StagingJobs.ContainsKey(job))
             {
@@ -660,8 +899,18 @@ public class ClusterQueue : JobQueue, IPoolQueue
                     return;
             }
 
-        while (JobsInLimbo.Contains(job) && string.IsNullOrWhiteSpace(job.ClusterJobId))
-            Thread.Sleep(100);
+        // Bounded, and locked. This runs on the daemon thread, so a wait that cannot end stops
+        // every other job on the host, not just this one.
+        if (!WaitForClusterJobId(job, LimboJobIdWait))
+        {
+            // No id ever arrived: staging failed after the job entered limbo, or the submission
+            // itself threw. There is nothing on the scheduler to cancel, and substituting an empty
+            // id into AbortJobTemplate would run a bare scancel/flux-cancel instead.
+            Log.ForContext<ClusterQueue>().Warning(
+                "Job {JobId} was aborted before the cluster gave it a job ID; there is nothing to " +
+                "cancel on the scheduler.", job.Id);
+            return;
+        }
 
         Task.Run(async () =>
         {
@@ -739,28 +988,12 @@ public class ClusterQueue : JobQueue, IPoolQueue
     }
 
     /// <summary>
-    /// Classifies a scheduler state token (e.g. "RUNNING", "PD") using the same per-scheduler
-    /// parsers as single-job status. The token is space-padded before matching so short codes
-    /// like " R " / " PD " still hit the SLURM parser's word-boundary checks. Returns Unknown
-    /// when no parser recognizes the state.
+    /// Classifies a scheduler state token (e.g. "RUNNING", "PD", "RUN") using the same parser as
+    /// single-job status, so the list and status paths can never disagree about what a state means.
+    /// The token is space-padded before matching so short codes like " R " / " PD " still hit the
+    /// SLURM parser's word-boundary checks. Returns Unknown when the state isn't recognised.
     /// </summary>
-    private ClusterJobStatus ClassifyState(string stateText)
-    {
-        string padded = $" {stateText} ";
-
-        foreach (var parser in JobStatusParsers)
-        {
-            try
-            {
-                var status = parser.Value(padded);
-                if (status is { } s && s != ClusterJobStatus.Unknown)
-                    return s;
-            }
-            catch { }
-        }
-
-        return ClusterJobStatus.Unknown;
-    }
+    private ClusterJobStatus ClassifyState(string stateText) => ParseClusterJobStatus($" {stateText} ");
 
     /// <summary>
     /// Cancels all provided cluster job IDs in a single scheduler call.
@@ -926,26 +1159,38 @@ public class ClusterQueue : JobQueue, IPoolQueue
     /// <returns>The parsed cluster job ID</returns>
     /// <exception cref="Exception">Thrown when the job ID cannot be parsed from the output</exception>
     /// <remarks>
-    /// Tries parsers for each supported scheduler type (slurm, lsf, pbs, sge, custom)
-    /// until one succeeds or all fail.
+    /// Uses only the parser for this queue's <see cref="SchedulerType"/>. Earlier versions tried
+    /// every scheduler's parser in turn, which meant a queue could silently accept a job ID in
+    /// another scheduler's format — and masked misconfigured submit commands.
     /// </remarks>
-    private string ParseClusterJobId(string output)
+    internal string ParseClusterJobId(string output)
     {
-        string result = null;
+        if (IsManaged)
+            throw new InvalidOperationException(
+                "A managed queue has no scheduler output to parse; job IDs are process ids " +
+                "assigned by ManagedExecutor. Reaching this is a wiring mistake.");
 
-        foreach (var parser in JobIdParsers)
+        if (!JobIdParsers.TryGetValue(SchedulerType, out var parser))
+            throw new Exception($"No job ID parser for scheduler {SchedulerType}.");
+
+        string result;
+        try
         {
-            try
-            {
-                result = parser.Value(output);
-            }
-            catch { }
-
-            if (result != null) break;
+            result = parser(output);
+        }
+        catch (Exception exc)
+        {
+            throw new Exception(
+                $"Couldn't parse job ID from output = \"{output}\" using the {SchedulerType} parser.", exc);
         }
 
         if (result == null)
-            throw new Exception($"Couldn't parse job ID from output = \"{output}\"");
+            throw new Exception(
+                $"Couldn't parse job ID from output = \"{output}\" using the {SchedulerType} parser. " +
+                (SchedulerType == ClusterScheduler.Custom
+                    ? "Check the queue's job ID parsing regular expression."
+                    : $"Check that the queue's scheduler is really {SchedulerType} and that its submit " +
+                      "command template is correct."));
 
         return result;
     }
@@ -954,32 +1199,55 @@ public class ClusterQueue : JobQueue, IPoolQueue
     /// Parses the cluster job status from the output of the status check command.
     /// </summary>
     /// <param name="output">The output from the cluster status check command</param>
-    /// <returns>The parsed cluster job status</returns>
-    /// <exception cref="Exception">Thrown when the job status cannot be parsed from the output</exception>
+    /// <returns>The parsed cluster job status, or Unknown if the output holds no recognisable state</returns>
     /// <remarks>
-    /// Tries parsers for each supported scheduler type (slurm, lsf, pbs, sge, custom)
-    /// until one succeeds or all fail. Parsers look for specific strings that indicate
-    /// job states like pending, running, completed, or failed.
+    /// Uses only the parser for this queue's <see cref="SchedulerType"/>.
+    ///
+    /// Output the parser doesn't recognise yields Unknown rather than throwing. That is what SLURM
+    /// queues already did — their parser returned Unknown as a catch-all — and the daemon's state
+    /// handlers are written around it: Unknown leaves a Staging job staged, and finalises a Running
+    /// job as Failed. Throwing here would instead escape into the polling loop.
     /// </remarks>
-    private ClusterJobStatus ParseClusterJobStatus(string output)
+    internal ClusterJobStatus ParseClusterJobStatus(string output)
     {
-        ClusterJobStatus? result = null;
+        // Unknown rather than a throw: unlike ParseClusterJobId this is reachable from
+        // ClassifyState, and the daemon's state handlers are written around Unknown.
+        if (IsManaged)
+            return ClusterJobStatus.Unknown;
 
-        foreach (var parser in JobStatusParsers)
+        if (!JobStatusParsers.TryGetValue(SchedulerType, out var parser))
+            return ClusterJobStatus.Unknown;
+
+        try
         {
-            try
-            {
-                result = parser.Value(output);
-            }
-            catch { }
-
-            if (result != null) break;
+            return parser(output) ?? ClusterJobStatus.Unknown;
         }
+        catch
+        {
+            return ClusterJobStatus.Unknown;
+        }
+    }
 
-        if (result == null)
-            throw new Exception($"Couldn't parse job status from output = \"{output}\"");
+    /// <summary>
+    /// Whether this queue can start <paramref name="job"/> right now. Queues backed by an external
+    /// scheduler always admit — the scheduler does the arbitration.
+    /// </summary>
+    public override AdmissionResult CanAdmit(Job job)
+    {
+        if (!IsManaged)
+            return AdmissionResult.Admitted;      // the external scheduler arbitrates
 
-        return result.Value;
+        // A duplicate managed queue found at load; see ManagedQueueRules.DisableDuplicateManagedQueues.
+        // Reject, not Busy: nothing about waiting fixes a configuration the UI would have refused.
+        if (!string.IsNullOrEmpty(ManagedDisabledReason))
+            return new AdmissionResult.Reject(ManagedDisabledReason);
+
+        if (Executor == null)
+            return new AdmissionResult.Reject(
+                $"Queue \"{Alias}\" is managed but has no executor attached. This is a Relay wiring " +
+                "fault, not a job problem; refusing to run the job unaccounted for.");
+
+        return Executor.TryAdmit(job, ManagedTotals);
     }
 
     /// <summary>

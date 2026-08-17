@@ -36,6 +36,10 @@ public partial class DataManager
         {
             try
             {
+                // The new queue adopts the template's state, so the template is what has to pass
+                // the single-managed-queue rule. Nothing has been added to the repository yet.
+                ManagedQueueRules.ValidateOnly(MutableClusterQueues(), template);
+
                 JobQueue newQueue = _queueRepository.CreateClusterQueue(template);
                 createdQueue = newQueue.AsReadOnly();
             }
@@ -83,7 +87,8 @@ public partial class DataManager
             {
                 var originalQueue = ResolveQueue(queue.Id);
 
-                _queueRepository.UpdateQueue(originalQueue, updateAction);
+                ValidateAndApplyQueueChange(originalQueue, updateAction);
+
                 updatedQueue = originalQueue.AsReadOnly();
             }
             catch (Exception e)
@@ -134,7 +139,19 @@ public partial class DataManager
                 var originalQueue = (ClusterQueue)ResolveQueue(queue.Id);
 
                 deletedQueue = originalQueue.AsReadOnly();
-                _queueRepository.DeleteClusterQueue(originalQueue);
+
+                // Before anything is removed: a managed queue that still owns compute must not go
+                // away, or its jobs stop being polled while their processes keep the host's cores
+                // and GPUs booked with nothing left to release them. Guarded for the same reason
+                // the edit path is — a job admitted between the check and the removal would strand
+                // its reservation in an executor no queue points at any more.
+                _queueRepository.ManagedExecutor.WithAdmissionSuspended(
+                    job => job.QueueId == originalQueue.Id,
+                    hasLiveEntries =>
+                    {
+                        ManagedQueueRules.ValidateDelete(originalQueue, hasLiveEntries());
+                        _queueRepository.DeleteClusterQueue(originalQueue);
+                    });
             }
             catch (Exception e)
             {
@@ -195,6 +212,49 @@ public partial class DataManager
 
         // Raise events outside of lock
         await QueueUpdated.InvokeHierarchy(queue, GroupName.QueueHierarchy(queue.Id));
+    }
+
+    #endregion
+
+    #region Managed queue rules
+
+    /// <summary>
+    /// The repository's mutable cluster queues. <see cref="Repositories.QueueRepository.ClusterQueues"/>
+    /// hands back a read-only <i>collection</i> of the live objects, not read-only wrappers, so no extra
+    /// accessor is needed — only the cast, since the list is typed as <see cref="JobQueue"/>.
+    /// </summary>
+    private IEnumerable<ClusterQueue> MutableClusterQueues() =>
+        _queueRepository.ClusterQueues.OfType<ClusterQueue>();
+
+    /// <summary>
+    /// Judges a proposed edit and applies it as <b>one operation the executor guards</b>. The rule
+    /// itself lives in <see cref="ManagedQueueRules.ValidateChange"/> so it can be tested without a
+    /// repository; what belongs here is only where the facts it needs come from, and that the
+    /// verdict cannot go stale before it is acted on.
+    /// </summary>
+    /// <remarks>
+    /// Checking whether the executor has entries and then releasing its lock before mutating let
+    /// <c>CanAdmit</c> reserve in between, so a totals or scheduler edit that should have been
+    /// refused went through. If the scheduler was switched, the job admitted in that window then
+    /// took the external submission branch while leaving a managed reservation stranded.
+    /// </remarks>
+    private void ValidateAndApplyQueueChange(JobQueue queue, Action<JobQueue> updateAction)
+    {
+        if (queue is not ClusterQueue cluster)
+        {
+            _queueRepository.UpdateQueue(queue, updateAction);
+            return;
+        }
+
+        _queueRepository.ManagedExecutor.WithAdmissionSuspended(
+            job => job.QueueId == cluster.Id,
+            hasLiveEntries =>
+            {
+                ManagedQueueRules.ValidateChange(cluster, updateAction,
+                                                 MutableClusterQueues(), hasLiveEntries);
+
+                _queueRepository.UpdateQueue(cluster, updateAction);
+            });
     }
 
     #endregion

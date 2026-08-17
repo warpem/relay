@@ -17,7 +17,7 @@ namespace Refund.Jobs.Refinement.Refinement3D.Refine3D;
 /// Used extensively throughout the application for obtaining high-resolution
 /// structures from particle sets.
 /// </summary>
-public class Refine3D : RelionJob, IClusterJob
+public class Refine3D : RelionJob, IClusterJob, IPooledJob, IPoolStatus
 {
     public override string TypeGuid => "2c3b1d9f-e226-48fd-a74a-1b2b319fae52";
 
@@ -51,7 +51,8 @@ public class Refine3D : RelionJob, IClusterJob
     /// Dynamically determined based on the UseGpu parameter to allow
     /// users to choose the appropriate processing resources.
     /// </summary>
-    public override JobQueueType QueueType => UseGpu ? JobQueueType.GPU : JobQueueType.CPU;
+    public override JobQueueType QueueType =>
+        IsPooled ? JobQueueType.CPU : (UseGpu ? JobQueueType.GPU : JobQueueType.CPU);
 
     /// <summary>
     /// Indicates that this job performs multiple iterations.
@@ -72,17 +73,38 @@ public class Refine3D : RelionJob, IClusterJob
     /// </summary>
     public override int2 CardSquareCount { set; get; } = new int2(2, 1);
 
-    public override string[] SupportedModules => base.SupportedModules.Concat(["gpu", "cpu"]).ToArray();
+    /// <summary>True when this job runs as a RELION disk-pool manager (CPU-only, relion_refine_pool).</summary>
+    public bool IsPooled => UseWorkerPool;
 
-    public override string[] RequiredModules => base.RequiredModules.Concat(UseGpu ? ["gpu"] : ["cpu"]).ToArray();
+    /// <summary>True when the pool workers run on GPUs (the manager stays CPU-only regardless).</summary>
+    public bool IsGpuPool => UseWorkerPool && UseGpuWorkers;
 
-    public override int CoreCount => NThreads;
+    /// <summary>Name of the RELION pool coordination directory (--pool_dir) created under the job directory.</summary>
+    public const string PoolDirName = "pool";
 
-    public override int MemoryGb => (NProcesses - 1) * MemoryPerWorker;
+    /// <summary>
+    /// Fixed core/thread budget for the pool manager. It runs the CPU-side angular-accuracy
+    /// estimation (multithreaded), reconstruction and maximization; its cores are decoupled from the
+    /// workers' in pool mode. Not user-exposed.
+    /// </summary>
+    private const int ManagerPoolCores = 16;
 
-    public override int GpuCount => UseGpu ? NGpus : 0;
+    public override string[] SupportedModules =>
+        base.SupportedModules.Concat(["gpu", "cpu", "relion-pool"]).ToArray();
 
-    public override int ProcessCount => NProcesses;
+    // When pooled, relion-pool replaces the ordinary "relion" software tag, but "cpu" is retained for
+    // the {{cpu}} partition directives (the manager runs on the CPU partition).
+    public override string[] RequiredModules =>
+        IsPooled ? ["cpu", "relion-pool"]
+                 : base.RequiredModules.Concat(UseGpu ? ["gpu"] : ["cpu"]).ToArray();
+
+    public override int CoreCount => IsPooled ? ManagerPoolCores : NThreads;
+
+    public override int MemoryGb => IsPooled ? MemoryPerWorker : (NProcesses - 1) * MemoryPerWorker;
+
+    public override int GpuCount => IsPooled ? 0 : (UseGpu ? NGpus : 0);
+
+    public override int ProcessCount => IsPooled ? 1 : NProcesses;
 
     public override bool CanBeFinalized => true;
 
@@ -497,14 +519,71 @@ public class Refine3D : RelionJob, IClusterJob
                       "directory is on a fast local drive (e.g. an SSD drive), processing in all " +
                       "the iterations will be faster. If the job finishes correctly, the " +
                       "relion_volatile directory will be wiped. If the job crashes, you may want " +
-                      "to remove it yourself.")]
+                      "to remove it yourself.",
+            ConditionalOnField = nameof(UseWorkerPool),
+            ConditionalOnValue = false)]
     [RelayProperty]
     public string UseScratch { get; set; } = null;
+
+    [UiBool("", "Use worker pool",
+            helpText: "Run this refinement through RELION's disk-based worker pool: a CPU-only " +
+                      "manager plus a fleet of worker jobs maintained on a cluster queue. Each worker " +
+                      "runs one half-1 and one half-2 process (refinement uses split half-maps). " +
+                      "Turning this on replaces MPI. Leave off for the normal single-job (GPU/MPI) run.")]
+    [RelayProperty]
+    public bool UseWorkerPool { get; set; } = false;
+
+    [UiQueue("Pool queue",
+             helpText: "Cluster queue on which to maintain the pool worker fleet.",
+             ConditionalOnField = nameof(UseWorkerPool),
+             ConditionalOnValue = true,
+             IncludeLocal = false)]
+    [RelayProperty]
+    public int PoolQueueId { get; set; } = -1;
+
+    [UiBool("", "GPU workers",
+            helpText: "Run the pool workers on GPUs instead of CPUs (the manager stays CPU-only). " +
+                      "Requires a RELION-pool build with GPU support. Each worker cluster job is " +
+                      "granted one GPU, shared by its half-1 and half-2 processes.",
+            ConditionalOnField = nameof(UseWorkerPool),
+            ConditionalOnValue = true)]
+    [RelayProperty]
+    public bool UseGpuWorkers { get; set; } = true;
+
+    [UiInt("", "Cores per worker",
+           1, 99999, 1,
+           helpText: "CPU cores requested for each pool worker process. Also sets RELION's --j threads " +
+                     "for every worker process.",
+           ConditionalOnField = nameof(UseWorkerPool),
+           ConditionalOnValue = true)]
+    [RelayProperty]
+    public int CoresPerWorker { get; set; } = 2;
+
+    [UiInt("", "Number of pool workers",
+           1, 99999, 1,
+           helpText: "Target number of worker jobs maintained in the pool (each runs a half-1 and a " +
+                     "half-2 process).",
+           ConditionalOnField = nameof(UseWorkerPool),
+           ConditionalOnValue = true)]
+    [RelayProperty]
+    public int NWorkers { get; set; } = 4;
+
+    [UiInt("", "Particles per task",
+           1, 9999999, 1,
+           helpText: "Number of particles bundled into each pool task (RELION --pool_batch). Larger " +
+                     "tasks amortize the per-task backprojector cost; smaller tasks spread the work " +
+                     "more evenly across workers.",
+           ConditionalOnField = nameof(UseWorkerPool),
+           ConditionalOnValue = true)]
+    [RelayProperty]
+    public int ParticlesPerTask { get; set; } = 128;
 
     [UiBool("gpu", "Use GPU",
             helpText: "If set to Yes, the program will use the GPU for calculations. " +
                       "This will speed up the calculations significantly. If set to No, " +
-                      "the calculations will be done on the CPU.")]
+                      "the calculations will be done on the CPU.",
+            ConditionalOnField = nameof(UseWorkerPool),
+            ConditionalOnValue = false)]
     [RelayProperty]
     public bool UseGpu { get; set; } = true;
 
@@ -524,7 +603,9 @@ public class Refine3D : RelionJob, IClusterJob
            1,
            helpText: "Number of threads running in parallel on each worker. Threads don't increase " +
                      "the memory usage as much as processes do, but the performance gain is smaller when " +
-                     "compared to processes distributed over the same number of CPU cores.")]
+                     "compared to processes distributed over the same number of CPU cores.",
+           ConditionalOnField = nameof(UseWorkerPool),
+           ConditionalOnValue = false)]
     [RelayProperty]
     public int NThreads { get; set; } = 1;
 
@@ -534,7 +615,9 @@ public class Refine3D : RelionJob, IClusterJob
            2,
            helpText: "The number of workers to use for the job. This is the number of MPI processes " +
                      "that will be started. 3D Refinement requires 2n+1 processes, where n>0. The number of workers " +
-                     "should not exceed the number of available CPU cores.")]
+                     "should not exceed the number of available CPU cores.",
+           ConditionalOnField = nameof(UseWorkerPool),
+           ConditionalOnValue = false)]
     [RelayProperty]
     public int NProcesses { get; set; } = 3;
 
@@ -554,6 +637,11 @@ public class Refine3D : RelionJob, IClusterJob
                         "expert use of the program. Specify as --option1 value1 --option2 value2")]
     [RelayProperty]
     public string AdditionalArguments { get; set; } = "";
+
+    // Live pool-worker counters (written by QueueRepository each daemon tick; satisfy IPooledJob/IPoolStatus).
+    [RelayProperty] [Clearable] public int PoolWorkersAlive { get; set; }
+    [RelayProperty] [Clearable] public int PoolWorkersRunning { get; set; }
+    [RelayProperty] [Clearable] public int PoolWorkersSubmitted { get; set; }
 
     #endregion
 
@@ -703,7 +791,8 @@ public class Refine3D : RelionJob, IClusterJob
     /// Uses MPI to distribute the processing across multiple nodes.
     /// Referenced by ClusterQueue when constructing the command for job submission.
     /// </summary>
-    public override string CommandName => $"mpirun -n {NProcesses} relion_refine_mpi";
+    public override string CommandName =>
+        IsPooled ? "relion_refine_pool" : $"mpirun -n {NProcesses} relion_refine_mpi";
 
     /// <summary>
     /// Builds the command line arguments dictionary for the refine_mpi command.
@@ -765,8 +854,96 @@ public class Refine3D : RelionJob, IClusterJob
             foreach (var kv in ArgumentStringToDictionary(AdditionalArguments))
                 result[kv.Key] = kv.Value;
 
+        // Applied last so pool-owned arguments win over the above (incl. AdditionalArguments and --gpu).
+        if (IsPooled)
+            ApplyPoolArguments(result);
+
         return result;
     }
+
+    /// <summary>
+    /// Applies the RELION disk-pool argument overrides shared by the manager and every worker:
+    /// forces --j to the manager thread count, points --pool_dir at the shared coordination directory,
+    /// sets --pool_batch, and drops CPU-pool-unsupported flags (--gpu, --scratch_dir). Public seam so
+    /// it is unit-testable without a connected input port graph. Returns the same dictionary.
+    /// </summary>
+    public Dictionary<string, string> ApplyPoolArguments(Dictionary<string, string> result)
+    {
+        // These are the manager's arguments; --j is the manager thread count. The worker command
+        // (ComposeWorkerCommand) overrides --j down to CoresPerWorker for the per-worker E-step.
+        result["j"] = ManagerPoolCores.ToString(CultureInfo.InvariantCulture);
+        result["pool_batch"] = ParticlesPerTask.ToString(CultureInfo.InvariantCulture);
+        result["pool_dir"] = Space.GetRelativePath(Path.Combine(DirectoryPath, PoolDirName));
+        result.Remove("gpu");
+        result.Remove("scratch_dir");
+        return result;
+    }
+
+    #region Worker pool (IPooledJob)
+
+    // DirectoryPath and the PoolWorkers* counters satisfy IPooledJob implicitly (public members).
+
+    /// <summary>Target number of worker jobs in the pool (each runs a half-1 and a half-2 process).</summary>
+    public int PoolSize => NWorkers;
+
+    // Explicit: the stored [UiQueue] value persists across toggles, but the pool machinery (which
+    // reads PoolQueueId > 0) must only see a queue when the pool is actually on.
+    int IPooledJob.PoolQueueId => UseWorkerPool ? PoolQueueId : -1;
+
+    int IPooledJob.PoolSubmissionCap => PoolSize * 100;
+
+    // Each worker runs two processes (half 1 + half 2), so its node cores/memory are for two E-step
+    // processes. GPU workers get one GPU shared by both halves; CPU workers get none.
+    Dictionary<string, string> IPooledJob.GetWorkerResourceValues(string workerLogDir)
+    {
+        var values = GetResourceValues();
+        values["job_id"]      = $"{Id}-worker";
+        values["n_processes"] = "1";
+        values["n_cores"]     = (2 * CoresPerWorker).ToString(CultureInfo.InvariantCulture);
+        values["memory_gb"]   = (2 * MemoryPerWorker).ToString(CultureInfo.InvariantCulture);
+        values["n_gpus"]      = IsGpuPool ? "1" : "0";
+        values["std_out"]     = Path.Combine(workerLogDir, "%j.out");
+        values["std_err"]     = Path.Combine(workerLogDir, "%j.err");
+        return values;
+    }
+
+    // GPU workers run on the GPU partition; CPU workers on the CPU partition. Both load relion-pool.
+    string[] IPooledJob.WorkerRequiredModules => IsGpuPool ? ["gpu", "relion-pool"] : ["cpu", "relion-pool"];
+
+    // A RELION pool worker runs the same run as the manager (arg parity is required), plus the worker
+    // role flags. Refinement uses split half-maps, so each worker runs both halves.
+    string IPooledJob.GetWorkerCommand(int deviceIndex) =>
+        ComposeWorkerCommand(ComposeCommandArguments());
+
+    /// <summary>
+    /// Wraps a fully-composed argument set into a refinement pool worker command: cd into the run
+    /// directory, then launch one --half 1 and one --half 2 relion_refine_pool process. The manager
+    /// refuses to start without at least one of each half, so pairing them per worker guarantees both
+    /// are present as soon as any worker is up. GPU: both halves share the one granted GPU via
+    /// --gpu "" --gpu_shares 2 (bare --gpu would swallow the next token; gpu_shares=2 splits VRAM
+    /// between the two halves). Public seam so it is unit-testable without a connected port graph.
+    /// </summary>
+    public string ComposeWorkerCommand(Dictionary<string, string> args)
+    {
+        // The manager composed these args with its own (larger) thread count; a worker's E-step uses
+        // CoresPerWorker threads, so override --j back down here.
+        args["j"] = CoresPerWorker.ToString(CultureInfo.InvariantCulture);
+
+        string flat = JobTools.ComposeArgumentString(args);
+
+        string gpu = IsGpuPool ? " --gpu \"\" --gpu_shares 2" : "";
+
+        return string.Join("\n", new[]
+        {
+            $"cd {RunDirectory}",
+            $"relion_refine_pool {flat}{gpu} --worker --half 1 &",
+            $"relion_refine_pool {flat}{gpu} --worker --half 2 &",
+            "wait",
+        });
+    }
+
+    #endregion
+
     private long LastLogSize = -1;
 
     /// <summary>

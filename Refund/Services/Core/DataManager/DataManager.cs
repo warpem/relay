@@ -649,4 +649,15 @@ public partial class DataManager
     }
 
     #endregion
+
+    /// <summary>
+    /// Stops the job daemon and kills every managed process tree.
+    /// </summary>
+    /// <remarks>
+    /// Called from the host's ApplicationStopping hook. DataManager is registered as an
+    /// externally-constructed singleton and implements no disposal, so the DI container will never
+    /// clean it up on its own; without that hook nothing kills managed processes on a graceful
+    /// shutdown.
+    /// </remarks>
+    public Task ShutdownAsync() => _queueRepository.ShutdownAsync();
 }

@@ -119,7 +119,43 @@ scripts/relay.sh restart  # Stop + start
 
 ## Configure a cluster queue
 
-Queues are managed by an admin under **Users → Queue configuration**. Each queue has a name, a type (CPU, GPU, or Mixed), and several command templates.
+Queues are managed by an admin under **Users → Queue configuration**. Each queue has a name, a type (CPU, GPU, or Mixed), a scheduler, and several command templates.
+
+### Scheduler
+
+The **Scheduler** setting tells Relay how to read job IDs and job states out of your commands' output. Pick `Slurm`, `Lsf`, `Pbs`, `Sge` or `Flux` to use the built-in parser for that scheduler, or `Custom` to supply your own patterns — the job ID regular expression and the pending/running/failed status patterns in the **Advanced settings** tab apply only to `Custom` queues, and are hidden otherwise.
+
+Queues default to `Slurm`. Note that the parser no longer falls back across schedulers: a queue set to `Slurm` will reject output in another scheduler's format rather than guessing, so a non-SLURM queue must have its scheduler selected explicitly.
+
+### Managed queues (no external scheduler)
+
+Setting **Scheduler** to `Managed` makes Relay run jobs itself, as local processes on the Relay host, instead of submitting them to SLURM, Flux or anything else. It starts a job only when the CPU cores, memory and GPUs it asks for are free. This suits a single workstation, where installing a scheduler purely to arbitrate one machine's resources is a large dependency for a small need.
+
+Configure **CPU cores**, **Memory (GB)** and **GPUs** to describe the host. The submission script template is still used — for module blocks and `{{ command }}` — but drops the scheduler directives:
+
+```bash
+#!/bin/bash
+{{ warp }}
+ml warptools/latest
+{{ /warp }}
+
+umask 007
+
+{{ command }}
+```
+
+Things worth knowing:
+
+- **Cores and memory are accounting, not enforcement.** Relay will not start a job unless its declared requirements fit, but nothing stops a running job from exceeding them. GPUs are the exception: each job sees only its assigned devices via `CUDA_VISIBLE_DEVICES`.
+- **One managed queue per host.** A second would double-book the same machine, so Relay refuses to create one or to switch an existing queue to `Managed` when one already exists. The rule is also applied to the queues loaded from the state file at startup, so a hand-edited or copied state carrying two does not slip past: the lowest-numbered managed queue keeps working, every other one is logged as an error and refuses to start jobs until you switch it to another scheduler or delete it. Resolving the duplication re-enables it immediately; no restart is needed.
+- **Jobs do not survive a Relay restart.** They are killed on shutdown, and anything left behind by a crash is killed at the next startup. Jobs that were running are marked failed.
+- **Worker pools cannot use a managed queue.** Pools submit bare scripts with no resource request attached, so there is nothing to admit against.
+- **Jobs run in order of fit, not strictly in order of submission.** A small job may start ahead of a queued larger one. On a multi-GPU host a large job can in principle be held off indefinitely by a stream of small ones.
+- **macOS is a development-only configuration.** `setsid` is absent there, so Relay cannot clean up compute processes left behind by a crash — only by a graceful shutdown. On Linux both work.
+
+**Change note — 2D classification memory.** `Class2D` now declares its real memory footprint — 16 GB per MPI worker rank, `(processes - 1) x 16 GB` — instead of the flat 16 GB it inherited before. A VDAM run with 8 processes therefore asks for 112 GB, which does not fit the default managed-queue total of 64 GB, so it is rejected outright with a message naming both figures rather than queued to wait for memory that will never appear. Raise **Memory (GB)** to match the host, or lower the job's process count.
+
+The cores, memory and GPU totals can only be changed while the queue is idle. If jobs are still running on it, the edit is refused rather than leaving the accounting to disagree with what is on the host.
 
 ### Submission script template
 
@@ -157,6 +193,13 @@ Relay uses conditional blocks to load the right software modules depending on th
 {{ relion }}
 # included only for RELION jobs
 {{ /relion }}
+
+{{ relion-pool }}
+# included instead of {{ relion }} when a RELION job runs through the disk-based
+# worker pool (CPU-only manager + CPU worker fleet). Load a RELION build that
+# provides the relion_refine_pool binary. Requested by both the manager and the
+# workers, alongside {{ cpu }} for the CPU partition directives.
+{{ /relion-pool }}
 
 {{ imod }}
 # included only for IMOD jobs
@@ -211,6 +254,49 @@ umask 007
 ```
 
 > **Why `umask 007`:** Without it, jobs create output files with default permissions that exclude the group, breaking access for other project members who share the same group. Setting `umask 007` ensures files land as `660` and directories as `770`, so the group can always read and write job outputs regardless of who submitted the job.
+
+A minimal Flux example:
+
+```bash
+#!/bin/bash
+#FLUX: --job-name={{ job_id }}
+#FLUX: -N 1
+#FLUX: -n 1
+#FLUX: -x
+#FLUX: --output={{ std_out }}
+#FLUX: --error={{ std_err }}
+{{ gpu }}
+#FLUX: -g {{ n_gpus }}
+{{ /gpu }}
+
+{{ warp }}
+ml warptools/latest
+{{ /warp }}
+
+umask 007
+
+{{ command }}
+```
+
+Flux specifics worth knowing:
+
+- **All `#FLUX:` directives must be grouped at the top.** Flux errors out on a directive that follows any non-blank line which isn't a comment, so module blocks that emit `ml ...` have to come after them. The blank lines left behind by stripped `{{ gpu }}` tags are fine.
+- **`-g` is GPUs *per slot*, not per job.** With `-n {{ n_processes }}`, a 3-rank job asking for 1 GPU would request 3. Pairing `-n 1` with `-x` (exclusive) sidesteps the arithmetic and gives each job the whole node — a good fit for single-node installations, at the cost of running jobs strictly one at a time.
+- **Flux's `{{id}}` mustache cannot be used in output paths**, because Relay's own templating strips unrecognised `{{ ... }}` tags. Use `{{ std_out }}` / `{{ std_err }}`, which are already per-job absolute paths.
+- Relay must be able to reach your Flux instance. A systemd-managed system instance works out of the box; a per-terminal `flux start` will not, since `FLUX_URI` won't be in the Relay service's environment.
+
+Matching command templates:
+
+| Template | Value |
+|---|---|
+| Send command | `{{ command }}` |
+| Submit job | `flux batch {{ script_path_abs }}` |
+| Status job | `flux jobs -no "{status}" {{ job_id }}` |
+| Abort job | `flux cancel {{ job_id }} \|\| true` |
+| List jobs *(pools only)* | `flux jobs -no "{id.f58},{status}"` |
+| Cancel many jobs *(pools only)* | `flux cancel {{ job_ids }} \|\| true` |
+
+Single braces such as `{status}` are Flux's own format fields and pass through Relay's templating untouched.
 
 ### Command templates
 

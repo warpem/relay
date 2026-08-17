@@ -1,5 +1,7 @@
 using System.Reflection;
 using System.Text.RegularExpressions;
+using Microsoft.AspNetCore.Components;
+using Microsoft.FluentUI.AspNetCore.Components;
 using Refund.Components.CodeEditor;
 using Refund.DataModel;
 using Refund.DataModel.ReadOnly;
@@ -11,6 +13,9 @@ namespace Relay.Screens.Overlay.Settings;
 
 public partial class QueueEditor
 {
+    [Inject]
+    private IToastService ToastService { get; set; }
+
     private ReadOnlyClusterQueue _selectedQueue;
     private readonly List<GroupEventSubscription> _subscriptions = new();
     
@@ -21,6 +26,23 @@ public partial class QueueEditor
                                     DataManager.ClusterQueues.IndexOf(_selectedQueue) < DataManager.ClusterQueues.Count - 1;
 
     private IEnumerable<JobQueueType> QueueTypes => Enum.GetValues<JobQueueType>().Where(v => v != JobQueueType.Local);
+
+    private IEnumerable<ClusterScheduler> Schedulers => Enum.GetValues<ClusterScheduler>();
+
+    /// <summary>
+    /// The job ID regular expression and job status patterns are only consulted for
+    /// <see cref="ClusterScheduler.Custom"/> queues; every other scheduler has a built-in parser.
+    /// </summary>
+    private bool ShowCustomParsingFields => _selectedQueue?.SchedulerType == ClusterScheduler.Custom;
+
+    /// <summary>
+    /// A managed queue has no external scheduler to talk to, so the command templates are
+    /// meaningless for it and its resource limits take their place.
+    /// </summary>
+    private bool IsManagedQueue => _selectedQueue?.SchedulerType == ClusterScheduler.Managed;
+
+    /// <summary>Command templates apply to every scheduler except Managed.</summary>
+    private bool ShowCommandTemplates => !IsManagedQueue;
 
     private CodeEditor _submissionScriptEditor;
     private int _submissionScriptCursorPosition = -1;
@@ -96,16 +118,36 @@ public partial class QueueEditor
         template.Alias += " Copy";
         template.Clear();
 
-        var newQueue = await DataManager.CreateClusterQueue(template);
-        await SelectQueue(newQueue);
+        // Copying a managed queue is the mistake the single-queue rule exists to catch.
+        try
+        {
+            var newQueue = await DataManager.CreateClusterQueue(template);
+            await SelectQueue(newQueue);
+        }
+        catch (InvalidOperationException exc)
+        {
+            ToastService.ShowError(exc.Message);
+        }
     }
 
     private async Task DeleteQueue(ReadOnlyJobQueue queue)
     {
-        if (queue.Id == _selectedQueue.Id)
+        // Deleted first, deselected after: a managed queue that still owns processes on the host is
+        // refused, and clearing the selection up front would empty the editor for a queue that is
+        // still there. The delete button is already disabled while jobs are in the queue, but an
+        // executor entry outlives its job's membership of one, so the refusal is still reachable.
+        try
+        {
+            await DataManager.DeleteQueue(queue);
+        }
+        catch (InvalidOperationException exc)
+        {
+            ToastService.ShowError(exc.Message);
+            return;
+        }
+
+        if (queue.Id == _selectedQueue?.Id)
             _selectedQueue = null;
-            
-        await DataManager.DeleteQueue(queue);
     }
 
     private async Task MoveQueueUp()
@@ -307,13 +349,23 @@ public partial class QueueEditor
     {
         if (_selectedQueue == null)
             return;
-        
-        await DataManager.UpdateQueue(_selectedQueue, queue =>
+
+        // A refused change — a second managed queue, or new totals while jobs are running — has to
+        // be shown, and the control put back to the stored value rather than left showing the edit.
+        try
         {
-            var clusterQueue = queue as ClusterQueue;
-            PropertyInfo prop = clusterQueue.GetType().GetProperty(propertyName);
-            prop.SetValue(clusterQueue, value);
-        });
+            await DataManager.UpdateQueue(_selectedQueue, queue =>
+            {
+                var clusterQueue = queue as ClusterQueue;
+                PropertyInfo prop = clusterQueue.GetType().GetProperty(propertyName);
+                prop.SetValue(clusterQueue, value);
+            });
+        }
+        catch (InvalidOperationException exc)
+        {
+            ToastService.ShowError(exc.Message);
+            await InvokeAsync(StateHasChanged);
+        }
     }
     
     private async Task HandleCustomVariableKeyChanged(string oldValue, string newValue)

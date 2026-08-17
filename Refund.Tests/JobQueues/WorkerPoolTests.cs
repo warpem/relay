@@ -193,7 +193,7 @@ public class WorkerPoolTests
         // Pool config is [RelayProperty] ints handled by RelayBase.WriteToJson /
         // ReadFromJson via reflection; a bare instance round-trips them fine. Pool size
         // is derived from NGpus (one worker per GPU), so NGpus is the persisted source.
-        var job = new MotionAndCTF2D { PoolQueueId = 3, NGpus = 16 };
+        var job = new MotionAndCTF2D { UseWorkerPool = true, PoolQueueId = 3, NGpus = 16 };
         var node = new JsonObject();
         job.WriteToJson(node);
 
@@ -203,6 +203,7 @@ public class WorkerPoolTests
         var job2 = new MotionAndCTF2D();
         job2.ReadFromJson(node);
 
+        Assert.True(job2.UseWorkerPool);
         Assert.Equal(3, job2.PoolQueueId);
         Assert.Equal(16, job2.NGpus);
         Assert.Equal(16, ((IPooledJob)job2).PoolSize);   // derived from NGpus
@@ -294,9 +295,26 @@ public class WorkerPoolTests
     public void WarpJobGpu_ComposeCommandArguments_AddsExternalProvisionerWhenPooled()
     {
         var job = MakeJobWithSpace();
+        job.UseWorkerPool = true;
         job.PoolQueueId = 1;
         var args = job.ComposeCommandArguments();
         Assert.True(args.ContainsKey("external_provisioner"));
+    }
+
+    [Fact]
+    public void WarpJobGpu_IsPooled_RequiresUseWorkerPoolToggle_NotJustQueue()
+    {
+        // New mechanism (in line with RELION): the boolean toggle enables pooling, not merely
+        // selecting a non-local queue. A stored queue id alone must NOT activate the pool.
+        var job = MakeJobWithSpace();
+        job.PoolQueueId = 1;
+        Assert.False(job.IsPooled);
+        Assert.Equal(-1, ((IPooledJob)job).PoolQueueId);            // gated off while toggle is off
+        Assert.False(job.ComposeCommandArguments().ContainsKey("external_provisioner"));
+
+        job.UseWorkerPool = true;
+        Assert.True(job.IsPooled);
+        Assert.Equal(1, ((IPooledJob)job).PoolQueueId);
     }
 
     [Fact]
@@ -305,6 +323,7 @@ public class WorkerPoolTests
         // Pooled Manager runs CPU-only; the worker does the GPU work. The worker module set must
         // request "gpu", never the Manager's "cpu".
         var job = MakeJobWithSpace();
+        job.UseWorkerPool = true;
         job.PoolQueueId = 1;   // pooled → this job's RequiredModules carries "cpu"
 
         var workerModules = ((IPooledJob)job).WorkerRequiredModules;
@@ -320,8 +339,8 @@ public class WorkerPoolTests
         // multi-GPU job) path. When pooled, NGpus IS the pool size, so the CPU-only Manager
         // must fall back to the fixed manager profile instead of requesting worker-scaled
         // resources. Two pools of very different sizes must request identical Manager resources.
-        var small = new RefineJob { NGpus = 4,  PerDevice = 2, MemoryPerWorker = 10, PoolQueueId = 1 };
-        var large = new RefineJob { NGpus = 64, PerDevice = 2, MemoryPerWorker = 10, PoolQueueId = 1 };
+        var small = new RefineJob { UseWorkerPool = true, NGpus = 4,  PerDevice = 2, MemoryPerWorker = 10, PoolQueueId = 1 };
+        var large = new RefineJob { UseWorkerPool = true, NGpus = 64, PerDevice = 2, MemoryPerWorker = 10, PoolQueueId = 1 };
 
         Assert.Equal(small.CoreCount, large.CoreCount);
         Assert.Equal(small.MemoryGb,  large.MemoryGb);
@@ -337,7 +356,7 @@ public class WorkerPoolTests
     {
         // Regression: workers ran etomo/aretomo without their tool module because
         // WorkerRequiredModules built off WarpJob's base modules, dropping the leaf job's "imod".
-        var job = new EtomoJob { PoolQueueId = 1 };
+        var job = new EtomoJob { UseWorkerPool = true, PoolQueueId = 1 };
 
         var workerModules = ((IPooledJob)job).WorkerRequiredModules;
 
@@ -558,6 +577,9 @@ internal class FakePooledJob : IPooledJob
         { "std_err", Path.Combine(workerLogDir, "%j.err") },
     };
     public string GetWorkerCommand(int deviceIndex) => $"WarpWorker2 --device {deviceIndex}";
+    public int PoolWorkersAlive { get; set; }
+    public int PoolWorkersRunning { get; set; }
+    public int PoolWorkersSubmitted { get; set; }
 }
 
 internal class FakePoolQueue : IPoolQueue

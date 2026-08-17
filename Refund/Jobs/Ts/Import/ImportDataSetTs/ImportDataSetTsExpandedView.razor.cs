@@ -197,10 +197,13 @@ public partial class ImportDataSetTsExpandedView : IAsyncDisposable
 
     private async Task SelectedTsThumbnailChanged(ThumbnailData data)
     {
-        if (!_allTsThumbnails.Contains(data))
+        // Use the index carried by the item rather than IndexOf: ThumbnailData compares by
+        // ImagePath, so two tilt series that share a thumbnail (duplicate MDOCs referencing the
+        // same tilt images) would both resolve to whichever one comes first in the list.
+        int index = data?.Index ?? -1;
+        if (index < 0 || index >= _allTsThumbnails.Count || !ReferenceEquals(_allTsThumbnails[index], data))
             return;
 
-        int index = _allTsThumbnails.IndexOf(data);
         await SelectTsItem(index, false);
     }
 
@@ -275,10 +278,11 @@ public partial class ImportDataSetTsExpandedView : IAsyncDisposable
 
     private async Task SelectedFsThumbnailChanged(ThumbnailData data)
     {
-        if (!_allFsThumbnails.Contains(data))
+        // See SelectedTsThumbnailChanged for why this doesn't use IndexOf
+        int index = data?.Index ?? -1;
+        if (index < 0 || index >= _allFsThumbnails.Count || !ReferenceEquals(_allFsThumbnails[index], data))
             return;
 
-        int index = _allFsThumbnails.IndexOf(data);
         await SelectFsItem(index, false);
     }
 

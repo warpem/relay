@@ -30,6 +30,12 @@ public partial class QueueRepository
                 queue.AdoptState(template);
 
             queue.Id = _clusterQueues.Select(q => q.Id).DefaultIfEmpty(0).Max() + 1;
+
+            // The host-wide executor. Attached to every cluster queue, not only the managed ones:
+            // the scheduler type is editable afterwards, and a managed queue without an executor
+            // rejects every job it is handed.
+            queue.Executor = ManagedExecutor;
+
             _clusterQueues.Add(queue);
 
             _needsSaving = true;
@@ -52,6 +58,11 @@ public partial class QueueRepository
         {
             updateAction(queue);
 
+            // Recomputed after every edit, not only at load. Switching the *other* managed queue to
+            // a different scheduler is exactly how a user resolves the duplication, and the queue
+            // that was disabled must come back without a restart.
+            ManagedQueueRules.DisableDuplicateManagedQueues(_clusterQueues.OfType<ClusterQueue>());
+
             _needsSaving = true;
         }
 
@@ -69,6 +80,12 @@ public partial class QueueRepository
         lock (_saveLock)
         {
             _clusterQueues.Remove(queue);
+
+            // Same reason as in UpdateQueue, and deleting is the other way a user resolves a
+            // duplication. Delete the queue that *won* and the survivor keeps a
+            // ManagedDisabledReason naming a queue that no longer exists, rejecting every job it
+            // is handed until somebody happens to edit it or restart Relay.
+            ManagedQueueRules.DisableDuplicateManagedQueues(_clusterQueues.OfType<ClusterQueue>());
 
             _needsSaving = true;
         }

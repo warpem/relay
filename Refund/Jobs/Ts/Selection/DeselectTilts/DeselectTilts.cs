@@ -28,6 +28,9 @@ public class DeselectTilts : WarpJob, ILocalJob
 
     public override JobQueueType QueueType => JobQueueType.CPU;
 
+    /// <summary>CPU-only tool; requests no GPUs.</summary>
+    public override int GpuCount => 0;
+
     public override Type ExpandedViewType => typeof(DeselectTiltsExpandedView);
 
     public override int2 CardSquareCount { set; get; } = new int2(2, 1);

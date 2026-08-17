@@ -6,14 +6,15 @@ using Refund.Utils;
 namespace Refund.Jobs;
 
 [GenerateReadOnly]
-public abstract class WarpJobGpu : WarpJob, IPooledJob
+public abstract class WarpJobGpu : WarpJob, IPooledJob, IPoolStatus
 {
     /// <summary>
     /// True when this job runs as a pool Manager — a CPU-only orchestrator that populates the
-    /// task queue and maintains the worker fleet. The pooled workers carry the GPUs, so the
-    /// Manager's own cluster submission must NOT request GPUs or per-worker-scaled resources.
+    /// task queue and maintains the worker fleet. Enabled by the <see cref="UseWorkerPool"/> toggle
+    /// (mirrors the RELION pool jobs). The pooled workers carry the GPUs, so the Manager's own cluster
+    /// submission must NOT request GPUs or per-worker-scaled resources.
     /// </summary>
-    public bool IsPooled => PoolQueueId > 0;
+    public bool IsPooled => UseWorkerPool;
 
     public override int GpuCount => IsPooled ? 0 : NGpus;
 
@@ -33,7 +34,7 @@ public abstract class WarpJobGpu : WarpJob, IPooledJob
 
     [UiFieldGroup("Resources", 999)]
     [UiInt("", "Number of GPUs",
-           helpText: "Number of GPUs to request for this job. When a pool queue is set, this is " +
+           helpText: "Number of GPUs to request for this job. When the worker pool is enabled, this is " +
                      "the number of parallel GPU workers maintained in the pool (one worker per GPU).",
            min: 1)]
     [RelayProperty]
@@ -47,8 +48,18 @@ public abstract class WarpJobGpu : WarpJob, IPooledJob
     public virtual int PerDevice { get; set; } = 2;
 
     [UiFieldGroup("Resources", 999)]
+    [UiBool("", "Use worker pool",
+            helpText: "Maintain a fleet of GPU worker cluster jobs that pull tasks from this job " +
+                      "instead of running everything in one job; this job itself becomes a CPU-only " +
+                      "manager. Select the worker pool's cluster queue below.")]
+    [RelayProperty]
+    public bool UseWorkerPool { get; set; } = false;
+
     [UiQueue("Pool Queue",
-             helpText: "Cluster queue for the GPU worker pool. Leave as Local (no pool) to run workers on this machine.")]
+             helpText: "Cluster queue on which to maintain the GPU worker fleet.",
+             ConditionalOnField = nameof(UseWorkerPool),
+             ConditionalOnValue = true,
+             IncludeLocal = false)]
     [RelayProperty]
     public int PoolQueueId { get; set; } = -1;
 
@@ -92,7 +103,7 @@ public abstract class WarpJobGpu : WarpJob, IPooledJob
     public override Dictionary<string, string> ComposeCommandArguments()
     {
         var result = base.ComposeCommandArguments();
-        if (PoolQueueId > 0)
+        if (IsPooled)
             result["external_provisioner"] = "";
         return result;
     }
@@ -106,8 +117,11 @@ public abstract class WarpJobGpu : WarpJob, IPooledJob
     public int PoolSize => NGpus;
 
     // IPooledJob
-    // PoolQueueId and PoolSize satisfy the interface implicitly via the public members above;
-    // the remaining members are derived/computed.
+    // PoolSize satisfies the interface implicitly via the public member above; the remaining members
+    // are derived/computed. PoolQueueId is explicit so the stored [UiQueue] value (which persists
+    // across toggles) only activates pooling when UseWorkerPool is on — the pool machinery gates on
+    // IPooledJob.PoolQueueId > 0.
+    int IPooledJob.PoolQueueId                => UseWorkerPool ? PoolQueueId : -1;
     int IPooledJob.PoolSubmissionCap          => PoolSize * 100;
 
     // Build the worker's template variables from the Manager's own GetResourceValues so the two

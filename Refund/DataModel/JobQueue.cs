@@ -170,6 +170,12 @@ namespace Refund.DataModel
         public virtual async Task<(ClusterJobStatus status, string output)> CheckStatus(Job job) => (ClusterJobStatus.Unknown, "");
 
         /// <summary>
+        /// Whether this queue can start <paramref name="job"/> right now.
+        /// Queues backed by an external scheduler always admit — the scheduler does the arbitration.
+        /// </summary>
+        public virtual AdmissionResult CanAdmit(Job job) => AdmissionResult.Admitted;
+
+        /// <summary>
         /// Clears all jobs from this queue.
         /// This removes all jobs from the queue but does not affect their execution status.
         /// </summary>
@@ -205,6 +211,83 @@ namespace Refund.DataModel
         /// Queue for jobs that run on both CPU and GPU nodes in a cluster.
         /// </summary>
         Mixed = (1 << 1) | (1 << 2)
+    }
+
+    /// <summary>
+    /// Identifies which cluster scheduler a <see cref="Refund.JobQueues.ClusterQueue"/> talks to,
+    /// selecting the parsers used to read job IDs and job states out of scheduler output.
+    /// </summary>
+    /// <remarks>
+    /// Slurm is deliberately value 0: queues saved before this field existed deserialize to the
+    /// default, and every one of them was already being parsed with the SLURM patterns (the SLURM
+    /// status parser returned Unknown for unrecognised output, which short-circuited the
+    /// try-each-parser-in-turn loop before any other parser was reached). Defaulting to Slurm
+    /// therefore preserves existing behaviour exactly.
+    ///
+    /// The consequence for a pre-existing non-SLURM queue is that its scheduler must now be
+    /// selected explicitly — job ID parsing no longer falls through to the other schedulers.
+    /// </remarks>
+    public enum ClusterScheduler
+    {
+        /// <summary>SLURM: sbatch / squeue / scancel.</summary>
+        Slurm = 0,
+
+        /// <summary>IBM Spectrum LSF: bsub / bjobs / bkill.</summary>
+        Lsf = 1,
+
+        /// <summary>PBS / Torque: qsub / qstat / qdel.</summary>
+        Pbs = 2,
+
+        /// <summary>Sun Grid Engine and derivatives: qsub / qstat / qdel.</summary>
+        Sge = 3,
+
+        /// <summary>Flux: flux batch / flux jobs / flux cancel.</summary>
+        Flux = 4,
+
+        /// <summary>
+        /// Anything else. Job IDs are read with <see cref="Refund.JobQueues.ClusterQueue.JobIdParseRegex"/>
+        /// and states with the JobStatusParseTemplate* patterns.
+        /// </summary>
+        Custom = 5,
+
+        /// <summary>
+        /// No external scheduler: Relay runs the job as a local process and accounts for the host's
+        /// cores, memory and GPUs itself. Not a scheduler in the sense the other values are — the
+        /// job ID and status parsers are never consulted for a managed queue.
+        /// </summary>
+        /// <remarks>
+        /// 6, not 5: <see cref="Custom"/> already owns 5 and its persisted value must not shift.
+        /// </remarks>
+        Managed = 6
+    }
+
+    /// <summary>
+    /// The outcome of asking a queue whether it can start a job right now.
+    /// </summary>
+    /// <remarks>
+    /// A boolean cannot express the difference that matters. "No, resources are busy" must leave the
+    /// job Waiting so the daemon retries; "no, this can never run here" must fail it once, with a
+    /// reason. Throwing is not an alternative — HandleWaitingState's catch logs and returns without
+    /// changing job status, so an exception would leave the job Waiting and re-log every tick.
+    /// </remarks>
+    public abstract record AdmissionResult
+    {
+        private AdmissionResult() { }
+
+        /// <summary>Start the job now.</summary>
+        public sealed record Admit : AdmissionResult;
+
+        /// <summary>Resources are in use. Leave the job Waiting; the daemon will ask again.</summary>
+        public sealed record Busy : AdmissionResult;
+
+        /// <summary>The job can never run on this queue. Fail it once with this reason.</summary>
+        public sealed record Reject(string Reason) : AdmissionResult;
+
+        /// <summary>Shared instance — returned for every waiting job on every tick.</summary>
+        public static readonly AdmissionResult Admitted = new Admit();
+
+        /// <summary>Shared instance — returned for every waiting job on every tick.</summary>
+        public static readonly AdmissionResult IsBusy = new Busy();
     }
 
     /// <summary>

@@ -176,18 +176,44 @@ public class Class3DContinue : Class3D
         // Output prefix
         result["o"] = Space.GetRelativePath(Path.Combine(DirectoryPath, "run"));
 
+        // This subclass builds its args from scratch (base would crash on the empty Particles/Maps
+        // ports), so it must apply the pool overrides itself — mirroring Class3D.ComposeCommandArguments.
+        // Applied last so pool-owned args (--j, --pool_dir, --pool_batch; strip --gpu/--scratch_dir)
+        // win over the compute args set above. The worker command re-adds --gpu/--gpu_shares as needed.
+        if (IsPooled)
+            ApplyPoolArguments(result);
+
         return result;
+    }
+
+    /// <summary>
+    /// True if a predecessor-relative path belongs to worker-pool state that must NOT be copied into a
+    /// continued job: the RELION coordination directory (--pool_dir, <see cref="PoolDirName"/>) and
+    /// Relay's WorkerPool state/logs/script (pool_state.json, worker_logs, worker_submit.sh — see
+    /// <c>WorkerPool</c>). Copying them would corrupt this job's fresh pool with the previous run's
+    /// worker registrations, task queue, and submitted-id bookkeeping.
+    /// </summary>
+    public bool IsPoolArtifact(string relativePath)
+    {
+        var top = relativePath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)[0];
+        return top == PoolDirName
+            || top == "worker_logs"
+            || top == "pool_state.json"
+            || top == "worker_submit.sh";
     }
 
     public override void Stage()
     {
         base.Stage();
-        
-        // Copy all data and visualizations, including hidden folders, from the continued job's directory to the new job's directory
+
+        // Copy all data and visualizations, including hidden folders, from the continued job's directory
+        // to the new job's directory — except the previous run's worker-pool artifacts (see IsPoolArtifact).
         var predecessor = PortsIn[PortInOptimizer].Edges.First().Source.Job as Class3D;
         foreach (var filePath in Directory.EnumerateFiles(predecessor.DirectoryPath, "*", SearchOption.AllDirectories))
         {
             var relativePath = Path.GetRelativePath(predecessor.DirectoryPath, filePath);
+            if (IsPoolArtifact(relativePath))
+                continue;
             var destPath = Path.Combine(DirectoryPath, relativePath);
             Directory.CreateDirectory(Path.GetDirectoryName(destPath));
             File.Copy(filePath, destPath, overwrite: true);

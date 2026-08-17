@@ -29,6 +29,9 @@ public class ImportDataSetTs : WarpJob, IClusterJob
     public override int CoreCount => 16;
     public override int MemoryGb => 32;
 
+    /// <summary>CPU-only tool; requests no GPUs.</summary>
+    public override int GpuCount => 0;
+
     public override bool IsIterative => false;
 
     public override Type ExpandedViewType => typeof(ImportDataSetTsExpandedView);
