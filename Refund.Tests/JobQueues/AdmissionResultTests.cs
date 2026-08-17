@@ -24,7 +24,19 @@ public class AdmissionResultTests
     public void AdmitAndBusy_AreSharedSingletons()
     {
         // Returned for every waiting job on every daemon tick; do not allocate per call.
-        Assert.Same(AdmissionResult.Admitted, AdmissionResult.Admitted);
-        Assert.Same(AdmissionResult.IsBusy, AdmissionResult.IsBusy);
+        // Comparing a static field to itself proves nothing, so pin what the fields actually are:
+        // the right case, and distinct from each other.
+        Assert.IsType<AdmissionResult.Admit>(AdmissionResult.Admitted);
+        Assert.IsType<AdmissionResult.Busy>(AdmissionResult.IsBusy);
+        Assert.NotSame(AdmissionResult.Admitted, AdmissionResult.IsBusy);
+    }
+
+    [Fact]
+    public void BusyIsNotAdmit_SoTheCallerCannotConflateThem()
+    {
+        // "Busy, ask again" and "start now" differ only by type; a caller pattern-matching on
+        // Admit must not match Busy.
+        Assert.IsNotType<AdmissionResult.Admit>(AdmissionResult.IsBusy);
+        Assert.IsNotType<AdmissionResult.Busy>(AdmissionResult.Admitted);
     }
 }
