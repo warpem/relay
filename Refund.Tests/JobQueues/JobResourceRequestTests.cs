@@ -88,6 +88,7 @@ public class JobResourceRequestTests
         Assert.Equal(1, job.ProcessCount);
         Assert.Equal(1, job.CoreCount);
         Assert.Equal(16, job.MemoryGb);
+        Assert.Equal(1, job.GpuCount);   // UseGpu defaults to true, so this stays at the old implicit 1
     }
 
     [Fact]
@@ -95,6 +96,7 @@ public class JobResourceRequestTests
     {
         // Every concrete job type now states GpuCount explicitly, so the base default can only
         // be observed through a type that declines to override it — hence the stub below.
+        EnsurePopulated();
         Assert.Equal(0, new JobWithoutResourceOverrides().GpuCount);
     }
 
