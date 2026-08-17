@@ -402,6 +402,38 @@ public class ManagedProcessRegistryTests : IDisposable
     }
 
     [Fact]
+    public void TryContain_IsNotConfirmedWhileAnythingIsStillInTheGroup()
+    {
+        // The leader going is not the tree going. A submission script's bash exits while the mpirun
+        // ranks it started are still in the group setsid gave us, and a descendant in
+        // uninterruptible sleep outlives the leader by definition. Confirming on the leader's
+        // identity alone dropped the record and reopened managed admission onto a GPU that was
+        // still occupied.
+        var host = new FakeHost().Alive(4242, Launched);
+        var record = At(Launched);                       // pid 4242, pgid 4242
+
+        bool groupEmpty = false;
+
+        Assert.False(ManagedProcessRegistry.TryContain(record, host.StartTimeOf, _ => null,
+                                                       host.Kill, TimeSpan.Zero,
+                                                       groupIsEmpty: _ => groupEmpty));
+
+        // The kill landed and the leader really is gone — and it is still not containment.
+        Assert.Single(host.Signalled);
+        Assert.Null(host.StartTimeOf(4242));
+
+        groupEmpty = true;                               // the last descendant finally exits
+
+        Assert.True(ManagedProcessRegistry.TryContain(record, host.StartTimeOf, _ => null,
+                                                      host.Kill, TimeSpan.Zero,
+                                                      groupIsEmpty: _ => groupEmpty));
+
+        // Nothing was signalled the second time: the pid is not ours any more, and it may since
+        // have been recycled into somebody else's.
+        Assert.Single(host.Signalled);
+    }
+
+    [Fact]
     public void TryContain_OnARecordWhosePidWasRecycled_SignalsNothingAtAll()
     {
         // The daemon's retry (RetryContainment) calls TryContain once per reap tick, for as long

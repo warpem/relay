@@ -317,6 +317,32 @@ public sealed class SystemManagedProcess : IManagedProcess
 
     private const int SIGKILL = 9;
 
+    /// <summary>
+    /// Whether <paramref name="pgid"/> has any member left. Signal 0 asks the kernel about
+    /// existence and permission without delivering anything, so this is a probe and never a kill:
+    /// ESRCH means no process is in the group at all, which is the only answer that proves the work
+    /// a leftover record describes is really over. A leader's identity disappearing does not — a
+    /// descendant can outlive it in the same group.
+    /// </summary>
+    /// <remarks>
+    /// Any other failure (EPERM, or a p/invoke that throws) is reported as "not empty": something
+    /// may be there and we cannot see it, and the caller's cost for a false negative is a queue
+    /// that stays Busy and retries, against a GPU nothing is tracking for a false positive.
+    /// </remarks>
+    internal static bool GroupIsEmpty(int pgid)
+    {
+        // Same interlock as the kill path: -1 means "every process this user may signal", and no
+        // group we created can be 1 or below. An unaskable group is not an empty one.
+        if (pgid <= 1)
+            return false;
+
+        try { return Kill(-pgid, 0) != 0 && Marshal.GetLastWin32Error() == ESRCH; }
+        catch { return false; }
+    }
+
+    /// <summary>No such process — the errno that means the group is genuinely empty.</summary>
+    private const int ESRCH = 3;
+
     public async Task WaitForExitAsync(CancellationToken ct = default)
     {
         await _process.WaitForExitAsync(ct);

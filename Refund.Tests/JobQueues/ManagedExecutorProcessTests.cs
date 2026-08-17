@@ -631,6 +631,26 @@ public class ManagedExecutorProcessTests : IDisposable
         await WaitUntil(() => process.HasExited, timeoutMs: 5_000);
     }
 
+    [Fact]
+    public async Task GroupIsEmpty_AnswersTheRealKernel_InBothDirections()
+    {
+        // The probe the leftover sweep now believes before it drops a record, so both answers have
+        // to be right against a real kernel rather than only against a fake. Reading the errno
+        // wrongly would report every group as still occupied, and managed admission would then stay
+        // Busy for as long as Relay ran — the wedge this design works hardest to avoid.
+        Assert.False(SystemManagedProcess.GroupIsEmpty(getpgid(Environment.ProcessId)));
+
+        var process = SystemManagedProcess.Start(WriteScript("sleep 30"), _dir, Array.Empty<int>(),
+                                                 Path.Combine(_dir, "std.out"),
+                                                 Path.Combine(_dir, "std.err"));
+        process.KillTree();
+        await WaitUntil(() => process.HasExited, timeoutMs: 5_000);
+
+        // On the setsid branch this is the group we created, now emptied; on macOS there is no such
+        // group at all, which reads as ESRCH for the same reason and gives the same answer.
+        await WaitUntil(() => SystemManagedProcess.GroupIsEmpty(process.Pid), timeoutMs: 5_000);
+    }
+
     #endregion
 
     #region Process groups

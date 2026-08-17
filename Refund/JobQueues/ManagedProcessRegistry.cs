@@ -335,7 +335,8 @@ public sealed class ManagedProcessRegistry
     /// exists. Injected so the recycling logic is testable without spawning anything.
     /// </param>
     public static LeftoverSweepResult KillLeftovers(string path, Func<int, DateTime?> startTimeOf) =>
-        KillLeftovers(path, startTimeOf, KillRecord);
+        KillLeftovers(path, startTimeOf, KillRecord,
+                      groupIsEmpty: SystemManagedProcess.GroupIsEmpty);
 
     /// <summary>Overload with the kill injected, so the identity rules can be tested without
     /// putting real pids in range of a real SIGKILL.</summary>
@@ -347,10 +348,17 @@ public sealed class ManagedProcessRegistry
     /// How long to keep re-probing a killed process before declaring it a survivor; see
     /// <see cref="DefaultConfirmWait"/>. Zero means one re-probe and no waiting.
     /// </param>
+    /// <param name="groupIsEmpty">
+    /// The group-emptiness probe; see <see cref="SystemManagedProcess.GroupIsEmpty"/>. Left unset
+    /// only by the injected-kill callers, i.e. tests, whose pgids name no real group and must not
+    /// be handed to a syscall: null answers "empty", so those tests see the leader-identity rule
+    /// alone. Every production entry point passes the real probe.
+    /// </param>
     internal static LeftoverSweepResult KillLeftovers(string path, Func<int, DateTime?> startTimeOf,
                                                       Action<ManagedProcessRecord> kill,
                                                       Func<int, string> startTokenOf = null,
-                                                      TimeSpan? confirmWait = null)
+                                                      TimeSpan? confirmWait = null,
+                                                      Func<int, bool> groupIsEmpty = null)
     {
         startTokenOf ??= StartTokenOf;
 
@@ -372,7 +380,7 @@ public sealed class ManagedProcessRegistry
                 continue;
 
             if (TryContain(record, startTimeOf, startTokenOf, kill,
-                           confirmWait ?? DefaultConfirmWait))
+                           confirmWait ?? DefaultConfirmWait, groupIsEmpty))
                 killed++;
             else
                 unconfirmed.Add(record);
@@ -397,7 +405,8 @@ public sealed class ManagedProcessRegistry
     /// check of its own, which is why this one has to come before the signal.
     /// </remarks>
     public static bool TryContain(ManagedProcessRecord record) =>
-        TryContain(record, LiveProcessStartTime, StartTokenOf, KillRecord, DefaultConfirmWait);
+        TryContain(record, LiveProcessStartTime, StartTokenOf, KillRecord, DefaultConfirmWait,
+                   SystemManagedProcess.GroupIsEmpty);
 
     /// <summary>
     /// The reap-tick retry. Identical containment, but with a much shorter wait: it runs under the
@@ -406,13 +415,18 @@ public sealed class ManagedProcessRegistry
     /// </summary>
     public static bool RetryContainment(ManagedProcessRecord record) =>
         TryContain(record, LiveProcessStartTime, StartTokenOf, KillRecord,
-                   TimeSpan.FromMilliseconds(100));
+                   TimeSpan.FromMilliseconds(100), SystemManagedProcess.GroupIsEmpty);
 
+    /// <param name="groupIsEmpty">
+    /// See the parameter of the same name on
+    /// <see cref="KillLeftovers(string, Func{int, DateTime?}, Action{ManagedProcessRecord}, Func{int, string}, TimeSpan?, Func{int, bool})"/>.
+    /// </param>
     internal static bool TryContain(ManagedProcessRecord record,
                                     Func<int, DateTime?> startTimeOf,
                                     Func<int, string> startTokenOf,
                                     Action<ManagedProcessRecord> kill,
-                                    TimeSpan confirmWait)
+                                    TimeSpan confirmWait,
+                                    Func<int, bool> groupIsEmpty = null)
     {
         // Identity before signal, and not the other way round. KillLeftovers gates on identity
         // before it calls in here, but <see cref="RetryContainment"/> does not: the daemon calls
@@ -428,8 +442,11 @@ public sealed class ManagedProcessRegistry
         // is left at that pid, which is exactly what the caller needs to know to drop it.
         try
         {
+            // Nothing of ours is left at that pid, so there is nothing we may safely signal: the
+            // kernel could have recycled the pid, and with it the group. Whether the *work* is
+            // over is a separate question, and the one below answers it.
             if (!IsStillTheSameProcess(record, startTimeOf, startTokenOf))
-                return true;
+                return GroupIsGone(record, groupIsEmpty);
         }
         catch
         {
@@ -447,7 +464,8 @@ public sealed class ManagedProcessRegistry
         {
             try
             {
-                if (!IsStillTheSameProcess(record, startTimeOf, startTokenOf))
+                if (!IsStillTheSameProcess(record, startTimeOf, startTokenOf) &&
+                    GroupIsGone(record, groupIsEmpty))
                     return true;
             }
             catch
@@ -463,6 +481,22 @@ public sealed class ManagedProcessRegistry
             Thread.Sleep(ConfirmPollInterval < confirmWait ? ConfirmPollInterval : confirmWait);
         }
     }
+
+    /// <summary>
+    /// Whether the group this record owned still has a member. The leader's identity disappearing
+    /// is not the same thing: a descendant — an mpirun rank, a <c>( ... ) &amp;</c> subshell, a task
+    /// in uninterruptible sleep — can outlive the leader in the same group while still holding the
+    /// GPU the record exists to account for.
+    /// </summary>
+    /// <remarks>
+    /// A record with no group of ours has no group to ask about, and the leader check is then all
+    /// there is; that is the macOS path and the path for records written by an older Relay.
+    /// Reporting a non-empty group as not-contained is safe to be strict about because the caller
+    /// keeps the record, keeps managed admission Busy, and retries on the next daemon tick — so it
+    /// resolves itself once the last descendant exits, rather than wedging.
+    /// </remarks>
+    private static bool GroupIsGone(ManagedProcessRecord record, Func<int, bool> groupIsEmpty) =>
+        groupIsEmpty == null || record.Pgid is not { } pgid || pgid <= 1 || groupIsEmpty(pgid);
 
     /// <summary>
     /// The real kill. Goes through <see cref="SystemManagedProcess.KillTree(int, int?, Action, Func{bool})"/>
