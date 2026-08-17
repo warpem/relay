@@ -102,7 +102,12 @@ public sealed class ManagedProcessRegistry
                     exc, "The managed process registry at {Path} exists but could not be read. It " +
                          "may list processes left over from a previous run, which cannot now be " +
                          "found or killed. The file is being left untouched for inspection, and " +
-                         "nothing will be written to it until Relay is restarted.", _path);
+                         "nothing will be written to it. Restarting Relay does not clear this — " +
+                         "nothing repairs, renames or removes the file, so every future run reads " +
+                         "the same bytes and latches again. Inspect it, then delete or move it " +
+                         "aside; the next run starts a fresh registry. Until that happens, no " +
+                         "managed process launched on this host is recorded for a later startup " +
+                         "to find and kill.", _path);
 
             _unreadable = true;
             return new List<ManagedProcessRecord>();
