@@ -54,6 +54,12 @@ public class Class2D : RelionJob, IClusterJob
     public override JobQueueType QueueType => UseGpu ? JobQueueType.GPU : JobQueueType.CPU;
 
     /// <summary>
+    /// relion_refine is passed --gpu when UseGpu is set, and it uses a single device;
+    /// there is no per-job GPU count to configure. Requests none when running on the CPU.
+    /// </summary>
+    public override int GpuCount => UseGpu ? 1 : 0;
+
+    /// <summary>
     /// Indicates that this job produces intermediate results through multiple iterations
     /// </summary>
     public override bool IsIterative => true;

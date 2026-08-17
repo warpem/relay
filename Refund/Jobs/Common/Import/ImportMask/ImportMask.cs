@@ -26,6 +26,9 @@ public class ImportMask : Job, ILocalJob
 
     public override JobQueueType QueueType => JobQueueType.Local;
 
+    /// <summary>Runs locally on the CPU; requests no GPUs.</summary>
+    public override int GpuCount => 0;
+
     public override bool IsIterative => false;
 
     public override Type ExpandedViewType => typeof(ImportMaskExpandedView);

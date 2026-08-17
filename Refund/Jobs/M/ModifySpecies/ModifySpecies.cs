@@ -47,6 +47,9 @@ public class ModifySpecies : LocalJob, ILocalJob
     /// </summary>
     public override JobQueueType QueueType => JobQueueType.Local;
 
+    /// <summary>Runs locally on the CPU; requests no GPUs.</summary>
+    public override int GpuCount => 0;
+
     /// <summary>
     /// Gets whether this job produces iterative results.
     /// Import jobs are non-iterative as they simply copy existing files.

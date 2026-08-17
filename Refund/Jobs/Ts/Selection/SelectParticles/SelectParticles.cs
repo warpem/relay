@@ -77,6 +77,9 @@ public class SelectParticles : WarpJob, ILocalJob
 
     public override JobQueueType QueueType => JobQueueType.Local;
 
+    /// <summary>Runs locally on the CPU; requests no GPUs.</summary>
+    public override int GpuCount => 0;
+
     public override Type ExpandedViewType => typeof(SelectParticlesExpandedView);
 
     public override int2 CardSquareCount { set; get; } = new int2(2, 1);

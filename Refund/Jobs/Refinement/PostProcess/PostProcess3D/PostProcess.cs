@@ -63,6 +63,9 @@ public class  PostProcess : RelionJob, IClusterJob
     /// Post-processing is typically CPU-bound and doesn't require GPU acceleration.
     /// </summary>
     public override JobQueueType QueueType => JobQueueType.CPU;
+
+    /// <summary>CPU-only tool; requests no GPUs.</summary>
+    public override int GpuCount => 0;
     
     /// <summary>
     /// This job doesn't have a custom expanded view - it uses the standard job view.

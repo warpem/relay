@@ -355,8 +355,10 @@ public abstract class Job : RelayBase, IFolderContent
     /// <summary>
     /// Number of GPUs to allocate when running this job.
     /// Default is 0 (no GPUs), but can be overridden by job implementations that use GPU acceleration.
+    /// Every concrete job type states this explicitly; the default exists so a new type that forgets
+    /// cannot silently reserve a GPU.
     /// </summary>
-    public virtual int GpuCount => 1;
+    public virtual int GpuCount => 0;
 
     /// <summary>
     /// Amount of GPU memory in gigabytes required per GPU when running this job.

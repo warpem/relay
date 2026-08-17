@@ -36,6 +36,9 @@ public class ExpandSymmetry : RelionJob, IClusterJob
 
     public override JobQueueType QueueType => JobQueueType.CPU;
 
+    /// <summary>CPU-only tool; requests no GPUs.</summary>
+    public override int GpuCount => 0;
+
     public override Type ExpandedViewType => null;
 
     public override bool IsIterative => false;
