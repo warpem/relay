@@ -30,6 +30,12 @@ public partial class QueueRepository
                 queue.AdoptState(template);
 
             queue.Id = _clusterQueues.Select(q => q.Id).DefaultIfEmpty(0).Max() + 1;
+
+            // The host-wide executor. Attached to every cluster queue, not only the managed ones:
+            // the scheduler type is editable afterwards, and a managed queue without an executor
+            // rejects every job it is handed.
+            queue.Executor = ManagedExecutor;
+
             _clusterQueues.Add(queue);
 
             _needsSaving = true;

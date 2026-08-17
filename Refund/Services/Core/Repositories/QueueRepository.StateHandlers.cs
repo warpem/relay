@@ -49,6 +49,45 @@ public partial class QueueRepository
                         throw new InvalidOperationException(
                             $"Pool queue \"{poolQueue.Alias}\" has no Cancel Many Jobs template configured. " +
                             "Add a CancelManyJobsTemplate (e.g. \"scancel {{job_ids}}\") before using it as a pool queue.");
+
+                    if (poolQueue.IsManaged)
+                        throw new InvalidOperationException(
+                            $"Pool queue \"{poolQueue.Alias}\" is a managed queue. Worker pools submit " +
+                            "bare scripts with no resource request attached, so a managed queue cannot " +
+                            "admit them. Pick a queue backed by an external scheduler.");
+                }
+
+                // Ask the queue before moving the job out of Waiting, never after. A job rejected
+                // after the transition would strand in Staging, and the whole point of returning
+                // Busy rather than throwing is that the daemon can retry cleanly from Waiting.
+                switch (queue.CanAdmit(job))
+                {
+                    case AdmissionResult.Admit:
+                        break;                              // proceed to staging
+
+                    case AdmissionResult.Busy:
+                        return;                             // resources in use; the daemon asks again next tick
+
+                    case AdmissionResult.Reject reject:
+                        // Fail it once. Leaving it Waiting would re-log the same reason every tick.
+                        await job.WriteToErrorLog(reject.Reason);
+                        _jobUpdateCallback(job, j =>
+                        {
+                            j.Status = JobStatus.Failed;
+                            j.AddEvent(EventType.Failed);
+                        });
+                        _logger.Warning("Job {JobId} rejected by queue {QueueAlias}: {Reason}",
+                                        job.Id, queue.Alias, reject.Reason);
+                        return;
+
+                    // AdmissionResult's private constructor does not actually close the hierarchy —
+                    // a record's protected copy constructor can be chained — and C# would not treat
+                    // the switch as exhaustive even if it did. Refusing to start is the safe answer
+                    // for a verdict this code does not understand.
+                    default:
+                        _logger.Error("Queue {QueueAlias} returned an unrecognised admission verdict " +
+                                      "for job {JobId}; leaving it Waiting.", queue.Alias, job.Id);
+                        return;
                 }
 
                 // Transition to Staging state

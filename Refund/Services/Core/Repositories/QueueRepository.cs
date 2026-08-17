@@ -131,6 +131,13 @@ public partial class QueueRepository
     public ReadOnlyCollection<JobQueue> ClusterQueues => _clusterQueues.ToList().AsReadOnly();
 
     /// <summary>
+    /// One executor per host, shared by every managed queue. A host has one set of GPUs, so it has
+    /// one ledger — per-queue executors would let two managed queues each reserve the whole machine
+    /// and both hand out CUDA device 0.
+    /// </summary>
+    public ManagedExecutor ManagedExecutor { get; }
+
+    /// <summary>
     /// Initializes a new instance of the QueueRepository class.
     /// </summary>
     /// <param name="statePath">Path to the file where queue state will be persisted</param>
@@ -155,6 +162,26 @@ public partial class QueueRepository
             Id = -1,
             QueueType = JobQueueType.Local
         };
+
+        var registryPath = Path.Combine(Path.GetDirectoryName(_statePath) ?? "", "managed-processes.json");
+
+        // Before anything is admitted: kill compute left running by a Relay that crashed rather
+        // than shut down. An orphan holding a GPU blocks every later job on a single-GPU host.
+        try
+        {
+            int leftovers = ManagedProcessRegistry.KillLeftovers(
+                registryPath, ManagedProcessRegistry.LiveProcessStartTime);
+            if (leftovers > 0)
+                _logger.Warning("Killed {Count} managed process(es) left over from a previous run", leftovers);
+        }
+        catch (Exception exc)
+        {
+            // A sweep that cannot run is bad, but a Relay that cannot start is worse: every job on
+            // the host is then unreachable, not just the ones sharing a GPU with an orphan.
+            _logger.Error(exc, "Could not sweep managed processes left over from a previous run");
+        }
+
+        ManagedExecutor = new ManagedExecutor(new ManagedProcessRegistry(registryPath));
 
         InitializeClusterQueues();
     }
@@ -195,6 +222,11 @@ public partial class QueueRepository
                     var queue = new ClusterQueue(_jobUpdateCallback);
                     // The job finder delegate allows the queue to resolve job references by ID
                     queue.ReadFromJson(queueNode, (pId, sId, jId) => dataRepository.FindJob(pId, sId, jId));
+
+                    // Attached unconditionally, not only when the queue reads back as Managed: the
+                    // scheduler type can be switched to Managed in the editor afterwards, and a
+                    // queue with no executor rejects every job it is handed.
+                    queue.Executor = ManagedExecutor;
 
                     _clusterQueues.Add(queue);
                 }
@@ -293,6 +325,27 @@ public partial class QueueRepository
             _logger.Information("Successfully saved queue state with {ClusterQueueCount} cluster queues to {StatePath}", 
                 _clusterQueues.Count(q => q is ClusterQueue), Path.GetFullPath(_statePath));
         }
+    }
+
+    #endregion
+
+    #region Shutdown
+
+    /// <summary>
+    /// Stops the daemon and kills every managed process tree. Ordered: admission closes first, so a
+    /// job admitted but not yet launched cannot have its staging task spawn a process after the
+    /// sweep has passed.
+    /// </summary>
+    /// <remarks>
+    /// Called from the host's ApplicationStopping hook, not from <see cref="Dispose()"/>:
+    /// DataManager implements no disposal and is registered as an externally-constructed singleton,
+    /// which the DI container never disposes.
+    /// </remarks>
+    public async Task ShutdownAsync()
+    {
+        ManagedExecutor.BeginShutdown();
+        StopDaemon();
+        await ManagedExecutor.KillAllAsync();
     }
 
     #endregion
