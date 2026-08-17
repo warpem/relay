@@ -27,6 +27,69 @@ public class ManagedQueueConfigTests
         Assert.Contains("Local", error.Message);
     }
 
+    #region The single-managed-queue rule at load
+
+    [Fact]
+    public void LoadingTwoManagedQueues_DisablesAllButTheLowestNumbered()
+    {
+        // CreateClusterQueue and UpdateQueue both refuse a second managed queue, but nothing
+        // guarded loading — so a hand-edited, copied or half-migrated state file could start Relay
+        // in exactly the configuration its own UI cannot produce: two queues sharing the host-wide
+        // executor while each declares the whole machine, both handing out CUDA device 0.
+        var first = Managed("Workstation");  first.Id  = 3;
+        var second = Managed("Copy of Workstation"); second.Id = 7;
+
+        var disabled = ManagedQueueRules.DisableDuplicateManagedQueues(new[] { second, first });
+
+        // Lowest Id wins: stable across reloads, and it is the one the user has been running on.
+        Assert.Same(second, Assert.Single(disabled));
+        Assert.Null(first.ManagedDisabledReason);
+        Assert.Contains("Workstation", second.ManagedDisabledReason);
+    }
+
+    [Fact]
+    public void ADisabledDuplicate_RejectsEveryJob_WithTheReasonItWasGiven()
+    {
+        var first = Managed("Workstation");  first.Id  = 1;
+        var second = Managed("Copy", new ManagedExecutor()); second.Id = 2;
+
+        ManagedQueueRules.DisableDuplicateManagedQueues(new[] { first, second });
+
+        // Reject, not Busy: no amount of waiting resolves a duplicated configuration.
+        var reject = Assert.IsType<AdmissionResult.Reject>(second.CanAdmit(null));
+        Assert.Contains("only", reject.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void OneManagedQueue_IsLeftAlone_AndAVerdictIsLiftedWhenTheDuplicationGoesAway()
+    {
+        var first = Managed("Workstation");  first.Id  = 1;
+        var second = Managed("Copy"); second.Id = 2;
+
+        ManagedQueueRules.DisableDuplicateManagedQueues(new[] { first, second });
+        Assert.NotNull(second.ManagedDisabledReason);
+
+        // The recommended fix: switch the other one to a real scheduler. Recomputing must lift the
+        // verdict, or the surviving queue would reject every job until Relay was restarted.
+        first.SchedulerType = ClusterScheduler.Slurm;
+
+        Assert.Empty(ManagedQueueRules.DisableDuplicateManagedQueues(new[] { first, second }));
+        Assert.Null(second.ManagedDisabledReason);
+    }
+
+    [Fact]
+    public void NonManagedQueues_AreNeverDisabled()
+    {
+        var slurm = new ClusterQueue((_, _) => { })
+                    { Id = 1, Alias = "Cluster", SchedulerType = ClusterScheduler.Slurm };
+        var flux = new ClusterQueue((_, _) => { })
+                   { Id = 2, Alias = "Other", SchedulerType = ClusterScheduler.Flux };
+
+        Assert.Empty(ManagedQueueRules.DisableDuplicateManagedQueues(new[] { slurm, flux }));
+    }
+
+    #endregion
+
     [Fact]
     public void ReconfiguringTheSameManagedQueue_IsAllowed()
     {

@@ -58,6 +58,11 @@ public partial class QueueRepository
         {
             updateAction(queue);
 
+            // Recomputed after every edit, not only at load. Switching the *other* managed queue to
+            // a different scheduler is exactly how a user resolves the duplication, and the queue
+            // that was disabled must come back without a restart.
+            ManagedQueueRules.DisableDuplicateManagedQueues(_clusterQueues.OfType<ClusterQueue>());
+
             _needsSaving = true;
         }
 

@@ -84,6 +84,14 @@ public class ClusterQueue : JobQueue, IPoolQueue
     public bool IsManaged => SchedulerType == ClusterScheduler.Managed;
 
     /// <summary>
+    /// Why this managed queue is not allowed to admit anything, or null in the normal case.
+    /// Deliberately not persisted: it is a verdict on the configuration as loaded, recomputed each
+    /// startup by <see cref="ManagedQueueRules.DisableDuplicateManagedQueues"/> and cleared as soon
+    /// as the queue is edited, since the edit itself goes through the same rules.
+    /// </summary>
+    public string ManagedDisabledReason { get; set; }
+
+    /// <summary>
     /// Read fresh on every use rather than snapshotted: this object is constructed before
     /// ReadFromJson hydrates the persisted values, and the editor can change them later.
     /// </summary>
@@ -1135,6 +1143,11 @@ public class ClusterQueue : JobQueue, IPoolQueue
     {
         if (!IsManaged)
             return AdmissionResult.Admitted;      // the external scheduler arbitrates
+
+        // A duplicate managed queue found at load; see ManagedQueueRules.DisableDuplicateManagedQueues.
+        // Reject, not Busy: nothing about waiting fixes a configuration the UI would have refused.
+        if (!string.IsNullOrEmpty(ManagedDisabledReason))
+            return new AdmissionResult.Reject(ManagedDisabledReason);
 
         if (Executor == null)
             return new AdmissionResult.Reject(

@@ -28,6 +28,53 @@ public static class ManagedQueueRules
     }
 
     /// <summary>
+    /// Applies the single-managed-queue rule to a set of queues that already exists — a state file
+    /// that was hand-edited, copied between hosts, or half-migrated. Returns the queues that were
+    /// disabled, so the caller can say which.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ValidateOnly"/> guards the two paths that <em>create</em> a managed queue, but
+    /// nothing guarded loading, so Relay could start in exactly the configuration its own UI and
+    /// DataManager refuse to produce: two queues sharing the host-wide executor while each declares
+    /// the whole machine's totals, both handing out CUDA device 0.
+    /// <para>
+    /// Throwing here is not an option — the alternative to a partly-usable Relay would be no Relay
+    /// at all, with every job on the host unreachable. The extras are kept, and loaded, and
+    /// editable; they simply admit nothing until the user resolves the duplication, and
+    /// <see cref="ClusterQueue.ManagedDisabledReason"/> is what they are told when they try.
+    /// </para>
+    /// <para>
+    /// The lowest Id wins, which is stable across reloads and is the queue that was created first —
+    /// so the one the user has actually been running jobs on keeps working.
+    /// </para>
+    /// </remarks>
+    public static IReadOnlyList<ClusterQueue> DisableDuplicateManagedQueues(
+        IEnumerable<ClusterQueue> queues)
+    {
+        var managed = queues.Where(q => q.IsManaged).ToList();
+
+        // Recomputed from scratch every time, so this is also how a verdict is *lifted*: switch the
+        // other managed queue to a different scheduler and the disabled one comes back by itself.
+        foreach (var queue in managed)
+            queue.ManagedDisabledReason = null;
+
+        if (managed.Count <= 1)
+            return Array.Empty<ClusterQueue>();
+
+        var keep = managed.OrderBy(q => q.Id).First();
+        var disabled = managed.Where(q => !ReferenceEquals(q, keep)).ToList();
+
+        foreach (var queue in disabled)
+            queue.ManagedDisabledReason =
+                $"\"{keep.Alias}\" is already the managed queue for this host, and there can only " +
+                $"be one — a host has a single set of cores and GPUs. Queue \"{queue.Alias}\" was " +
+                "loaded as a second managed queue and will not run anything. Switch it to another " +
+                "scheduler, or delete it.";
+
+        return disabled;
+    }
+
+    /// <summary>
     /// Refuses total changes while jobs are running, rather than defining what should happen when
     /// new totals fall below current usage.
     /// </summary>

@@ -253,6 +253,18 @@ public partial class QueueRepository
                     _clusterQueues.Add(queue);
                 }
 
+            // The fully deserialized set, before the daemon runs a single tick. CreateClusterQueue
+            // and UpdateQueue both refuse a second managed queue, but nothing guarded loading, so a
+            // hand-edited, copied or half-migrated state file could start Relay in exactly the
+            // configuration its own UI cannot produce: two queues sharing the host-wide executor
+            // while each declares the whole machine, both handing out CUDA device 0.
+            foreach (var disabled in ManagedQueueRules.DisableDuplicateManagedQueues(
+                         _clusterQueues.OfType<ClusterQueue>()))
+                _logger.Error(
+                    "Queue {QueueId} (\"{QueueAlias}\") was loaded as a second managed queue and " +
+                    "has been disabled: {Reason}",
+                    disabled.Id, disabled.Alias, disabled.ManagedDisabledReason);
+
             _logger.Information("Successfully loaded {LocalJobCount} local jobs and {ClusterQueueCount} cluster queues from {StatePath}",
                 _localQueue.QueuedJobs.Count, _clusterQueues.Count, Path.GetFullPath(_statePath));
 
