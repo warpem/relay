@@ -249,9 +249,17 @@ public sealed class SystemManagedProcess : IManagedProcess
     /// A no-op where we could never prove a group of ours — macOS, or a child that exited before
     /// anything read <see cref="Pgid"/> — because a group we did not create is Relay's own.
     /// Signalling a group that is already empty costs one ESRCH, which is why the caller does not
-    /// have to know whether anything is left in it. Carries the same accepted residual as the live
-    /// path: between the child being reaped and this landing, the kernel could in principle recycle
-    /// the pgid.
+    /// have to know whether anything is left in it.
+    /// <para>
+    /// <b>The recycled-pgid residual here is wider than on the live path, and is accepted.</b> The
+    /// live path usually signals a group whose leader is still alive, so the pgid cannot be reused
+    /// while we hold it. This one fires only <em>after</em> .NET has reaped the child, so the pid —
+    /// and with it the group id, which equals it — is already back in the kernel's pool by the time
+    /// we call. It then runs on the normal completion of every managed job, not just on a kill, and
+    /// is reached up to a full daemon tick plus the 10 s drain grace after the reap. Closing it
+    /// properly needs a cgroup, which this design does not have; until then a recycled group is a
+    /// real if unlikely outcome of an ordinary successful job.
+    /// </para>
     /// </remarks>
     internal void KillOwnGroup()
     {
