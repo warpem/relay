@@ -799,6 +799,112 @@ public class ManagedExecutorProcessTests : IDisposable
     }
 
     [Fact]
+    public async Task ThePersistedRecordEndsUpCarryingTheProcessGroup_OnTheSetsidBranch()
+    {
+        // The deployment branch of the containment design, forced onto whatever machine runs this.
+        //
+        // Pgid resolves lazily, so the record written at launch is *born null* — the child has not
+        // reached setsid(2) when Process.Start returns. That is expected and is not the bug; the
+        // bug would be leaving it null forever, because the startup sweep has no Process handle and
+        // dispatches on a non-null group. So this asserts the upgrade actually lands: after
+        // reconciliation the persisted Pgid is the child's own pid, which is exactly what
+        // KillTree needs to issue kill(-pgid).
+        var standIn = SetsidStandIn();
+        Assert.NotNull(standIn);
+
+        var previous = SystemManagedProcess.SetsidPathOverride;
+        SystemManagedProcess.SetsidPathOverride = standIn;
+        try
+        {
+            Assert.True(SystemManagedProcess.CanCreateOwnGroup);
+
+            var registry = new ManagedProcessRegistry(Path.Combine(_dir, "managed-processes.json"));
+            var executor = new ManagedExecutor(registry);
+
+            var job = NewJob();
+            executor.TryAdmit(job, new ResourceTotals(8, 32, 0));
+
+            var release = Path.Combine(_dir, "release");
+            var process = executor.Launch(
+                job, WriteScript($"while [ ! -f '{release}' ]; do sleep 0.05; done"), _dir);
+            try
+            {
+                // Recorded from the instant it launched, and — measured, not assumed — with no
+                // group yet: the child is still between fork(2) and setsid(2). If this ever starts
+                // failing, the record is resolving its group at launch and the refresh below has
+                // stopped being the thing under test.
+                var born = Assert.Single(registry.Load());
+                Assert.Equal(process.Pid, born.Pid);
+                Assert.Null(born.Pgid);
+
+                await WaitUntil(() =>
+                {
+                    executor.Reap();
+                    return registry.Load().Single().Pgid != null;
+                }, timeoutMs: 5_000);
+
+                var record = registry.Load().Single();
+                var pgid = record.Pgid;
+                Assert.NotNull(pgid);
+                Assert.Equal(process.Pid, pgid);
+                Assert.Equal(pgid.Value, getpgid(process.Pid));             // the OS agrees
+                Assert.NotEqual(getpgid(Environment.ProcessId), pgid.Value);
+                Assert.Equal(process.StartTime.Ticks, record.StartTimeTicks);
+            }
+            finally
+            {
+                File.WriteAllText(release, "");
+                executor.Kill(job);
+                await WaitUntil(() => process.HasExited, timeoutMs: 10_000);
+            }
+
+            // And once it has settled it is no longer a leftover.
+            job.Status = JobStatus.Finished;
+            executor.Reap();
+            Assert.Empty(registry.Load());
+        }
+        finally
+        {
+            SystemManagedProcess.SetsidPathOverride = previous;
+        }
+    }
+
+    [Fact]
+    public async Task WithoutASetsidBranch_ThePersistedRecordStaysNull()
+    {
+        // The macOS half of the same interlock, asserted rather than skipped: with no group of our
+        // own the record must never acquire one, because on that platform the child's pgid is
+        // Relay's and kill(-pgid) would take Relay down.
+        if (SystemManagedProcess.CanCreateOwnGroup)
+            return;   // this platform has setsid; the test above is the one that applies here
+
+        var registry = new ManagedProcessRegistry(Path.Combine(_dir, "managed-processes.json"));
+        var executor = new ManagedExecutor(registry);
+
+        var job = NewJob();
+        executor.TryAdmit(job, new ResourceTotals(8, 32, 0));
+
+        var release = Path.Combine(_dir, "release");
+        var process = executor.Launch(
+            job, WriteScript($"while [ ! -f '{release}' ]; do sleep 0.05; done"), _dir);
+        try
+        {
+            for (var i = 0; i < 10; i++)
+            {
+                executor.Reap();
+                await Task.Delay(25);
+                Assert.Null(registry.Load().Single().Pgid);
+            }
+        }
+        finally
+        {
+            File.WriteAllText(release, "");
+            executor.Kill(job);
+            await WaitUntil(() => process.HasExited, timeoutMs: 10_000);
+        }
+    }
+
+    [Fact]
     public void CanCreateOwnGroup_TracksWhetherSetsidIsActuallyInstalled()
     {
         var setsidExists = File.Exists("/usr/bin/setsid") || File.Exists("/bin/setsid");

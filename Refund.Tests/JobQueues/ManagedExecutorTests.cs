@@ -8,9 +8,17 @@ using Class2DJob = Refund.Jobs.Refinement.Classes2D.Class2D.Class2D;
 namespace Refund.Tests.JobQueues;
 
 [Collection("JobRegistry")]
-public class ManagedExecutorTests
+public class ManagedExecutorTests : IDisposable
 {
     private static readonly object _populateLock = new();
+
+    private readonly string _dir = Path.Combine(Path.GetTempPath(), "relay-executor-" + Guid.NewGuid());
+
+    public ManagedExecutorTests() => Directory.CreateDirectory(_dir);
+    public void Dispose() { try { Directory.Delete(_dir, true); } catch { } }
+
+    private ManagedProcessRegistry NewRegistry() =>
+        new(Path.Combine(_dir, "managed-processes.json"));
 
     private static void EnsurePopulated()
     {
@@ -738,6 +746,260 @@ public class ManagedExecutorTests
         Assert.Equal(1, allocation.Cores);
         Assert.Equal(16, allocation.MemoryGb);
         Assert.Equal(new[] { 0 }, allocation.GpuIndices);
+    }
+
+    #endregion
+
+    #region Shutdown
+
+    [Fact]
+    public void OnceShutdownBegins_NothingNewIsAdmittedOrLaunched()
+    {
+        var executor = new ManagedExecutor();
+        var job = NewJob();
+        Assert.IsType<AdmissionResult.Admit>(executor.TryAdmit(job, Host));
+
+        executor.BeginShutdown();
+
+        Assert.IsType<AdmissionResult.Busy>(executor.TryAdmit(NewJob(), Host));
+        Assert.Throws<InvalidOperationException>(
+            () => executor.Launch(job, "/tmp/does-not-matter.sh", "/tmp"));
+    }
+
+    [Fact]
+    public void ShutdownRefusesAdmission_AsBusyRatherThanAsAPermanentRejection()
+    {
+        // Reject is terminal: the daemon fails the job with the reason string. A job that simply
+        // arrived while Relay was stopping must still be Waiting when Relay comes back.
+        var executor = new ManagedExecutor();
+        executor.BeginShutdown();
+
+        Assert.IsType<AdmissionResult.Busy>(executor.TryAdmit(NewJob(), Host));
+    }
+
+    [Fact]
+    public async Task KillAllAsync_ClosesAdmissionBeforeItKillsAnything()
+    {
+        // The ordering is the whole point. An entry admitted but not yet launched has no process
+        // for the sweep to find, so a kill-then-return would let its in-flight staging task spawn
+        // one *after* the sweep had already passed. Probed from inside the kill, which is the
+        // latest instant at which admission could still be found open.
+        var executor = new ManagedExecutor();
+        var job = NewJob();
+        Assert.IsType<AdmissionResult.Admit>(executor.TryAdmit(job, Host));
+
+        AdmissionResult? duringTheKill = null;
+        Exception? launchDuringTheKill = null;
+
+        var process = new ProbeProcess(() =>
+        {
+            duringTheKill = executor.TryAdmit(NewJob(), Host);
+            launchDuringTheKill = Record.Exception(
+                () => executor.Launch(NewJob(), "/tmp/does-not-matter.sh", "/tmp"));
+        });
+        Assert.True(executor.Attach(job, process));
+
+        await executor.KillAllAsync();
+
+        Assert.IsType<AdmissionResult.Busy>(duringTheKill);
+        Assert.IsType<InvalidOperationException>(launchDuringTheKill);
+    }
+
+    /// <summary>A process that runs a caller-supplied probe at the moment it is killed.</summary>
+    private sealed class ProbeProcess : IManagedProcess
+    {
+        private readonly Action _onKill;
+
+        public ProbeProcess(Action onKill) => _onKill = onKill;
+
+        public int Pid => 4242;
+        public DateTime StartTime => new(2026, 1, 1);
+        public bool HasExited { get; private set; }
+        public int ExitCode => 137;
+
+        public void KillTree()
+        {
+            _onKill();
+            HasExited = true;
+        }
+
+        public Task WaitForExitAsync(CancellationToken ct = default) => Task.CompletedTask;
+    }
+
+    [Fact]
+    public async Task KillAllAsync_KillsEveryTrackedProcess_AndForgetsEveryEntry()
+    {
+        var executor = new ManagedExecutor();
+
+        var first = NewJob();
+        var second = NewJob();
+        executor.TryAdmit(first, Host);
+        executor.TryAdmit(second, Host);
+
+        var running = new FakeProcess();
+        var alsoRunning = new FakeProcess();
+        executor.Attach(first, running);
+        executor.Attach(second, alsoRunning);
+
+        await executor.KillAllAsync();
+
+        Assert.Equal(1, running.KillCount);
+        Assert.Equal(1, alsoRunning.KillCount);
+        Assert.False(executor.HasEntries(_ => true));
+        Assert.Empty(executor.LiveAllocations());
+    }
+
+    [Fact]
+    public async Task KillAllAsync_ToleratesAnEntryThatWasNeverLaunched()
+    {
+        // Admitted, still staging: there is no process to kill, and the null must not throw.
+        var executor = new ManagedExecutor();
+        executor.TryAdmit(NewJob(), Host);
+
+        await executor.KillAllAsync();
+
+        Assert.False(executor.HasEntries(_ => true));
+    }
+
+    [Fact]
+    public async Task KillAllAsync_KillsTheRestEvenIfOneProcessThrows()
+    {
+        var executor = new ManagedExecutor();
+
+        var thrower = NewJob();
+        var ordinary = NewJob();
+        executor.TryAdmit(thrower, Host);
+        executor.TryAdmit(ordinary, Host);
+
+        executor.Attach(thrower, new ProbeProcess(() => throw new InvalidOperationException("gone")));
+        var survivor = new FakeProcess();
+        executor.Attach(ordinary, survivor);
+
+        await executor.KillAllAsync();
+
+        Assert.Equal(1, survivor.KillCount);
+    }
+
+    [Fact]
+    public void ALaunchThatFinishesSpawningAfterShutdownBegan_KillsTheProcessAndThrows()
+    {
+        // The other half of the ordering. The guard at the top of Launch was passed before shutdown
+        // started, so the spawn goes ahead; by the time it returns, KillAllAsync may already have
+        // taken its snapshot and walked past this entry. Nothing else would ever signal it.
+        var executor = new ManagedExecutor();
+        var job = NewJob();
+        executor.TryAdmit(job, Host);
+
+        var late = new FakeProcess();
+
+        Assert.Throws<InvalidOperationException>(() => executor.Launch(job, _ =>
+        {
+            executor.BeginShutdown();
+            return late;
+        }));
+
+        Assert.Equal(1, late.KillCount);
+    }
+
+    #endregion
+
+    #region The leftover registry
+
+    [Fact]
+    public void Launching_RecordsTheProcess_AndSettlingForgetsIt()
+    {
+        var registry = NewRegistry();
+        var executor = new ManagedExecutor(registry);
+
+        var job = NewJob();
+        job.Status = JobStatus.Running;
+        executor.TryAdmit(job, Host);
+
+        var process = new FakeProcess { Pid = 5150, StartTime = new DateTime(1234) };
+        executor.Launch(job, _ => process);
+
+        var record = Assert.Single(registry.Load());
+        Assert.Equal(job.Id, record.JobId);
+        Assert.Equal(5150, record.Pid);
+        Assert.Equal(new DateTime(1234).Ticks, record.StartTimeTicks);
+
+        process.Exit(0);
+        job.Status = JobStatus.Finished;
+        executor.Reap();
+
+        Assert.Empty(registry.Load());   // no longer a leftover: it is dead and accounted for
+    }
+
+    [Fact]
+    public void ANonSystemProcessIsRecordedWithNoProcessGroup()
+    {
+        // Only SystemManagedProcess can have a group of ours. Anything else must persist null, or
+        // the startup sweep would group-kill a number that was never a group we created.
+        var registry = NewRegistry();
+        var executor = new ManagedExecutor(registry);
+
+        var job = NewJob();
+        executor.TryAdmit(job, Host);
+        executor.Launch(job, _ => new FakeProcess());
+
+        Assert.Null(Assert.Single(registry.Load()).Pgid);
+    }
+
+    [Fact]
+    public void ALaunchThatFailsToAttach_LeavesNoRecordBehind()
+    {
+        // The process is killed on this path, so recording it would put a dead pid in range of the
+        // next sweep — and, worse, clobber the record of whichever run replaced this reservation.
+        var registry = NewRegistry();
+        var executor = new ManagedExecutor(registry);
+
+        var job = NewJob();
+        executor.TryAdmit(job, Host);
+
+        Assert.Throws<InvalidOperationException>(() => executor.Launch(job, _ =>
+        {
+            executor.Kill(job);
+            executor.Reap();
+            return new FakeProcess();
+        }));
+
+        Assert.Empty(registry.Load());
+    }
+
+    [Fact]
+    public async Task KillAllAsync_ClearsTheRegistry()
+    {
+        // A clean shutdown leaves nothing for the next startup to sweep. Records left behind would
+        // point the next Relay's sweep at pids that have since been recycled.
+        var registry = NewRegistry();
+        var executor = new ManagedExecutor(registry);
+
+        var job = NewJob();
+        executor.TryAdmit(job, Host);
+        executor.Launch(job, _ => new FakeProcess());
+        Assert.Single(registry.Load());
+
+        await executor.KillAllAsync();
+
+        Assert.Empty(registry.Load());
+    }
+
+    [Fact]
+    public void AnExecutorWithNoRegistry_StillLaunchesAndReconciles()
+    {
+        // The registry is optional; every accounting-only test constructs the executor without one.
+        var executor = new ManagedExecutor();
+        var job = NewJob();
+        executor.TryAdmit(job, Host);
+
+        var process = new FakeProcess();
+        Assert.Same(process, executor.Launch(job, _ => process));
+
+        process.Exit(0);
+        job.Status = JobStatus.Finished;
+        executor.Reap();
+
+        Assert.False(executor.HasEntries(_ => true));
     }
 
     #endregion

@@ -37,6 +37,14 @@ public sealed class ManagedExecutor
         /// and not already spent by a process that has run and exited.
         /// </summary>
         public bool IsUsableReservation => !Condemned && ExitCode == null;
+
+        /// <summary>
+        /// What was last written to the leftover registry for this entry, or null if nothing was.
+        /// Kept so a record persisted before the child had entered its process group can be
+        /// upgraded once the group appears — see <see cref="RefreshRegistryPgid"/> — and so a
+        /// retired entry only rewrites the file when it actually had a record to drop.
+        /// </summary>
+        public ManagedProcessRecord Record { get; set; }
     }
 
     /// <summary>
@@ -47,6 +55,19 @@ public sealed class ManagedExecutor
     private readonly Dictionary<Job, Entry> _entries = new();
 
     private readonly object _sync = new();
+
+    /// <summary>
+    /// Where launched processes are persisted so a restarted Relay can kill what a crashed one left
+    /// behind. Optional: every test that only exercises the accounting rules passes none.
+    /// </summary>
+    private readonly ManagedProcessRegistry _registry;
+
+    /// <summary>
+    /// Set once, never cleared. Volatile because the guards read it outside <see cref="_sync"/>.
+    /// </summary>
+    private volatile bool _shuttingDown;
+
+    public ManagedExecutor(ManagedProcessRegistry registry = null) => _registry = registry;
 
     /// <summary>
     /// Cores are per-process in the job model (<c>Job.CoreCount</c>, Job.cs:347) while memory is
@@ -84,6 +105,11 @@ public sealed class ManagedExecutor
     /// </remarks>
     public AdmissionResult TryAdmit(Job job, ResourceTotals totals)
     {
+        // Busy, not Reject: the host is not permanently incapable of running this job, it is going
+        // away. The daemon leaves a Busy job Waiting, so it is still queued after the restart.
+        if (_shuttingDown)
+            return AdmissionResult.IsBusy;
+
         var request = RequestFor(job);
 
         if (!ResourceLedger.CanEverFit(totals, request))
@@ -211,6 +237,13 @@ public sealed class ManagedExecutor
     /// </remarks>
     internal IManagedProcess Launch(Job job, Func<IReadOnlyList<int>, IManagedProcess> spawn)
     {
+        // Checked before the spawn, and again below under the lock. A staging task that was already
+        // in flight when shutdown began arrives here with a perfectly valid reservation, and the
+        // kill sweep has no way to find a process that does not exist yet.
+        if (_shuttingDown)
+            throw new InvalidOperationException(
+                $"Relay is shutting down; refusing to launch job {job.Id}.");
+
         IReadOnlyList<int> gpus;
         long reservation;
         lock (_sync)
@@ -237,23 +270,157 @@ public sealed class ManagedExecutor
             // starting — an abort, typically. We now own a running process nothing is accounting
             // for, and leaving it alive would hold cores, memory and GPUs that no ledger can ever
             // reclaim, on top of whatever the replacement reservation booked.
-            try
-            {
-                process.KillTree();
-            }
-            catch (Exception exc)
-            {
-                Log.ForContext<ManagedExecutor>().Error(
-                    exc, "Could not kill the unaccounted process {Pid} of job {JobId}; " +
-                         "it may still be holding this host's resources.", process.Pid, job.Id);
-            }
+            KillUnaccounted(job, process);
 
             throw new InvalidOperationException(
                 $"Job {job.Id}'s reservation was retired or replaced while its process was " +
                 "starting; the process has been killed rather than left running unaccounted for.");
         }
 
+        if (_shuttingDown)
+        {
+            // Shutdown began while this process was starting, so KillAllAsync may already have
+            // taken its snapshot and walked past this entry. Nothing else would ever signal it.
+            KillUnaccounted(job, process);
+
+            throw new InvalidOperationException(
+                $"Relay began shutting down while job {job.Id}'s process was starting; the " +
+                "process has been killed rather than left behind.");
+        }
+
+        RecordLaunch(job, process);
+
         return process;
+    }
+
+    private static void KillUnaccounted(Job job, IManagedProcess process)
+    {
+        try
+        {
+            process.KillTree();
+        }
+        catch (Exception exc)
+        {
+            Log.ForContext<ManagedExecutor>().Error(
+                exc, "Could not kill the unaccounted process {Pid} of job {JobId}; " +
+                     "it may still be holding this host's resources.", process.Pid, job.Id);
+        }
+    }
+
+    /// <summary>
+    /// Persist the launched process so a restarted Relay can kill it if this one dies first.
+    /// Written only once the process is attached: an attach that failed has already killed it, and
+    /// recording under the job's id would clobber the record of whichever run displaced it.
+    /// </summary>
+    /// <remarks>
+    /// <b>Pgid is read here, at persist time, and re-read later if it is still null.</b> It resolves
+    /// lazily against the OS (see <see cref="SystemManagedProcess.Pgid"/>) because the child has not
+    /// finished <c>execve</c> and <c>setsid</c> when <c>Process.Start</c> returns — on Linux this
+    /// read loses that race often, and on a fast path essentially always. A null latched into the
+    /// file would make the startup sweep fall back to a tree walk it cannot do without a Process
+    /// handle, i.e. into nothing, on the one platform that has process groups at all.
+    /// </remarks>
+    private void RecordLaunch(Job job, IManagedProcess process)
+    {
+        if (_registry == null)
+            return;
+
+        var record = new ManagedProcessRecord(job.Id, process.Pid, PgidOf(process),
+                                              process.StartTime.Ticks);
+
+        lock (_sync)
+        {
+            // Only if this process is still the tracked one. Between the attach above and here the
+            // entry can have been retired, and writing then would leave a record no Forget clears.
+            if (!_entries.TryGetValue(job, out var entry) || !ReferenceEquals(entry.Process, process))
+                return;
+
+            entry.Record = record;
+            _registry.Record(record);
+        }
+    }
+
+    /// <summary>The group we created for this process, or null — including for every non-system
+    /// process, which by definition has no group of ours.</summary>
+    private static int? PgidOf(IManagedProcess process) =>
+        process is SystemManagedProcess system ? system.Pgid : null;
+
+    /// <summary>
+    /// Re-read the process group of an entry whose record was written before the child had entered
+    /// it, and upgrade the persisted record once the OS confirms one. Without this the file keeps
+    /// the null it was necessarily born with and the startup sweep can never group-kill anything.
+    /// </summary>
+    private void RefreshRegistryPgid(Entry entry)
+    {
+        if (_registry == null || entry.Record is not { Pgid: null } stale)
+            return;
+
+        if (PgidOf(entry.Process) is not { } pgid)
+            return;
+
+        entry.Record = stale with { Pgid = pgid };
+        _registry.Record(entry.Record);
+    }
+
+    private void ForgetRegistryRecord(Entry entry)
+    {
+        if (_registry == null || entry.Record == null)
+            return;
+
+        _registry.Forget(entry.Record.JobId);
+        entry.Record = null;
+    }
+
+    /// <summary>
+    /// Stops admitting and stops launching. Call before killing anything: an entry admitted but not
+    /// yet launched has no process to find, and its staging task would otherwise spawn one after
+    /// the sweep had already passed.
+    /// </summary>
+    public void BeginShutdown() => _shuttingDown = true;
+
+    /// <summary>Kills every tracked process tree and waits for them to actually exit.</summary>
+    /// <remarks>
+    /// Admission closes first, and it closes inside this method rather than being left to the
+    /// caller — the ordering is the correctness property, so it must not be possible to get it
+    /// wrong from outside.
+    /// </remarks>
+    public async Task KillAllAsync()
+    {
+        BeginShutdown();
+
+        List<IManagedProcess> processes;
+        lock (_sync)
+            processes = _entries.Values.Select(e => e.Process).Where(p => p != null).ToList();
+
+        foreach (var process in processes)
+        {
+            // One failure must not leave the rest of the host's processes unsignalled.
+            try { process.KillTree(); }
+            catch (Exception exc)
+            {
+                Log.ForContext<ManagedExecutor>().Error(
+                    exc, "Could not kill managed process {Pid} during shutdown.", process.Pid);
+            }
+        }
+
+        await Task.WhenAll(processes.Select(async p =>
+        {
+            try { await p.WaitForExitAsync(); }
+            catch (Exception exc)
+            {
+                Log.ForContext<ManagedExecutor>().Warning(
+                    exc, "Managed process {Pid} did not report its exit during shutdown.", p.Pid);
+            }
+        }));
+
+        lock (_sync)
+        {
+            _entries.Clear();
+
+            // Everything recorded is now dead, so the next startup has nothing to sweep. Leaving
+            // the file populated would point the next Relay's sweep at recycled pids.
+            _registry?.Clear();
+        }
     }
 
     public void Reap()
@@ -345,9 +512,16 @@ public sealed class ManagedExecutor
             {
                 entry.ExitCode ??= exited.ExitCode;         // resources free from here (see LiveAllocationsLocked)
                 if (entry.Condemned || !IsJobActive(job))
+                {
                     _entries.Remove(job);                   // settled or condemned; forget it entirely
+                    ForgetRegistryRecord(entry);            // and it is no longer a leftover to sweep
+                }
                 continue;
             }
+
+            // Live process: the one moment its process group can be confirmed. Cheap and
+            // self-limiting — it is a syscall only while a record is still carrying a null.
+            RefreshRegistryPgid(entry);
 
             if (!entry.Condemned && IsJobActive(job))
                 continue;
@@ -365,6 +539,7 @@ public sealed class ManagedExecutor
             }
 
             _entries.Remove(job);                           // abandoned reservation, no process
+            ForgetRegistryRecord(entry);                    // (normally none: it never launched)
         }
     }
 
