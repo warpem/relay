@@ -229,46 +229,13 @@ public partial class DataManager
         _queueRepository.ManagedExecutor.HasEntries(j => j.QueueId == queue.Id);
 
     /// <summary>
-    /// Applies <paramref name="updateAction"/> to a throwaway copy of the queue's managed settings so the
-    /// proposed configuration can be judged before the real queue is touched, then refuses it if it would
-    /// create a second managed queue or move the totals of a queue that still has jobs on the host.
+    /// Judges a proposed edit before the real queue is touched. The rule itself lives in
+    /// <see cref="ManagedQueueRules.ValidateChange"/> so it can be tested without a repository;
+    /// what belongs here is only where the two facts it needs come from.
     /// </summary>
-    /// <remarks>
-    /// The comparison against the current values is what keeps unrelated edits — a rename, a template
-    /// tweak — from being blocked while jobs are running.
-    /// </remarks>
-    private void ValidateManagedQueueChange(ClusterQueue cluster, Action<JobQueue> updateAction)
-    {
-        var proposed = new ClusterQueue(null)
-        {
-            Id = cluster.Id,
-            Alias = cluster.Alias,
-            SchedulerType = cluster.SchedulerType,
-            ManagedCores = cluster.ManagedCores,
-            ManagedMemoryGb = cluster.ManagedMemoryGb,
-            ManagedGpus = cluster.ManagedGpus,
-            SubmissionScriptTemplate = cluster.SubmissionScriptTemplate,
-
-            // A fresh dictionary, not the queue's own: an update action that edits a custom variable
-            // reads the existing entry, and must not reach the real queue through a shared reference.
-            CustomVariables = new Dictionary<string, (string, string)>(cluster.CustomVariables),
-        };
-
-        updateAction(proposed);
-
-        // The candidate is the copy, so ValidateOnly's identity check can't recognise it as the queue
-        // being edited; exclude that one here instead.
-        ManagedQueueRules.ValidateOnly(
-            MutableClusterQueues().Where(q => !ReferenceEquals(q, cluster)), proposed);
-
-        bool totalsChanged = cluster.ManagedCores != proposed.ManagedCores ||
-                             cluster.ManagedMemoryGb != proposed.ManagedMemoryGb ||
-                             cluster.ManagedGpus != proposed.ManagedGpus ||
-                             cluster.SchedulerType != proposed.SchedulerType;
-
-        if (totalsChanged)
-            ManagedQueueRules.ValidateTotalsChange(cluster, HasLiveEntries(cluster));
-    }
+    private void ValidateManagedQueueChange(ClusterQueue cluster, Action<JobQueue> updateAction) =>
+        ManagedQueueRules.ValidateChange(cluster, updateAction,
+                                         MutableClusterQueues(), () => HasLiveEntries(cluster));
 
     #endregion
 }

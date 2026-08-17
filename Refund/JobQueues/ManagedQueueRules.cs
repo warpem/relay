@@ -31,12 +31,17 @@ public static class ManagedQueueRules
     /// Refuses total changes while jobs are running, rather than defining what should happen when
     /// new totals fall below current usage.
     /// </summary>
+    /// <remarks>
+    /// The scheduler type counts as a total: switching away from Managed abandons the executor's
+    /// accounting for whatever is still on the host, so the message names it too.
+    /// </remarks>
     public static void ValidateTotalsChange(ClusterQueue queue, bool hasLiveEntries)
     {
         if (queue.IsManaged && hasLiveEntries)
             throw new InvalidOperationException(
                 $"Queue \"{queue.Alias}\" has running jobs. Wait for them to finish, or abort them, " +
-                "before changing its cores, memory or GPU count.");
+                "before changing how much of this host it may use — its cores, memory, GPU count " +
+                "or scheduler type.");
     }
 
     /// <summary>
@@ -63,5 +68,61 @@ public static class ManagedQueueRules
                 $"Queue \"{queue.Alias}\" still has jobs on this host. Wait for them to finish, or " +
                 "abort them, before deleting it — deleting it now would leave their processes " +
                 "running with nothing tracking the cores and GPUs they hold.");
+    }
+
+    /// <summary>
+    /// Judges a proposed edit to <paramref name="cluster"/> by applying <paramref name="updateAction"/>
+    /// to a throwaway copy of its managed settings, then refusing the result if it would create a
+    /// second managed queue or move the totals of a queue that still has jobs on the host.
+    /// </summary>
+    /// <param name="allQueues">
+    /// Every cluster queue currently registered, <paramref name="cluster"/> included — it is excluded
+    /// here, since <see cref="ValidateOnly"/>'s identity check cannot recognise the copy as the queue
+    /// being edited.
+    /// </param>
+    /// <param name="hasLiveEntries">
+    /// Whether the executor still holds anything for this queue. A function, not a bool: answering it
+    /// reconciles the executor, and an edit that does not touch the totals must not pay for that.
+    /// </param>
+    /// <remarks>
+    /// Comparing the copy against the current values is what keeps unrelated edits — a rename, a
+    /// template tweak — from being blocked while jobs are running.
+    /// <para>
+    /// The copy carries only the properties the rules read. An update action that reads any other
+    /// property sees a fresh default rather than the queue's real value; that is true of none of the
+    /// current callers, and adding a property the rules consult means adding it here too.
+    /// </para>
+    /// </remarks>
+    public static void ValidateChange(ClusterQueue cluster,
+                                      Action<JobQueue> updateAction,
+                                      IEnumerable<ClusterQueue> allQueues,
+                                      Func<bool> hasLiveEntries)
+    {
+        var proposed = new ClusterQueue(null)
+        {
+            Id = cluster.Id,
+            Alias = cluster.Alias,
+            SchedulerType = cluster.SchedulerType,
+            ManagedCores = cluster.ManagedCores,
+            ManagedMemoryGb = cluster.ManagedMemoryGb,
+            ManagedGpus = cluster.ManagedGpus,
+            SubmissionScriptTemplate = cluster.SubmissionScriptTemplate,
+
+            // A fresh dictionary, not the queue's own: an update action that edits a custom variable
+            // reads the existing entry, and must not reach the real queue through a shared reference.
+            CustomVariables = new Dictionary<string, (string, string)>(cluster.CustomVariables),
+        };
+
+        updateAction(proposed);
+
+        ValidateOnly(allQueues.Where(q => !ReferenceEquals(q, cluster)), proposed);
+
+        bool totalsChanged = cluster.ManagedCores != proposed.ManagedCores ||
+                             cluster.ManagedMemoryGb != proposed.ManagedMemoryGb ||
+                             cluster.ManagedGpus != proposed.ManagedGpus ||
+                             cluster.SchedulerType != proposed.SchedulerType;
+
+        if (totalsChanged)
+            ValidateTotalsChange(cluster, hasLiveEntries());
     }
 }
