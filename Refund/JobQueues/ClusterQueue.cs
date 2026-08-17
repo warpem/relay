@@ -462,15 +462,30 @@ public class ClusterQueue : JobQueue, IPoolQueue
             CancellationTokenSource cts = new();
             StagingJobs.Add(job, cts);
 
+            // Deliberately *not* Task.Run(..., cts.Token). Passing the token as the task's
+            // scheduling token means a cancel landing between the task being queued and its
+            // delegate starting stops the delegate running at all — including its finally. The job
+            // then stayed in StagingJobs forever, and every requeue threw "already staging", so an
+            // abort in that window made the job permanently unrunnable. Cancellation is observed
+            // inside the delegate instead, where the cleanup below always runs.
             Task.Run(async () =>
             {
                 try
                 {
+                    // The window the scheduling token used to swallow: an abort that arrived while
+                    // this task sat in the thread pool queue.
+                    cts.Token.ThrowIfCancellationRequested();
+
                     JobUpdateCallback(job, j =>
                     {
                         j.DirectoryName = j.Id.ToString();
                         j.Status = JobStatus.Staging;
                     });
+
+                    // Before the work, not only after it. Script preparation deletes and recreates
+                    // the job directory and can throw for reasons of its own, and an abort that
+                    // was already pending must not come back as one of those failures.
+                    cts.Token.ThrowIfCancellationRequested();
 
                     string scriptPath = await PrepareAndWriteScript(job, customValues);
                     cts.Token.ThrowIfCancellationRequested();
@@ -500,6 +515,15 @@ public class ClusterQueue : JobQueue, IPoolQueue
 
                     JobUpdateCallback(job, j => { j.ClusterJobId = jobId; });
                 }
+                catch (OperationCanceledException) when (cts.IsCancellationRequested)
+                {
+                    // An explicit abort, not a staging failure. Rewritten to Failed by the generic
+                    // catch below, a job the user deliberately stopped ended up indistinguishable
+                    // from one whose script could not be written, with a stack trace in error.txt.
+                    await job.WriteToLifecycleLog(
+                        $"Job {job.Id} was aborted before it reached the cluster");
+                    JobUpdateCallback(job, j => j.Status = JobStatus.Aborted);
+                }
                 catch (Exception exc)
                 {
                     await job.WriteToErrorLog($"Job {job.Id} cancelled before it went to cluster:\n{exc}");
@@ -507,6 +531,8 @@ public class ClusterQueue : JobQueue, IPoolQueue
                 }
                 finally
                 {
+                    // Reached on every path now, cancellation included. It is the only thing that
+                    // lets the job be queued again.
                     lock (Sync)
                     {
                         StagingJobs.Remove(job);
@@ -514,7 +540,7 @@ public class ClusterQueue : JobQueue, IPoolQueue
                             JobsInLimbo.Remove(job);
                     }
                 }
-            }, cts.Token);
+            });
         }
     }
 
