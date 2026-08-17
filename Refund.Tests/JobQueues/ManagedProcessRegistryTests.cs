@@ -422,8 +422,8 @@ public class ManagedProcessRegistryTests : IDisposable
         Assert.Single(host.Signalled);
         Assert.Null(host.StartTimeOf(4242));
 
-        groupEmpty = true;                               // the last descendant finally exits
-
+        // The retry a tick later. The leader's identity no longer matches, so the record is dropped
+        // without the group being consulted at all — see the test below for why it must not be.
         Assert.True(ManagedProcessRegistry.TryContain(record, host.StartTimeOf, _ => null,
                                                       host.Kill, TimeSpan.Zero,
                                                       groupIsEmpty: _ => groupEmpty));
@@ -431,6 +431,31 @@ public class ManagedProcessRegistryTests : IDisposable
         // Nothing was signalled the second time: the pid is not ours any more, and it may since
         // have been recycled into somebody else's.
         Assert.Single(host.Signalled);
+    }
+
+    [Fact]
+    public void TryContain_OnAMismatchedIdentity_DropsTheRecordEvenIfSomeGroupHasThatId()
+    {
+        // The wedge. RetryContainment runs once per reap tick for as long as a leftover is
+        // retained, and a record's pgid equals the pid it was born with. Once our process is gone
+        // that id belongs to the kernel again: it can be recycled into any live group on the host,
+        // and GroupIsEmpty deliberately reports another user's group (EPERM) as non-empty. Asking
+        // about it here returned false on every tick forever, _unconfirmedLeftovers never drained,
+        // and every managed job on the host sat at Waiting for the life of a stranger's group.
+        //
+        // Our process is provably gone, so the group id is not ours to reason about: drop it.
+        var record = At(Launched);                                     // pid 4242, pgid 4242
+        var host = new FakeHost().Alive(4242, Launched.AddHours(1));   // recycled: not ours
+
+        Assert.True(ManagedProcessRegistry.TryContain(
+            record, host.StartTimeOf, _ => null, host.Kill, TimeSpan.Zero,
+            groupIsEmpty: pgid =>
+            {
+                Assert.Equal(4242, pgid);
+                return false;          // a live group carries that id — somebody else's
+            }));
+
+        Assert.Empty(host.Signalled);
     }
 
     [Fact]

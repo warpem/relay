@@ -461,11 +461,16 @@ public sealed class ManagedProcessRegistry
         // is left at that pid, which is exactly what the caller needs to know to drop it.
         try
         {
-            // Nothing of ours is left at that pid, so there is nothing we may safely signal: the
-            // kernel could have recycled the pid, and with it the group. Whether the *work* is
-            // over is a separate question, and the one below answers it.
+            // Contained, unconditionally, and *without* asking about the group. Our process is
+            // provably gone, so the recorded pgid — which equals the pid we just failed to
+            // recognise — is no longer ours to reason about: the kernel may have recycled it into
+            // any live group on the host, including one owned by another user, where GroupIsEmpty
+            // reports EPERM as not-empty by design. Probing it would have RetryContainment answer
+            // false on every tick for the life of that stranger's group, never drain
+            // _unconfirmedLeftovers, and hold every managed job on the host at Waiting — the exact
+            // silent wedge this containment exists to avoid.
             if (!IsStillTheSameProcess(record, startTimeOf, startTokenOf))
-                return GroupIsGone(record, groupIsEmpty);
+                return true;
         }
         catch
         {
@@ -510,9 +515,13 @@ public sealed class ManagedProcessRegistry
     /// <remarks>
     /// A record with no group of ours has no group to ask about, and the leader check is then all
     /// there is; that is the macOS path and the path for records written by an older Relay.
-    /// Reporting a non-empty group as not-contained is safe to be strict about because the caller
-    /// keeps the record, keeps managed admission Busy, and retries on the next daemon tick — so it
-    /// resolves itself once the last descendant exits, rather than wedging.
+    /// <para>
+    /// <b>Only ever consulted while the leader's identity still matches</b>, and that is what keeps
+    /// it from wedging. A non-empty group is reported as not-contained, which retains the record
+    /// and holds managed admission Busy — tolerable only because the group is still demonstrably
+    /// ours, and because the retry re-checks identity first: once the leader is gone the record is
+    /// dropped outright and admission is released, whatever some recycled group id now says.
+    /// </para>
     /// </remarks>
     private static bool GroupIsGone(ManagedProcessRecord record, Func<int, bool> groupIsEmpty) =>
         groupIsEmpty == null || record.Pgid is not { } pgid || pgid <= 1 || groupIsEmpty(pgid);
