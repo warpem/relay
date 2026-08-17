@@ -60,6 +60,38 @@ public class Class2D : RelionJob, IClusterJob
     public override int GpuCount => UseGpu ? 1 : 0;
 
     /// <summary>
+    /// True when the job actually launches relion_refine_mpi across several ranks. The EM branch
+    /// always runs the single-process relion_refine, so NProcesses only takes effect for VDAM.
+    /// CommandName and ProcessCount both read this so they cannot drift apart.
+    /// </summary>
+    private bool UsesMpi => Algorithm != Class2DAlgorithm.EM && NProcesses > 1;
+
+    /// <summary>
+    /// Number of MPI ranks the command actually starts — mirrors CommandName rather than reporting
+    /// NProcesses unconditionally, because a non-MPI run is always a single process.
+    /// </summary>
+    public override int ProcessCount => UsesMpi ? (int)NProcesses : 1;
+
+    /// <summary>
+    /// Cores per process. relion_refine is given -j NThreads, and every rank gets that many.
+    /// </summary>
+    public override int CoreCount => (int)NThreads;
+
+    /// <summary>
+    /// Memory per process, in GB. Class2D exposes no per-worker memory field, unlike Class3D and
+    /// Refine3D, so the base class's 16 GB is retained as the per-process figure — that keeps the
+    /// single-process case at exactly what this job has always requested.
+    /// </summary>
+    private const int MemoryPerProcessGb = 16;
+
+    /// <summary>
+    /// Total memory across the whole job, which is how the other resource overrides treat it.
+    /// Under MPI, rank 0 is the work manager and holds no full working set (see the NProcesses
+    /// help text), so it is excluded — matching Class3D's Math.Max(NProcesses - 1, 1) shape.
+    /// </summary>
+    public override int MemoryGb => Math.Max(ProcessCount - 1, 1) * MemoryPerProcessGb;
+
+    /// <summary>
     /// Indicates that this job produces intermediate results through multiple iterations
     /// </summary>
     public override bool IsIterative => true;
@@ -586,9 +618,8 @@ public class Class2D : RelionJob, IClusterJob
     /// - For single-process jobs or EM algorithm: uses standard relion_refine
     /// - For multi-process VDAM jobs: uses MPI-enabled relion_refine_mpi
     /// </remarks>
-    public override string CommandName => Algorithm == Class2DAlgorithm.EM || NProcesses == 1 ? 
-                                              "relion_refine" : 
-                                              $"mpirun -n {NProcesses} relion_refine_mpi";
+    public override string CommandName => UsesMpi ? $"mpirun -n {NProcesses} relion_refine_mpi"
+                                                  : "relion_refine";
 
     /// <summary>
     /// Builds the command-line arguments for the RELION 2D classification job

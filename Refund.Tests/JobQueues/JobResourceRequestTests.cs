@@ -2,6 +2,7 @@ using Warp.Tools;
 using Refund.DataModel;
 using MaskJob = Refund.Jobs.Refinement.Masks.CreateMask.CreateMask;
 using ImportTsJob = Refund.Jobs.Ts.Import.ImportDataSetTs.ImportDataSetTs;
+using Refund.Jobs.Refinement.Classes2D.Class2D;
 using Class2DJob = Refund.Jobs.Refinement.Classes2D.Class2D.Class2D;
 
 namespace Refund.Tests.JobQueues;
@@ -34,6 +35,59 @@ public class JobResourceRequestTests
         EnsurePopulated();
         Assert.Equal(1, new Class2DJob { UseGpu = true }.GpuCount);
         Assert.Equal(0, new Class2DJob { UseGpu = false }.GpuCount);
+    }
+
+    [Fact]
+    public void Class2D_MpiRun_ReportsItsRealCpuFootprint()
+    {
+        EnsurePopulated();
+
+        // VDAM with 4 workers of 6 threads each is the branch that actually launches MPI.
+        var job = new Class2DJob
+        {
+            Algorithm = Class2DAlgorithm.VDAM,
+            NProcesses = 4,
+            NThreads = 6,
+            UseGpu = true,
+        };
+
+        Assert.Equal("mpirun -n 4 relion_refine_mpi", job.CommandName);
+        Assert.Equal(4, job.ProcessCount);   // four ranks
+        Assert.Equal(6, job.CoreCount);      // per rank, not 24 in total
+        Assert.Equal(48, job.MemoryGb);      // 3 working ranks x 16 GB; rank 0 is the manager
+        Assert.Equal(1, job.GpuCount);
+    }
+
+    [Fact]
+    public void Class2D_EmRun_IsSingleProcessEvenWhenWorkersAreConfigured()
+    {
+        EnsurePopulated();
+
+        // CommandName never uses MPI for EM, so NProcesses must not leak into the resource request.
+        var job = new Class2DJob
+        {
+            Algorithm = Class2DAlgorithm.EM,
+            NProcesses = 4,
+            NThreads = 6,
+        };
+
+        Assert.Equal("relion_refine", job.CommandName);
+        Assert.Equal(1, job.ProcessCount);
+        Assert.Equal(6, job.CoreCount);
+        Assert.Equal(16, job.MemoryGb);
+    }
+
+    [Fact]
+    public void Class2D_Defaults_RequestWhatTheyAlwaysHave()
+    {
+        // The explicit overrides must not change what an untouched Class2D asks a cluster for.
+        EnsurePopulated();
+
+        var job = new Class2DJob();
+
+        Assert.Equal(1, job.ProcessCount);
+        Assert.Equal(1, job.CoreCount);
+        Assert.Equal(16, job.MemoryGb);
     }
 
     [Fact]
