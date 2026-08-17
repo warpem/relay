@@ -94,6 +94,45 @@ public class ClusterQueueStagingCancellationTests : IDisposable
     }
 
     [Fact]
+    public async Task AnAbortThatSurfacesAsAnotherException_StillEndsAtAborted()
+    {
+        // Cancellation has to win over the exception's *type*. An abort can land after the last
+        // ThrowIfCancellationRequested and still condemn the executor reservation before the
+        // managed launch reads it — Executor.Launch then throws InvalidOperationException, which
+        // the OperationCanceledException catch does not match, and the generic handler rewrote a
+        // job the user had explicitly stopped to Failed. Modelled here at the queue's own callback
+        // seam so the window does not have to be won by timing: the abort is issued, and then a
+        // non-cancellation exception is thrown, in that order and on the staging thread itself.
+        ClusterQueue queue = null;
+        int callbacks = 0;
+
+        queue = new ClusterQueue((job, action) =>
+        {
+            action(job);
+
+            if (Interlocked.Increment(ref callbacks) == 1)
+            {
+                queue.AbortJob(job);
+                throw new InvalidOperationException(
+                    $"Job {job.Id}'s reservation was retired while its process was starting");
+            }
+        })
+        {
+            Id = 1,
+            SubmissionScriptTemplate = "#!/bin/bash\n{{command}}\n",
+        };
+
+        var job = NewJob();
+        queue.SubmitJob(job);
+
+        await WaitUntil(() => job.Status is JobStatus.Aborted or JobStatus.Failed,
+                        "the staging task never settled the job");
+
+        Assert.Equal(JobStatus.Aborted, job.Status);
+        await WaitUntil(() => StagingCount(queue) == 0, "the job was never released");
+    }
+
+    [Fact]
     public async Task AnAbortDuringStaging_AlwaysReleasesTheJob_SoItCanBeQueuedAgain()
     {
         // The cleanup half. Whether the cancel is seen before the delegate starts or partway

@@ -531,6 +531,18 @@ public class ClusterQueue : JobQueue, IPoolQueue
                         $"Job {job.Id} was aborted before it reached the cluster");
                     JobUpdateCallback(job, j => j.Status = JobStatus.Aborted);
                 }
+                catch (Exception exc) when (cts.IsCancellationRequested)
+                {
+                    // An abort that surfaced as something other than OperationCanceledException.
+                    // It can arrive after the last ThrowIfCancellationRequested above and still
+                    // condemn the executor reservation before the managed launch reads it, and
+                    // Executor.Launch then throws InvalidOperationException — which the catch above
+                    // does not match. What the user asked for is what the job must end up as: an
+                    // abort is an abort whatever exception carried it here.
+                    await job.WriteToLifecycleLog(
+                        $"Job {job.Id} was aborted while it was being staged: {exc.Message}");
+                    JobUpdateCallback(job, j => j.Status = JobStatus.Aborted);
+                }
                 catch (Exception exc)
                 {
                     await job.WriteToErrorLog($"Job {job.Id} cancelled before it went to cluster:\n{exc}");
