@@ -898,6 +898,32 @@ public class ManagedExecutorTests : IDisposable
     }
 
     [Fact]
+    public async Task KillAllAsync_KeepsTheRecordOfAProcessItCouldNotConfirmDead()
+    {
+        // Wiping the registry unconditionally was only sound if every kill and every wait had
+        // succeeded. When one did not, the process may still be alive — and with its record gone
+        // the next startup's sweep has nothing to find, leaving a GPU held by something nothing
+        // tracks. The record is the only handle left, so it stays.
+        var registry = NewRegistry();
+        var executor = new ManagedExecutor(registry);
+
+        var stubborn = InSpace(NewJob(), spaceId: 1, jobId: 1);
+        var ordinary = InSpace(NewJob(), spaceId: 1, jobId: 2);
+        executor.TryAdmit(stubborn, Host);
+        executor.TryAdmit(ordinary, Host);
+
+        executor.Launch(stubborn, _ => new ProbeProcess(() => throw new InvalidOperationException("gone")));
+        executor.Launch(ordinary, _ => new FakeProcess { Pid = 777 });
+        Assert.Equal(2, registry.Load().Count);
+
+        await executor.KillAllAsync();
+
+        // The one that died is forgotten; the one that could not be confirmed is left to sweep.
+        var leftover = Assert.Single(registry.Load());
+        Assert.Equal(stubborn.Id, leftover.JobId);
+    }
+
+    [Fact]
     public void ALaunchThatFinishesSpawningAfterShutdownBegan_KillsTheProcessAndThrows()
     {
         // The other half of the ordering. The guard at the top of Launch was passed before shutdown

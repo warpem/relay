@@ -398,10 +398,12 @@ public sealed class ManagedExecutor
         lock (_sync)
             processes = _entries.Values.Select(e => e.Process).Where(p => p != null).ToList();
 
+        var signalled = new List<IManagedProcess>();
+
         foreach (var process in processes)
         {
             // One failure must not leave the rest of the host's processes unsignalled.
-            try { process.KillTree(); }
+            try { process.KillTree(); signalled.Add(process); }
             catch (Exception exc)
             {
                 Log.ForContext<ManagedExecutor>().Error(
@@ -409,9 +411,17 @@ public sealed class ManagedExecutor
             }
         }
 
-        await Task.WhenAll(processes.Select(async p =>
+        // Only the ones that were actually signalled: awaiting a process the kill never reached
+        // would block shutdown for as long as it keeps computing.
+        var dead = new List<IManagedProcess>();
+
+        await Task.WhenAll(signalled.Select(async p =>
         {
-            try { await p.WaitForExitAsync(); }
+            try
+            {
+                await p.WaitForExitAsync();
+                lock (dead) dead.Add(p);
+            }
             catch (Exception exc)
             {
                 Log.ForContext<ManagedExecutor>().Warning(
@@ -421,11 +431,20 @@ public sealed class ManagedExecutor
 
         lock (_sync)
         {
-            _entries.Clear();
+            // Drop only what is confirmed dead: a process whose kill or wait threw above may still
+            // be alive on the host, and dropping its record would leave the next startup's sweep
+            // nothing to find — a GPU held by something nothing tracks. What stays behind is
+            // precisely the leftover the registry exists to hand to the next Relay.
+            foreach (var (job, entry) in _entries.ToList())
+            {
+                bool confirmed = entry.Process == null ||          // never launched; nothing to sweep
+                                 dead.Any(p => ReferenceEquals(p, entry.Process));
+                if (!confirmed)
+                    continue;
 
-            // Everything recorded is now dead, so the next startup has nothing to sweep. Leaving
-            // the file populated would point the next Relay's sweep at recycled pids.
-            _registry?.Clear();
+                _entries.Remove(job);
+                ForgetRegistryRecord(entry);
+            }
         }
     }
 
@@ -514,39 +533,56 @@ public sealed class ManagedExecutor
     {
         foreach (var (job, entry) in _entries.ToList())
         {
-            if (entry.Process is { HasExited: true } exited)
+            // Per entry, because enumeration order is stable: a throw that escaped this loop would
+            // abort the whole pass, and then the same entry would abort every later pass too —
+            // nothing after it would ever be reconciled again and every allocation behind it would
+            // strand. Reconciliation is the one path that frees resources, so it has to survive one
+            // sick entry.
+            try { ReconcileEntry(job, entry); }
+            catch (Exception exc)
             {
-                entry.ExitCode ??= exited.ExitCode;         // resources free from here (see LiveAllocationsLocked)
-                if (entry.Condemned || !IsJobActive(job))
-                {
-                    _entries.Remove(job);                   // settled or condemned; forget it entirely
-                    ForgetRegistryRecord(entry);            // and it is no longer a leftover to sweep
-                }
-                continue;
+                Log.ForContext<ManagedExecutor>().Error(
+                    exc, "Could not reconcile managed entry for job {JobId}; continuing with the rest.",
+                    job.Id);
             }
-
-            // Live process: the one moment its process group can be confirmed. Cheap and
-            // self-limiting — it is a syscall only while a record is still carrying a null.
-            RefreshRegistryPgid(entry);
-
-            if (!entry.Condemned && IsJobActive(job))
-                continue;
-
-            if (entry.Process != null)
-            {
-                // Terminal or condemned, live process. Never free here: HandleAbortingState
-                // force-marks a job Aborted after 30s whether or not the kill landed, and releasing
-                // would hand a still-computing job's GPU to someone else. Condemn and wait for the
-                // exit. This runs on every pass, but it signals only on the first: what the flag
-                // buys on later passes is that the entry is retired the moment its process exits
-                // (see the branch above) even if the job has gone active again in the meantime.
-                Condemn(entry);
-                continue;
-            }
-
-            _entries.Remove(job);                           // abandoned reservation, no process
-            ForgetRegistryRecord(entry);                    // (normally none: it never launched)
         }
+    }
+
+    /// <summary>One entry's share of <see cref="Reconcile"/>; see that method's remarks for the ordering.</summary>
+    private void ReconcileEntry(Job job, Entry entry)
+    {
+        if (entry.Process is { HasExited: true } exited)
+        {
+            entry.ExitCode ??= exited.ExitCode;         // resources free from here (see LiveAllocationsLocked)
+            if (entry.Condemned || !IsJobActive(job))
+            {
+                _entries.Remove(job);                   // settled or condemned; forget it entirely
+                ForgetRegistryRecord(entry);            // and it is no longer a leftover to sweep
+            }
+            return;
+        }
+
+        // Live process: the one moment its process group can be confirmed. Cheap and
+        // self-limiting — it is a syscall only while a record is still carrying a null.
+        RefreshRegistryPgid(entry);
+
+        if (!entry.Condemned && IsJobActive(job))
+            return;
+
+        if (entry.Process != null)
+        {
+            // Terminal or condemned, live process. Never free here: HandleAbortingState
+            // force-marks a job Aborted after 30s whether or not the kill landed, and releasing
+            // would hand a still-computing job's GPU to someone else. Condemn and wait for the
+            // exit. This runs on every pass, but it signals only on the first: what the flag
+            // buys on later passes is that the entry is retired the moment its process exits
+            // (see the branch above) even if the job has gone active again in the meantime.
+            Condemn(entry);
+            return;
+        }
+
+        _entries.Remove(job);                           // abandoned reservation, no process
+        ForgetRegistryRecord(entry);                    // (normally none: it never launched)
     }
 
     private static bool IsJobActive(Job job) =>
