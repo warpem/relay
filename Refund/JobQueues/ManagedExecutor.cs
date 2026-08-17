@@ -788,7 +788,21 @@ public sealed class ManagedExecutor
     {
         if (entry.Process is { HasExited: true } exited)
         {
-            entry.ExitCode ??= exited.ExitCode;         // resources free from here (see LiveAllocationsLocked)
+            if (entry.ExitCode == null)
+            {
+                // The one signal on this path, and it has to be here. HasExited describes the
+                // direct child, and a submission script's bash routinely exits while the work it
+                // started — mpirun ranks, a `( ... ) &` subshell — is still in the group setsid
+                // gave us. This branch then released the allocation and eventually forgot the
+                // registry record without ever calling KillTree, so that work kept computing on a
+                // GPU the ledger had already handed to somebody else. Once, before the release:
+                // signalling an empty group is an ESRCH and costs nothing, so there is no need to
+                // know whether anything is left there.
+                SignalOwnGroup(exited);
+
+                entry.ExitCode = exited.ExitCode;       // resources free from here (see LiveAllocationsLocked)
+            }
+
             if (entry.Condemned || !IsJobActive(job))
             {
                 _entries.Remove(job);                   // settled or condemned; forget it entirely
@@ -818,6 +832,17 @@ public sealed class ManagedExecutor
 
         _entries.Remove(job);                           // abandoned reservation, no process
         ForgetRegistryRecord(entry);                    // (normally none: it never launched)
+    }
+
+    /// <summary>
+    /// Kill whatever is left in the process group of an exited process; see
+    /// <see cref="SystemManagedProcess.KillOwnGroup"/>. Nothing to do for any other implementation:
+    /// only a process we started with setsid has a group of ours to signal.
+    /// </summary>
+    private static void SignalOwnGroup(IManagedProcess process)
+    {
+        if (process is SystemManagedProcess system)
+            system.KillOwnGroup();
     }
 
     private static bool IsJobActive(Job job) =>

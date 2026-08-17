@@ -632,6 +632,62 @@ public class ManagedExecutorProcessTests : IDisposable
     }
 
     [Fact]
+    public async Task ACleanExitOfTheShell_StillTakesTheGroupWithIt()
+    {
+        // The exit branch nobody was signalling. HasExited describes the *direct* child, and a
+        // submission script's bash exits while the work it started — mpirun ranks, a backgrounded
+        // subshell — is still in the group setsid gave us. Reconcile then recorded the exit, freed
+        // the cores, memory and GPUs, and eventually forgot the registry record, all without ever
+        // calling KillTree: the work kept computing on a GPU the ledger had handed to someone else.
+        var standIn = SetsidStandIn();
+        Assert.NotNull(standIn);
+
+        var previous = SystemManagedProcess.SetsidPathOverride;
+        SystemManagedProcess.SetsidPathOverride = standIn;
+
+        int child = 0;
+        try
+        {
+            var executor = new ManagedExecutor();
+            var job = NewJob();
+            executor.TryAdmit(job, new ResourceTotals(8, 32, 0));
+
+            var pidFile = Path.Combine(_dir, "child.pid");
+            var release = Path.Combine(_dir, "release");
+
+            // The background sleep is the surviving descendant. Its output goes to /dev/null rather
+            // than the inherited pipe, so the shell's exit really is the whole story here.
+            var process = (SystemManagedProcess)executor.Launch(job, WriteScript(
+                $"sleep 30 >/dev/null 2>&1 & echo $! > '{pidFile}'; " +
+                $"while [ ! -f '{release}' ]; do sleep 0.05; done; exit 0"), _dir);
+
+            await WaitUntil(() => File.Exists(pidFile) && process.Pgid != null);
+            child = int.Parse(File.ReadAllText(pidFile).Trim());
+
+            File.WriteAllText(release, "");
+            await WaitUntil(() => process.HasExited);      // the shell exited cleanly, on its own
+
+            Assert.True(Alive(child), "the descendant should outlive the shell that started it");
+
+            executor.Reap();                                // the pass that frees the allocation
+
+            await WaitUntil(() => !Alive(child));
+        }
+        finally
+        {
+            SystemManagedProcess.SetsidPathOverride = previous;
+            if (child > 0) try { Process.GetProcessById(child).Kill(); } catch { }
+        }
+    }
+
+    /// <summary>Whether a pid is still a running process, for a descendant we did not start.</summary>
+    private static bool Alive(int pid)
+    {
+        try { return !Process.GetProcessById(pid).HasExited; }
+        catch { return false; }
+    }
+
+    [Fact]
     public async Task GroupIsEmpty_AnswersTheRealKernel_InBothDirections()
     {
         // The probe the leftover sweep now believes before it drops a record, so both answers have

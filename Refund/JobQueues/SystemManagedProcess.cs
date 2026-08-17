@@ -240,6 +240,29 @@ public sealed class SystemManagedProcess : IManagedProcess
     }
 
     /// <summary>
+    /// SIGKILL whatever is still in the group we created for this process, and nothing else. Unlike
+    /// <see cref="KillTree()"/> there is no fallback: this is for the moment the direct child has
+    /// exited cleanly, when there is no live process to walk a tree from and the only thing that
+    /// could still be running is a member of our own group.
+    /// </summary>
+    /// <remarks>
+    /// A no-op where we could never prove a group of ours — macOS, or a child that exited before
+    /// anything read <see cref="Pgid"/> — because a group we did not create is Relay's own.
+    /// Signalling a group that is already empty costs one ESRCH, which is why the caller does not
+    /// have to know whether anything is left in it. Carries the same accepted residual as the live
+    /// path: between the child being reaped and this landing, the kernel could in principle recycle
+    /// the pgid.
+    /// </remarks>
+    internal void KillOwnGroup()
+    {
+        if (Pgid is not { } group || group != Pid || group <= 1)
+            return;
+
+        try { Kill(-group, SIGKILL); }
+        catch { /* the group path is unavailable; there is nothing else to try here */ }
+    }
+
+    /// <summary>
     /// Shared by the live path and the startup leftover sweep, which has no Process handle.
     /// </summary>
     /// <remarks>
