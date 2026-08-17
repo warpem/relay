@@ -107,6 +107,16 @@ public partial class QueueRepository
             return $"Pool queue {pooledJob.PoolQueueId} not found. " +
                    "Select a valid pool queue in the job settings.";
 
+        // Before either template check, and the order is the whole point. A managed queue's
+        // ListJobsTemplate and CancelManyJobsTemplate are empty because the editor hides those
+        // fields for it, so checking them first tells the user to add a List Jobs template — advice
+        // the UI gives them no way to follow, for a queue that could not back a pool even if they
+        // could. The managed verdict is the true one and has an action attached: pick another queue.
+        if (poolQueue.IsManaged)
+            return $"Pool queue \"{poolQueue.Alias}\" is a managed queue. Worker pools submit " +
+                   "bare scripts with no resource request attached, so a managed queue cannot " +
+                   "admit them. Pick a queue backed by an external scheduler.";
+
         if (string.IsNullOrWhiteSpace(poolQueue.ListJobsTemplate))
             return $"Pool queue \"{poolQueue.Alias}\" has no List Jobs template configured. " +
                    "Add a ListJobsTemplate that prints \"<id> <state>\" per line, using a " +
@@ -116,11 +126,6 @@ public partial class QueueRepository
         if (string.IsNullOrWhiteSpace(poolQueue.CancelManyJobsTemplate))
             return $"Pool queue \"{poolQueue.Alias}\" has no Cancel Many Jobs template configured. " +
                    "Add a CancelManyJobsTemplate (e.g. \"scancel {{job_ids}}\") before using it as a pool queue.";
-
-        if (poolQueue.IsManaged)
-            return $"Pool queue \"{poolQueue.Alias}\" is a managed queue. Worker pools submit " +
-                   "bare scripts with no resource request attached, so a managed queue cannot " +
-                   "admit them. Pick a queue backed by an external scheduler.";
 
         return null;
     }

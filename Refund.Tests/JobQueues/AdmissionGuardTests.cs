@@ -192,8 +192,14 @@ public class WaitingStateAdmissionTests : IDisposable
 
         var repository = NewRepository();
         var queue = ManagedQueue(repository, cores: 8);
-        queue.ListJobsTemplate       = "squeue -u $USER -h -o \"%i,%T\"";
-        queue.CancelManyJobsTemplate = "scancel {{job_ids}}";
+
+        // Deliberately *not* populating ListJobsTemplate and CancelManyJobsTemplate. The editor
+        // hides both fields for a managed queue, so a realistically-configured one has them empty —
+        // and populating them here let the guard pass the template checks and reach the managed
+        // rejection by luck, hiding that a real managed queue was told to "add a List Jobs
+        // template" instead. See PoolPreflightError.
+        Assert.True(string.IsNullOrWhiteSpace(queue.ListJobsTemplate));
+        Assert.True(string.IsNullOrWhiteSpace(queue.CancelManyJobsTemplate));
 
         var job = new PooledJob
         {
@@ -214,6 +220,10 @@ public class WaitingStateAdmissionTests : IDisposable
         var error = File.ReadAllText(job.ErrorFilePath);
         Assert.Contains("managed queue", error);
         Assert.DoesNotContain("InvalidOperationException", error);      // a reason, not a stack trace
+
+        // Not the hidden-field advice: the user cannot act on it, and it is not the real problem.
+        Assert.DoesNotContain("List Jobs template", error);
+        Assert.DoesNotContain("Cancel Many Jobs template", error);
 
         // Two ticks, two failures — but the second was a deliberate re-run of the same guard, so
         // what matters is that one tick writes exactly one line.
