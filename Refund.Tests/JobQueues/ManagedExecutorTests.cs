@@ -778,6 +778,23 @@ public class ManagedExecutorTests : IDisposable
     }
 
     [Fact]
+    public void OnceShutdownBegins_NoProcessCanAttachEither()
+    {
+        // The third door. TryAdmit and Launch are guarded, but a process could still be adopted
+        // through Attach after KillAllAsync had taken its snapshot — and would then never be
+        // signalled by anything. False is the right answer: the caller's contract is to kill a
+        // process it cannot get accounted for.
+        var executor = new ManagedExecutor();
+        var job = NewJob();
+        Assert.IsType<AdmissionResult.Admit>(executor.TryAdmit(job, Host));
+
+        executor.BeginShutdown();
+
+        Assert.False(executor.Attach(job, new FakeProcess()));
+        Assert.Equal(ClusterJobStatus.Pending, executor.GetStatus(job));   // nothing was adopted
+    }
+
+    [Fact]
     public async Task KillAllAsync_ClosesAdmissionBeforeItKillsAnything()
     {
         // The ordering is the whole point. An entry admitted but not yet launched has no process
@@ -921,7 +938,9 @@ public class ManagedExecutorTests : IDisposable
         var record = Assert.Single(registry.Load());
         Assert.Equal(job.Id, record.JobId);
         Assert.Equal(5150, record.Pid);
-        Assert.Equal(new DateTime(1234).Ticks, record.StartTimeTicks);
+        // UTC, not the raw Local ticks: a DST or timezone change between the crash and the restart
+        // would otherwise move a recorded start time by an hour and hide the process from the sweep.
+        Assert.Equal(ManagedProcessRegistry.UtcTicksOf(new DateTime(1234)), record.StartTimeTicks);
 
         process.Exit(0);
         job.Status = JobStatus.Finished;
@@ -980,6 +999,89 @@ public class ManagedExecutorTests : IDisposable
         Assert.Single(registry.Load());
 
         await executor.KillAllAsync();
+
+        Assert.Empty(registry.Load());
+    }
+
+    [Fact]
+    public void TwoSpacesRunningTheirOwnJobFive_KeepSeparateRecords()
+    {
+        // Job.Id is per-space, so this is an ordinary Tuesday, not an edge case. Keyed on Job.Id
+        // alone, space 1's job settling would call Forget and delete space 2's *live* record —
+        // a running process quietly un-registered by a completely unrelated, successful job.
+        var registry = NewRegistry();
+        var executor = new ManagedExecutor(registry);
+
+        var first = InSpace(NewJob(), spaceId: 1, jobId: 5);
+        var second = InSpace(NewJob(), spaceId: 2, jobId: 5);
+        first.Status = JobStatus.Running;
+        second.Status = JobStatus.Running;
+
+        executor.TryAdmit(first, Host);
+        executor.TryAdmit(second, Host);
+
+        var firstProcess = new FakeProcess { Pid = 111 };
+        executor.Launch(first, _ => firstProcess);
+        executor.Launch(second, _ => new FakeProcess { Pid = 222 });
+
+        Assert.Equal(2, registry.Load().Count);
+
+        // Space 1's job finishes normally.
+        firstProcess.Exit(0);
+        first.Status = JobStatus.Finished;
+        executor.Reap();
+
+        var survivor = Assert.Single(registry.Load());
+        Assert.Equal(2, survivor.SpaceId);
+        Assert.Equal(222, survivor.Pid);          // space 2's process is still registered
+    }
+
+    private static Job InSpace(Job job, int spaceId, int jobId)
+    {
+        job.Space = new Space { Id = spaceId, Project = new Project { Id = 7 } };
+        job.Id = jobId;
+        return job;
+    }
+
+    [Fact]
+    public void ARecordCarriesTheJobsProjectAndSpace()
+    {
+        var registry = NewRegistry();
+        var executor = new ManagedExecutor(registry);
+
+        var job = InSpace(NewJob(), spaceId: 3, jobId: 9);
+        executor.TryAdmit(job, Host);
+        executor.Launch(job, _ => new FakeProcess());
+
+        var record = Assert.Single(registry.Load());
+        Assert.Equal(7, record.ProjectId);
+        Assert.Equal(3, record.SpaceId);
+        Assert.Equal(9, record.JobId);
+    }
+
+    [Fact]
+    public void AJobWithNoSpace_IsStillRecordedConsistently()
+    {
+        // Refund is nullable-disabled and a template job need not be filed anywhere yet. The
+        // placeholder identity has to round-trip, or the record could never be forgotten again.
+        var registry = NewRegistry();
+        var executor = new ManagedExecutor(registry);
+
+        var job = NewJob();
+        job.Status = JobStatus.Running;
+        Assert.Null(job.Space);
+
+        executor.TryAdmit(job, Host);
+        var process = new FakeProcess();
+        executor.Launch(job, _ => process);
+
+        var record = Assert.Single(registry.Load());
+        Assert.Equal(-1, record.ProjectId);
+        Assert.Equal(-1, record.SpaceId);
+
+        process.Exit(0);
+        job.Status = JobStatus.Finished;
+        executor.Reap();
 
         Assert.Empty(registry.Load());
     }

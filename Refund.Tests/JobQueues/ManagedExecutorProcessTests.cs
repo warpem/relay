@@ -849,7 +849,20 @@ public class ManagedExecutorProcessTests : IDisposable
                 Assert.Equal(process.Pid, pgid);
                 Assert.Equal(pgid.Value, getpgid(process.Pid));             // the OS agrees
                 Assert.NotEqual(getpgid(Environment.ProcessId), pgid.Value);
-                Assert.Equal(process.StartTime.Ticks, record.StartTimeTicks);
+                // UTC, and demonstrably not the raw Local ticks: on this machine the two differ by
+                // the timezone offset, which is exactly what a DST change would introduce between
+                // a crash and a restart even on a machine that is UTC today.
+                Assert.Equal(ManagedProcessRegistry.UtcTicksOf(process.StartTime),
+                             record.StartTimeTicks);
+                Assert.InRange(new DateTime(record.StartTimeTicks, DateTimeKind.Utc),
+                               DateTime.UtcNow.AddMinutes(-5), DateTime.UtcNow.AddSeconds(1));
+
+                // And the sweep's own probe, which is what a restarted Relay would use, agrees.
+                var probed = ManagedProcessRegistry.LiveProcessStartTime(process.Pid);
+                Assert.NotNull(probed);
+                Assert.True(
+                    TimeSpan.FromTicks(Math.Abs(probed.Value.Ticks - record.StartTimeTicks))
+                        <= ManagedProcessRegistry.StartTimeTolerance);
             }
             finally
             {

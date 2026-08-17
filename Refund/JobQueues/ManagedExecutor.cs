@@ -207,6 +207,13 @@ public sealed class ManagedExecutor
     {
         lock (_sync)
         {
+            // The third door, closed for the same reason as TryAdmit and Launch. Adopting a process
+            // now would put it in the table after KillAllAsync had taken its snapshot, so nothing
+            // would ever signal it; refusing hands it back to the caller, whose contract is to kill
+            // what it cannot get accounted for.
+            if (_shuttingDown)
+                return false;
+
             if (!_entries.TryGetValue(job, out var entry))
                 return false;
 
@@ -270,22 +277,15 @@ public sealed class ManagedExecutor
             // starting — an abort, typically. We now own a running process nothing is accounting
             // for, and leaving it alive would hold cores, memory and GPUs that no ledger can ever
             // reclaim, on top of whatever the replacement reservation booked.
+            //
+            // Shutdown starting mid-spawn arrives here too, and must: Attach refuses once shutdown
+            // has begun, so a process that came up after KillAllAsync took its snapshot is killed
+            // by the caller that owns it rather than left with nothing to signal it.
             KillUnaccounted(job, process);
 
             throw new InvalidOperationException(
                 $"Job {job.Id}'s reservation was retired or replaced while its process was " +
                 "starting; the process has been killed rather than left running unaccounted for.");
-        }
-
-        if (_shuttingDown)
-        {
-            // Shutdown began while this process was starting, so KillAllAsync may already have
-            // taken its snapshot and walked past this entry. Nothing else would ever signal it.
-            KillUnaccounted(job, process);
-
-            throw new InvalidOperationException(
-                $"Relay began shutting down while job {job.Id}'s process was starting; the " +
-                "process has been killed rather than left behind.");
         }
 
         RecordLaunch(job, process);
@@ -325,8 +325,14 @@ public sealed class ManagedExecutor
         if (_registry == null)
             return;
 
-        var record = new ManagedProcessRecord(job.Id, process.Pid, PgidOf(process),
-                                              process.StartTime.Ticks);
+        // Space and Project can be absent in tests and in a job that was never filed; -1 is then
+        // simply another identity, and every record of such a job shares it consistently.
+        var record = new ManagedProcessRecord(job.Space?.Project?.Id ?? -1,
+                                              job.Space?.Id ?? -1,
+                                              job.Id,
+                                              process.Pid,
+                                              PgidOf(process),
+                                              ManagedProcessRegistry.UtcTicksOf(process.StartTime));
 
         lock (_sync)
         {
@@ -367,7 +373,7 @@ public sealed class ManagedExecutor
         if (_registry == null || entry.Record == null)
             return;
 
-        _registry.Forget(entry.Record.JobId);
+        _registry.Forget(entry.Record.ProjectId, entry.Record.SpaceId, entry.Record.JobId);
         entry.Record = null;
     }
 
