@@ -30,6 +30,7 @@ public class JobTaxonomyTests
 
         // Tilt-series
         ["ImportDataSetTs"]        = "Tilt-series.Import.Tilt series",
+        ["ImportMetadataTs"]       = "Tilt-series.Import.Warp metadata",
         ["AlignAretomo"]           = "Tilt-series.Alignment.AreTomo",
         ["AlignEtomo"]             = "Tilt-series.Alignment.Etomo patch tracking",
         ["AlignMiss"]              = "Tilt-series.Alignment.MISS patch tracking",
