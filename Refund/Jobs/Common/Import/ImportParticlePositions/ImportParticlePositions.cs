@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.Globalization;
+using System.Text.RegularExpressions;
 using Refund.Components.FileBrowser;
 using Refund.DataModel;
 using Refund.DataModel.ReadOnly;
@@ -8,6 +9,7 @@ using Refund.UIFields;
 using Refund.Utils;
 using Warp;
 using Warp.Tools;
+using WarpHelper = Warp.Tools.Helper;
 
 namespace Refund.Jobs.Common.Import.ImportParticlePositions;
 
@@ -163,11 +165,23 @@ public class ImportParticlePositions : LocalJob, ILocalJob
     
     [UiString("", "File name suffix",
              helpText: "Suffix to append to the micrograph or tilt series name to arrive at the STAR file name. " +
-                       "For example, if the suffix is '_particles', the job will look for files like 'micrograph001_particles.star'.",
+                       "Leave empty to detect it automatically from the directory contents. " +
+                       "Note that template matching results carry the binned pixel size in their name, so the " +
+                       "suffix includes it: 'TS_01_10.00Apx_ribosome.star' has the suffix '_10.00Apx_ribosome'.",
              ConditionalOnField = nameof(InputType),
              ConditionalOnValue = InputTypes.MultipleFiles)]
     [RelayProperty]
     public string MultipleFilesSuffix { get; set; } = "";
+
+    /// <summary>
+    /// The file name suffix the job actually imported with, either copied from
+    /// <see cref="MultipleFilesSuffix"/> or detected from the directory contents when that was left
+    /// empty. Resolved during the run and used from then on to locate per-series STAR files.
+    /// Not user-editable.
+    /// </summary>
+    [RelayProperty]
+    [Clearable]
+    public string ResolvedFilesSuffix { get; set; } = "";
 
     [UiDecimalNullable("", "Pixel size",
                        min: 0.0001,
@@ -245,8 +259,10 @@ public class ImportParticlePositions : LocalJob, ILocalJob
             ParticlesMultiStarDirectory = InputType == InputTypes.MultipleFiles ? 
                                               DirectoryPath : 
                                               null,
-            ToMultiStarPath = InputType == InputTypes.MultipleFiles ? 
-                                  (n) => Path.Combine(DirectoryPath, $"{n}{MultipleFilesSuffix}.star") : 
+            // Consumers address series by the tomostar file name from processed_items.json, while the
+            // STAR files are named after the bare series name, the way WarpTools writes them.
+            ToMultiStarPath = InputType == InputTypes.MultipleFiles ?
+                                  (n) => Path.Combine(DirectoryPath, $"{WarpHelper.PathToName(n)}{ResolvedFilesSuffix}.star") :
                                   null,
             HasShifts = HasShifts,
             HasPositions = HasCoordinates,
@@ -280,27 +296,24 @@ public class ImportParticlePositions : LocalJob, ILocalJob
                 logger.WriteLine($"Importing particles from {(InputType == InputTypes.SingleFile ? SingleFilePath : MultipleFilesDirectory)}");
 
                 #region Figure out the file to check
-                
+
                 string fileToCheck = null;
-                
+
                 if (InputType == InputTypes.SingleFile)
                 {
                     fileToCheck = SingleFilePath;
                 }
                 else
                 {
-                    var files = Directory.GetFiles(MultipleFilesDirectory, $"*{MultipleFilesSuffix}.star")
-                                         .Where(n => Path.GetFileName(n)[0] != '.')
-                                         .ToList();
-                    
-                    if (files.Count == 0)
-                        throw new Exception($"No STAR files found in {MultipleFilesDirectory} with suffix '{MultipleFilesSuffix}'.");
-                    
-                    logger.WriteLine($"Found {files.Count} STAR files in {MultipleFilesDirectory} with suffix '{MultipleFilesSuffix}'");
-                    
+                    ResolvedFilesSuffix = ResolveFilesSuffix(logger);
+
+                    var files = MatchingFiles();
+
+                    logger.WriteLine($"Found {files.Count} STAR files in {MultipleFilesDirectory} with suffix '{ResolvedFilesSuffix}'");
+
                     fileToCheck = files[0];
                 }
-                
+
                 #endregion
                 
                 logger.WriteLine($"Checking columns in {fileToCheck}:");
@@ -402,11 +415,7 @@ public class ImportParticlePositions : LocalJob, ILocalJob
                     }
                     else
                     {
-                        var files = Directory.GetFiles(MultipleFilesDirectory, $"*{MultipleFilesSuffix}.star")
-                                             .Where(n => Path.GetFileName(n)[0] != '.')
-                                             .ToList();
-                    
-                        foreach (var file in files)
+                        foreach (var file in MatchingFiles())
                             File.Copy(file, Path.Combine(DirectoryPath, Path.GetFileName(file)), true);
                     }
                 }
@@ -421,8 +430,151 @@ public class ImportParticlePositions : LocalJob, ILocalJob
             }
         }
     }
+
+    #region Per-series file name suffix
+
+    /// <summary>
+    /// All STAR files in the input directory that carry <see cref="ResolvedFilesSuffix"/>.
+    /// Matched in memory rather than through a glob so that a suffix containing wildcard
+    /// characters can't widen the selection.
+    /// </summary>
+    private List<string> MatchingFiles()
+    {
+        return DirectoryStarFiles(MultipleFilesDirectory)
+               .Where(n => Path.GetFileName(n).EndsWith($"{ResolvedFilesSuffix}.star", StringComparison.Ordinal))
+               .ToList();
+    }
+
+    private static IEnumerable<string> DirectoryStarFiles(string directory)
+    {
+        return Directory.GetFiles(directory, "*.star")
+                        .Where(n => Path.GetFileName(n)[0] != '.');
+    }
+
+    /// <summary>
+    /// Establishes the suffix to import with: the one the user typed if there is one, otherwise
+    /// whatever can be derived from the directory contents. Throws when neither yields files.
+    /// </summary>
+    private string ResolveFilesSuffix(TextWriter logger)
+    {
+        var fileNames = DirectoryStarFiles(MultipleFilesDirectory).Select(Path.GetFileName).ToList();
+
+        if (!string.IsNullOrEmpty(MultipleFilesSuffix))
+        {
+            int matched = fileNames.Count(n => n.EndsWith($"{MultipleFilesSuffix}.star", StringComparison.Ordinal));
+
+            if (matched == 0)
+                throw new Exception($"None of the {fileNames.Count} STAR files in {MultipleFilesDirectory} end " +
+                                    $"with '{MultipleFilesSuffix}.star'.");
+
+            logger.WriteLine($"Using the specified file name suffix '{MultipleFilesSuffix}' ({matched} files)");
+
+            return MultipleFilesSuffix;
+        }
+
+        var detection = DetectSuffix(fileNames);
+
+        if (!detection.Succeeded)
+            throw new Exception(DescribeFailedDetection(detection, fileNames.Count));
+
+        logger.WriteLine($"Detected file name suffix '{detection.Suffix}' ({detection.MatchedCount} files)");
+
+        foreach (var ignored in detection.Unmatched)
+            logger.WriteLine($"  Ignoring {ignored}: no recognizable suffix");
+
+        return detection.Suffix;
+    }
+
+    private static string DescribeFailedDetection(SuffixDetection detection, int fileCount)
+    {
+        if (detection.Candidates.Count == 0)
+            return $"Could not derive a file name suffix from the {fileCount} STAR file(s) found. Template " +
+                   "matching results are named '<series>_<pixel size>Apx_<template>.star'; if these aren't, " +
+                   "specify the suffix manually.";
+
+        string listed = string.Join(", ", detection.Candidates
+                                                   .OrderByDescending(kv => kv.Value)
+                                                   .ThenBy(kv => kv.Key, StringComparer.Ordinal)
+                                                   .Select(kv => $"'{kv.Key}' ({kv.Value} files)"));
+
+        return $"Found more than one candidate file name suffix: {listed}. This usually means the directory " +
+               "holds results for several templates or binnings. Specify the one to import manually.";
+    }
+
+    /// <summary>
+    /// Derives the per-series file name suffix from a listing of STAR file names.
+    /// </summary>
+    /// <remarks>
+    /// Anchors on the binned pixel size that WarpTools stamps into every name it writes
+    /// (see <c>TiltSeries.ToTomogramWithPixelSize</c>), taking the last occurrence so that a series
+    /// named after an earlier matching run doesn't mislead it. The part before the anchor is the
+    /// series name and is never parsed, so arbitrary acquisition-software naming survives intact.
+    /// Detection only succeeds when every recognized file agrees on one suffix; several candidates
+    /// mean genuine ambiguity and are reported rather than guessed between.
+    /// </remarks>
+    /// <param name="fileNames">STAR file names or paths to inspect.</param>
+    internal static SuffixDetection DetectSuffix(IEnumerable<string> fileNames)
+    {
+        Dictionary<string, int> candidates = new(StringComparer.Ordinal);
+        List<string> unmatched = new();
+
+        foreach (var path in fileNames)
+        {
+            string fileName = Path.GetFileName(path);
+            var match = SuffixPattern.Match(fileName);
+
+            if (!match.Success)
+            {
+                unmatched.Add(fileName);
+                continue;
+            }
+
+            string suffix = match.Groups["suffix"].Value;
+            candidates[suffix] = candidates.GetValueOrDefault(suffix) + 1;
+        }
+
+        bool unambiguous = candidates.Count == 1;
+
+        return new SuffixDetection
+        {
+            Suffix = unambiguous ? candidates.Keys.Single() : null,
+            MatchedCount = unambiguous ? candidates.Values.Single() : 0,
+            Candidates = candidates,
+            Unmatched = unmatched
+        };
+    }
+
+    /// <summary>
+    /// Splits a WarpTools-written STAR file name into the series name and everything from the
+    /// binned pixel size onwards. The greedy leading group makes the last pixel size win.
+    /// The decimal separator varies because WarpTools formats it with the ambient culture.
+    /// </summary>
+    private static readonly Regex SuffixPattern = new(@"^(?<series>.*)(?<suffix>_\d+[.,]\d{2}Apx.*)\.star$",
+                                                      RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    #endregion
 }
-    
+
+/// <summary>
+/// What <see cref="ImportParticlePositions.DetectSuffix"/> made of a directory listing.
+/// </summary>
+internal class SuffixDetection
+{
+    /// <summary>The single suffix all recognized files agreed on, or null if detection was inconclusive.</summary>
+    public string Suffix { get; init; }
+
+    /// <summary>Number of files carrying <see cref="Suffix"/>, or zero when detection failed.</summary>
+    public int MatchedCount { get; init; }
+
+    /// <summary>Every distinct suffix seen, and how many files carried it.</summary>
+    public IReadOnlyDictionary<string, int> Candidates { get; init; } = new Dictionary<string, int>();
+
+    /// <summary>Files with no recognizable suffix. Reported so silent omissions stay visible.</summary>
+    public IReadOnlyList<string> Unmatched { get; init; } = [];
+
+    public bool Succeeded => Suffix != null;
+}
+
 public enum InputTypes
 {
     [Display(Name = "Single file",
