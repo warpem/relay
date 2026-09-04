@@ -613,6 +613,7 @@ public partial class DataManager
                 {
                     j.Status = JobStatus.Waiting;
                     j.QueueId = originalQueue.Id;
+                    j.SubmittedByUsername = user.Username;
                     j.AddEvent(EventType.WaitingStarted, originalUser);
                 });
 
