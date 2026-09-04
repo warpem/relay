@@ -205,6 +205,14 @@ public abstract class Job : RelayBase, IFolderContent
     public User UpdatedBy { get; set; }
 
     /// <summary>
+    /// Username of the user who queued/submitted this job.
+    /// This is included in cluster submission templates via {{username}}.
+    /// </summary>
+    [Clearable]
+    [RelayProperty]
+    public string SubmittedByUsername { get; set; } = string.Empty;
+
+    /// <summary>
     /// User-provided notes or comments about this job.
     /// </summary>
     [Clearable]
@@ -430,7 +438,8 @@ public abstract class Job : RelayBase, IFolderContent
             { "gpu_memory_gb", GpuMemoryGb.ToString() },
             { "run_directory", RunDirectory },
             { "std_out", PathStdOut },
-            { "std_err", PathStdErr }
+            { "std_err", PathStdErr },
+            { "username", SubmittedByUsername }
         };
     }
 

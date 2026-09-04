@@ -79,6 +79,15 @@ public class ClusterQueueBatchTests
     }
 
     [Fact]
+    public void JobResourceValues_IncludeSubmittingUsername()
+    {
+        var job = new MaskJob { SubmittedByUsername = "alice" };
+        var values = job.GetResourceValues();
+
+        Assert.Equal("alice", values["username"]);
+    }
+
+    [Fact]
     public void BuildWorkerScript_PreservesDollarSignsInCommand()
     {
         var queue = new ClusterQueue((_, _) => { }) { SubmissionScriptTemplate = "#!/bin/bash\n{{ command }}\n" };
