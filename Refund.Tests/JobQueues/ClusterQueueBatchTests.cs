@@ -53,6 +53,55 @@ public class ClusterQueueBatchTests
     }
 
     [Fact]
+    public async Task ObserveReceiptsFallsBackWhenBulkCommandFails()
+    {
+        var queue = new ClusterQueue
+        {
+            SchedulerType = ClusterScheduler.Custom,
+            ListJobsTemplate = "exit 1",
+            StatusJobTemplate = "printf RUNNING",
+            JobStatusParseTemplateRunning = "RUNNING"
+        };
+
+        var observations = await queue.ObserveReceipts(["123"]);
+
+        Assert.Equal(BackendObservationKind.Running, observations["123"].Kind);
+    }
+
+    [Fact]
+    public async Task ObserveReceiptUsesTerminalViewWhenActiveCommandRejectsMissingJob()
+    {
+        var queue = new ClusterQueue
+        {
+            SchedulerType = ClusterScheduler.Custom,
+            StatusJobTemplate = "printf 'not active' >&2; exit 1",
+            TerminalStatusJobTemplate = "printf COMPLETED",
+            JobStatusParseTemplateSucceeded = "COMPLETED"
+        };
+
+        var observation = await queue.ObserveReceipt("123");
+
+        Assert.Equal(BackendObservationKind.Succeeded, observation.Kind);
+    }
+
+    [Fact]
+    public async Task ObserveReceiptIsIndeterminateWhenBothSchedulerViewsFail()
+    {
+        var queue = new ClusterQueue
+        {
+            SchedulerType = ClusterScheduler.Custom,
+            StatusJobTemplate = "exit 1",
+            TerminalStatusJobTemplate = "exit 2"
+        };
+
+        var observation = await queue.ObserveReceipt("123");
+
+        Assert.Equal(BackendObservationKind.Indeterminate, observation.Kind);
+        Assert.Contains("active scheduler view failed", observation.Detail);
+        Assert.Contains("terminal scheduler view failed", observation.Detail);
+    }
+
+    [Fact]
     public async Task CancelReceipts_FallsBackToPerReceiptCancellationCommands()
     {
         string path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());

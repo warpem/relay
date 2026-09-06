@@ -261,6 +261,16 @@ public class ClusterSchedulerParsingTests
             Queue(ClusterScheduler.Flux).ParseBackendObservation("WAT\n").Kind);
     }
 
+    [Theory]
+    [InlineData("diagnostic F text")]
+    [InlineData("job COMPLETED")]
+    public void ParseBackendObservation_FluxRequiresTheWholeResponseToBeAState(string output)
+    {
+        Assert.Equal(
+            BackendObservationKind.Unparseable,
+            Queue(ClusterScheduler.Flux).ParseBackendObservation(output).Kind);
+    }
+
     #endregion
 
     #region Pool list parsing honours the selected scheduler

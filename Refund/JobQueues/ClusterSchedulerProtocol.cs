@@ -166,20 +166,18 @@ internal static class ClusterSchedulerProtocol
 
     private static BackendObservation ParseFlux(string output)
     {
-        var states = Tokens(output).ToArray();
-
-        if (states.Any(state => state is "CANCELED" or "CA"))
-            return new BackendObservation(BackendObservationKind.Canceled);
-        if (states.Any(state => state is "FAILED" or "F" or "TIMEOUT" or "TO"))
-            return new BackendObservation(BackendObservationKind.Failed);
-        if (states.Length > 0 && states.All(state => state is "COMPLETED" or "CD"))
-            return new BackendObservation(BackendObservationKind.Succeeded);
-        if (states.Any(state => state is "RUN" or "R" or "CLEANUP" or "C"))
-            return new BackendObservation(BackendObservationKind.Running);
-        if (states.Any(state => state is "DEPEND" or "D" or "PRIORITY" or "P" or "SCHED" or "S"))
-            return new BackendObservation(BackendObservationKind.Pending);
-
-        return Unparseable(output);
+        return output.Trim().ToUpperInvariant() switch
+        {
+            "CANCELED" or "CA" => new BackendObservation(BackendObservationKind.Canceled),
+            "FAILED" or "F" or "TIMEOUT" or "TO" =>
+                new BackendObservation(BackendObservationKind.Failed),
+            "COMPLETED" or "CD" => new BackendObservation(BackendObservationKind.Succeeded),
+            "RUN" or "R" or "CLEANUP" or "C" =>
+                new BackendObservation(BackendObservationKind.Running),
+            "DEPEND" or "D" or "PRIORITY" or "P" or "SCHED" or "S" =>
+                new BackendObservation(BackendObservationKind.Pending),
+            _ => Unparseable(output)
+        };
     }
 
     private static BackendObservation ParseCustom(ClusterQueue queue, string output)

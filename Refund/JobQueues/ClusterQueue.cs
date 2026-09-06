@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -17,7 +18,7 @@ namespace Refund.JobQueues;
 public sealed class ClusterQueue : JobQueue
 {
     private static readonly ConditionalWeakTable<ClusterQueue, ReadOnlyClusterQueue> ReadOnlyCache = new();
-    private static readonly SemaphoreSlim ClusterCommands = new(Environment.ProcessorCount);
+    private static readonly ConcurrentDictionary<int, SemaphoreSlim> ClusterCommandGates = new();
 
     [RelayProperty]
     public ClusterScheduler SchedulerType { get; set; } = ClusterScheduler.Slurm;
@@ -196,10 +197,24 @@ public sealed class ClusterQueue : JobQueue
                 BackendObservationKind.Indeterminate,
                 "The queue has no active-status command configured.");
 
-        var active = ParseBackendObservation(await ExecuteOnCluster(
-            ReplaceJobId(StatusJobTemplate, receiptId)));
+        BackendObservation active;
+        string activeFailure = null;
+        try
+        {
+            active = ParseBackendObservation(await ExecuteOnCluster(
+                ReplaceJobId(StatusJobTemplate, receiptId)));
+        }
+        catch (Exception exception)
+        {
+            activeFailure = exception.Message;
+            active = new BackendObservation(
+                BackendObservationKind.Unreachable,
+                activeFailure);
+        }
+
         if (active.Kind is not (BackendObservationKind.AbsentFromActiveView or
-            BackendObservationKind.Unparseable or BackendObservationKind.Indeterminate))
+            BackendObservationKind.Unparseable or BackendObservationKind.Indeterminate or
+            BackendObservationKind.Unreachable))
             return active;
 
         string terminalTemplate = string.IsNullOrWhiteSpace(TerminalStatusJobTemplate)
@@ -210,13 +225,29 @@ public sealed class ClusterQueue : JobQueue
                 BackendObservationKind.Indeterminate,
                 "The active scheduler view was inconclusive and no terminal-status command is configured.");
 
-        var terminal = ParseBackendObservation(await ExecuteOnCluster(
-            ReplaceJobId(terminalTemplate, receiptId)));
+        BackendObservation terminal;
+        try
+        {
+            terminal = ParseBackendObservation(await ExecuteOnCluster(
+                ReplaceJobId(terminalTemplate, receiptId)));
+        }
+        catch (Exception exception)
+        {
+            string detail = activeFailure == null
+                ? $"The terminal scheduler view failed: {exception.Message}"
+                : $"The active scheduler view failed: {activeFailure}\n" +
+                  $"The terminal scheduler view failed: {exception.Message}";
+            return new BackendObservation(BackendObservationKind.Indeterminate, detail);
+        }
+
         return terminal.Kind is BackendObservationKind.AbsentFromActiveView or
             BackendObservationKind.Unparseable
             ? new BackendObservation(
                 BackendObservationKind.Indeterminate,
-                "The job could not be resolved from the scheduler's active or terminal views.")
+                activeFailure == null
+                    ? "The job could not be resolved from the scheduler's active or terminal views."
+                    : $"The active scheduler view failed: {activeFailure}\n" +
+                      "The terminal scheduler view did not contain a recognized state.")
             : terminal;
     }
 
@@ -336,7 +367,16 @@ public sealed class ClusterQueue : JobQueue
         if (string.IsNullOrWhiteSpace(ListJobsTemplate))
             return await ObserveReceiptsIndividually(ids);
 
-        string output = await ExecuteOnCluster(ListJobsTemplate);
+        string output;
+        try
+        {
+            output = await ExecuteOnCluster(ListJobsTemplate);
+        }
+        catch
+        {
+            return await ObserveReceiptsIndividually(ids);
+        }
+
         var active = ParseActiveReceipts(output);
         var observations = new Dictionary<string, BackendObservation>(ids.Length);
         foreach (string id in ids)
@@ -419,7 +459,10 @@ public sealed class ClusterQueue : JobQueue
 
     private async Task<string> ExecuteOnCluster(string command)
     {
-        if (!await ClusterCommands.WaitAsync(TimeSpan.FromSeconds(30)))
+        var commandGate = ClusterCommandGates.GetOrAdd(
+            Id,
+            _ => new SemaphoreSlim(Math.Max(1, Environment.ProcessorCount)));
+        if (!await commandGate.WaitAsync(TimeSpan.FromSeconds(30)))
             throw new TimeoutException("Timed out waiting to run a cluster command.");
 
         try
@@ -428,7 +471,7 @@ public sealed class ClusterQueue : JobQueue
         }
         finally
         {
-            ClusterCommands.Release();
+            commandGate.Release();
         }
     }
 
