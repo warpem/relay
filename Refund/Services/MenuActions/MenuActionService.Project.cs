@@ -93,7 +93,8 @@ public partial class MenuActionService
                 IconLarge = new Icons.Regular.Size20.PlugDisconnected().WithColor("var(--error)")
             };
 
-            if (spaces.Any(s => s.Jobs.Any(j => j.Status.IsUnsettled())))
+            if (spaces.Any(s => s.Jobs.Any(j =>
+                    j.Status == JobStatus.Waiting || j.Status.IsUnsettled())))
                 actionDisconnect.IsDisabled = true;
             else
                 actionDisconnect.Action = async () =>

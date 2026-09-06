@@ -517,9 +517,10 @@ public partial class MenuActionService
         #region Finalize
 
         {
-            // If no job is in failed or aborted state, don't add the action at all
+            // If no job is in a terminal state that supports finalization, don't add the action.
             if (jobs.Any(j => (j.Status == JobStatus.Failed ||
-                               j.Status == JobStatus.Aborted) &&
+                               j.Status == JobStatus.Aborted ||
+                               j.Status == JobStatus.Interrupted) &&
                               j.CanBeFinalized))
             {
                 var actionFinalize = new MenuAction()
@@ -535,10 +536,12 @@ public partial class MenuActionService
                     IconLarge = new Icons.Regular.Size20.FlagCheckered()
                 };
 
-                if (jobs.Any(j => j.Status != JobStatus.Failed && j.Status != JobStatus.Aborted))
+                if (jobs.Any(j => j.Status is not (
+                        JobStatus.Failed or JobStatus.Aborted or JobStatus.Interrupted)))
                 {
                     actionFinalize.IsDisabled = true;
-                    actionFinalize.DisabledBecause = "Can't finalize because some jobs are not in Failed or Aborted state";
+                    actionFinalize.DisabledBecause =
+                        "Can't finalize because some jobs are not failed, aborted, or interrupted";
                 }
                 else if (jobs.Any(j => !j.CanBeFinalized))
                 {
@@ -873,7 +876,7 @@ public partial class MenuActionService
                     IconLarge = new Icons.Regular.Size20.Broom().WithColor("var(--error)")
                 };
 
-                if (jobs.Any(j => j.Status.IsUnsettled()))
+                if (jobs.Any(j => j.Status == JobStatus.Waiting || j.Status.IsUnsettled()))
                 {
                     actionClear.DisabledBecause = "Can't clear because some jobs are active";
                     actionClear.IsDisabled = true;
@@ -926,7 +929,7 @@ public partial class MenuActionService
                 IconLarge = new Icons.Regular.Size20.Delete().WithColor("var(--error)")
             };
 
-            if (jobs.Any(j => j.Status.IsUnsettled()))
+            if (jobs.Any(j => j.Status == JobStatus.Waiting || j.Status.IsUnsettled()))
             {
                 actionDelete.DisabledBecause = "Can't delete because some jobs are active";
                 actionDelete.IsDisabled = true;

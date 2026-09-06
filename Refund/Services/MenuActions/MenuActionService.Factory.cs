@@ -391,7 +391,8 @@ public partial class MenuActionService
         #region Clear failed
 
         {
-            if (instances.Any(i => i.SubJobs.Any(j => j.Status == JobStatus.Failed || j.Status == JobStatus.Aborted)))
+            if (instances.Any(i => i.SubJobs.Any(j =>
+                    j.Status is JobStatus.Failed or JobStatus.Aborted or JobStatus.Interrupted)))
             {
                 var actionClearFailed = new MenuAction()
                 {
@@ -447,22 +448,30 @@ public partial class MenuActionService
                     IconLarge = new Icons.Regular.Size20.Broom().WithColor("var(--error)")
                 };
 
-                actionClearAll.Action = async () =>
+                if (instances.Any(i => i.SubJobs.Any(j =>
+                        j.Status == JobStatus.Waiting || j.Status.IsUnsettled())))
                 {
-                    foreach (var instance in instances)
-                        Task.Run(async () =>
-                        {
-                            try
+                    actionClearAll.IsDisabled = true;
+                    actionClearAll.DisabledBecause =
+                        "Can't clear while some sub-jobs are active";
+                }
+                else
+                    actionClearAll.Action = async () =>
+                    {
+                        foreach (var instance in instances)
+                            Task.Run(async () =>
                             {
-                                await _dataManager.ClearFactoryInstance(_session.User, instance);
-                                _toastService.ShowSuccess($"{instance.QualifiedName} cleared");
-                            }
-                            catch (Exception exc)
-                            {
-                                _toastService.ShowError($"Couldn't clear {instance.QualifiedName}: {exc.Message}");
-                            }
-                        });
-                };
+                                try
+                                {
+                                    await _dataManager.ClearFactoryInstance(_session.User, instance);
+                                    _toastService.ShowSuccess($"{instance.QualifiedName} cleared");
+                                }
+                                catch (Exception exc)
+                                {
+                                    _toastService.ShowError($"Couldn't clear {instance.QualifiedName}: {exc.Message}");
+                                }
+                            });
+                    };
 
                 result.Add(actionClearAll);
             }
@@ -534,7 +543,8 @@ public partial class MenuActionService
                 IconLarge = new Icons.Regular.Size20.Delete().WithColor("var(--error)")
             };
 
-            if (instances.Any(i => i.SubJobs.Any(j => j.Status.IsUnsettled())))
+            if (instances.Any(i => i.SubJobs.Any(j =>
+                    j.Status == JobStatus.Waiting || j.Status.IsUnsettled())))
             {
                 actionDelete.DisabledBecause = "Can't delete because some sub-jobs are active";
                 actionDelete.IsDisabled = true;

@@ -193,6 +193,10 @@ public partial class DataManager
                 var originalInst = originalSpace.FindFactoryInstance(instance.Id)
                     ?? throw new Exception($"Factory instance {instance.Id} not found");
 
+                EnsureNoActiveExecutions(
+                    originalInst.SubJobs,
+                    $"Factory instance {originalInst.QualifiedName}");
+
                 foreach (var jobId in originalInst.SubJobIds)
                 {
                     var job = originalSpace.FindJob(jobId);
@@ -410,13 +414,13 @@ public partial class DataManager
     }
 
     /// <summary>
-    /// Clears only Failed/Aborted sub-jobs of a factory instance back to Building.
+    /// Clears failed, aborted, or interrupted sub-jobs of a factory instance back to Building.
     /// Delegates to ClearJob for each qualifying sub-job.
     /// </summary>
     public async Task ClearFailedFactoryInstance(ReadOnlyUser user, ReadOnlyFactoryInstance instance)
     {
         var jobsToClear = instance.SubJobs
-            .Where(j => j.Status == JobStatus.Failed || j.Status == JobStatus.Aborted)
+            .Where(j => j.Status is JobStatus.Failed or JobStatus.Aborted or JobStatus.Interrupted)
             .ToList();
 
         foreach (var job in jobsToClear)
@@ -436,20 +440,7 @@ public partial class DataManager
             .Where(j => j.Status != JobStatus.Building)
             .ToList();
 
-        // Abort any active jobs first before clearing
-        var activeJobs = jobsToClear
-            .Where(j => j.Status.IsUnsettled() || j.Status == JobStatus.Waiting)
-            .ToList();
-        foreach (var job in activeJobs)
-            await AbortJob(user, job);
-
-        // Now clear all non-Building jobs (re-read statuses since abort may have changed them)
-        var refreshedInstance = instance; // instance is a live read-only wrapper, reflects current state
-        var refreshedJobsToClear = refreshedInstance.SubJobs
-            .Where(j => j.Status != JobStatus.Building)
-            .ToList();
-
-        foreach (var job in refreshedJobsToClear)
+        foreach (var job in jobsToClear)
             await ClearJob(user, job);
 
         await FactoryInstanceUpdated.InvokeHierarchy(instance,

@@ -335,6 +335,16 @@ public sealed class QueueRepository
             desiredCount,
             cancellationToken);
 
+    public bool HasActiveAttempt(Job job) =>
+        HasActiveAttempts(job.Space.Project.Id, job.Space.Id, job.Id);
+
+    public bool HasActiveAttempts(int projectId, int? spaceId = null, int? jobId = null) =>
+        _runtime.Attempts.Any(attempt =>
+            !attempt.Phase.IsTerminal() &&
+            attempt.Job.ProjectId == projectId &&
+            (spaceId == null || attempt.Job.SpaceId == spaceId) &&
+            (jobId == null || attempt.Job.JobId == jobId));
+
     public JobQueue FindQueue(int id)
     {
         if (id == _localQueue.Id)
@@ -457,8 +467,7 @@ public sealed class QueueRepository
         foreach (var space in project.Spaces)
         foreach (var job in space.Jobs)
         {
-            if (job.Status == JobStatus.Clearing ||
-                job.Status != JobStatus.Waiting && !job.Status.IsUnsettled() ||
+            if (job.Status != JobStatus.Waiting && !job.Status.IsUnsettled() ||
                 owned.Contains(AddressOf(job)))
                 continue;
 

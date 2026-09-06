@@ -367,6 +367,18 @@ public partial class DataManager
         }
     }
 
+    private bool HasActiveExecution(Job job) =>
+        job.Status == JobStatus.Waiting ||
+        job.Status.IsUnsettled() ||
+        _queueRepository.HasActiveAttempt(job);
+
+    private void EnsureNoActiveExecutions(IEnumerable<Job> jobs, string target)
+    {
+        if (jobs.Any(HasActiveExecution))
+            throw new InvalidOperationException(
+                $"{target} contains active jobs. Abort them and wait for execution to stop first.");
+    }
+
     private static bool FolderContainsJob(Folder folder, int jobId)
     {
         foreach (var item in folder.Items)

@@ -51,6 +51,13 @@ public static class ManagedQueueRules
         if (hasActiveAttempts && proposed.IsManaged != queue.IsManaged)
             throw new InvalidOperationException(
                 $"Queue \"{queue.Alias}\" has active jobs and cannot switch between managed and external execution.");
+
+        if (hasActiveAttempts && queue.IsManaged && proposed.IsManaged &&
+            (proposed.ManagedCores != queue.ManagedCores ||
+             proposed.ManagedMemoryGb != queue.ManagedMemoryGb ||
+             proposed.ManagedGpus != queue.ManagedGpus))
+            throw new InvalidOperationException(
+                $"Queue \"{queue.Alias}\" has active jobs and its managed capacity cannot be changed.");
     }
 
     public static void ValidateDelete(ClusterQueue queue, bool hasActiveAttempts)

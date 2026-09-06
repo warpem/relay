@@ -30,22 +30,17 @@ public partial class DataManager
     /// </remarks>
     public async Task<ReadOnlyJobQueue> CreateClusterQueue(ClusterQueue template = null)
     {
-        ReadOnlyJobQueue createdQueue = null;
-
-        await ExecuteWithLock(async () =>
+        ReadOnlyJobQueue createdQueue;
+        try
         {
-            try
-            {
-                JobQueue newQueue = await _queueRepository.CreateClusterQueueAsync(template);
-                createdQueue = newQueue.AsReadOnly();
-            }
-            catch (Exception e)
-            {
-                Log.ForContext<DataManager>().Error(e, "Failed to create cluster queue from template");
-
-                throw;
-            }
-        });
+            JobQueue newQueue = await _queueRepository.CreateClusterQueueAsync(template);
+            createdQueue = newQueue.AsReadOnly();
+        }
+        catch (Exception e)
+        {
+            Log.ForContext<DataManager>().Error(e, "Failed to create cluster queue from template");
+            throw;
+        }
 
         // Raise events outside of lock
         await QueueCreated.InvokeHierarchy(createdQueue, GroupName.QueueHierarchy(null));
@@ -75,25 +70,18 @@ public partial class DataManager
     /// </remarks>
     public async Task<ReadOnlyJobQueue> UpdateQueue(ReadOnlyJobQueue queue, Action<JobQueue> updateAction)
     {
-        ReadOnlyJobQueue updatedQueue = null;
-
-        await ExecuteWithLock(async () =>
+        ReadOnlyJobQueue updatedQueue;
+        try
         {
-            try
-            {
-                var originalQueue = ResolveQueue(queue.Id);
-
-                await _queueRepository.UpdateQueueAsync(originalQueue, updateAction);
-
-                updatedQueue = originalQueue.AsReadOnly();
-            }
-            catch (Exception e)
-            {
-                Log.ForContext<DataManager>().Error(e, "Failed to update queue {QueueId}", queue.Id);
-
-                throw;
-            }
-        });
+            var originalQueue = ResolveQueue(queue.Id);
+            await _queueRepository.UpdateQueueAsync(originalQueue, updateAction);
+            updatedQueue = originalQueue.AsReadOnly();
+        }
+        catch (Exception e)
+        {
+            Log.ForContext<DataManager>().Error(e, "Failed to update queue {QueueId}", queue.Id);
+            throw;
+        }
 
         // Raise events outside of lock
         await QueueUpdated.InvokeHierarchy(updatedQueue, GroupName.QueueHierarchy(queue.Id));
@@ -119,28 +107,21 @@ public partial class DataManager
     /// </remarks>
     public async Task DeleteQueue(ReadOnlyJobQueue queue)
     {
-        ReadOnlyJobQueue deletedQueue = null;
-
-        await ExecuteWithLock(async () =>
+        ReadOnlyJobQueue deletedQueue;
+        try
         {
-            try
-            {
-                if (queue.Id == -1)
-                    throw new Exception("Cannot delete local queue");
+            if (queue.Id == -1)
+                throw new Exception("Cannot delete local queue");
 
-                var originalQueue = (ClusterQueue)ResolveQueue(queue.Id);
-
-                deletedQueue = originalQueue.AsReadOnly();
-
-                await _queueRepository.DeleteClusterQueueAsync(originalQueue);
-            }
-            catch (Exception e)
-            {
-                Log.ForContext<DataManager>().Error(e, "Failed to delete queue {QueueId}", queue.Id);
-
-                throw;
-            }
-        });
+            var originalQueue = (ClusterQueue)ResolveQueue(queue.Id);
+            deletedQueue = originalQueue.AsReadOnly();
+            await _queueRepository.DeleteClusterQueueAsync(originalQueue);
+        }
+        catch (Exception e)
+        {
+            Log.ForContext<DataManager>().Error(e, "Failed to delete queue {QueueId}", queue.Id);
+            throw;
+        }
 
         // Raise events outside of lock
         await QueueDeleted.InvokeHierarchy(deletedQueue, GroupName.QueueHierarchy(queue.Id));
@@ -172,24 +153,20 @@ public partial class DataManager
         if (queue == null)
             throw new ArgumentNullException(nameof(queue));
 
-        await ExecuteWithLock(async () =>
+        try
         {
-            try
-            {
-                var originalQueue = ResolveQueue(queue.Id);
+            var originalQueue = ResolveQueue(queue.Id);
 
-                if (newPosition < 0 || newPosition >= _queueRepository.ClusterQueues.Count)
-                    throw new ArgumentOutOfRangeException(nameof(newPosition), "New position is out of range");
+            if (newPosition < 0 || newPosition >= _queueRepository.ClusterQueues.Count)
+                throw new ArgumentOutOfRangeException(nameof(newPosition), "New position is out of range");
 
-                await _queueRepository.ReorderClusterQueueAsync(originalQueue, newPosition);
-            }
-            catch (Exception e)
-            {
-                Log.ForContext<DataManager>().Error(e, "Failed to move queue {QueueId} to position {Position}", queue.Id, newPosition);
-
-                throw;
-            }
-        });
+            await _queueRepository.ReorderClusterQueueAsync(originalQueue, newPosition);
+        }
+        catch (Exception e)
+        {
+            Log.ForContext<DataManager>().Error(e, "Failed to move queue {QueueId} to position {Position}", queue.Id, newPosition);
+            throw;
+        }
 
         // Raise events outside of lock
         await QueueUpdated.InvokeHierarchy(queue, GroupName.QueueHierarchy(queue.Id));

@@ -143,6 +143,10 @@ public partial class DataManager
             {
                 var originalProject = ResolveProject(project.Id);
 
+                EnsureNoActiveExecutions(
+                    originalProject.Spaces.SelectMany(space => space.Jobs),
+                    $"Project {originalProject.Alias}");
+
                 _dataRepository.DeleteProject(originalProject);
             }
             catch (Exception e)

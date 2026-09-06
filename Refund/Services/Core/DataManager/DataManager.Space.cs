@@ -79,6 +79,12 @@ public partial class DataManager
 
                 // Delegate to the DataRepository to handle the actual reconnection
                 Space space = _dataRepository.ReconnectSpace(originalUser, originalProject, spacePath, _userRepository.Users);
+                foreach (var job in space.Jobs.Where(job =>
+                             job.Status == JobStatus.Waiting || job.Status.IsUnsettled()))
+                {
+                    job.Status = JobStatus.Interrupted;
+                    job.AddEvent(EventType.Interrupted, originalUser);
+                }
                 reconnectedSpace = space.AsReadOnly();
             }
             catch (Exception e)
@@ -158,6 +164,10 @@ public partial class DataManager
             {
                 var originalUser = ResolveUser(user.Id);
                 var originalSpace = ResolveSpace(space.Project.Id, space.Id);
+
+                EnsureNoActiveExecutions(
+                    originalSpace.Jobs,
+                    $"Space {originalSpace.Alias}");
 
                 _dataRepository.DeleteSpace(originalUser, originalSpace);
             }

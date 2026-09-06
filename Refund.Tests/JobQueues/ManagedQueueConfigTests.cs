@@ -89,6 +89,36 @@ public sealed class ManagedQueueConfigTests
     }
 
     [Fact]
+    public void ChangingManagedCapacityIsRefusedWhileAttemptsAreActive()
+    {
+        var current = Managed("Workstation");
+        var proposed = Managed("Workstation");
+        proposed.ManagedGpus++;
+
+        var error = Assert.Throws<InvalidOperationException>(() =>
+            ManagedQueueRules.ValidateChange(
+                current,
+                proposed,
+                [current],
+                hasActiveAttempts: true));
+
+        Assert.Contains("capacity", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void RenamingAnActiveManagedQueueDoesNotChangeItsCapacity()
+    {
+        var current = Managed("Workstation");
+        var proposed = Managed("Renamed");
+
+        ManagedQueueRules.ValidateChange(
+            current,
+            proposed,
+            [current],
+            hasActiveAttempts: true);
+    }
+
+    [Fact]
     public void ActiveQueueCannotBeDeleted()
     {
         Assert.Throws<InvalidOperationException>(() =>
