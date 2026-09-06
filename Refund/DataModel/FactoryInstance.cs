@@ -100,6 +100,7 @@ public class FactoryInstance : RelayBase, IFolderContent
     private static int StatusPriority(JobStatus s) => s switch
     {
         JobStatus.Deleted    => 11,
+        JobStatus.Interrupted => 10,
         JobStatus.Failed     => 10,
         JobStatus.Aborting   => 9,
         JobStatus.Aborted    => 8,

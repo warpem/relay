@@ -392,4 +392,25 @@ public class ExecutionCoordinatorTests
         Assert.Equal(ExecutionHealth.Indeterminate, copy.Health);
         Assert.DoesNotContain(copy.History, entry => entry.Detail == copy.HealthDetail);
     }
+
+    [Fact]
+    public void RestoreKeepsAttemptsWhoseQueueDefinitionWasDeleted()
+    {
+        var external = new ExecutionQueuePolicy(
+            4,
+            ExecutionBackendKind.ExternalScheduler,
+            BackendConfiguration: "{\"scheduler\":\"snapshot\"}");
+        var original = new ExecutionCoordinator([external]);
+        var attempt = original.RequestRun(
+            Job(1), 4, new ResourceVector(1, 1, 0), dependenciesReady: true).Attempt;
+        original.PreparationCompleted(attempt.Id);
+        original.StartCompleted(attempt.Id, new BackendReceipt("42"), isRunning: false);
+
+        var restored = new ExecutionCoordinator([]);
+        restored.Restore(original.CreateSnapshot());
+
+        var copy = Assert.Single(restored.Attempts);
+        Assert.Equal("42", copy.Receipt.Id);
+        Assert.Empty(restored.Recover());
+    }
 }

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Serilog;
 
 namespace Refund.JobExecution;
 
@@ -14,6 +15,7 @@ public sealed class ExecutionRuntime : IAsyncDisposable
     private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _preparations = new();
     private readonly CancellationTokenSource _lifetime = new();
     private readonly List<ExecutionEffect> _uncommittedEffects = new();
+    private readonly ILogger _logger = Log.ForContext<ExecutionRuntime>();
     private ExecutionCoordinatorSnapshot _latestSnapshot;
     private bool _initialized;
     private bool _stopping;
@@ -363,6 +365,14 @@ public sealed class ExecutionRuntime : IAsyncDisposable
         {
             await ExecuteEffectAsync(effect, cancellationToken);
         }
+        catch (Exception exception)
+        {
+            _logger.Error(
+                exception,
+                "Execution effect {EffectType} failed for attempt {AttemptId}",
+                effect.GetType().Name,
+                effect.AttemptId);
+        }
         finally
         {
             _runningEffects.TryRemove(key, out _);
@@ -536,8 +546,12 @@ public sealed class ExecutionRuntime : IAsyncDisposable
                 () => _coordinator.ObserveWorkers(effect.AttemptId, observations),
                 CancellationToken.None);
         }
-        catch
+        catch (Exception exception)
         {
+            _logger.Warning(
+                exception,
+                "Could not cancel workers for attempt {AttemptId}",
+                effect.AttemptId);
         }
     }
 
@@ -572,8 +586,12 @@ public sealed class ExecutionRuntime : IAsyncDisposable
             await ApplyEffectsAsync(
                 () => _coordinator.ObserveWorkers(attempt.Id, observations), cancellationToken);
         }
-        catch
+        catch (Exception exception)
         {
+            _logger.Warning(
+                exception,
+                "Could not observe workers for attempt {AttemptId}",
+                attempt.Id);
         }
     }
 
@@ -589,8 +607,12 @@ public sealed class ExecutionRuntime : IAsyncDisposable
         {
             await _operations.TrackProgressAsync(attempt, cancellationToken);
         }
-        catch
+        catch (Exception exception)
         {
+            _logger.Warning(
+                exception,
+                "Could not track progress for attempt {AttemptId}",
+                attempt.Id);
         }
         finally
         {

@@ -42,6 +42,7 @@ public static class JobStatusExtensions
                     JobStatus.Failed => new Icons.Filled.Size16.ErrorCircle(),
                     JobStatus.Deleted => new Icons.Filled.Size16.Delete(),
                     JobStatus.Clearing => new Icons.Filled.Size16.Broom(),
+                    JobStatus.Interrupted => new Icons.Filled.Size16.ErrorCircle(),
                     _ => new Icons.Filled.Size16.QuestionCircle()
                 },
 
@@ -63,6 +64,7 @@ public static class JobStatusExtensions
                     JobStatus.Failed => new Icons.Filled.Size20.ErrorCircle(),
                     JobStatus.Deleted => new Icons.Filled.Size20.Delete(),
                     JobStatus.Clearing => new Icons.Filled.Size20.Broom(),
+                    JobStatus.Interrupted => new Icons.Filled.Size20.ErrorCircle(),
                     _ => new Icons.Filled.Size20.QuestionCircle()
                 },
 
@@ -84,6 +86,7 @@ public static class JobStatusExtensions
                     JobStatus.Failed => new Icons.Filled.Size24.ErrorCircle(),
                     JobStatus.Deleted => new Icons.Filled.Size24.Delete(),
                     JobStatus.Clearing => new Icons.Filled.Size24.Broom(),
+                    JobStatus.Interrupted => new Icons.Filled.Size24.ErrorCircle(),
                     _ => new Icons.Filled.Size24.QuestionCircle()
                 }
         };
@@ -118,6 +121,7 @@ public static class JobStatusExtensions
             JobStatus.Aborted => icon.WithColor("#d13438"),         // Red
             JobStatus.Failed => icon.WithColor("#d13438"),          // Red
             JobStatus.Clearing => icon.WithColor("#e9835e"),        // Orange
+            JobStatus.Interrupted => icon.WithColor("#e9835e"),
             _ => icon
         };
     }
@@ -144,6 +148,7 @@ public static class JobStatusExtensions
                     JobStatus.Failed => new Icons.Filled.Size16.ErrorCircle(),
                     JobStatus.Deleted => new Icons.Filled.Size16.Delete(),
                     JobStatus.Clearing => new Icons.Filled.Size16.Broom(),
+                    JobStatus.Interrupted => new Icons.Filled.Size16.ErrorCircle(),
                     _ => new Icons.Filled.Size16.QuestionCircle()
                 },
             IconSize.Size20 =>
@@ -160,6 +165,7 @@ public static class JobStatusExtensions
                     JobStatus.Failed => new Icons.Filled.Size20.ErrorCircle(),
                     JobStatus.Deleted => new Icons.Filled.Size20.Delete(),
                     JobStatus.Clearing => new Icons.Filled.Size20.Broom(),
+                    JobStatus.Interrupted => new Icons.Filled.Size20.ErrorCircle(),
                     _ => new Icons.Filled.Size20.QuestionCircle()
                 },
             _ =>
@@ -176,6 +182,7 @@ public static class JobStatusExtensions
                     JobStatus.Failed => new Icons.Filled.Size24.ErrorCircle(),
                     JobStatus.Deleted => new Icons.Filled.Size24.Delete(),
                     JobStatus.Clearing => new Icons.Filled.Size24.Broom(),
+                    JobStatus.Interrupted => new Icons.Filled.Size24.ErrorCircle(),
                     _ => new Icons.Filled.Size24.QuestionCircle()
                 }
         };
@@ -198,6 +205,7 @@ public static class JobStatusExtensions
             JobStatus.Aborted => icon.WithColor("#d13438"),
             JobStatus.Failed => icon.WithColor("#d13438"),
             JobStatus.Clearing => icon.WithColor("#e9835e"),
+            JobStatus.Interrupted => icon.WithColor("#e9835e"),
             _ => icon
         };
     }
@@ -214,6 +222,7 @@ public static class JobStatusExtensions
         JobStatus.Aborted => "#d13438",
         JobStatus.Failed => "#d13438",
         JobStatus.Clearing => "#e9835e",
+        JobStatus.Interrupted => "#e9835e",
         _ => "#888"
     };
 }

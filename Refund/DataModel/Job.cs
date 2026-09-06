@@ -1342,28 +1342,21 @@ public abstract class Job : RelayBase, IFolderContent
 
     #region State transition
     
-    // @formatter:off
-    private static bool[][] TransitionMatrix = new bool[][]
+    private static bool CanTransitionState(JobStatus from, JobStatus to) => (from, to) switch
     {
-            // To:   Blding  Wting Stging Rnning Fnlzng Fnshed Abrtng Abrted Failed Dlted  Clrng           From:
-        new bool[] { false,  true, false, false, false, false, false, false, false,  true, false },     // Building
-        new bool[] {  true, false,  true, false, false, false, false, false, false,  true,  true },     // Waiting
-        new bool[] { false, false, false,  true, false, false,  true, false,  true, false, false },     // Staging
-        new bool[] { false, false, false, false, false, false,  true, false,  true, false, false },     // Running
-        new bool[] { false, false, false, false, false,  true, false, false,  true, false, false },     // Finalizing
-        new bool[] {  true, false, false, false, false, false, false, false, false,  true,  true },     // Finished
-        new bool[] { false, false, false, false, false, false, false,  true, false, false, false },     // Aborting
-        new bool[] {  true, false,  true, false,  true, false, false, false, false,  true,  true },     // Aborted
-        new bool[] {  true, false, false, false,  true, false, false, false, false,  true,  true },     // Failed
-        new bool[] { false, false, false, false, false, false, false, false, false, false, false },     // Deleted
-        new bool[] {  true, false, false, false, false, false, false, false, false, false, false }      // Clearing
+        (JobStatus.Building, JobStatus.Waiting or JobStatus.Deleted) => true,
+        (JobStatus.Waiting, JobStatus.Building or JobStatus.Staging or JobStatus.Deleted or JobStatus.Clearing) => true,
+        (JobStatus.Staging, JobStatus.Running or JobStatus.Aborting or JobStatus.Failed or JobStatus.Interrupted) => true,
+        (JobStatus.Running, JobStatus.Aborting or JobStatus.Finalizing or JobStatus.Failed or JobStatus.Interrupted) => true,
+        (JobStatus.Finalizing, JobStatus.Finished or JobStatus.Failed or JobStatus.Interrupted) => true,
+        (JobStatus.Finished, JobStatus.Building or JobStatus.Deleted or JobStatus.Clearing) => true,
+        (JobStatus.Aborting, JobStatus.Aborted or JobStatus.Interrupted) => true,
+        (JobStatus.Aborted, JobStatus.Building or JobStatus.Staging or JobStatus.Finalizing or JobStatus.Deleted or JobStatus.Clearing) => true,
+        (JobStatus.Failed, JobStatus.Building or JobStatus.Finalizing or JobStatus.Deleted or JobStatus.Clearing) => true,
+        (JobStatus.Clearing, JobStatus.Building) => true,
+        (JobStatus.Interrupted, JobStatus.Building or JobStatus.Waiting or JobStatus.Finalizing or JobStatus.Deleted or JobStatus.Clearing) => true,
+        _ => false
     };
-    // @formatter:on
-
-    private static bool CanTransitionState(JobStatus from, JobStatus to)
-    {
-        return TransitionMatrix[(int)from][(int)to];
-    }
 
     public bool CanTransitionState(JobStatus to)
     {
@@ -1737,7 +1730,8 @@ public enum JobStatus
     Aborted = 7,
     Failed = 8,
     Deleted = 9,
-    Clearing = 10
+    Clearing = 10,
+    Interrupted = 11
 }
 
 public static class JobStatusExtensions
@@ -1816,7 +1810,12 @@ public enum EventType
     /// <summary>
     /// Job was deleted.
     /// </summary>
-    Deleted
+    Deleted,
+
+    /// <summary>
+    /// Relay lost ownership of an in-process execution during shutdown or restart.
+    /// </summary>
+    Interrupted
 }
 
 public static class EventTypeExtensions
@@ -1829,13 +1828,14 @@ public static class EventTypeExtensions
             JobStatus.Waiting => EventType.WaitingStarted,
             JobStatus.Staging => EventType.StagingStarted,
             JobStatus.Running => EventType.RunningStarted,
-            JobStatus.Finalizing => EventType.RunningStarted,
+            JobStatus.Finalizing => EventType.FinalizingStarted,
             JobStatus.Finished => EventType.Finished,
             JobStatus.Failed => EventType.Failed,
             JobStatus.Aborting => EventType.Aborting,
             JobStatus.Aborted => EventType.Aborted,
             JobStatus.Clearing => EventType.ClearingStarted,
             JobStatus.Deleted => EventType.Deleted,
+            JobStatus.Interrupted => EventType.Interrupted,
         };
     }
 }

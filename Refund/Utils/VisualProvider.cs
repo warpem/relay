@@ -44,6 +44,7 @@ public static class VisualProvider
             JobStatus.Aborting => "",   // TODO: additional statuses
             JobStatus.Deleted => "",    // TODO: additional statuses
             JobStatus.Clearing => "clearing-icon",
+            JobStatus.Interrupted => "failed-icon",
             _ => throw new ArgumentOutOfRangeException(nameof(status), status, null)
         };
 
@@ -73,6 +74,7 @@ public static class VisualProvider
             JobStatus.Aborting => new Icons.Regular.Size16.CircleHint(),   // Temporary icon until a specific one is created
             JobStatus.Deleted => new Icons.Regular.Size16.CircleHint(),    // Temporary icon until a specific one is created
             JobStatus.Clearing => new ClearingIcon(),
+            JobStatus.Interrupted => new Icons.Regular.Size16.CircleHint(),
             _ => throw new ArgumentOutOfRangeException(nameof(status), status, null)
         };
 

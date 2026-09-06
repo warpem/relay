@@ -51,7 +51,11 @@ public sealed class ExecutionCoordinator
         foreach (var attemptSnapshot in snapshot.Attempts ?? Array.Empty<ExecutionAttemptSnapshot>())
         {
             if (!_queues.ContainsKey(attemptSnapshot.QueueId))
-                continue;
+                _queues.Add(attemptSnapshot.QueueId, new ExecutionQueuePolicy(
+                    attemptSnapshot.QueueId,
+                    attemptSnapshot.BackendKind,
+                    null,
+                    attemptSnapshot.BackendConfiguration));
 
             var attempt = new ExecutionAttempt(attemptSnapshot);
             _attempts.Add(attempt.Id, attempt);
