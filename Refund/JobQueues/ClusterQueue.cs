@@ -9,6 +9,7 @@ using Serilog;
 using Refund.DataModel;
 using Refund.DataModel.ReadOnly;
 using Refund.JobQueues.ReadOnly;
+using Refund.JobExecution;
 using Refund.Utils;
 
 namespace Refund.JobQueues;
@@ -140,6 +141,13 @@ public class ClusterQueue : JobQueue, IPoolQueue
     public string StatusJobTemplate { get; set; } = "";
 
     /// <summary>
+    /// Optional command for querying jobs that no longer appear in the scheduler's active view.
+    /// Uses the same {{job_id}} placeholder and scheduler parser as <see cref="StatusJobTemplate"/>.
+    /// </summary>
+    [RelayProperty]
+    public string TerminalStatusJobTemplate { get; set; } = "";
+
+    /// <summary>
     /// Template for aborting/canceling a job on the cluster.
     /// Should include {{job_id}} placeholder for the cluster job ID.
     /// </summary>
@@ -174,6 +182,12 @@ public class ClusterQueue : JobQueue, IPoolQueue
     /// </summary>
     [RelayProperty]
     public string JobStatusParseTemplateFailed { get; set; } = "";
+
+    [RelayProperty]
+    public string JobStatusParseTemplateSucceeded { get; set; } = "";
+
+    [RelayProperty]
+    public string JobStatusParseTemplateCanceled { get; set; } = "";
 
     /// <summary>
     /// Template for generating the job submission script sent to the cluster.
@@ -665,7 +679,7 @@ public class ClusterQueue : JobQueue, IPoolQueue
     /// Prepares the submission script for a job and writes it to disk.
     /// Returns the absolute path to the written script.
     /// </summary>
-    private async Task<string> PrepareAndWriteScript(Job job, Dictionary<string, string> customValues = null)
+    internal async Task<string> PrepareAndWriteScript(Job job, Dictionary<string, string> customValues = null)
     {
         job.DirectoryName = job.Id.ToString();
 
@@ -722,6 +736,60 @@ public class ClusterQueue : JobQueue, IPoolQueue
         onRawOutput?.Invoke(output);
         return ParseClusterJobId(output);
     }
+
+    public async Task<BackendObservation> ObserveReceipt(string receiptId)
+    {
+        if (IsManaged)
+            throw new InvalidOperationException("Managed execution is observed by its process host.");
+        if (string.IsNullOrWhiteSpace(receiptId))
+            return new BackendObservation(
+                BackendObservationKind.Indeterminate, "The scheduler receipt is empty.");
+
+        if (string.IsNullOrWhiteSpace(StatusJobTemplate))
+            return new BackendObservation(
+                BackendObservationKind.Indeterminate,
+                "The queue has no active-status command configured.");
+
+        string command = ReplaceJobId(StatusJobTemplate, receiptId);
+        var activeObservation = ParseBackendObservation(await ExecuteOnCluster(command));
+        if (activeObservation.Kind is not (BackendObservationKind.AbsentFromActiveView or
+            BackendObservationKind.Unparseable or BackendObservationKind.Indeterminate))
+            return activeObservation;
+
+        string terminalTemplate = string.IsNullOrWhiteSpace(TerminalStatusJobTemplate)
+            ? ClusterSchedulerProtocol.DefaultTerminalStatusTemplate(SchedulerType)
+            : TerminalStatusJobTemplate;
+        if (string.IsNullOrWhiteSpace(terminalTemplate))
+            return new BackendObservation(
+                BackendObservationKind.Indeterminate,
+                "The active scheduler view was inconclusive and no terminal-status command is configured.");
+
+        var terminalObservation = ParseBackendObservation(
+            await ExecuteOnCluster(ReplaceJobId(terminalTemplate, receiptId)));
+        return terminalObservation.Kind is BackendObservationKind.AbsentFromActiveView or
+            BackendObservationKind.Unparseable
+            ? new BackendObservation(
+                BackendObservationKind.Indeterminate,
+                "The job could not be resolved from the scheduler's active or terminal views.")
+            : terminalObservation;
+    }
+
+    public async Task CancelReceipt(string receiptId)
+    {
+        if (IsManaged)
+            throw new InvalidOperationException("Managed execution is canceled by its process host.");
+        if (string.IsNullOrWhiteSpace(receiptId))
+            throw new ArgumentException("The scheduler receipt is empty.", nameof(receiptId));
+
+        string command = ReplaceJobId(AbortJobTemplate, receiptId);
+        await ExecuteOnCluster(command);
+    }
+
+    internal BackendObservation ParseBackendObservation(string output) =>
+        ClusterSchedulerProtocol.ParseObservation(this, output);
+
+    private static string ReplaceJobId(string template, string receiptId) =>
+        template.ReplaceRegex("{{\\s*job_id\\s*}}", receiptId);
 
     /// <summary>
     /// Explicit IPoolQueue implementation. The public SubmitScript carries an optional
@@ -1088,99 +1156,66 @@ public class ClusterQueue : JobQueue, IPoolQueue
     private async Task<string> ExecuteClusterCommandInternal(string command)
     {
         string fullCommand = SendCommmandTemplate.ReplaceRegex("{{\\s*command\\s*}}", command);
-        var attempts = 0;
-        var maxAttempts = 20;
-        var timeoutMinutes = 2;
-        string lastError = null;
+        using var process = new Process();
+        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
 
-        while (attempts < maxAttempts)
+        if (!string.IsNullOrEmpty(CustomShell))
         {
-            using var process = new Process();
-            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromMinutes(timeoutMinutes)); // Timeout per attempt
-            
-            try
-            {
-                // How the command reaches the shell:
-                //
-                // The default Unix path passes ["-c", fullCommand] via ArgumentList, NOT a single
-                // Arguments string. ArgumentList hands argv straight to execve with no re-parsing,
-                // so fullCommand reaches /bin/bash verbatim and the admin's quoting behaves exactly
-                // as in an interactive shell. (The old `-c "{fullCommand}"` string was parsed twice
-                // — once by .NET's Arguments→argv parser, once by bash — which silently collapsed
-                // embedded double quotes, e.g. turning -o "%i %T" into -o %i with %T dropped.)
-                //
-                // CustomShell keeps the string-template form: the admin owns that quoting via
-                // CustomShellArguments. Windows cmd.exe keeps the string form too (cmd has its own
-                // quoting rules that ArgumentList's escaping does not match).
-                if (!string.IsNullOrEmpty(CustomShell))
-                {
-                    process.StartInfo.FileName  = CustomShell;
-                    process.StartInfo.Arguments = CustomShellArguments.ReplaceRegex("{{\\s*command\\s*}}", fullCommand);
-                }
-                else if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                {
-                    process.StartInfo.FileName  = "cmd.exe";
-                    process.StartInfo.Arguments = $"/c {fullCommand}";
-                }
-                else
-                {
-                    process.StartInfo.FileName = "/bin/bash";
-                    process.StartInfo.ArgumentList.Add("-c");
-                    process.StartInfo.ArgumentList.Add(fullCommand);
-                }
-
-                process.StartInfo.UseShellExecute = false;
-                process.StartInfo.RedirectStandardOutput = true;
-                process.StartInfo.RedirectStandardError = true;
-                process.StartInfo.CreateNoWindow = true;
-
-                // Prevent the Relay web server's environment from leaking into
-                // cluster jobs. Slurm propagates the submitter's CWD and env vars
-                // to compute nodes, where paths like ASPNETCORE_CONTENTROOT don't
-                // exist and cause worker processes (.NET hosts) to crash.
-                process.StartInfo.WorkingDirectory = Path.GetTempPath();
-                foreach (var key in process.StartInfo.Environment.Keys
-                             .Where(k => k.StartsWith("ASPNETCORE_") || k.StartsWith("Kestrel__"))
-                             .ToList())
-                    process.StartInfo.Environment.Remove(key);
-
-                process.Start();
-                
-                var outputTask = process.StandardOutput.ReadToEndAsync();
-                var errorTask = process.StandardError.ReadToEndAsync();
-                
-                await process.WaitForExitAsync(timeoutCts.Token);
-                
-                string output = await outputTask;
-                string error = await errorTask;
-                
-                if (process.ExitCode == 0)
-                    return output;
-                    
-                lastError = error;
-            }
-            catch (OperationCanceledException)
-            {
-                try
-                {
-                    if (!process.HasExited)
-                        process.Kill(true); // Kill process tree
-                }
-                catch { }
-                lastError = $"Command timed out after {timeoutMinutes} minutes";
-            }
-            catch (Exception ex)
-            {
-                lastError = ex.Message;
-                Console.Error.WriteLine($"Error executing command '{command}': {lastError}, attempt {attempts + 1} of {maxAttempts}");
-            }
-
-            attempts++;
-            if (attempts < maxAttempts)
-                await Task.Delay(2000, CancellationToken.None); // 2 second delay between retries
+            process.StartInfo.FileName = CustomShell;
+            process.StartInfo.Arguments = CustomShellArguments.ReplaceRegex("{{\\s*command\\s*}}", fullCommand);
+        }
+        else if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            process.StartInfo.FileName = "cmd.exe";
+            process.StartInfo.Arguments = $"/c {fullCommand}";
+        }
+        else
+        {
+            process.StartInfo.FileName = "/bin/bash";
+            process.StartInfo.ArgumentList.Add("-c");
+            process.StartInfo.ArgumentList.Add(fullCommand);
         }
 
-        throw new Exception($"Command execution failed after {attempts} attempts, last error message: {lastError}");
+        process.StartInfo.UseShellExecute = false;
+        process.StartInfo.RedirectStandardOutput = true;
+        process.StartInfo.RedirectStandardError = true;
+        process.StartInfo.CreateNoWindow = true;
+        process.StartInfo.WorkingDirectory = Path.GetTempPath();
+
+        foreach (var key in process.StartInfo.Environment.Keys
+                     .Where(key => key.StartsWith("ASPNETCORE_") || key.StartsWith("Kestrel__"))
+                     .ToList())
+            process.StartInfo.Environment.Remove(key);
+
+        process.Start();
+        var outputTask = process.StandardOutput.ReadToEndAsync();
+        var errorTask = process.StandardError.ReadToEndAsync();
+
+        try
+        {
+            await process.WaitForExitAsync(timeoutCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            try
+            {
+                if (!process.HasExited)
+                    process.Kill(true);
+            }
+            catch
+            {
+            }
+
+            throw new TimeoutException($"Cluster command timed out after 2 minutes: {command}");
+        }
+
+        string output = await outputTask;
+        string error = await errorTask;
+        if (process.ExitCode != 0)
+            throw new InvalidOperationException(
+                $"Cluster command exited with code {process.ExitCode}: {command}\n{error}");
+
+        return output;
     }
 
     /// <summary>

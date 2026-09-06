@@ -1,4 +1,5 @@
 using Refund.DataModel;
+using Refund.JobExecution;
 using Refund.JobQueues;
 
 namespace Refund.Tests.JobQueues;
@@ -94,6 +95,78 @@ public class ClusterSchedulerParsingTests
         // job's state undetermined instead of raising out of the daemon's polling loop.
         var queue = Queue(ClusterScheduler.Slurm);
         Assert.Equal(ClusterJobStatus.Unknown, queue.ParseClusterJobStatus("nonsense"));
+    }
+
+    #endregion
+
+    #region Execution observations
+
+    [Theory]
+    [InlineData(ClusterScheduler.Slurm, "COMPLETED|", BackendObservationKind.Succeeded)]
+    [InlineData(ClusterScheduler.Slurm, "CANCELLED by 1000|", BackendObservationKind.Canceled)]
+    [InlineData(ClusterScheduler.Lsf, "DONE", BackendObservationKind.Succeeded)]
+    [InlineData(ClusterScheduler.Pbs, "job_state = R", BackendObservationKind.Running)]
+    [InlineData(ClusterScheduler.Sge, "123 0.5 job user r queue", BackendObservationKind.Running)]
+    [InlineData(ClusterScheduler.Flux, "COMPLETED", BackendObservationKind.Succeeded)]
+    public void ParseBackendObservation_UsesSelectedScheduler(
+        ClusterScheduler scheduler,
+        string output,
+        BackendObservationKind expected)
+    {
+        Assert.Equal(expected, Queue(scheduler).ParseBackendObservation(output).Kind);
+    }
+
+    [Fact]
+    public void ParseBackendObservation_CustomQueue_SupportsEveryTerminalOutcome()
+    {
+        var queue = Queue(ClusterScheduler.Custom);
+        queue.JobStatusParseTemplateSucceeded = "ALL GOOD";
+        queue.JobStatusParseTemplateFailed = "BROKEN";
+        queue.JobStatusParseTemplateCanceled = "STOPPED";
+
+        Assert.Equal(
+            BackendObservationKind.Succeeded,
+            queue.ParseBackendObservation("ALL GOOD").Kind);
+        Assert.Equal(
+            BackendObservationKind.Failed,
+            queue.ParseBackendObservation("BROKEN").Kind);
+        Assert.Equal(
+            BackendObservationKind.Canceled,
+            queue.ParseBackendObservation("STOPPED").Kind);
+    }
+
+    [Fact]
+    public void TerminalStatusTemplate_IsConfigurableForEveryScheduler()
+    {
+        var queue = Queue(ClusterScheduler.Pbs);
+        queue.TerminalStatusJobTemplate = "qstat -xf {{job_id}}";
+
+        var saved = queue.ToJson();
+        var loaded = Queue(ClusterScheduler.Slurm);
+        loaded.ReadFromJson(saved, (_, _, _) => null);
+
+        Assert.Equal(ClusterScheduler.Pbs, loaded.SchedulerType);
+        Assert.Equal("qstat -xf {{job_id}}", loaded.TerminalStatusJobTemplate);
+    }
+
+    [Theory]
+    [InlineData(ClusterScheduler.Lsf)]
+    [InlineData(ClusterScheduler.Pbs)]
+    [InlineData(ClusterScheduler.Sge)]
+    [InlineData(ClusterScheduler.Flux)]
+    [InlineData(ClusterScheduler.Custom)]
+    public void DefaultTerminalStatusTemplate_DoesNotInventSchedulerCommands(
+        ClusterScheduler scheduler)
+    {
+        Assert.Null(ClusterSchedulerProtocol.DefaultTerminalStatusTemplate(scheduler));
+    }
+
+    [Fact]
+    public void DefaultTerminalStatusTemplate_SlurmUsesAccountingView()
+    {
+        Assert.Contains(
+            "sacct",
+            ClusterSchedulerProtocol.DefaultTerminalStatusTemplate(ClusterScheduler.Slurm));
     }
 
     #endregion
