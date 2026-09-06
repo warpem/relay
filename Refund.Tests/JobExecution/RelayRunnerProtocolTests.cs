@@ -1,4 +1,5 @@
 using System.IO.Pipes;
+using System.Diagnostics;
 using Refund.JobExecution;
 
 namespace Refund.Tests.JobExecution;
@@ -65,6 +66,75 @@ public sealed class RelayRunnerProtocolTests
         }
     }
 
+    [Fact]
+    public async Task CleanPayloadExitKillsRemainingProcessGroup()
+    {
+        string directory = CreateDirectory();
+        string setsid = CreateSetsidStandIn(directory);
+        int childPid = 0;
+        string previous = SupervisedProcess.SetsidPathOverride;
+        SupervisedProcess.SetsidPathOverride = setsid;
+        try
+        {
+            string pidFile = Path.Combine(directory, "child.pid");
+            string release = Path.Combine(directory, "release");
+            string script = Path.Combine(directory, "payload.sh");
+            await File.WriteAllTextAsync(
+                script,
+                $"sleep 30 >/dev/null 2>&1 & echo $! > '{pidFile}'\n" +
+                $"while [ ! -f '{release}' ]; do sleep 0.05; done\n");
+            await using var protocol = await RunnerProtocol.StartAsync(Options(
+                script,
+                directory,
+                Path.Combine(directory, "stdout.txt"),
+                Path.Combine(directory, "stderr.txt")));
+            Assert.Equal(RelayRunner.ReadySignal, await protocol.Ready.ReadLineAsync());
+            await protocol.Control.WriteLineAsync(RelayRunner.GoSignal);
+            await WaitUntilAsync(() => File.Exists(pidFile));
+            childPid = int.Parse(await File.ReadAllTextAsync(pidFile));
+
+            await File.WriteAllTextAsync(release, "");
+
+            Assert.Equal(0, await protocol.Result.WaitAsync(TimeSpan.FromSeconds(10)));
+            await WaitUntilAsync(() => !IsAlive(childPid));
+        }
+        finally
+        {
+            SupervisedProcess.SetsidPathOverride = previous;
+            KillIfAlive(childPid);
+            Directory.Delete(directory, true);
+        }
+    }
+
+    [Fact]
+    public async Task BrokenOutputFileDoesNotStopDrainingThePayload()
+    {
+        string directory = CreateDirectory();
+        try
+        {
+            string blocker = Path.Combine(directory, "blocker");
+            await File.WriteAllTextAsync(blocker, "not a directory");
+            string script = Path.Combine(directory, "payload.sh");
+            await File.WriteAllTextAsync(
+                script,
+                "for i in $(seq 1 20000); do echo output-$i; done\n");
+            await using var protocol = await RunnerProtocol.StartAsync(Options(
+                script,
+                directory,
+                Path.Combine(blocker, "stdout.txt"),
+                Path.Combine(directory, "stderr.txt")));
+            Assert.Equal(RelayRunner.ReadySignal, await protocol.Ready.ReadLineAsync());
+
+            await protocol.Control.WriteLineAsync(RelayRunner.GoSignal);
+
+            Assert.Equal(0, await protocol.Result.WaitAsync(TimeSpan.FromSeconds(10)));
+        }
+        finally
+        {
+            Directory.Delete(directory, true);
+        }
+    }
+
     private static Dictionary<string, string> Options(
         string script,
         string directory,
@@ -90,6 +160,48 @@ public sealed class RelayRunnerProtocolTests
         string path = Path.Combine(Path.GetTempPath(), $"relay-runner-{Guid.NewGuid():N}");
         Directory.CreateDirectory(path);
         return path;
+    }
+
+    private static string CreateSetsidStandIn(string directory)
+    {
+        foreach (string candidate in new[] { "/usr/bin/setsid", "/bin/setsid" })
+            if (File.Exists(candidate))
+                return candidate;
+
+        string path = Path.Combine(directory, "setsid");
+        File.WriteAllText(
+            path,
+            "#!/bin/bash\nexec /usr/bin/perl -e 'setpgrp(0,0); exec @ARGV or die' \"$@\"\n");
+        File.SetUnixFileMode(
+            path,
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        return path;
+    }
+
+    private static bool IsAlive(int processId)
+    {
+        try
+        {
+            return !Process.GetProcessById(processId).HasExited;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void KillIfAlive(int processId)
+    {
+        if (processId <= 0)
+            return;
+
+        try
+        {
+            Process.GetProcessById(processId).Kill();
+        }
+        catch
+        {
+        }
     }
 
     private sealed class RunnerProtocol : IAsyncDisposable

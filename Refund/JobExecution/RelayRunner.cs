@@ -56,18 +56,21 @@ public static class RelayRunner
             standardOutput,
             standardError);
         using var monitorCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        Task payloadExit = payload.WaitForExitAsync(CancellationToken.None);
+        Task payloadExit = payload.WaitForProcessExitAsync(CancellationToken.None);
         Task<string> controlCommand = controlReader.ReadLineAsync(monitorCancellation.Token).AsTask();
         Task completed = await Task.WhenAny(payloadExit, controlCommand);
 
         if (completed == controlCommand)
         {
             payload.KillTree();
-            await payloadExit;
+            await payload.WaitForContainmentAsync(CancellationToken.None);
             return 137;
         }
 
         await payloadExit;
+        int exitCode = payload.ExitCode;
+        payload.KillTree();
+        bool contained = await payload.WaitForContainmentAsync(CancellationToken.None);
         monitorCancellation.Cancel();
         try
         {
@@ -76,7 +79,7 @@ public static class RelayRunner
         catch (OperationCanceledException)
         {
         }
-        return payload.ExitCode;
+        return contained ? exitCode : 125;
     }
 
     internal static Dictionary<string, string> Parse(IReadOnlyList<string> arguments)

@@ -7,20 +7,24 @@ namespace Refund.JobExecution;
 internal sealed class SupervisedProcess : IDisposable
 {
     private static readonly TimeSpan DrainGrace = TimeSpan.FromSeconds(10);
-    private static readonly string SetsidPath =
+    private static readonly TimeSpan ContainmentGrace = TimeSpan.FromSeconds(5);
+    private static readonly string InstalledSetsidPath =
         new[] { "/usr/bin/setsid", "/bin/setsid" }.FirstOrDefault(File.Exists);
 
     private readonly Process _process;
     private readonly Task _outputPumps;
-    private readonly bool _ownsProcessGroup;
-    private int _confirmedProcessGroup;
+    private readonly int? _processGroup;
     private long _exitObservedAt;
 
-    private SupervisedProcess(Process process, Task outputPumps, bool ownsProcessGroup)
+    internal static string SetsidPathOverride { get; set; }
+
+    private static string SetsidPath => SetsidPathOverride ?? InstalledSetsidPath;
+
+    private SupervisedProcess(Process process, Task outputPumps, int? processGroup)
     {
         _process = process;
         _outputPumps = outputPumps;
-        _ownsProcessGroup = ownsProcessGroup;
+        _processGroup = processGroup;
     }
 
     public int ExitCode => _process.ExitCode;
@@ -72,16 +76,32 @@ internal sealed class SupervisedProcess : IDisposable
         process.Start();
         process.StandardInput.Close();
 
+        int? processGroup = ownsProcessGroup
+            ? ConfirmProcessGroup(process, TimeSpan.FromSeconds(1))
+            : null;
+        if (ownsProcessGroup && processGroup == null && !process.HasExited)
+        {
+            try
+            {
+                process.Kill(entireProcessTree: true);
+            }
+            catch
+            {
+            }
+            process.Dispose();
+            throw new InvalidOperationException(
+                "The managed payload did not enter its private process group.");
+        }
+
         var pumps = Task.WhenAll(
             PumpAsync(process.StandardOutput, standardOutputPath),
             PumpAsync(process.StandardError, standardErrorPath));
-        return new SupervisedProcess(process, pumps, ownsProcessGroup);
+        return new SupervisedProcess(process, pumps, processGroup);
     }
 
     public void KillTree()
     {
-        int? processGroup = ProcessGroup;
-        if (processGroup is { } group && group > 1 && Kill(-group, SigKill) == 0)
+        if (_processGroup is { } group && group > 1 && Kill(-group, SigKill) == 0)
             return;
 
         try
@@ -93,6 +113,9 @@ internal sealed class SupervisedProcess : IDisposable
         {
         }
     }
+
+    public Task WaitForProcessExitAsync(CancellationToken cancellationToken) =>
+        _process.WaitForExitAsync(cancellationToken);
 
     public async Task WaitForExitAsync(CancellationToken cancellationToken)
     {
@@ -106,60 +129,125 @@ internal sealed class SupervisedProcess : IDisposable
         }
     }
 
+    public async Task<bool> WaitForContainmentAsync(CancellationToken cancellationToken)
+    {
+        await WaitForExitAsync(cancellationToken);
+        if (_processGroup == null)
+            return true;
+
+        var started = Stopwatch.StartNew();
+        while (started.Elapsed < ContainmentGrace)
+        {
+            if (ProcessGroupIsEmpty(_processGroup.Value))
+                return true;
+            await Task.Delay(25, cancellationToken);
+        }
+
+        return ProcessGroupIsEmpty(_processGroup.Value);
+    }
+
     public void Dispose()
     {
         _process.Dispose();
     }
 
-    private int? ProcessGroup
+    private static int? ConfirmProcessGroup(Process process, TimeSpan timeout)
     {
-        get
+        var started = Stopwatch.StartNew();
+        while (started.Elapsed < timeout)
         {
-            int confirmed = Volatile.Read(ref _confirmedProcessGroup);
-            if (confirmed != 0)
-                return confirmed;
-            if (!_ownsProcessGroup || _process.HasExited)
+            if (process.HasExited)
                 return null;
 
             try
             {
-                int group = GetProcessGroup(_process.Id);
-                if (group == _process.Id && group > 1)
-                {
-                    Volatile.Write(ref _confirmedProcessGroup, group);
+                int group = GetProcessGroup(process.Id);
+                if (group == process.Id && group > 1)
                     return group;
-                }
             }
             catch
             {
             }
 
-            return null;
+            Thread.Sleep(1);
         }
+
+        return null;
     }
 
     private static async Task PumpAsync(StreamReader reader, string path)
     {
+        StreamWriter writer = null;
         try
         {
             string directory = Path.GetDirectoryName(path);
             if (!string.IsNullOrEmpty(directory))
                 Directory.CreateDirectory(directory);
 
-            await using var writer = new StreamWriter(path, append: false) { AutoFlush = true };
-            while (await reader.ReadLineAsync() is { } line)
-                await writer.WriteLineAsync(line);
+            writer = new StreamWriter(path, append: false) { AutoFlush = true };
         }
         catch (Exception exception)
         {
             Log.ForContext<SupervisedProcess>().Warning(
                 exception,
-                "Stopped writing managed job output to {Path}",
+                "Could not open managed job output at {Path}; output will be discarded",
                 path);
+        }
+
+        try
+        {
+            while (await reader.ReadLineAsync() is { } line)
+            {
+                if (writer == null)
+                    continue;
+
+                try
+                {
+                    await writer.WriteLineAsync(line);
+                }
+                catch (Exception exception)
+                {
+                    Log.ForContext<SupervisedProcess>().Warning(
+                        exception,
+                        "Stopped writing managed job output to {Path}; output will be discarded",
+                        path);
+                    await writer.DisposeAsync();
+                    writer = null;
+                }
+            }
+        }
+        catch (Exception exception)
+        {
+            Log.ForContext<SupervisedProcess>().Warning(
+                exception,
+                "Stopped reading managed job output for {Path}",
+                path);
+        }
+        finally
+        {
+            if (writer != null)
+                await writer.DisposeAsync();
+        }
+    }
+
+    private static bool ProcessGroupIsEmpty(int processGroup)
+    {
+        if (processGroup <= 1)
+            return false;
+
+        try
+        {
+            return Kill(-processGroup, 0) != 0 &&
+                   Marshal.GetLastWin32Error() == NoSuchProcess;
+        }
+        catch
+        {
+            return false;
         }
     }
 
     private const int SigKill = 9;
+    private const int NoSuchProcess = 3;
 
     [DllImport("libc", EntryPoint = "kill", SetLastError = true)]
     private static extern int Kill(int pid, int signal);
