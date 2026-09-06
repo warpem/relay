@@ -951,6 +951,19 @@ public class ManagedExecutorProcessTests : IDisposable
     }
 
     [Fact]
+    public async Task Launch_IntoAReservationThatAlreadyHasAProcess_ThrowsBeforeSpawning()
+    {
+        var executor = new ManagedExecutor();
+        var job = NewJob();
+        executor.TryAdmit(job, new ResourceTotals(8, 32, 0));
+
+        Assert.True(executor.Attach(job, new FakeProcess()));
+
+        await AssertLaunchRefusesAndSpawnsNothing(
+            executor, job, "against a reservation already holding a live process");
+    }
+
+    [Fact]
     public async Task Launch_WhenTheReservationVanishesDuringSpawn_KillsTheRealProcessAndThrows()
     {
         // The reservation can be retired between admission and the process being up -- an abort,

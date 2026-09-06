@@ -478,17 +478,31 @@ public class ClusterQueue : JobQueue, IPoolQueue
             // inside the delegate instead, where the cleanup below always runs.
             Task.Run(async () =>
             {
+                JobStatus? stagingOutcome = null;
+
                 try
                 {
                     // The window the scheduling token used to swallow: an abort that arrived while
                     // this task sat in the thread pool queue.
                     cts.Token.ThrowIfCancellationRequested();
 
+                    bool shouldStage = false;
                     JobUpdateCallback(job, j =>
                     {
+                        if (j.Status == JobStatus.Waiting)
+                            j.Status = JobStatus.Staging;
+
+                        if (j.Status != JobStatus.Staging)
+                            return;
+
                         j.DirectoryName = j.Id.ToString();
-                        j.Status = JobStatus.Staging;
+                        shouldStage = true;
                     });
+
+                    // A clear can win the race between admission and this background task. Its
+                    // state must not be overwritten, and no script may launch behind it.
+                    if (!shouldStage)
+                        return;
 
                     // Before the work, not only after it. Script preparation deletes and recreates
                     // the job directory and can throw for reasons of its own, and an abort that
@@ -529,7 +543,7 @@ public class ClusterQueue : JobQueue, IPoolQueue
                     // from one whose script could not be written, with a stack trace in error.txt.
                     await job.WriteToLifecycleLog(
                         $"Job {job.Id} was aborted before it reached the cluster");
-                    JobUpdateCallback(job, j => j.Status = JobStatus.Aborted);
+                    stagingOutcome = JobStatus.Aborted;
                 }
                 catch (Exception exc) when (cts.IsCancellationRequested)
                 {
@@ -551,18 +565,31 @@ public class ClusterQueue : JobQueue, IPoolQueue
                         $"Job {job.Id} was aborted while it was being staged; the exception that " +
                         $"carried it here follows, and may be an unrelated staging failure:\n{exc}");
 
-                    JobUpdateCallback(job, j => j.Status = JobStatus.Aborted);
+                    stagingOutcome = JobStatus.Aborted;
                 }
                 catch (Exception exc)
                 {
-                    await job.WriteToErrorLog($"Job {job.Id} cancelled before it went to cluster:\n{exc}");
-                    JobUpdateCallback(job, j => j.Status = JobStatus.Failed);
+                    await job.WriteToErrorLog($"Job {job.Id} failed while it was being staged:\n{exc}");
+                    stagingOutcome = JobStatus.Failed;
                 }
                 finally
                 {
-                    // Reached on every path now, cancellation included. It is the only thing that
-                    // lets the job be queued again.
+                    // Release the per-run guard before exposing a terminal status. Otherwise the
+                    // UI can requeue an Aborted/Failed job in this tiny window and synchronously hit
+                    // "already staging" even though the old task is about to remove itself.
                     SettleStaging(job);
+
+                    if (stagingOutcome is { } outcome)
+                    {
+                        JobUpdateCallback(job, j =>
+                        {
+                            if (outcome == JobStatus.Aborted &&
+                                j.Status is JobStatus.Staging or JobStatus.Aborting)
+                                j.Status = JobStatus.Aborted;
+                            else if (outcome == JobStatus.Failed && j.Status == JobStatus.Staging)
+                                j.Status = JobStatus.Failed;
+                        });
+                    }
                 }
             });
         }
@@ -651,6 +678,10 @@ public class ClusterQueue : JobQueue, IPoolQueue
 
         Directory.CreateDirectory(job.DirectoryPath);
         Directory.CreateDirectory(job.RelayResultsDirectoryPath);
+
+        // This belongs after recreation: before DirectoryName is assigned it is written into the
+        // space root, and on a re-run writing it before the delete immediately erases it.
+        await job.WriteToLifecycleLog("Staging started");
 
         job.Stage();
 

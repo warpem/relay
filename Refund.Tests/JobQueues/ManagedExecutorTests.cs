@@ -166,6 +166,38 @@ public class ManagedExecutorTests : IDisposable
         Assert.Single(executor.LiveAllocations());
     }
 
+    [Fact]
+    public void TryAdmit_ReplacesAProcesslessReservation_WhenTheRequestChanged()
+    {
+        var executor = new ManagedExecutor();
+        var job = (MaskJob)NewJob();
+
+        job.NThreads = 1;
+        Assert.IsType<AdmissionResult.Admit>(executor.TryAdmit(job, Host));
+
+        job.NThreads = 4;
+        Assert.IsType<AdmissionResult.Admit>(executor.TryAdmit(job, Host));
+
+        var allocation = Assert.Single(executor.LiveAllocations());
+        Assert.Equal(4, allocation.Cores);
+    }
+
+    [Fact]
+    public void TryAdmit_DoesNotReuseAReservationThatAlreadyHasAProcess()
+    {
+        var executor = new ManagedExecutor();
+        var job = NewJob();
+
+        Assert.IsType<AdmissionResult.Admit>(executor.TryAdmit(job, Host));
+        var process = new FakeProcess();
+        Assert.True(executor.Attach(job, process));
+        job.Status = JobStatus.Staging;
+
+        Assert.IsType<AdmissionResult.Busy>(executor.TryAdmit(job, Host));
+        Assert.False(process.WasKilled);
+        Assert.Single(executor.LiveAllocations());
+    }
+
     #endregion
 
     #region Reconciliation
@@ -187,6 +219,19 @@ public class ManagedExecutorTests : IDisposable
 
         Assert.Empty(executor.LiveAllocations());
         Assert.IsType<AdmissionResult.Admit>(executor.TryAdmit(NewJob(), oneCore));
+    }
+
+    [Fact]
+    public void ClearingAWaitingJob_ReleasesItsUnlaunchedReservation()
+    {
+        var executor = new ManagedExecutor();
+        var job = NewJob();
+
+        Assert.IsType<AdmissionResult.Admit>(executor.TryAdmit(job, Host));
+        job.Status = JobStatus.Clearing;
+        executor.Reap();
+
+        Assert.Empty(executor.LiveAllocations());
     }
 
     [Fact]
@@ -840,6 +885,31 @@ public class ManagedExecutorTests : IDisposable
         executor.Launch(job, _ => new FakeProcess());
 
         Assert.Null(Assert.Single(registry.Load()).Pgid);
+    }
+
+    [Fact]
+    public void ARegistryForgetFailure_DoesNotBlockResourceReconciliation()
+    {
+        var registryDirectory = Path.Combine(_dir, "registry");
+        var registry = new ManagedProcessRegistry(
+            Path.Combine(registryDirectory, "managed-processes.json"));
+        var executor = new ManagedExecutor(registry);
+
+        var job = InSpace(NewJob(), spaceId: 1, jobId: 1);
+        job.Status = JobStatus.Running;
+        executor.TryAdmit(job, Host);
+        var process = new FakeProcess();
+        executor.Launch(job, _ => process);
+
+        Directory.Delete(registryDirectory, true);
+        File.WriteAllText(registryDirectory, "not a directory");
+
+        process.Exit(0);
+        job.Status = JobStatus.Finished;
+        executor.Reap();
+
+        Assert.False(executor.HasEntries(_ => true));
+        Assert.Empty(executor.LiveAllocations());
     }
 
     [Fact]

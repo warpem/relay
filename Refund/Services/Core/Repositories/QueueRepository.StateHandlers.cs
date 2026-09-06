@@ -24,76 +24,97 @@ public partial class QueueRepository
     /// <returns>A task representing the asynchronous operation</returns>
     private async Task HandleWaitingState(Job job, JobQueue queue)
     {
-        // Check if all job prerequisites are met
-        if (job.IsReadyToStage())
+        // The daemon normally dispatches by status, but a status can change while an earlier
+        // dispatch is still in flight. Never let a stale invocation submit the same run twice.
+        if (job.Status != JobStatus.Waiting)
+            return;
+
+        bool beganStaging = false;
+
+        try
         {
-            try
+            // Check if all job prerequisites are met
+            if (!job.IsReadyToStage())
+                return;
+
+            // If this is a pooled job, the pool queue must exist and have the batch templates
+            // configured before we submit the Manager. Fail the job outright rather than
+            // throwing: none of these are transient, so leaving it Waiting would re-log the
+            // same reason on every ~1s daemon tick, forever.
+            if (job is IPooledJob pooledJob && pooledJob.PoolQueueId > 0 &&
+                PoolPreflightError(pooledJob) is { } poolError)
             {
-                // If this is a pooled job, the pool queue must exist and have the batch templates
-                // configured before we submit the Manager. Fail the job outright rather than
-                // throwing: none of these are transient, so leaving it Waiting would re-log the
-                // same reason on every ~1s daemon tick, forever.
-                if (job is IPooledJob pooledJob && pooledJob.PoolQueueId > 0 &&
-                    PoolPreflightError(pooledJob) is { } poolError)
-                {
-                    await FailWaitingJob(job, queue, poolError);
+                await FailWaitingJob(job, queue, poolError);
+                return;
+            }
+
+            // Ask the queue before moving the job out of Waiting, never after. A job rejected
+            // after the transition would strand in Staging, and the whole point of returning
+            // Busy rather than throwing is that the daemon can retry cleanly from Waiting.
+            switch (queue.CanAdmit(job))
+            {
+                case AdmissionResult.Admit:
+                    break;                              // proceed to staging
+
+                case AdmissionResult.Busy:
+                    return;                             // resources in use; the daemon asks again next tick
+
+                case AdmissionResult.Reject reject:
+                    await FailWaitingJob(job, queue, reject.Reason);
                     return;
-                }
 
-                // Ask the queue before moving the job out of Waiting, never after. A job rejected
-                // after the transition would strand in Staging, and the whole point of returning
-                // Busy rather than throwing is that the daemon can retry cleanly from Waiting.
-                switch (queue.CanAdmit(job))
-                {
-                    case AdmissionResult.Admit:
-                        break;                              // proceed to staging
-
-                    case AdmissionResult.Busy:
-                        return;                             // resources in use; the daemon asks again next tick
-
-                    case AdmissionResult.Reject reject:
-                        // Fail it once. Leaving it Waiting would re-log the same reason every tick.
-                        await FailWaitingJob(job, queue, reject.Reason);
-                        return;
-
-                    // AdmissionResult's private constructor does not actually close the hierarchy —
-                    // a record's protected copy constructor can be chained — and C# would not treat
-                    // the switch as exhaustive even if it did. Refusing to start is the safe answer
-                    // for a verdict this code does not understand.
-                    default:
-                        _logger.Error("Queue {QueueAlias} returned an unrecognised admission verdict " +
-                                      "for job {JobId}; leaving it Waiting.", queue.Alias, job.Id);
-                        return;
-                }
-
-                // Only now, once admission has actually granted the job its resources. Written
-                // before the switch this appended a line per waiting job per daemon tick, which a
-                // long-lived Waiting state (the point of a managed queue) turns into an unbounded
-                // lifecycle log.
-                await job.WriteToLifecycleLog($"Staging started");
-
-                // Transition to Staging state
-                _jobUpdateCallback(job, j =>
-                {
-                    j.Status = JobStatus.Staging;
-                    j.AddEvent(EventType.StagingStarted);
-                });
-
-                // Submit the job to the queue for execution
-                lock (_saveLock)
-                {
-                    queue.SubmitJob(job);
-                }
-
-                _logger.Information("Job {JobId} successfully transitioned from Waiting to Staging and submitted to {QueueType} (alias: {JobAlias})",
-                                    job.Id, queue.GetType().Name, job.Alias);
+                default:
+                    await FailWaitingJob(
+                        job, queue,
+                        $"Queue {queue.Alias} returned an unrecognised admission verdict.");
+                    return;
             }
-            catch (Exception exc)
+
+            // Claim the transition. A second invocation may have made the same admission
+            // decision before this callback ran; only one of them may add the event and submit.
+            _jobUpdateCallback(job, j =>
             {
-                await job.WriteToErrorLog(exc.ToString());
-                _logger.Error("Job {JobId} failed to transition from Waiting to Staging and submitted to {QueueType} (alias: {JobAlias})\n{exception}",
-                              job.Id, queue.GetType().Name, job.Alias, exc.ToString());
+                if (j.Status != JobStatus.Waiting)
+                    return;
+
+                j.Status = JobStatus.Staging;
+                j.AddEvent(EventType.StagingStarted);
+                beganStaging = true;
+            });
+
+            if (!beganStaging)
+                return;
+
+            lock (_saveLock)
+            {
+                queue.SubmitJob(job);
             }
+
+            _logger.Information("Job {JobId} successfully transitioned from Waiting to Staging and submitted to {QueueType} (alias: {JobAlias})",
+                                job.Id, queue.GetType().Name, job.Alias);
+        }
+        catch (Exception exc)
+        {
+            // An unexpected admission failure is not transient by default. Leaving the job in
+            // Waiting would run this catch once per daemon tick forever. If submission failed
+            // after we claimed Staging, fail that run instead, but never overwrite a concurrent
+            // clear or abort.
+            bool failed = false;
+            _jobUpdateCallback(job, j =>
+            {
+                if (j.Status != (beganStaging ? JobStatus.Staging : JobStatus.Waiting))
+                    return;
+
+                j.Status = JobStatus.Failed;
+                j.AddEvent(EventType.Failed);
+                failed = true;
+            });
+
+            if (failed)
+                await job.WriteToErrorLog(exc.ToString());
+
+            _logger.Error("Job {JobId} failed to transition from Waiting to Staging and submitted to {QueueType} (alias: {JobAlias})\n{exception}",
+                          job.Id, queue.GetType().Name, job.Alias, exc.ToString());
         }
     }
 
@@ -136,16 +157,24 @@ public partial class QueueRepository
     /// </summary>
     private async Task FailWaitingJob(Job job, JobQueue queue, string reason)
     {
-        await job.WriteToErrorLog(reason);
+        bool failed = false;
 
         _jobUpdateCallback(job, j =>
         {
+            if (j.Status != JobStatus.Waiting)
+                return;
+
             j.Status = JobStatus.Failed;
             j.AddEvent(EventType.Failed);
+            failed = true;
         });
 
-        _logger.Warning("Job {JobId} cannot start on queue {QueueAlias}: {Reason}",
-                        job.Id, queue.Alias, reason);
+        if (failed)
+        {
+            await job.WriteToErrorLog(reason);
+            _logger.Warning("Job {JobId} cannot start on queue {QueueAlias}: {Reason}",
+                            job.Id, queue.Alias, reason);
+        }
     }
 
     /// <summary>

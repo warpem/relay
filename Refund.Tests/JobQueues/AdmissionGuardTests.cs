@@ -134,6 +134,24 @@ public class WaitingStateAdmissionTests : DaemonTestBase
 {
     public WaitingStateAdmissionTests() : base("relay-admission-") { }
 
+    private sealed class RecordingQueue : JobQueue
+    {
+        private readonly Func<Job, AdmissionResult> _admit;
+
+        public int SubmissionCount { get; private set; }
+
+        public RecordingQueue(Func<Job, AdmissionResult> admit)
+            : base((job, action) => action(job))
+        {
+            Alias = "recording";
+            _admit = admit;
+        }
+
+        public override AdmissionResult CanAdmit(Job job) => _admit(job);
+        public override void SubmitJob(Job job, Dictionary<string, string>? customValues = null) =>
+            SubmissionCount++;
+    }
+
     private static Task Invoke(QueueRepository repository, Job job, JobQueue queue) =>
         InvokeHandler(repository, "HandleWaitingState", job, queue);
 
@@ -284,6 +302,80 @@ public class WaitingStateAdmissionTests : DaemonTestBase
         Assert.Equal(JobStatus.Waiting, waiting.Status);
         Assert.False(File.Exists(waiting.LifecycleFilePath),
                      "A job that never left Waiting has no staging history to record.");
+    }
+
+    [Fact]
+    public async Task AWaitingRun_IsSubmittedAndRecordedExactlyOnce()
+    {
+        var repository = NewRepository();
+        var queue = new RecordingQueue(_ => AdmissionResult.Admitted);
+        var job = NewJob();
+
+        // Models a stale second dispatch arriving after the first one changed the status. Without
+        // the guarded transition it adds another Staging event and submits the same run again.
+        await Invoke(repository, job, queue);
+        await Invoke(repository, job, queue);
+
+        Assert.Equal(JobStatus.Staging, job.Status);
+        Assert.Equal(1, queue.SubmissionCount);
+        Assert.Single(job.Events, e => e.Type == EventType.StagingStarted);
+    }
+
+    [Fact]
+    public async Task AStatusChangeDuringAdmission_WinsOverStaging()
+    {
+        var repository = NewRepository();
+        var job = NewJob();
+        var queue = new RecordingQueue(j =>
+        {
+            j.Status = JobStatus.Clearing;
+            return AdmissionResult.Admitted;
+        });
+
+        await Invoke(repository, job, queue);
+
+        Assert.Equal(JobStatus.Clearing, job.Status);
+        Assert.Equal(0, queue.SubmissionCount);
+        Assert.DoesNotContain(job.Events, e => e.Type == EventType.StagingStarted);
+    }
+
+    [Fact]
+    public async Task AnUnexpectedAdmissionFailure_FailsOnce_InsteadOfLoopingEveryTick()
+    {
+        var repository = NewRepository();
+        var queue = new RecordingQueue(_ => throw new IOException("admission exploded"));
+        var job = NewJob();
+
+        await Invoke(repository, job, queue);
+        await Invoke(repository, job, queue);
+
+        Assert.Equal(JobStatus.Failed, job.Status);
+        Assert.Single(job.Events, e => e.Type == EventType.Failed);
+        Assert.Equal(1, File.ReadAllText(job.ErrorFilePath)
+                            .Split("admission exploded").Length - 1);
+    }
+
+    [Fact]
+    public async Task StagingHistory_IsWrittenOnce_InsideTheRecreatedJobDirectory()
+    {
+        var repository = NewRepository();
+        var queue = ManagedQueue(repository);
+        var job = NewJob();
+
+        await Invoke(repository, job, queue);
+
+        for (int i = 0; i < 100 && job.Status == JobStatus.Staging; i++)
+            await Task.Delay(25);
+
+        Assert.Equal(JobStatus.Failed, job.Status); // CreateMask has no input in this focused test
+        Assert.Equal("1", job.DirectoryName);
+        Assert.Equal(new[] { "Staging started" }, File.ReadAllLines(job.LifecycleFilePath));
+        Assert.False(File.Exists(Path.Combine(_dir, ".relay", "staging.txt")),
+                     "staging history was written into the space root before DirectoryName existed");
+        Assert.Single(job.Events, e => e.Type == EventType.StagingStarted);
+
+        repository.ManagedExecutor.Reap();
+        Assert.Empty(repository.ManagedExecutor.LiveAllocations());
     }
 }
 

@@ -50,10 +50,15 @@ public class ClusterQueueStagingCancellationTests : IDisposable
         var delegateStarted = new SemaphoreSlim(0);
         var abortIssued = new SemaphoreSlim(0);
         int callbacks = 0;
+        int stagingCountWhenAborted = -1;
 
-        var queue = new ClusterQueue((job, action) =>
+        ClusterQueue? queue = null;
+        queue = new ClusterQueue((job, action) =>
         {
             action(job);
+
+            if (job.Status == JobStatus.Aborted)
+                stagingCountWhenAborted = StagingCount(queue!);
 
             if (Interlocked.Increment(ref callbacks) == 1)
             {
@@ -80,6 +85,7 @@ public class ClusterQueueStagingCancellationTests : IDisposable
         // Failed is what the generic catch used to write, which made a job the user deliberately
         // stopped indistinguishable from one whose script could not be written.
         Assert.Equal(JobStatus.Aborted, job.Status);
+        Assert.Equal(0, stagingCountWhenAborted);
     }
 
     [Fact]
@@ -148,6 +154,30 @@ public class ClusterQueueStagingCancellationTests : IDisposable
         queue.SubmitJob(job);
 
         await WaitUntil(() => StagingCount(queue) == 0, "the requeued job never settled");
+    }
+
+    [Fact]
+    public async Task AConcurrentClear_IsNotOverwrittenByAStagingFailure()
+    {
+        int callbacks = 0;
+        var queue = new ClusterQueue((job, action) =>
+        {
+            if (Interlocked.Increment(ref callbacks) == 1)
+                job.Status = JobStatus.Clearing;
+            action(job);
+        })
+        {
+            Id = 1,
+            SubmissionScriptTemplate = "#!/bin/bash\n{{command}}\n",
+        };
+
+        var job = NewJob();
+        queue.SubmitJob(job);
+
+        await WaitUntil(() => StagingCount(queue) == 0, "the staging task never settled");
+
+        Assert.Equal(JobStatus.Clearing, job.Status);
+        Assert.Equal("", job.DirectoryName);
     }
 
     [Fact]

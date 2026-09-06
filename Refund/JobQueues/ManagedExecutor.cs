@@ -34,10 +34,12 @@ public sealed class ManagedExecutor
         public bool Condemned { get; set; }
 
         /// <summary>
-        /// Whether this entry is a reservation the job could still be launched into: not condemned,
-        /// and not already spent by a process that has run and exited.
+        /// Whether this entry still accounts for resources assigned to the job.
         /// </summary>
-        public bool IsUsableReservation => !Condemned && ExitCode == null;
+        public bool HasActiveAllocation => !Condemned && ExitCode == null;
+
+        /// <summary>A reservation is launchable exactly once.</summary>
+        public bool CanLaunch => Process == null && HasActiveAllocation;
 
         /// <summary>
         /// What was last written to the leftover registry for this entry, or null if nothing was.
@@ -46,6 +48,9 @@ public sealed class ManagedExecutor
         /// retired entry only rewrites the file when it actually had a record to drop.
         /// </summary>
         public ManagedProcessRecord Record { get; set; }
+
+        /// <summary>Suppresses a per-tick error flood while a registry update is failing.</summary>
+        public bool RegistryUpdateFailureLogged { get; set; }
     }
 
     /// <summary>
@@ -225,23 +230,31 @@ public sealed class ManagedExecutor
 
             if (_entries.TryGetValue(job, out var existing))
             {
-                if (existing.IsUsableReservation)
+                if (existing.CanLaunch && Matches(existing.Allocation, request))
                     return AdmissionResult.Admitted;   // this run's own reservation; idempotent
 
-                // Leftover from a previous run of the same job, and two separate things have to
-                // happen to it. Condemning marks it for retirement the instant its process exits,
-                // whatever the job's status says — without that the job's new Waiting status would
-                // make the entry look active forever and nothing would clean it up. (It does not
-                // make Reconcile re-kill: Condemn signals at most once, by design.)
-                Condemn(existing);
-                Reconcile();
+                if (existing.CanLaunch)
+                {
+                    // Settings may change after admission but before the staging task launches.
+                    // A process-less reservation is safe to replace; launching with the stale one
+                    // would account the wrong cores/memory and export the wrong GPU set.
+                    _entries.Remove(job);
+                    ForgetRegistryRecord(existing);
+                }
+                else
+                {
+                    // The reservation has already launched (or is winding down). It is never an
+                    // admission ticket for a second process. An exited entry can be retired now;
+                    // a live one keeps its allocation until its normal abort/status path ends it.
+                    if (existing.Process is { HasExited: true })
+                    {
+                        Condemn(existing);
+                        Reconcile();
+                    }
 
-                // And the job has to be told to wait rather than given a fresh allocation, even
-                // when the host has room for one. _entries is keyed by Job, so a new entry would
-                // *replace* the one tracking the live process — orphaning it exactly as an Attach
-                // overwrite would, only via the ledger instead.
-                if (_entries.ContainsKey(job))
-                    return AdmissionResult.IsBusy;     // still winding down; the daemon re-asks
+                    if (_entries.ContainsKey(job))
+                        return AdmissionResult.IsBusy;
+                }
             }
 
             if (!ResourceLedger.TryFit(totals, LiveAllocationsLocked(), request, out var allocation))
@@ -252,10 +265,14 @@ public sealed class ManagedExecutor
         }
     }
 
+    private static bool Matches(ResourceAllocation allocation, ResourceRequest request) =>
+        allocation.Cores == request.Cores &&
+        allocation.MemoryGb == request.MemoryGb &&
+        allocation.GpuIndices.Count == request.Gpus;
+
     /// <summary>
-    /// The GPU indices this job was given, for CUDA_VISIBLE_DEVICES. Empty unless the job holds a
-    /// reservation it could still be launched into — the same rule <see cref="Attach"/> applies,
-    /// so a caller can never read devices belonging to a run that is over.
+    /// The GPU indices this job was given, for CUDA_VISIBLE_DEVICES. Available while its allocation
+    /// is active, both before launch and while the process is running.
     /// </summary>
     public IReadOnlyList<int> GpuIndicesFor(Job job)
     {
@@ -263,7 +280,7 @@ public sealed class ManagedExecutor
         {
             Reconcile();
 
-            return _entries.TryGetValue(job, out var e) && e.IsUsableReservation
+            return _entries.TryGetValue(job, out var e) && e.HasActiveAllocation
                        ? e.Allocation.GpuIndices
                        : Array.Empty<int>();
         }
@@ -321,7 +338,7 @@ public sealed class ManagedExecutor
             if (reservation is { } token && entry.Token != token)
                 return false;
 
-            if (entry.Process != null || !entry.IsUsableReservation)
+            if (!entry.CanLaunch)
                 return false;
 
             entry.Process = process;
@@ -359,7 +376,7 @@ public sealed class ManagedExecutor
             // Presence is not enough. An entry can exist while condemned, or spent by a process
             // that has already run and exited, and <see cref="Attach"/> refuses both — so a
             // presence check would spawn a real process only to find nothing will account for it.
-            if (!_entries.TryGetValue(job, out var entry) || !entry.IsUsableReservation)
+            if (!_entries.TryGetValue(job, out var entry) || !entry.CanLaunch)
                 throw new InvalidOperationException(
                     $"Job {job.Id} holds no usable reservation; refusing to launch it unaccounted for.");
 
@@ -544,8 +561,24 @@ public sealed class ManagedExecutor
         if (PgidOf(entry.Process) is not { } pgid)
             return;
 
-        entry.Record = stale with { Pgid = pgid };
-        _registry.Record(entry.Record);
+        var refreshed = stale with { Pgid = pgid };
+        try
+        {
+            _registry.Record(refreshed);
+            entry.Record = refreshed;
+            entry.RegistryUpdateFailureLogged = false;
+        }
+        catch (Exception exc)
+        {
+            if (!entry.RegistryUpdateFailureLogged)
+            {
+                Log.ForContext<ManagedExecutor>().Error(
+                    exc, "Could not update process {Pid}'s group in the managed process registry; " +
+                         "resource reconciliation will continue and the update will be retried.",
+                    stale.Pid);
+                entry.RegistryUpdateFailureLogged = true;
+            }
+        }
     }
 
     private void ForgetRegistryRecord(Entry entry)
@@ -553,8 +586,20 @@ public sealed class ManagedExecutor
         if (_registry == null || entry.Record == null)
             return;
 
-        _registry.Forget(entry.Record.ProjectId, entry.Record.SpaceId, entry.Record.JobId);
+        var record = entry.Record;
         entry.Record = null;
+
+        try
+        {
+            _registry.Forget(record.ProjectId, record.SpaceId, record.JobId);
+        }
+        catch (Exception exc)
+        {
+            Log.ForContext<ManagedExecutor>().Error(
+                exc, "Could not drop job {JobId}'s retired managed-process record; the next " +
+                     "startup sweep will discard it if its process identity no longer matches.",
+                record.JobId);
+        }
     }
 
     /// <summary>
@@ -877,8 +922,9 @@ public sealed class ManagedExecutor
             system.KillOwnGroup();
     }
 
-    private static bool IsJobActive(Job job) =>
-        job.Status.IsUnsettled() || job.Status == JobStatus.Waiting;
+    private static bool IsJobActive(Job job) => job.Status is
+        JobStatus.Waiting or JobStatus.Staging or JobStatus.Running or
+        JobStatus.Finalizing or JobStatus.Aborting;
 
     /// <summary>An entry holds resources until its process has exited; see Reconcile.</summary>
     private IEnumerable<ResourceAllocation> LiveAllocationsLocked() =>
