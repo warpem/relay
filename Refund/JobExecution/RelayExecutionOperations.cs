@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Text.Json.Nodes;
 using Refund.DataModel;
 using Refund.JobQueues;
+using Serilog;
 
 namespace Refund.JobExecution;
 
@@ -12,6 +13,7 @@ public sealed class RelayExecutionOperations : IExecutionOperations
     private readonly ManagedExecutionHost _managed = new();
     private readonly ConcurrentDictionary<Guid, LocalExecution> _local = new();
     private readonly CancellationTokenSource _shutdown = new();
+    private readonly ILogger _logger = Log.ForContext<RelayExecutionOperations>();
 
     public RelayExecutionOperations(
         Func<JobAddress, Job> findJob,
@@ -166,7 +168,9 @@ public sealed class RelayExecutionOperations : IExecutionOperations
                 "The worker submission may have reached the scheduler, but no receipt was obtained.",
                 exception);
         }
-        await job.WriteToLifecycleLog($"Worker submitted with scheduler ID {receipt}");
+        await WriteSubmissionLogAsync(
+            job,
+            $"Worker submitted with scheduler ID {receipt}");
         return new BackendStartResult(new BackendReceipt(receipt), false);
     }
 
@@ -316,7 +320,7 @@ public sealed class RelayExecutionOperations : IExecutionOperations
         return ObserveLocal(attempt);
     }
 
-    private static async Task<BackendStartResult> StartExternalAsync(
+    private async Task<BackendStartResult> StartExternalAsync(
         ExecutionAttemptSnapshot attempt,
         Job job)
     {
@@ -334,9 +338,25 @@ public sealed class RelayExecutionOperations : IExecutionOperations
                 "The submission may have reached the scheduler, but no receipt was obtained.",
                 exception);
         }
-        await job.WriteToLifecycleLog(rawOutput ?? "");
-        await job.WriteToLifecycleLog($"Scheduler receipt: {receipt}");
+        if (!string.IsNullOrWhiteSpace(rawOutput))
+            await WriteSubmissionLogAsync(job, rawOutput);
+        await WriteSubmissionLogAsync(job, $"Scheduler receipt: {receipt}");
         return new BackendStartResult(new BackendReceipt(receipt), false);
+    }
+
+    private async Task WriteSubmissionLogAsync(Job job, string message)
+    {
+        try
+        {
+            await job.WriteToLifecycleLog(message);
+        }
+        catch (Exception exception)
+        {
+            _logger.Warning(
+                exception,
+                "Could not record scheduler submission for job {JobId}",
+                job.Id);
+        }
     }
 
     private static void PrepareWorkerGroup(ExecutionAttemptSnapshot attempt, Job job)

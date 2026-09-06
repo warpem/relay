@@ -15,7 +15,7 @@ public sealed class ExecutionRuntime : IAsyncDisposable
     private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _preparations = new();
     private readonly Dictionary<Guid, ProjectionFingerprint> _projected = new();
     private readonly CancellationTokenSource _lifetime = new();
-    private readonly List<ExecutionEffect> _uncommittedEffects = new();
+    private readonly Dictionary<EffectKey, ExecutionEffect> _pendingEffects = new();
     private readonly ILogger _logger = Log.ForContext<ExecutionRuntime>();
     private ExecutionCoordinatorSnapshot _latestSnapshot;
     private bool _initialized;
@@ -226,7 +226,22 @@ public sealed class ExecutionRuntime : IAsyncDisposable
     {
         if (attempt.Phase == ExecutionPhase.WaitingForDependencies)
         {
-            if (_operations.DependenciesReady(attempt))
+            bool dependenciesReady;
+            try
+            {
+                dependenciesReady = _operations.DependenciesReady(attempt);
+            }
+            catch (Exception exception)
+            {
+                await ApplyEffectsAsync(
+                    () => _coordinator.DependencyCheckFailed(
+                        attempt.Id,
+                        $"Dependency readiness check failed: {exception.Message}"),
+                    cancellationToken);
+                return;
+            }
+
+            if (dependenciesReady)
                 await ApplyEffectsAsync(
                     () => _coordinator.DependenciesSatisfied(attempt.Id), cancellationToken);
             return;
@@ -283,7 +298,7 @@ public sealed class ExecutionRuntime : IAsyncDisposable
         await _gate.WaitAsync(cancellationToken);
         try
         {
-            if (_uncommittedEffects.Count == 0)
+            if (_pendingEffects.Count == 0 && !HasPendingProjections())
                 return;
 
             effects = await CommitAsync(Array.Empty<ExecutionEffect>(), cancellationToken);
@@ -303,6 +318,8 @@ public sealed class ExecutionRuntime : IAsyncDisposable
         try
         {
             effects = _coordinator.ReconcileActiveEffects();
+            if (effects.Count > 0)
+                effects = await CommitAsync(effects, cancellationToken);
         }
         finally
         {
@@ -323,7 +340,9 @@ public sealed class ExecutionRuntime : IAsyncDisposable
         IReadOnlyList<ExecutionEffect> effects,
         CancellationToken cancellationToken)
     {
-        _uncommittedEffects.AddRange(effects);
+        foreach (var effect in effects)
+            _pendingEffects.TryAdd(EffectKey.For(effect), effect);
+
         var snapshot = _coordinator.CreateSnapshot();
         await _stateStore.SaveAsync(snapshot, cancellationToken);
         Volatile.Write(ref _latestSnapshot, snapshot);
@@ -339,13 +358,43 @@ public sealed class ExecutionRuntime : IAsyncDisposable
             if (_projected.TryGetValue(attempt.Id, out var current) && current == fingerprint)
                 continue;
 
-            await _projectAttempt(attempt);
-            _projected[attempt.Id] = fingerprint;
+            try
+            {
+                await _projectAttempt(attempt);
+                _projected[attempt.Id] = fingerprint;
+            }
+            catch (Exception exception)
+            {
+                _logger.Error(
+                    exception,
+                    "Could not project execution state for attempt {AttemptId}",
+                    attempt.Id);
+            }
         }
 
-        var committedEffects = _uncommittedEffects.ToArray();
-        _uncommittedEffects.Clear();
+        var projectedIds = latestAttempts
+            .Where(attempt =>
+                _projected.TryGetValue(attempt.Id, out var fingerprint) &&
+                fingerprint == ProjectionFingerprint.For(attempt))
+            .Select(attempt => attempt.Id)
+            .ToHashSet();
+        var committedEffects = _pendingEffects
+            .Where(pair => projectedIds.Contains(pair.Value.AttemptId))
+            .Select(pair => pair.Value)
+            .ToArray();
+        foreach (var effect in committedEffects)
+            _pendingEffects.Remove(EffectKey.For(effect));
         return committedEffects;
+    }
+
+    private bool HasPendingProjections()
+    {
+        foreach (var attempt in LatestAttempts(Volatile.Read(ref _latestSnapshot)))
+            if (!_projected.TryGetValue(attempt.Id, out var fingerprint) ||
+                fingerprint != ProjectionFingerprint.For(attempt))
+                return true;
+
+        return false;
     }
 
     private static IReadOnlyList<ExecutionAttemptSnapshot> LatestAttempts(

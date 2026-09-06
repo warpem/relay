@@ -172,6 +172,63 @@ public class ExecutionRuntimeTests
         Assert.Equal(afterStart, projectionCount);
     }
 
+    [Fact]
+    public async Task DependencyCheckFailureSettlesInsteadOfRetryingForever()
+    {
+        var operations = new FakeOperations
+        {
+            DependenciesReadyHandler = _ => throw new InvalidOperationException("invalid graph")
+        };
+        await using var runtime = new ExecutionRuntime(
+            new ExecutionCoordinator([LocalQueue]),
+            operations,
+            new RecordingStateStore(),
+            _ => Task.CompletedTask);
+        await runtime.InitializeAsync();
+        await runtime.RequestRunAsync(
+            new JobAddress(1, 1, 1), -1, new ResourceVector(1, 1, 0), false);
+
+        await runtime.TickAsync();
+        await runtime.TickAsync();
+
+        var attempt = Assert.Single(runtime.Attempts);
+        Assert.Equal(ExecutionPhase.Failed, attempt.Phase);
+        Assert.Single(attempt.History, entry =>
+            entry.Detail == "Dependency readiness check failed: invalid graph");
+        Assert.Equal(0, operations.PrepareCalls);
+    }
+
+    [Fact]
+    public async Task ProjectionFailureOnlyWithholdsEffectsForThatAttempt()
+    {
+        var firstQueue = new ExecutionQueuePolicy(1, ExecutionBackendKind.Local);
+        var secondQueue = new ExecutionQueuePolicy(2, ExecutionBackendKind.Local);
+        var operations = new FakeOperations();
+        bool failFirstProjection = true;
+        await using var runtime = new ExecutionRuntime(
+            new ExecutionCoordinator([firstQueue, secondQueue]),
+            operations,
+            new RecordingStateStore(),
+            attempt =>
+            {
+                if (failFirstProjection && attempt.Job.JobId == 1)
+                    throw new IOException("projection unavailable");
+                return Task.CompletedTask;
+            });
+        await runtime.InitializeAsync();
+        await runtime.RequestRunAsync(
+            new JobAddress(1, 1, 1), 1, ResourceVector.None, true);
+        await runtime.RequestRunAsync(
+            new JobAddress(1, 1, 2), 2, ResourceVector.None, true);
+
+        await WaitUntilAsync(() => operations.PreparedJobs.Contains(new JobAddress(1, 1, 2)));
+        Assert.DoesNotContain(new JobAddress(1, 1, 1), operations.PreparedJobs);
+
+        failFirstProjection = false;
+        await runtime.TickAsync();
+        await WaitUntilAsync(() => operations.PreparedJobs.Contains(new JobAddress(1, 1, 1)));
+    }
+
     private static async Task WaitUntilAsync(Func<bool> condition)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
@@ -229,14 +286,18 @@ public class ExecutionRuntimeTests
         public int ActivateCalls { get; private set; }
         public Action OnStart { get; init; }
         public BackendStartResult StartResult { get; init; }
+        public Func<ExecutionAttemptSnapshot, bool> DependenciesReadyHandler { get; init; }
+        public ConcurrentQueue<JobAddress> PreparedJobs { get; } = new();
 
-        public bool DependenciesReady(ExecutionAttemptSnapshot attempt) => true;
+        public bool DependenciesReady(ExecutionAttemptSnapshot attempt) =>
+            DependenciesReadyHandler?.Invoke(attempt) ?? true;
 
         public async Task PrepareAsync(
             ExecutionAttemptSnapshot attempt,
             CancellationToken cancellationToken)
         {
             PrepareCalls++;
+            PreparedJobs.Enqueue(attempt.Job);
             _events?.Enqueue("prepare");
             if (HoldPreparation)
                 await _preparation.Task.WaitAsync(cancellationToken);
