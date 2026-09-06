@@ -247,6 +247,32 @@ public class ExecutionRuntimeTests
         Assert.Equal(1, operations.ShutdownCalls);
     }
 
+    [Fact]
+    public async Task FinalizationWaitsForOutstandingProgressTracking()
+    {
+        var operations = new FakeOperations { HoldMaintenance = true };
+        await using var runtime = new ExecutionRuntime(
+            new ExecutionCoordinator([LocalQueue]),
+            operations,
+            new RecordingStateStore(),
+            _ => Task.CompletedTask);
+        await runtime.InitializeAsync();
+        await runtime.RequestRunAsync(
+            new JobAddress(1, 1, 1), -1, ResourceVector.None, true);
+        await WaitUntilAsync(() => runtime.Attempts.Single().Phase == ExecutionPhase.Running);
+
+        await runtime.TickAsync();
+        await operations.MaintenanceStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        operations.ObserveResult = new BackendObservation(BackendObservationKind.Succeeded);
+
+        await runtime.TickAsync();
+        Assert.Equal(0, operations.FinalizeCalls);
+
+        operations.ReleaseMaintenance();
+        await WaitUntilAsync(() => runtime.Attempts.Single().Phase == ExecutionPhase.Succeeded);
+        Assert.Equal(1, operations.FinalizeCalls);
+    }
+
     private static async Task WaitUntilAsync(Func<bool> condition)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
@@ -292,6 +318,8 @@ public class ExecutionRuntimeTests
         private readonly ConcurrentQueue<string> _events;
         private readonly TaskCompletionSource _preparation =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _maintenance =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public FakeOperations(ConcurrentQueue<string> events = null)
         {
@@ -303,10 +331,16 @@ public class ExecutionRuntimeTests
         public int StartCalls { get; private set; }
         public int ActivateCalls { get; private set; }
         public int ShutdownCalls { get; private set; }
+        public int FinalizeCalls { get; private set; }
+        public bool HoldMaintenance { get; set; }
         public Action OnStart { get; init; }
         public BackendStartResult StartResult { get; init; }
         public Func<ExecutionAttemptSnapshot, bool> DependenciesReadyHandler { get; init; }
         public ConcurrentQueue<JobAddress> PreparedJobs { get; } = new();
+        public TaskCompletionSource MaintenanceStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public BackendObservation ObserveResult { get; set; } =
+            new(BackendObservationKind.Running);
 
         public bool DependenciesReady(ExecutionAttemptSnapshot attempt) =>
             DependenciesReadyHandler?.Invoke(attempt) ?? true;
@@ -338,7 +372,7 @@ public class ExecutionRuntimeTests
         public Task<BackendObservation> ObserveAsync(
             ExecutionAttemptSnapshot attempt,
             CancellationToken cancellationToken) =>
-            Task.FromResult(new BackendObservation(BackendObservationKind.Running));
+            Task.FromResult(ObserveResult);
 
         public Task ActivateAsync(
             ExecutionAttemptSnapshot attempt,
@@ -357,7 +391,11 @@ public class ExecutionRuntimeTests
         public Task FinalizeAsync(
             ExecutionAttemptSnapshot attempt,
             ExecutionOutcome outcome,
-            CancellationToken cancellationToken) => Task.CompletedTask;
+            CancellationToken cancellationToken)
+        {
+            FinalizeCalls++;
+            return Task.CompletedTask;
+        }
 
         public Task<BackendStartResult> StartWorkerAsync(
             ExecutionAttemptSnapshot attempt,
@@ -380,9 +418,16 @@ public class ExecutionRuntimeTests
                 receipts.Select(receipt => new WorkerObservation(
                     receipt.Id, BackendObservationKind.Canceled)).ToArray());
 
-        public Task TrackProgressAsync(
+        public async Task TrackProgressAsync(
             ExecutionAttemptSnapshot attempt,
-            CancellationToken cancellationToken) => Task.CompletedTask;
+            CancellationToken cancellationToken)
+        {
+            MaintenanceStarted.TrySetResult();
+            if (HoldMaintenance)
+                await _maintenance.Task.WaitAsync(cancellationToken);
+        }
+
+        public void ReleaseMaintenance() => _maintenance.TrySetResult();
 
         public Task ShutdownAsync(CancellationToken cancellationToken)
         {

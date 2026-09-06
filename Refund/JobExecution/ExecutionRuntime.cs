@@ -13,6 +13,7 @@ public sealed class ExecutionRuntime : IAsyncDisposable
     private readonly SemaphoreSlim _tickGate = new(1, 1);
     private readonly ConcurrentDictionary<EffectKey, byte> _runningEffects = new();
     private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _preparations = new();
+    private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _maintenanceGates = new();
     private readonly Dictionary<Guid, ProjectionFingerprint> _projected = new();
     private readonly CancellationTokenSource _lifetime = new();
     private readonly Dictionary<EffectKey, ExecutionEffect> _pendingEffects = new();
@@ -619,7 +620,11 @@ public sealed class ExecutionRuntime : IAsyncDisposable
         if (attempt == null)
             return;
 
+        var maintenanceGate = _maintenanceGates.GetOrAdd(
+            effect.AttemptId,
+            _ => new SemaphoreSlim(1, 1));
         string failure = null;
+        await maintenanceGate.WaitAsync(CancellationToken.None);
         try
         {
             await _operations.FinalizeAsync(attempt, effect.Outcome, cancellationToken);
@@ -627,6 +632,11 @@ public sealed class ExecutionRuntime : IAsyncDisposable
         catch (Exception exception)
         {
             failure = exception.Message;
+        }
+        finally
+        {
+            maintenanceGate.Release();
+            _maintenanceGates.TryRemove(effect.AttemptId, out _);
         }
 
         await ApplyEffectsAsync(
@@ -750,7 +760,18 @@ public sealed class ExecutionRuntime : IAsyncDisposable
 
         try
         {
-            await _operations.TrackProgressAsync(attempt, cancellationToken);
+            var maintenanceGate = _maintenanceGates.GetOrAdd(
+                attempt.Id,
+                _ => new SemaphoreSlim(1, 1));
+            await maintenanceGate.WaitAsync(cancellationToken);
+            try
+            {
+                await _operations.TrackProgressAsync(attempt, cancellationToken);
+            }
+            finally
+            {
+                maintenanceGate.Release();
+            }
         }
         catch (Exception exception)
         {
