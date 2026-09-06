@@ -12,6 +12,7 @@ public sealed class RelayExecutionOperations : IExecutionOperations
     private readonly Func<Job, Action<Job>, Task> _updateJob;
     private readonly ManagedExecutionHost _managed = new();
     private readonly ConcurrentDictionary<Guid, LocalExecution> _local = new();
+    private readonly object _localGate = new();
     private readonly CancellationTokenSource _shutdown = new();
     private readonly ILogger _logger = Log.ForContext<RelayExecutionOperations>();
 
@@ -219,12 +220,15 @@ public sealed class RelayExecutionOperations : IExecutionOperations
 
     public async Task ShutdownAsync(CancellationToken cancellationToken)
     {
-        _shutdown.Cancel();
-        foreach (var execution in _local.Values)
-            execution.Cancellation.Cancel();
+        LocalExecution[] localExecutions;
+        lock (_localGate)
+        {
+            _shutdown.Cancel();
+            localExecutions = _local.Values.ToArray();
+        }
 
         await _managed.ShutdownAsync(cancellationToken);
-        var localTasks = _local.Values.Select(execution => execution.Task).ToArray();
+        var localTasks = localExecutions.Select(execution => execution.Task).ToArray();
         try
         {
             await Task.WhenAll(localTasks)
@@ -259,27 +263,34 @@ public sealed class RelayExecutionOperations : IExecutionOperations
         if (job is not ILocalJob localJob)
             throw new InvalidOperationException($"Job {job.Id} does not support local execution.");
 
-        var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_shutdown.Token);
-        var task = Task.Run(async () =>
+        lock (_localGate)
         {
-            try
-            {
-                localJob.RunLocal(cancellation.Token);
-            }
-            catch (Exception exception)
-            {
-                await job.WriteToErrorLog(exception.ToString());
-                throw;
-            }
-        }, CancellationToken.None);
-        if (!_local.TryAdd(attempt.Id, new LocalExecution(task, cancellation)))
-        {
-            cancellation.Cancel();
-            cancellation.Dispose();
-            throw new InvalidOperationException($"Attempt {attempt.Id} already has a local execution.");
-        }
+            if (_shutdown.IsCancellationRequested)
+                throw new InvalidOperationException("Local execution is shutting down.");
 
-        return new BackendStartResult(new BackendReceipt(attempt.Id.ToString()), true);
+            var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_shutdown.Token);
+            var task = Task.Run(async () =>
+            {
+                try
+                {
+                    localJob.RunLocal(cancellation.Token);
+                }
+                catch (Exception exception)
+                {
+                    await job.WriteToErrorLog(exception.ToString());
+                    throw;
+                }
+            }, CancellationToken.None);
+            if (!_local.TryAdd(attempt.Id, new LocalExecution(task, cancellation)))
+            {
+                cancellation.Cancel();
+                cancellation.Dispose();
+                throw new InvalidOperationException(
+                    $"Attempt {attempt.Id} already has a local execution.");
+            }
+
+            return new BackendStartResult(new BackendReceipt(attempt.Id.ToString()), true);
+        }
     }
 
     private BackendObservation ObserveLocal(ExecutionAttemptSnapshot attempt)

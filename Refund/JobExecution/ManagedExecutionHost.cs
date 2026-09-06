@@ -11,6 +11,9 @@ public sealed class ManagedExecutionHost
     private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(15);
 
     private readonly ConcurrentDictionary<Guid, ManagedExecution> _executions = new();
+    private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly CancellationTokenSource _shutdown = new();
+    private bool _stopping;
 
     public async Task<BackendStartResult> StartAsync(
         ExecutionAttemptSnapshot attempt,
@@ -21,6 +24,20 @@ public sealed class ManagedExecutionHost
         IReadOnlyList<int> gpuIndices,
         CancellationToken cancellationToken)
     {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            if (_stopping)
+                throw new InvalidOperationException("Managed execution is shutting down.");
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
+        using var startCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken,
+            _shutdown.Token);
         var control = new AnonymousPipeServerStream(
             PipeDirection.Out,
             HandleInheritability.Inheritable);
@@ -45,31 +62,42 @@ public sealed class ManagedExecutionHost
             using (ready)
             using (var reader = new StreamReader(ready))
             {
-                string signal = await reader.ReadLineAsync(cancellationToken)
+                string signal = await reader.ReadLineAsync(startCancellation.Token)
                     .AsTask()
-                    .WaitAsync(ReadyTimeout, cancellationToken);
+                    .WaitAsync(ReadyTimeout, startCancellation.Token);
                 if (signal != RelayRunner.ReadySignal)
                     throw new InvalidOperationException(
                         $"relay-runner exited before becoming ready (signal: {signal ?? "EOF"}).");
             }
 
-            var execution = new ManagedExecution(process, control, StopTimeout);
-            if (!_executions.TryAdd(attempt.Id, execution))
-                throw new InvalidOperationException(
-                    $"Attempt {attempt.Id} already has a managed execution.");
+            await _gate.WaitAsync(CancellationToken.None);
+            try
+            {
+                if (_stopping)
+                    throw new InvalidOperationException("Managed execution is shutting down.");
+                if (_executions.ContainsKey(attempt.Id))
+                    throw new InvalidOperationException(
+                        $"Attempt {attempt.Id} already has a managed execution.");
 
-            process = null;
-            control = null;
-            return new BackendStartResult(
-                new BackendReceipt(execution.ProcessId.ToString()),
-                IsRunning: false,
-                RequiresActivation: true);
+                var execution = new ManagedExecution(process, control, StopTimeout);
+                _executions[attempt.Id] = execution;
+                process = null;
+                control = null;
+                return new BackendStartResult(
+                    new BackendReceipt(execution.ProcessId.ToString()),
+                    IsRunning: false,
+                    RequiresActivation: true);
+            }
+            finally
+            {
+                _gate.Release();
+            }
         }
         catch
         {
             control?.Dispose();
             if (process != null)
-                await StopProcessAsync(process, cancellationToken);
+                await StopProcessAsync(process);
             throw;
         }
     }
@@ -88,9 +116,15 @@ public sealed class ManagedExecutionHost
         }
         catch
         {
-            _executions.TryRemove(attempt.Id, out _);
-            await execution.StopAsync(CancellationToken.None);
-            execution.Dispose();
+            try
+            {
+                await execution.StopAsync(CancellationToken.None);
+                if (_executions.TryRemove(attempt.Id, out var removed))
+                    removed.Dispose();
+            }
+            catch
+            {
+            }
             throw;
         }
     }
@@ -117,7 +151,7 @@ public sealed class ManagedExecutionHost
         ExecutionAttemptSnapshot attempt,
         CancellationToken cancellationToken)
     {
-        if (!_executions.TryRemove(attempt.Id, out var execution))
+        if (!_executions.TryGetValue(attempt.Id, out var execution))
             return new BackendObservation(
                 BackendObservationKind.Indeterminate,
                 "The managed execution is not owned by this Relay process.");
@@ -125,32 +159,49 @@ public sealed class ManagedExecutionHost
         try
         {
             await execution.StopAsync(cancellationToken);
+            if (_executions.TryRemove(attempt.Id, out var removed))
+                removed.Dispose();
             return new BackendObservation(BackendObservationKind.Canceled);
         }
-        finally
+        catch (Exception exception)
         {
-            execution.Dispose();
+            return new BackendObservation(
+                BackendObservationKind.Indeterminate,
+                $"The managed execution is still being contained: {exception.Message}");
         }
     }
 
     public async Task ShutdownAsync(CancellationToken cancellationToken)
     {
-        var executions = _executions.ToArray();
+        KeyValuePair<Guid, ManagedExecution>[] executions;
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            if (!_stopping)
+            {
+                _stopping = true;
+                _shutdown.Cancel();
+            }
+            executions = _executions.ToArray();
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
         await Task.WhenAll(executions.Select(async pair =>
         {
-            if (!_executions.TryRemove(pair.Key, out var execution))
+            if (!_executions.TryGetValue(pair.Key, out var execution))
                 return;
 
             try
             {
                 await execution.StopAsync(cancellationToken);
+                if (_executions.TryRemove(pair.Key, out var removed))
+                    removed.Dispose();
             }
             catch
             {
-            }
-            finally
-            {
-                execution.Dispose();
             }
         }));
     }
@@ -200,15 +251,14 @@ public sealed class ManagedExecutionHost
         info.ArgumentList.Add(value);
     }
 
-    private static async Task StopProcessAsync(
-        Process process,
-        CancellationToken cancellationToken)
+    private static async Task StopProcessAsync(Process process)
     {
         try
         {
             if (!process.HasExited)
                 process.Kill(entireProcessTree: true);
-            await process.WaitForExitAsync(cancellationToken);
+            await process.WaitForExitAsync(CancellationToken.None)
+                .WaitAsync(StopTimeout, CancellationToken.None);
         }
         catch
         {
@@ -291,12 +341,21 @@ public sealed class ManagedExecutionHost
             try
             {
                 await _process.WaitForExitAsync(CancellationToken.None)
-                    .WaitAsync(_stopTimeout, CancellationToken.None);
+                    .WaitAsync(_stopTimeout, cancellationToken);
             }
             catch (TimeoutException)
             {
                 TryKill();
-                await _process.WaitForExitAsync(CancellationToken.None);
+                try
+                {
+                    await _process.WaitForExitAsync(CancellationToken.None)
+                        .WaitAsync(_stopTimeout, cancellationToken);
+                }
+                catch (TimeoutException)
+                {
+                    throw new TimeoutException(
+                        $"relay-runner {_process.Id} did not exit after forced termination.");
+                }
             }
         }
 

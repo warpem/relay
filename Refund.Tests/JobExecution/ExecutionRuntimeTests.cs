@@ -229,6 +229,24 @@ public class ExecutionRuntimeTests
         await WaitUntilAsync(() => operations.PreparedJobs.Contains(new JobAddress(1, 1, 1)));
     }
 
+    [Fact]
+    public async Task ShutdownClosesAdmissionAndIsIdempotent()
+    {
+        var operations = new FakeOperations();
+        await using var runtime = new ExecutionRuntime(
+            new ExecutionCoordinator([LocalQueue]),
+            operations,
+            new RecordingStateStore(),
+            _ => Task.CompletedTask);
+        await runtime.InitializeAsync();
+
+        await Task.WhenAll(runtime.ShutdownAsync(), runtime.ShutdownAsync());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => runtime.RequestRunAsync(
+            new JobAddress(1, 1, 1), -1, ResourceVector.None, true));
+        Assert.Equal(1, operations.ShutdownCalls);
+    }
+
     private static async Task WaitUntilAsync(Func<bool> condition)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
@@ -284,6 +302,7 @@ public class ExecutionRuntimeTests
         public int PrepareCalls { get; private set; }
         public int StartCalls { get; private set; }
         public int ActivateCalls { get; private set; }
+        public int ShutdownCalls { get; private set; }
         public Action OnStart { get; init; }
         public BackendStartResult StartResult { get; init; }
         public Func<ExecutionAttemptSnapshot, bool> DependenciesReadyHandler { get; init; }
@@ -365,6 +384,10 @@ public class ExecutionRuntimeTests
             ExecutionAttemptSnapshot attempt,
             CancellationToken cancellationToken) => Task.CompletedTask;
 
-        public Task ShutdownAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task ShutdownAsync(CancellationToken cancellationToken)
+        {
+            ShutdownCalls++;
+            return Task.CompletedTask;
+        }
     }
 }

@@ -77,7 +77,7 @@ internal sealed class SupervisedProcess : IDisposable
         process.StandardInput.Close();
 
         int? processGroup = ownsProcessGroup
-            ? ConfirmProcessGroup(process, TimeSpan.FromSeconds(1))
+            ? ConfirmProcessGroup(process, TimeSpan.FromSeconds(5))
             : null;
         if (ownsProcessGroup && processGroup == null && !process.HasExited)
         {

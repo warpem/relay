@@ -16,10 +16,12 @@ public sealed class ExecutionRuntime : IAsyncDisposable
     private readonly Dictionary<Guid, ProjectionFingerprint> _projected = new();
     private readonly CancellationTokenSource _lifetime = new();
     private readonly Dictionary<EffectKey, ExecutionEffect> _pendingEffects = new();
+    private readonly object _shutdownSync = new();
     private readonly ILogger _logger = Log.ForContext<ExecutionRuntime>();
     private ExecutionCoordinatorSnapshot _latestSnapshot;
+    private Task _shutdownTask;
     private bool _initialized;
-    private bool _stopping;
+    private volatile bool _stopping;
 
     public ExecutionRuntime(
         ExecutionCoordinator coordinator,
@@ -140,6 +142,7 @@ public sealed class ExecutionRuntime : IAsyncDisposable
         await _gate.WaitAsync(cancellationToken);
         try
         {
+            ThrowIfUnavailable();
             _coordinator.UpsertQueue(queue);
         }
         finally
@@ -156,6 +159,7 @@ public sealed class ExecutionRuntime : IAsyncDisposable
         await _gate.WaitAsync(cancellationToken);
         try
         {
+            ThrowIfUnavailable();
             _coordinator.RemoveQueue(queueId);
         }
         finally
@@ -186,12 +190,25 @@ public sealed class ExecutionRuntime : IAsyncDisposable
         }
     }
 
-    public async Task ShutdownAsync(CancellationToken cancellationToken = default)
+    public Task ShutdownAsync(CancellationToken cancellationToken = default)
     {
-        if (_stopping)
-            return;
+        lock (_shutdownSync)
+            return _shutdownTask ??= ShutdownCoreAsync(cancellationToken);
+    }
 
-        _stopping = true;
+    private async Task ShutdownCoreAsync(CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            _stopping = true;
+            _lifetime.Cancel();
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
         foreach (var cancellation in _preparations.Values)
             cancellation.Cancel();
 
@@ -212,7 +229,6 @@ public sealed class ExecutionRuntime : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         await ShutdownAsync();
-        _lifetime.Cancel();
         _lifetime.Dispose();
         _gate.Dispose();
         _tickGate.Dispose();
@@ -280,6 +296,7 @@ public sealed class ExecutionRuntime : IAsyncDisposable
         await _gate.WaitAsync(cancellationToken);
         try
         {
+            ThrowIfUnavailable();
             commandResult = command();
             committedEffects = await CommitAsync(effects(commandResult), cancellationToken);
         }
@@ -408,6 +425,9 @@ public sealed class ExecutionRuntime : IAsyncDisposable
 
     private void Dispatch(IEnumerable<ExecutionEffect> effects)
     {
+        if (_stopping)
+            return;
+
         foreach (var effect in effects)
         {
             var key = EffectKey.For(effect);

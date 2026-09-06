@@ -90,13 +90,13 @@ public sealed class RelayRunnerProtocolTests
                 Path.Combine(directory, "stderr.txt")));
             Assert.Equal(RelayRunner.ReadySignal, await protocol.Ready.ReadLineAsync());
             await protocol.Control.WriteLineAsync(RelayRunner.GoSignal);
-            await WaitUntilAsync(() => File.Exists(pidFile));
+            await WaitUntilAsync(() => File.Exists(pidFile), TimeSpan.FromSeconds(10));
             childPid = int.Parse(await File.ReadAllTextAsync(pidFile));
 
             await File.WriteAllTextAsync(release, "");
 
             Assert.Equal(0, await protocol.Result.WaitAsync(TimeSpan.FromSeconds(10)));
-            await WaitUntilAsync(() => !IsAlive(childPid));
+            await WaitUntilAsync(() => !IsAlive(childPid), TimeSpan.FromSeconds(10));
         }
         finally
         {
@@ -148,11 +148,14 @@ public sealed class RelayRunnerProtocolTests
         ["gpus"] = ""
     };
 
-    private static async Task WaitUntilAsync(Func<bool> condition)
+    private static async Task WaitUntilAsync(
+        Func<bool> condition,
+        TimeSpan? timeout = null)
     {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cancellation = new CancellationTokenSource(
+            timeout ?? TimeSpan.FromSeconds(5));
         while (!condition())
-            await Task.Delay(10, timeout.Token);
+            await Task.Delay(10, cancellation.Token);
     }
 
     private static string CreateDirectory()
