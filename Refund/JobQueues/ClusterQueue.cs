@@ -91,6 +91,7 @@ public sealed class ClusterQueue : JobQueue
 
     internal async Task<string> PrepareAndWriteScript(
         Job job,
+        Guid attemptId,
         Dictionary<string, string> customValues = null)
     {
         job.DirectoryName = job.Id.ToString();
@@ -118,7 +119,8 @@ public sealed class ClusterQueue : JobQueue
         string script = ProcessSubmissionScript(
             SubmissionScriptTemplate
                 .ReplaceRegex("{{\\s*command\\s*}}", command.ToString())
-                .ReplaceRegex("{{\\s*job_id\\s*}}", job.Id.ToString()),
+                .ReplaceRegex("{{\\s*job_id\\s*}}", job.Id.ToString())
+                .ReplaceRegex("{{\\s*attempt_id\\s*}}", attemptId.ToString("D")),
             job.GetResourceValues(),
             job.RequiredModules,
             customValues);

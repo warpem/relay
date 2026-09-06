@@ -37,7 +37,7 @@ public sealed class RelayExecutionOperations : IExecutionOperations
             {
                 var queue = Queue(attempt.BackendConfiguration);
                 queue.ValidateSubmissionConfiguration();
-                await queue.PrepareAndWriteScript(job);
+                await queue.PrepareAndWriteScript(job, attempt.Id);
             }
 
             cancellationToken.ThrowIfCancellationRequested();
@@ -348,9 +348,11 @@ public sealed class RelayExecutionOperations : IExecutionOperations
         queue.ValidateSubmissionConfiguration();
         string logs = Path.Combine(job.DirectoryPath, "worker_logs");
         Directory.CreateDirectory(logs);
+        var resourceValues = pooledJob.GetWorkerResourceValues(logs);
+        resourceValues["attempt_id"] = attempt.Id.ToString("D");
         queue.BuildWorkerScript(
             pooledJob.GetWorkerCommand(0),
-            pooledJob.GetWorkerResourceValues(logs),
+            resourceValues,
             pooledJob.WorkerRequiredModules,
             WorkerScriptPath(job));
     }

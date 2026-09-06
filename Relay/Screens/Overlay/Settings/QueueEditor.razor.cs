@@ -176,6 +176,7 @@ public partial class QueueEditor
         {
             "command",
             "job_id",
+            "attempt_id",
             "n_processes",
             "n_cores",
             "memory_gb",

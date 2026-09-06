@@ -585,7 +585,7 @@ public sealed class ExecutionRuntime : IAsyncDisposable
                 effect.AttemptId);
             await ApplyEffectsAsync(
                 () => _coordinator.WorkerStartIndeterminate(
-                    effect.AttemptId, effect.OperationId),
+                    effect.AttemptId, effect.OperationId, exception.Message),
                 CancellationToken.None);
             return;
         }

@@ -367,7 +367,10 @@ public sealed class ExecutionCoordinator
                 _ => ExecutionPhase.Failed
             };
 
-        attempt.TransitionTo(phase, Now(), failure);
+        string detail = failure ?? (phase == ExecutionPhase.Interrupted
+            ? attempt.HealthDetail
+            : null);
+        attempt.TransitionTo(phase, Now(), detail);
         _currentAttempts.Remove(attempt.Job);
         return ReconcileQueue(attempt.QueueId);
     }
@@ -419,10 +422,21 @@ public sealed class ExecutionCoordinator
             ? ExecutionOutcome.Canceled
             : observedOutcome;
 
+        bool hasUntraceableWorker = attempt.WorkerGroup?.Workers.Any(worker =>
+            worker.Phase == WorkerPhase.Indeterminate) == true;
+        if (hasUntraceableWorker)
+        {
+            outcome = ExecutionOutcome.Interrupted;
+            detail = "A worker submission has an unknown outcome and no scheduler receipt; " +
+                     "Relay cannot prove that all worker processes stopped.";
+        }
+
         Release(attempt);
         attempt.PendingOutcome = outcome;
-        attempt.Health = ExecutionHealth.Healthy;
-        attempt.HealthDetail = null;
+        attempt.Health = hasUntraceableWorker
+            ? ExecutionHealth.Indeterminate
+            : ExecutionHealth.Healthy;
+        attempt.HealthDetail = hasUntraceableWorker ? detail : null;
         attempt.TransitionTo(ExecutionPhase.Finalizing, Now(), detail);
         var effects = new List<ExecutionEffect>(ContinueFinalization(attempt));
         effects.AddRange(ReconcileQueue(attempt.QueueId));
@@ -473,7 +487,8 @@ public sealed class ExecutionCoordinator
 
     public IReadOnlyList<ExecutionEffect> WorkerStartIndeterminate(
         Guid attemptId,
-        Guid operationId)
+        Guid operationId,
+        string detail)
     {
         if (!TryGetCurrent(attemptId, out var attempt) || attempt.WorkerGroup == null)
             return Array.Empty<ExecutionEffect>();
@@ -485,6 +500,8 @@ public sealed class ExecutionCoordinator
         worker.Phase = attempt.Phase == ExecutionPhase.Finalizing
             ? WorkerPhase.Ended
             : WorkerPhase.Indeterminate;
+        attempt.Health = ExecutionHealth.Indeterminate;
+        attempt.HealthDetail = detail;
         return attempt.Phase == ExecutionPhase.Finalizing
             ? ContinueFinalization(attempt)
             : Array.Empty<ExecutionEffect>();
@@ -589,6 +606,7 @@ public sealed class ExecutionCoordinator
                     break;
                 case ExecutionPhase.Starting:
                     attempt.TransitionTo(ExecutionPhase.Pending, Now());
+                    queuesToReconcile.Add(attempt.QueueId);
                     break;
                 case ExecutionPhase.Cancelling when attempt.Receipt == null:
                     Release(attempt);
@@ -650,12 +668,11 @@ public sealed class ExecutionCoordinator
         {
             var receipts = new List<BackendReceipt>();
             foreach (var worker in workerGroup.Workers
-                         .Where(worker => worker.Phase != WorkerPhase.Ended)
+                         .Where(worker => worker.Phase is not (
+                             WorkerPhase.Ended or WorkerPhase.Indeterminate))
                          .Reverse()
                          .Take(excess))
             {
-                if (worker.Phase == WorkerPhase.Indeterminate)
-                    continue;
                 worker.Phase = WorkerPhase.Cancelling;
                 if (worker.Receipt != null)
                     receipts.Add(worker.Receipt);

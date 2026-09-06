@@ -406,6 +406,34 @@ public class ExecutionCoordinatorTests
     }
 
     [Fact]
+    public void UntraceableWorkerPreventsSuccessfulParentCompletion()
+    {
+        var workerQueue = new ExecutionQueuePolicy(2, ExecutionBackendKind.ExternalScheduler);
+        var coordinator = new ExecutionCoordinator([LocalQueue, workerQueue]);
+        var attempt = coordinator.RequestRun(
+            Job(1), -1, new ResourceVector(1, 1, 0), dependenciesReady: true,
+            new WorkerGroupRequest(2, DesiredCount: 1, SubmissionLimit: 2)).Attempt;
+        coordinator.PreparationCompleted(attempt.Id);
+        var workerStart = Assert.IsType<StartWorker>(Assert.Single(coordinator.StartCompleted(
+            attempt.Id, new BackendReceipt("manager"), isRunning: true)));
+        coordinator.WorkerStartIndeterminate(
+            attempt.Id, workerStart.OperationId, "submission timed out");
+
+        var completion = coordinator.Observe(
+            attempt.Id, new BackendObservation(BackendObservationKind.Succeeded));
+        var finalization = Assert.IsType<FinalizeExecution>(Assert.Single(completion));
+
+        Assert.Equal(ExecutionOutcome.Interrupted, finalization.Outcome);
+        Assert.Equal(ExecutionHealth.Indeterminate, attempt.Health);
+        Assert.Contains("cannot prove", attempt.HealthDetail);
+
+        coordinator.FinalizationCompleted(attempt.Id);
+
+        Assert.Equal(ExecutionPhase.Interrupted, attempt.Phase);
+        Assert.Contains(attempt.History, entry => entry.Detail == attempt.HealthDetail);
+    }
+
+    [Fact]
     public void FinalizeOnlyAttemptUsesTheSameLifecycleAuthority()
     {
         var coordinator = new ExecutionCoordinator([LocalQueue]);
@@ -439,6 +467,35 @@ public class ExecutionCoordinatorTests
         Assert.Equal(ExecutionPhase.Interrupted, copy.Phase);
         Assert.Equal(ExecutionHealth.Indeterminate, copy.Health);
         Assert.Contains(copy.History, entry => entry.Detail == copy.HealthDetail);
+    }
+
+    [Fact]
+    public void RecoveryOfAcceptedExternalStartAdvancesFifo()
+    {
+        var external = new ExecutionQueuePolicy(4, ExecutionBackendKind.ExternalScheduler);
+        var original = new ExecutionCoordinator([external]);
+        var first = original.RequestRun(
+            Job(1), 4, ResourceVector.None, dependenciesReady: true).Attempt;
+        var second = original.RequestRun(
+            Job(2), 4, ResourceVector.None, dependenciesReady: true).Attempt;
+        original.PreparationCompleted(first.Id);
+        original.PreparationCompleted(second.Id);
+        var snapshot = original.CreateSnapshot();
+        snapshot = snapshot with
+        {
+            Attempts = snapshot.Attempts.Select(attempt => attempt.Id == first.Id
+                    ? attempt with { Receipt = new BackendReceipt("scheduler-42") }
+                    : attempt)
+                .ToArray()
+        };
+
+        var restored = new ExecutionCoordinator([external]);
+        restored.Restore(snapshot);
+        var effects = restored.Recover();
+
+        Assert.Equal(ExecutionPhase.Pending, restored.CurrentAttempt(first.Job).Phase);
+        Assert.Single(effects, effect =>
+            effect is StartExecution { AttemptId: var id } && id == second.Id);
     }
 
     [Fact]

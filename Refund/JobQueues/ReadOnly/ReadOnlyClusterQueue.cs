@@ -100,10 +100,10 @@ public sealed class ReadOnlyClusterQueue : ReadOnlyJobQueue
     /// </summary>
     public string SubmissionScriptTemplate => _queue.SubmissionScriptTemplate;
 
-    /// <summary>Gets the command template for listing all active job IDs.</summary>
+    /// <summary>Gets the optional batch command for listing active scheduler receipts.</summary>
     public string ListJobsTemplate => _queue.ListJobsTemplate;
 
-    /// <summary>Gets the command template for cancelling multiple jobs at once.</summary>
+    /// <summary>Gets the optional batch command for cancelling scheduler receipts.</summary>
     public string CancelManyJobsTemplate => _queue.CancelManyJobsTemplate;
 
     /// <summary>

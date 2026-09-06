@@ -140,4 +140,30 @@ public class ClusterQueueBatchTests
         }
         finally { if (File.Exists(path)) File.Delete(path); }
     }
+
+    [Fact]
+    public void BuildWorkerScript_ExpandsAttemptCorrelationToken()
+    {
+        var queue = new ClusterQueue
+        {
+            SubmissionScriptTemplate = "# {{ attempt_id }}\n{{ command }}\n"
+        };
+        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".sh");
+        var attemptId = Guid.NewGuid();
+        try
+        {
+            queue.BuildWorkerScript(
+                "worker",
+                new Dictionary<string, string> { ["attempt_id"] = attemptId.ToString("D") },
+                Array.Empty<string>(),
+                path);
+
+            Assert.Contains(attemptId.ToString("D"), File.ReadAllText(path));
+        }
+        finally
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+    }
 }

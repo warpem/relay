@@ -1,6 +1,6 @@
 # Unified Job Execution and Queue Management — Design Spec
 
-**Status:** Draft  
+**Status:** Implemented
 **Date:** 2026-09-06  
 **Scope:** Replace Relay's orchestration for local, locally managed, cluster, and pooled execution. Preserve existing space and job definitions, but not active execution state or queue-runtime state.
 
@@ -299,37 +299,30 @@ The startup protocol closes the dangerous launch windows:
 
 If Relay exits before `GO`, the runner exits without launching the payload. If Relay exits after
 `GO`, end-of-file on the control channel makes the runner terminate the complete payload process
-tree and then write an atomic exit receipt. Normal cancellation asks the runner to stop the tree,
-waits for a bounded grace period, and escalates if necessary.
+tree. Normal cancellation asks the runner to stop the tree, waits for a bounded grace period, and
+escalates if necessary.
 
 Platform mechanisms may strengthen the same contract, such as Linux parent-death signals and
 Windows Job Objects. The control channel and handshake define the portable behavior; they are not a
 heartbeat protocol.
 
-On restart, any non-terminal managed attempt becomes `Interrupted`. Before reusing its reserved
-capacity, Relay performs the bounded startup cleanup/reconciliation defined by the runner receipt.
-Managed work is never silently adopted or assumed still alive.
+On restart, any non-terminal managed attempt becomes `Interrupted`. The runner's ownership channel
+provides the cleanup contract; Relay does not try to reconnect to or adopt a prior runner.
 
 ### 8.3 External scheduler backend
 
 An external backend persists its scheduler receipt and survives Relay restart. Startup reconciliation
 uses that receipt to resume observation and cancellation.
 
-Every submission uses the stable `AttemptId` as a correlation token in scheduler-visible metadata
-where the scheduler supports it. Submission intent is persisted before invoking the scheduler, and
-the returned scheduler ID is persisted before the attempt leaves `Starting`.
+Every submission template can use the stable `AttemptId` as `{{ attempt_id }}` in scheduler-visible
+metadata. Submission intent is persisted before invoking the scheduler, and the returned scheduler
+ID is persisted before the attempt leaves `Starting`.
 
 There is an unavoidable two-system crash window if the scheduler accepts a job but Relay loses the
-returned ID. Recovery follows a conservative rule:
-
-1. search active and historical scheduler data by the attempt correlation token;
-2. adopt a unique match;
-3. resubmit only after the backend can establish that no matching submission exists; and
-4. if neither can be established, keep the attempt indeterminate and require explicit operator
-   resolution rather than risk duplicate computation.
-
-A backend that cannot search by correlation token must declare that limitation. Relay does not turn
-an ambiguous submission into an automatic retry.
+returned ID. Relay marks that attempt `Interrupted`, records its health as indeterminate, and never
+resubmits it automatically. The stable attempt token lets an operator correlate it with scheduler
+records where the site configuration exposes that metadata. A deliberate rerun creates a new
+attempt and token.
 
 ## 9. Scheduler observation and transient unknown states
 
@@ -348,7 +341,7 @@ includes:
 
 Communication and parsing failures never prove that computation ended.
 
-For Slurm, observing a job is a two-stage operation:
+Schedulers may have separate active and historical views. Slurm is the motivating example:
 
 1. query the active queue view (`squeue`);
 2. if the job is absent, query accounting history (`sacct`);
@@ -361,12 +354,11 @@ This covers the real gap in which a Slurm job has disappeared from `squeue` but 
 visible through accounting. Polling the same uncertainty must not append another staging event or
 turn a previously running attempt into failure.
 
-Relay-generated scheduler scripts should additionally write an atomic completion receipt in the job
-directory when that directory is shared with Relay. This is corroborating evidence and a useful
-fallback during accounting lag, not a replacement for scheduler observation.
+Site submission templates may additionally write a completion receipt in a shared job directory.
+This can provide corroborating evidence, but it is not a replacement for scheduler observation.
 
-An extended indeterminate period becomes a visible warning with the last positive evidence and the
-last observation error. It does not silently become `Failed` merely because time passed.
+An indeterminate observation is retained as attempt health with its latest detail. It does not
+silently become `Failed` merely because time passed.
 
 ## 10. Worker groups and live resizing
 
@@ -377,7 +369,8 @@ and backend machinery as primary attempts.
 The coordinator:
 
 - submits missing workers without exceeding the stable lifetime submission limit;
-- uses batch scheduler observation and cancellation when available;
+- uses batch scheduler observation and cancellation when configured, otherwise the same per-receipt
+  operations as primary scheduler jobs;
 - replaces workers that have positively reached a terminal state;
 - does not treat one missing or failed status query as worker death;
 - persists desired size, receipts, observations, and submission count in the main runtime snapshot;
@@ -495,7 +488,8 @@ The implementation and tests must enforce these invariants:
 10. A permanent preparation or configuration error cannot retry forever.
 11. Cancellation is idempotent and never reports completion before the backend-specific stop
     condition is met.
-12. A terminal parent attempt has no live or unaccounted worker-group members.
+12. A parent cannot report success or cancellation when a worker submission remains untraceable;
+    the parent becomes `Interrupted` instead.
 13. An exception while processing one attempt or queue cannot stop scheduling unrelated work.
 14. Rerun never reuses an attempt ID, backend receipt, reservation, or worker group.
 15. Restart recovery makes no claim stronger than the evidence available for that backend.
@@ -538,7 +532,7 @@ Race-focused tests must include:
 - duplicate and out-of-order backend observations;
 - stale results arriving after rerun;
 - crash before launch, after launch intent, after backend acceptance, and before receipt persistence;
-- repeated indeterminate Slurm observations between active and accounting views;
+- repeated indeterminate scheduler observations between active and historical views;
 - managed runner death and Relay death on both sides of the `GO` handshake;
 - worker resize concurrent with worker completion and parent termination; and
 - snapshot recovery with each non-terminal phase.
@@ -568,15 +562,13 @@ state.
 These do not require more architecture, but they must be resolved before implementation reaches the
 affected behavior:
 
-1. **Active clear/delete:** reject until cancellation finishes, or make the command explicitly
-   cancel-then-clear.
-2. **Pool scale-down:** graceful drain versus immediate cancellation, and whether both are exposed.
-3. **Long scheduler uncertainty:** the warning/escalation UX and operator actions available while an
+1. **Pool scale-down:** graceful drain versus immediate cancellation, and whether both are exposed.
+2. **Long scheduler uncertainty:** the warning/escalation UX and operator actions available while an
    attempt remains indeterminate.
-4. **Queue configuration migration:** whether old queue definitions receive a one-time conversion or
+3. **Queue configuration migration:** whether old queue definitions receive a one-time conversion or
    administrators recreate them. Active execution state is not migrated either way.
-5. **Custom scheduler correlation:** the minimum template capability required for safe adoption of an
-   ambiguous submission.
+4. **Custom scheduler correlation:** whether a future adapter may safely adopt an ambiguous
+   submission by querying the configured `{{ attempt_id }}` metadata.
 
 ## 18. Acceptance criteria
 
@@ -585,7 +577,7 @@ The design is successful when:
 - local, managed, cluster, and pooled execution all use the same attempt lifecycle;
 - only one serialized component can change execution truth;
 - a poll can never create another copy of the current lifecycle event;
-- a transient Slurm visibility gap leaves the attempt alive and visibly indeterminate;
+- a transient scheduler visibility gap leaves the attempt alive and records indeterminate health;
 - managed work cannot survive loss of its owning Relay process under the supported platform
   contract;
 - cluster work is re-adopted after restart without normal-case resubmission;
