@@ -67,21 +67,9 @@ public class RelayConfiguration
     public string UsersPath { get; set; } = "users.relay";
     
     /// <summary>
-    /// Gets or sets the file path where job queue data is stored.
-    /// This file contains information about job queues and their configuration.
+    /// Gets or sets the file path where queue definitions are stored. Execution attempts are
+    /// persisted separately beside this file.
     /// </summary>
-    /// <remarks>
-    /// Used by the QueueRepository in DataManager to persist queue definitions and states:
-    /// 
-    /// <code>
-    /// _queueRepository = new QueueRepository(config.QueuesPath, (job, action) => {
-    ///     UpdateJob(job.UpdatedBy.AsReadOnly(), job.AsReadOnly(), action).Wait();
-    /// });
-    /// </code>
-    /// 
-    /// The queues file stores information about all job processing queues (local, cluster)
-    /// including their configuration settings and current state.
-    /// </remarks>
     public string QueuesPath { get; set; } = "queues.relay";
     
     /// <summary>

@@ -64,6 +64,8 @@ public sealed class ReadOnlyClusterQueue : ReadOnlyJobQueue
     /// </summary>
     public string StatusJobTemplate => _queue.StatusJobTemplate;
 
+    public string TerminalStatusJobTemplate => _queue.TerminalStatusJobTemplate;
+
     /// <summary>
     /// Gets the template for aborting/canceling a job on the cluster.
     /// </summary>
@@ -88,6 +90,10 @@ public sealed class ReadOnlyClusterQueue : ReadOnlyJobQueue
     /// Gets the string pattern that indicates a job has failed on the cluster.
     /// </summary>
     public string JobStatusParseTemplateFailed => _queue.JobStatusParseTemplateFailed;
+
+    public string JobStatusParseTemplateSucceeded => _queue.JobStatusParseTemplateSucceeded;
+
+    public string JobStatusParseTemplateCanceled => _queue.JobStatusParseTemplateCanceled;
 
     /// <summary>
     /// Gets the template for generating the job submission script sent to the cluster.

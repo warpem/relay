@@ -5,6 +5,14 @@ public sealed record BackendStartResult(
     bool IsRunning,
     bool RequiresActivation = false);
 
+public sealed class IndeterminateBackendStartException : Exception
+{
+    public IndeterminateBackendStartException(string message, Exception innerException = null)
+        : base(message, innerException)
+    {
+    }
+}
+
 public interface IExecutionOperations
 {
     bool DependenciesReady(ExecutionAttemptSnapshot attempt);

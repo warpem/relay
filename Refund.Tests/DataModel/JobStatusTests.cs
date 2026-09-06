@@ -20,4 +20,14 @@ public sealed class JobStatusTests
     {
         Assert.Equal(EventType.FinalizingStarted, JobStatus.Finalizing.ToEventType());
     }
+
+    [Fact]
+    public void WaitingAndFastSchedulerJobsSupportRealLifecycleTransitions()
+    {
+        var waiting = new Note { Status = JobStatus.Waiting };
+        var staging = new Note { Status = JobStatus.Staging };
+
+        Assert.True(waiting.CanTransitionState(JobStatus.Aborting));
+        Assert.True(staging.CanTransitionState(JobStatus.Finalizing));
+    }
 }

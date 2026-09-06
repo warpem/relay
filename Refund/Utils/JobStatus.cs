@@ -103,8 +103,8 @@ public static class JobStatusExtensions
     /// - Green: Successful completion (Finished)
     /// - Blue: In-progress (Running, Finalizing)
     /// - Gray: Waiting (Waiting, Staging)
-    /// - Red: Problems (Failed, Aborted)
-    /// - Orange: Transitional states (Aborting, Clearing)
+    /// - Red: Definite problems (Failed, Aborted)
+    /// - Orange: Transitional or uncertain states (Aborting, Clearing, Interrupted)
     /// - Default UI color: Building
     /// </remarks>
     public static Icon WithStatusColor(this Icon icon, ReadOnlyJob job)

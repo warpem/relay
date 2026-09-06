@@ -13,6 +13,7 @@ public sealed class ExecutionRuntime : IAsyncDisposable
     private readonly SemaphoreSlim _tickGate = new(1, 1);
     private readonly ConcurrentDictionary<EffectKey, byte> _runningEffects = new();
     private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _preparations = new();
+    private readonly Dictionary<Guid, ProjectionFingerprint> _projected = new();
     private readonly CancellationTokenSource _lifetime = new();
     private readonly List<ExecutionEffect> _uncommittedEffects = new();
     private readonly ILogger _logger = Log.ForContext<ExecutionRuntime>();
@@ -327,8 +328,20 @@ public sealed class ExecutionRuntime : IAsyncDisposable
         await _stateStore.SaveAsync(snapshot, cancellationToken);
         Volatile.Write(ref _latestSnapshot, snapshot);
 
-        foreach (var attempt in LatestAttempts(snapshot))
+        var latestAttempts = LatestAttempts(snapshot);
+        var latestIds = latestAttempts.Select(attempt => attempt.Id).ToHashSet();
+        foreach (var stale in _projected.Keys.Where(id => !latestIds.Contains(id)).ToArray())
+            _projected.Remove(stale);
+
+        foreach (var attempt in latestAttempts)
+        {
+            var fingerprint = ProjectionFingerprint.For(attempt);
+            if (_projected.TryGetValue(attempt.Id, out var current) && current == fingerprint)
+                continue;
+
             await _projectAttempt(attempt);
+            _projected[attempt.Id] = fingerprint;
+        }
 
         var committedEffects = _uncommittedEffects.ToArray();
         _uncommittedEffects.Clear();
@@ -422,19 +435,21 @@ public sealed class ExecutionRuntime : IAsyncDisposable
         try
         {
             await _operations.PrepareAsync(attempt, preparation.Token);
-            await ApplyEffectsAsync(
-                () => _coordinator.PreparationCompleted(attemptId), CancellationToken.None);
         }
         catch (Exception exception)
         {
             await ApplyEffectsAsync(
                 () => _coordinator.PreparationFailed(attemptId, exception.Message),
                 CancellationToken.None);
+            return;
         }
         finally
         {
             _preparations.TryRemove(attemptId, out _);
         }
+
+        await ApplyEffectsAsync(
+            () => _coordinator.PreparationCompleted(attemptId), CancellationToken.None);
     }
 
     private async Task StartAsync(StartExecution effect, CancellationToken cancellationToken)
@@ -443,24 +458,34 @@ public sealed class ExecutionRuntime : IAsyncDisposable
         if (attempt == null)
             return;
 
+        BackendStartResult started;
         try
         {
-            var started = await _operations.StartAsync(
+            started = await _operations.StartAsync(
                 attempt, effect.GpuIndices, cancellationToken);
+        }
+        catch (IndeterminateBackendStartException exception)
+        {
             await ApplyEffectsAsync(
-                () => _coordinator.StartCompleted(
-                    effect.AttemptId,
-                    started.Receipt,
-                    started.IsRunning,
-                    started.RequiresActivation),
+                () => _coordinator.StartIndeterminate(effect.AttemptId, exception.Message),
                 CancellationToken.None);
+            return;
         }
         catch (Exception exception)
         {
             await ApplyEffectsAsync(
                 () => _coordinator.StartFailed(effect.AttemptId, exception.Message),
                 CancellationToken.None);
+            return;
         }
+
+        await ApplyEffectsAsync(
+            () => _coordinator.StartCompleted(
+                effect.AttemptId,
+                started.Receipt,
+                started.IsRunning,
+                started.RequiresActivation),
+            CancellationToken.None);
     }
 
     private async Task ActivateAsync(
@@ -474,16 +499,18 @@ public sealed class ExecutionRuntime : IAsyncDisposable
         try
         {
             await _operations.ActivateAsync(attempt, cancellationToken);
-            await ApplyEffectsAsync(
-                () => _coordinator.ActivationCompleted(effect.AttemptId),
-                CancellationToken.None);
         }
         catch (Exception exception)
         {
             await ApplyEffectsAsync(
                 () => _coordinator.ActivationFailed(effect.AttemptId, exception.Message),
                 CancellationToken.None);
+            return;
         }
+
+        await ApplyEffectsAsync(
+            () => _coordinator.ActivationCompleted(effect.AttemptId),
+            CancellationToken.None);
     }
 
     private async Task CancelAsync(CancelExecution effect, CancellationToken cancellationToken)
@@ -499,21 +526,22 @@ public sealed class ExecutionRuntime : IAsyncDisposable
         if (attempt == null)
             return;
 
+        BackendObservation observation;
         try
         {
-            var observation = await _operations.CancelAsync(
+            observation = await _operations.CancelAsync(
                 attempt, effect.Receipt, cancellationToken);
-            await ApplyEffectsAsync(
-                () => _coordinator.Observe(effect.AttemptId, observation),
-                CancellationToken.None);
         }
         catch (Exception exception)
         {
-            await ApplyEffectsAsync(
-                () => _coordinator.Observe(effect.AttemptId, new BackendObservation(
-                    BackendObservationKind.Indeterminate, exception.Message)),
-                CancellationToken.None);
+            observation = new BackendObservation(
+                BackendObservationKind.Indeterminate,
+                exception.Message);
         }
+
+        await ApplyEffectsAsync(
+            () => _coordinator.Observe(effect.AttemptId, observation),
+            CancellationToken.None);
     }
 
     private async Task FinalizeAsync(FinalizeExecution effect, CancellationToken cancellationToken)
@@ -543,14 +571,23 @@ public sealed class ExecutionRuntime : IAsyncDisposable
         if (attempt == null)
             return;
 
+        BackendStartResult started;
         try
         {
-            var started = await _operations.StartWorkerAsync(
+            started = await _operations.StartWorkerAsync(
                 attempt, effect.OperationId, cancellationToken);
+        }
+        catch (IndeterminateBackendStartException exception)
+        {
+            _logger.Warning(
+                exception,
+                "Worker submission outcome is unknown for attempt {AttemptId}",
+                effect.AttemptId);
             await ApplyEffectsAsync(
-                () => _coordinator.WorkerStarted(
-                    effect.AttemptId, effect.OperationId, started.Receipt, started.IsRunning),
+                () => _coordinator.WorkerStartIndeterminate(
+                    effect.AttemptId, effect.OperationId),
                 CancellationToken.None);
+            return;
         }
         catch (Exception exception)
         {
@@ -558,7 +595,13 @@ public sealed class ExecutionRuntime : IAsyncDisposable
                 () => _coordinator.WorkerStartFailed(
                     effect.AttemptId, effect.OperationId, exception.Message),
                 CancellationToken.None);
+            return;
         }
+
+        await ApplyEffectsAsync(
+            () => _coordinator.WorkerStarted(
+                effect.AttemptId, effect.OperationId, started.Receipt, started.IsRunning),
+            CancellationToken.None);
     }
 
     private async Task CancelWorkersAsync(CancelWorkers effect, CancellationToken cancellationToken)
@@ -588,19 +631,20 @@ public sealed class ExecutionRuntime : IAsyncDisposable
         ExecutionAttemptSnapshot attempt,
         CancellationToken cancellationToken)
     {
+        BackendObservation observation;
         try
         {
-            var observation = await _operations.ObserveAsync(attempt, cancellationToken);
-            await ApplyEffectsAsync(
-                () => _coordinator.Observe(attempt.Id, observation), cancellationToken);
+            observation = await _operations.ObserveAsync(attempt, cancellationToken);
         }
         catch (Exception exception)
         {
-            await ApplyEffectsAsync(
-                () => _coordinator.Observe(attempt.Id, new BackendObservation(
-                    BackendObservationKind.Unreachable, exception.Message)),
-                cancellationToken);
+            observation = new BackendObservation(
+                BackendObservationKind.Unreachable,
+                exception.Message);
         }
+
+        await ApplyEffectsAsync(
+            () => _coordinator.Observe(attempt.Id, observation), cancellationToken);
     }
 
     private async Task ObserveWorkersAsync(
@@ -608,12 +652,11 @@ public sealed class ExecutionRuntime : IAsyncDisposable
         IReadOnlyList<BackendReceipt> receipts,
         CancellationToken cancellationToken)
     {
+        IReadOnlyList<WorkerObservation> observations;
         try
         {
-            var observations = await _operations.ObserveWorkersAsync(
+            observations = await _operations.ObserveWorkersAsync(
                 attempt, receipts, cancellationToken);
-            await ApplyEffectsAsync(
-                () => _coordinator.ObserveWorkers(attempt.Id, observations), cancellationToken);
         }
         catch (Exception exception)
         {
@@ -621,7 +664,11 @@ public sealed class ExecutionRuntime : IAsyncDisposable
                 exception,
                 "Could not observe workers for attempt {AttemptId}",
                 attempt.Id);
+            return;
         }
+
+        await ApplyEffectsAsync(
+            () => _coordinator.ObserveWorkers(attempt.Id, observations), cancellationToken);
     }
 
     private async Task RunMaintenanceAsync(
@@ -677,5 +724,20 @@ public sealed class ExecutionRuntime : IAsyncDisposable
                 string.Join("\n", workers.Receipts.Select(receipt => receipt.Id).Order())),
             _ => new(effect.GetType().Name, effect.AttemptId, Guid.Empty, "")
         };
+    }
+
+    private readonly record struct ProjectionFingerprint(
+        ExecutionPhase Phase,
+        string ReceiptId,
+        int WorkersAlive,
+        int WorkersRunning,
+        int WorkerSubmissions)
+    {
+        public static ProjectionFingerprint For(ExecutionAttemptSnapshot attempt) => new(
+            attempt.Phase,
+            attempt.Receipt?.Id,
+            attempt.WorkerGroup?.Workers.Count(worker => worker.Phase != WorkerPhase.Ended) ?? 0,
+            attempt.WorkerGroup?.Workers.Count(worker => worker.Phase == WorkerPhase.Running) ?? 0,
+            attempt.WorkerGroup?.TotalSubmissions ?? 0);
     }
 }

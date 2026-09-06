@@ -264,91 +264,13 @@ public partial class DataManager
         _dataRepository = new DataRepository(config.ProjectsPath);
         _dataRepository.LoadAll(_userRepository.Users);
 
-        // Initialize job queue repository with a callback to update job status
-        // The callback allows the queue to notify the DataManager when job status changes
-        _queueRepository = new QueueRepository(config.QueuesPath, (job, action) =>
-        {
-            UpdateJob(job.UpdatedBy.AsReadOnly(), job.AsReadOnly(), action).Wait();
-        },
-        async (job, action) =>
+        _queueRepository = new QueueRepository(
+            config.QueuesPath,
+            async (job, action) =>
         {
             await UpdateJob(job.UpdatedBy.AsReadOnly(), job.AsReadOnly(), action);
         });
         _queueRepository.LoadQueues(_dataRepository);
-
-        // Handle jobs that were in active states when the application shut down.
-        // Jobs already tracked in a queue (via improved persistence that now includes Waiting jobs)
-        // will be picked up by the daemon automatically. Jobs NOT in any queue are orphaned and
-        // need to be reassigned or marked as failed.
-        foreach (var project in _dataRepository.Projects)
-            foreach (var space in project.Spaces)
-                foreach (var job in space.Jobs)
-                {
-                    if (job.Status == JobStatus.Clearing)
-                    {
-                        _dataRepository.UpdateJob(job.UpdatedBy, job, alteredJob =>
-                        {
-                            alteredJob.Status = JobStatus.Failed;
-                            alteredJob.AddEvent(EventType.Failed);
-                            Console.WriteLine($"{job.QualifiedName} was clearing at shutdown, marking as failed");
-                        });
-                    }
-                    else if ((job.Status.IsUnsettled() || job.Status == JobStatus.Waiting) &&
-                         !_queueRepository.LocalQueue.QueuedJobs.Contains(job) &&
-                         !_queueRepository.ClusterQueues.Any(q => q.QueuedJobs.Contains(job)))
-                    {
-                        // Job is orphaned: in an active state but not tracked by any queue.
-                        // Use the persisted QueueId to reassign to the original queue if possible,
-                        // otherwise fall back to matching by job's QueueType flags.
-                        JobQueue suitableQueue = null;
-
-                        if (job.QueueId.HasValue)
-                        {
-                            // Try to find the original queue by stored ID
-                            suitableQueue = _queueRepository.FindQueue(job.QueueId.Value);
-                        }
-
-                        if (suitableQueue == null)
-                        {
-                            // Fall back to matching by QueueType (for jobs without a stored QueueId,
-                            // e.g. jobs created before this feature was added)
-                            if (job.QueueType == JobQueueType.Local)
-                                suitableQueue = _queueRepository.LocalQueue;
-                            else
-                                suitableQueue = _queueRepository.ClusterQueues
-                                    .FirstOrDefault(q => (q.QueueType & job.QueueType) != 0);
-                        }
-
-                        if (suitableQueue != null)
-                        {
-                            // Update QueueId to reflect the (re)assignment
-                            _dataRepository.UpdateJob(job.UpdatedBy, job, j =>
-                            {
-                                j.QueueId = suitableQueue.Id;
-                            });
-
-                            if (suitableQueue == _queueRepository.LocalQueue)
-                                suitableQueue.SubmitJob(job);
-                            else
-                                suitableQueue.Enqueue(job);
-                        }
-                        else
-                        {
-                            Console.WriteLine($"Couldn't find queue for orphaned {job.QualifiedName} (QueueId={job.QueueId}, QueueType={job.QueueType})");
-                        }
-                    }
-                }
-
-        // Backfill QueueId for jobs that are already tracked in a queue but have no QueueId
-        // (e.g. jobs created before this feature was added)
-        foreach (var job in _queueRepository.LocalQueue.QueuedJobs)
-            if (!job.QueueId.HasValue)
-                job.QueueId = _queueRepository.LocalQueue.Id;
-
-        foreach (var queue in _queueRepository.ClusterQueues)
-            foreach (var job in queue.QueuedJobs)
-                if (!job.QueueId.HasValue)
-                    job.QueueId = queue.Id;
 
         // Detect and remove any cyclic edges that would cause infinite recursion
         // during resource resolution (e.g. PortIn.GetSingleResource → PortOut.GetResource loop)
@@ -369,9 +291,6 @@ public partial class DataManager
         // These ensure that data changes are persisted to disk at regular intervals
         _userRepository.StartAutoSave(500);
         _dataRepository.StartAutoSave(500);
-        _queueRepository.StartAutoSave(500);
-        
-        // Start the job queue daemon process that monitors and manages job execution
         _queueRepository.StartDaemon(1_000);
     }
 
@@ -651,13 +570,7 @@ public partial class DataManager
     #endregion
 
     /// <summary>
-    /// Stops the job daemon and kills every managed process tree.
+    /// Stops execution monitoring and terminates Relay-owned work.
     /// </summary>
-    /// <remarks>
-    /// Called from the host's ApplicationStopping hook. DataManager is registered as an
-    /// externally-constructed singleton and implements no disposal, so the DI container will never
-    /// clean it up on its own; without that hook nothing kills managed processes on a graceful
-    /// shutdown.
-    /// </remarks>
     public Task ShutdownAsync() => _queueRepository.ShutdownAsync();
 }

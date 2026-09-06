@@ -29,13 +29,17 @@
         @{
             var relevantEvent = Job.GetMostRecentEvent(Job.Status.ToEventType());
 
-            // For settled states, we're interested in how long in took to settle,
+            // For settled states, we're interested in how long it took to settle,
             // not when it was settled
             var previousEvent = Job.Status switch
             {
                 JobStatus.Finished => Job.GetMostRecentEvent(EventType.RunningStarted), 
                 JobStatus.Aborted => Job.GetMostRecentEvent(EventType.RunningStarted),
                 JobStatus.Failed => Job.GetMostRecentEvent(EventType.RunningStarted),
+                JobStatus.Interrupted => Job.GetMostRecentEvent(EventType.RunningStarted)
+                                         ?? Job.GetMostRecentEvent(EventType.StagingStarted)
+                                         ?? Job.GetMostRecentEvent(EventType.WaitingStarted)
+                                         ?? Job.GetMostRecentEvent(EventType.Created),
                 _ => null
             };
         }
@@ -66,6 +70,11 @@
             else if (Job.Status == JobStatus.Failed && previousEvent != null)
             {
                 <span>Failed after </span>
+                @((relevantEvent.Timestamp - previousEvent.Timestamp).ToStringAdaptive())
+            }
+            else if (Job.Status == JobStatus.Interrupted && previousEvent != null)
+            {
+                <span>Interrupted after </span>
                 @((relevantEvent.Timestamp - previousEvent.Timestamp).ToStringAdaptive())
             }
             else if (Job.Status == JobStatus.Waiting)

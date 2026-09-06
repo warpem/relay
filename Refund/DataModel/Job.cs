@@ -1345,8 +1345,8 @@ public abstract class Job : RelayBase, IFolderContent
     private static bool CanTransitionState(JobStatus from, JobStatus to) => (from, to) switch
     {
         (JobStatus.Building, JobStatus.Waiting or JobStatus.Deleted) => true,
-        (JobStatus.Waiting, JobStatus.Building or JobStatus.Staging or JobStatus.Deleted or JobStatus.Clearing) => true,
-        (JobStatus.Staging, JobStatus.Running or JobStatus.Aborting or JobStatus.Failed or JobStatus.Interrupted) => true,
+        (JobStatus.Waiting, JobStatus.Building or JobStatus.Staging or JobStatus.Aborting or JobStatus.Deleted or JobStatus.Clearing) => true,
+        (JobStatus.Staging, JobStatus.Running or JobStatus.Aborting or JobStatus.Finalizing or JobStatus.Failed or JobStatus.Interrupted) => true,
         (JobStatus.Running, JobStatus.Aborting or JobStatus.Finalizing or JobStatus.Failed or JobStatus.Interrupted) => true,
         (JobStatus.Finalizing, JobStatus.Finished or JobStatus.Failed or JobStatus.Interrupted) => true,
         (JobStatus.Finished, JobStatus.Building or JobStatus.Deleted or JobStatus.Clearing) => true,
@@ -1674,7 +1674,7 @@ public interface IPoolStatus
 /// </summary>
 public interface IPooledJob
 {
-    /// <summary>The job's working directory (where pool_state.json, worker_logs/, and the worker script live).</summary>
+    /// <summary>The job's working directory containing worker logs and the worker script.</summary>
     string DirectoryPath { get; }
 
     /// <summary>
@@ -1693,10 +1693,8 @@ public interface IPooledJob
     int PoolSubmissionCap { get; }
 
     /// <summary>
-    /// Submission-script template variables for one pool worker. Derived from the Manager's
-    /// Job.GetResourceValues (so a worker can never silently miss a variable the template expects)
-    /// with worker-specific overrides (one GPU, per-worker cores/memory, worker job name, log paths).
-    /// <paramref name="workerLogDir"/> is where the worker's SLURM stdout/stderr (std_out/std_err) go.
+    /// Submission-script template variables for one pool worker, with worker-specific resource,
+    /// name, and output-path values.
     /// </summary>
     Dictionary<string, string> GetWorkerResourceValues(string workerLogDir);
 
@@ -1710,8 +1708,7 @@ public interface IPooledJob
     string GetWorkerCommand(int deviceIndex);
 
     /// <summary>
-    /// Live pool-worker counters written by QueueRepository each daemon tick and read by the pool UI.
-    /// Implementors expose them as [RelayProperty][Clearable] ints so they persist and reset with the job.
+    /// Live worker-group counters projected from the active execution attempt.
     /// </summary>
     int PoolWorkersAlive { get; set; }
     int PoolWorkersRunning { get; set; }

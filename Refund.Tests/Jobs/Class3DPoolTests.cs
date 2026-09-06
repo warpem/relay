@@ -273,17 +273,13 @@ public class Class3DPoolTests
     }
 
     [Fact]
-    public void Continue_IsPoolArtifact_ExcludesPreviousPoolState_KeepsResults()
+    public void Continue_IsPoolArtifact_ExcludesCoordinationData_KeepsResults()
     {
-        // A continued job copies the predecessor's directory but must NOT drag along the old run's
-        // pool state (it would corrupt the new job's fresh pool).
         var job = new Class3DContinueJob();
         Assert.True(job.IsPoolArtifact(Path.Combine("pool", "pending", "task1.json")));
         Assert.True(job.IsPoolArtifact(Path.Combine("worker_logs", "123.out")));
-        Assert.True(job.IsPoolArtifact("pool_state.json"));
         Assert.True(job.IsPoolArtifact("worker_submit.sh"));
 
-        // Actual results and other data must still be copied.
         Assert.False(job.IsPoolArtifact("run_it025_data.star"));
         Assert.False(job.IsPoolArtifact("run_it025_optimiser.star"));
         Assert.False(job.IsPoolArtifact(Path.Combine("visualizations", "class1.png")));

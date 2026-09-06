@@ -173,36 +173,28 @@ public partial class MenuActionService
         #region Abort
 
         {
-            bool allOnCluster = jobs.All(j => j.Status.IsOnCluster());
-            bool anyOnCluster = jobs.Any(j => j.Status.IsOnCluster());
-
-            if (anyOnCluster)
+            if (jobs.Any(job => job.CanTransitionState(JobStatus.Aborting)))
             {
-                bool IsOrphaned(ReadOnlyJob j) =>
-                    j.Status.IsOnCluster()
-                    && !_dataManager.LocalQueue.QueuedJobs.Contains(j)
-                    && !_dataManager.ClusterQueues.Any(q => q.QueuedJobs.Contains(j));
-
-                var onClusterJobs = jobs.Where(j => j.Status.IsOnCluster()).ToList();
-                bool allOrphaned = onClusterJobs.All(IsOrphaned);
-                bool anyOrphaned = onClusterJobs.Any(IsOrphaned);
-
-                if (allOnCluster && allOrphaned)
+                var actionAbort = new MenuAction()
                 {
-                    // All selected jobs are orphaned — offer force abort
-                    var actionAbort = new MenuAction()
-                    {
-                        Name = jobs.Count() > 1
-                            ? $"Abort {jobs.Count()} orphaned jobs"
-                            : "Abort orphaned job",
-                        NeedsConfirmation = true,
-                        Appearance = null,
-                        TextColor = "var(--error)",
-                        BorderColor = "var(--error)",
-                        IconSmall = new Icons.Regular.Size16.RecordStop().WithColor("var(--error)"),
-                        IconLarge = new Icons.Regular.Size20.RecordStop().WithColor("var(--error)")
-                    };
+                    Name = jobs.Count() > 1
+                        ? $"Abort {jobs.Count()} jobs"
+                        : "Abort job",
+                    NeedsConfirmation = true,
+                    Appearance = null,
+                    TextColor = "var(--error)",
+                    BorderColor = "var(--error)",
+                    IconSmall = new Icons.Regular.Size16.RecordStop().WithColor("var(--error)"),
+                    IconLarge = new Icons.Regular.Size20.RecordStop().WithColor("var(--error)")
+                };
 
+                if (jobs.Any(job => !job.CanTransitionState(JobStatus.Aborting)))
+                {
+                    actionAbort.DisabledBecause = "Can't abort because some jobs are not active";
+                    actionAbort.IsDisabled = true;
+                }
+                else
+                {
                     actionAbort.Action = async () =>
                     {
                         foreach (var job in jobs)
@@ -210,7 +202,7 @@ public partial class MenuActionService
                             {
                                 try
                                 {
-                                    await _dataManager.ForceAbortOrphanedJob(_session.User, job);
+                                    await _dataManager.AbortJob(_session.User, job);
                                     _toastService.ShowSuccess($"{job.QualifiedName} aborted");
                                 }
                                 catch (Exception exc)
@@ -219,53 +211,9 @@ public partial class MenuActionService
                                 }
                             });
                     };
-
-                    result.Add(actionAbort);
                 }
-                else if (!anyOrphaned)
-                {
-                    // No orphans — regular abort flow
-                    var actionAbort = new MenuAction()
-                    {
-                        Name = jobs.Count() > 1
-                            ? $"Abort {jobs.Count()} jobs"
-                            : "Abort job",
-                        NeedsConfirmation = true,
-                        Appearance = null,
-                        TextColor = "var(--error)",
-                        BorderColor = "var(--error)",
-                        IconSmall = new Icons.Regular.Size16.RecordStop().WithColor("var(--error)"),
-                        IconLarge = new Icons.Regular.Size20.RecordStop().WithColor("var(--error)")
-                    };
 
-                    if (jobs.Any(j => !j.Status.IsOnCluster() || j.Status == JobStatus.Aborting))
-                    {
-                        actionAbort.DisabledBecause = "Can't abort because some jobs are not active";
-                        actionAbort.IsDisabled = true;
-                    }
-                    else
-                    {
-                        actionAbort.Action = async () =>
-                        {
-                            foreach (var job in jobs)
-                                Task.Run(async () =>
-                                {
-                                    try
-                                    {
-                                        await _dataManager.AbortJob(_session.User, job);
-                                        _toastService.ShowSuccess($"{job.QualifiedName} aborted");
-                                    }
-                                    catch (Exception exc)
-                                    {
-                                        _toastService.ShowError($"Couldn't abort {job.QualifiedName}: {exc.Message}");
-                                    }
-                                });
-                        };
-                    }
-
-                    result.Add(actionAbort);
-                }
-                // Mixed state (some orphaned, some not) — show neither action
+                result.Add(actionAbort);
             }
         }
 

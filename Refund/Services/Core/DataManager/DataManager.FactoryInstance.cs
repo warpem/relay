@@ -328,6 +328,7 @@ public partial class DataManager
         Dictionary<int, int> queueAssignments)
     {
         var queuedJobSnapshots = new List<ReadOnlyJob>();
+        var jobsToQueue = new List<(Job Job, JobQueue Queue)>();
 
         await ExecuteWithLock(async () =>
         {
@@ -354,16 +355,10 @@ public partial class DataManager
 
                     _dataRepository.UpdateJob(originalUser, job, j =>
                     {
-                        j.Status = JobStatus.Waiting;
                         j.QueueId = queueId;
-                        j.AddEvent(EventType.WaitingStarted, originalUser);
                     });
 
-                    if (queueId == _queueRepository.LocalQueue.Id)
-                        _queueRepository.QueueLocalJob(job);
-                    else
-                        _queueRepository.QueueClusterJob(job, queue);
-
+                    jobsToQueue.Add((job, queue));
                     queuedJobSnapshots.Add(job.AsReadOnly());
                 }
 
@@ -380,6 +375,9 @@ public partial class DataManager
                 throw;
             }
         });
+
+        foreach (var (job, queue) in jobsToQueue)
+            await _queueRepository.QueueJobAsync(job, queue);
 
         foreach (var job in queuedJobSnapshots)
         {

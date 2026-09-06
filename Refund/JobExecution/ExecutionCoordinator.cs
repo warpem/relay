@@ -274,6 +274,20 @@ public sealed class ExecutionCoordinator
         return ReconcileQueue(attempt.QueueId);
     }
 
+    public IReadOnlyList<ExecutionEffect> StartIndeterminate(Guid attemptId, string detail)
+    {
+        if (!TryGetCurrent(attemptId, out var attempt) ||
+            attempt.Phase is not (ExecutionPhase.Starting or ExecutionPhase.Cancelling))
+            return Array.Empty<ExecutionEffect>();
+
+        Release(attempt);
+        attempt.Health = ExecutionHealth.Indeterminate;
+        attempt.HealthDetail = detail;
+        attempt.TransitionTo(ExecutionPhase.Interrupted, Now(), detail);
+        _currentAttempts.Remove(attempt.Job);
+        return ReconcileQueue(attempt.QueueId);
+    }
+
     public IReadOnlyList<ExecutionEffect> Observe(Guid attemptId, BackendObservation observation)
     {
         if (!TryGetCurrent(attemptId, out var attempt) || attempt.IsTerminal)
@@ -457,6 +471,25 @@ public sealed class ExecutionCoordinator
             : ReconcileWorkers(attempt);
     }
 
+    public IReadOnlyList<ExecutionEffect> WorkerStartIndeterminate(
+        Guid attemptId,
+        Guid operationId)
+    {
+        if (!TryGetCurrent(attemptId, out var attempt) || attempt.WorkerGroup == null)
+            return Array.Empty<ExecutionEffect>();
+
+        var worker = attempt.WorkerGroup.Workers.FirstOrDefault(item => item.OperationId == operationId);
+        if (worker is not { Phase: WorkerPhase.Starting or WorkerPhase.Cancelling })
+            return Array.Empty<ExecutionEffect>();
+
+        worker.Phase = attempt.Phase == ExecutionPhase.Finalizing
+            ? WorkerPhase.Ended
+            : WorkerPhase.Indeterminate;
+        return attempt.Phase == ExecutionPhase.Finalizing
+            ? ContinueFinalization(attempt)
+            : Array.Empty<ExecutionEffect>();
+    }
+
     public IReadOnlyList<ExecutionEffect> ObserveWorkers(
         Guid attemptId,
         IReadOnlyList<WorkerObservation> observations)
@@ -544,8 +577,29 @@ public sealed class ExecutionCoordinator
                     queuesToReconcile.Add(attempt.QueueId);
                     break;
                 case ExecutionPhase.Starting when attempt.Receipt == null:
+                    Release(attempt);
                     attempt.Health = ExecutionHealth.Indeterminate;
                     attempt.HealthDetail = "Submission outcome is unknown after restart.";
+                    attempt.TransitionTo(
+                        ExecutionPhase.Interrupted,
+                        Now(),
+                        attempt.HealthDetail);
+                    _currentAttempts.Remove(attempt.Job);
+                    queuesToReconcile.Add(attempt.QueueId);
+                    break;
+                case ExecutionPhase.Starting:
+                    attempt.TransitionTo(ExecutionPhase.Pending, Now());
+                    break;
+                case ExecutionPhase.Cancelling when attempt.Receipt == null:
+                    Release(attempt);
+                    attempt.Health = ExecutionHealth.Indeterminate;
+                    attempt.HealthDetail = "Cancellation could not be resumed without a scheduler receipt.";
+                    attempt.TransitionTo(
+                        ExecutionPhase.Interrupted,
+                        Now(),
+                        attempt.HealthDetail);
+                    _currentAttempts.Remove(attempt.Job);
+                    queuesToReconcile.Add(attempt.QueueId);
                     break;
                 case ExecutionPhase.Cancelling when attempt.Receipt != null:
                     effects.Add(new CancelExecution(attempt.Id, attempt.Receipt));
@@ -600,6 +654,8 @@ public sealed class ExecutionCoordinator
                          .Reverse()
                          .Take(excess))
             {
+                if (worker.Phase == WorkerPhase.Indeterminate)
+                    continue;
                 worker.Phase = WorkerPhase.Cancelling;
                 if (worker.Receipt != null)
                     receipts.Add(worker.Receipt);
@@ -630,6 +686,8 @@ public sealed class ExecutionCoordinator
             {
                 if (worker.Phase is WorkerPhase.Starting)
                     worker.Phase = WorkerPhase.Cancelling;
+                else if (worker.Phase is WorkerPhase.Indeterminate)
+                    worker.Phase = WorkerPhase.Ended;
                 else if (worker.Phase is WorkerPhase.Pending or WorkerPhase.Running)
                 {
                     worker.Phase = WorkerPhase.Cancelling;
@@ -655,16 +713,14 @@ public sealed class ExecutionCoordinator
 
     private IReadOnlyList<ExecutionEffect> RecoverFinalization(ExecutionAttempt attempt)
     {
-        if (attempt.WorkerGroup?.AliveCount > 0)
-        {
-            var receipts = attempt.WorkerGroup.Workers
-                .Where(worker => worker.Receipt != null && worker.Phase != WorkerPhase.Ended)
-                .Select(worker => worker.Receipt)
-                .ToArray();
-            return receipts.Length == 0
-                ? Array.Empty<ExecutionEffect>()
-                : new ExecutionEffect[] { new CancelWorkers(attempt.Id, receipts) };
-        }
+        if (attempt.WorkerGroup != null)
+            foreach (var worker in attempt.WorkerGroup.Workers.Where(worker =>
+                         worker.Receipt == null && worker.Phase != WorkerPhase.Ended))
+                worker.Phase = WorkerPhase.Ended;
+
+        var cleanup = ContinueFinalization(attempt);
+        if (cleanup.Count > 0)
+            return cleanup;
 
         attempt.FinalizationIssued = true;
         return new ExecutionEffect[]

@@ -349,11 +349,6 @@ public class DataRepository : IDisposable
             // Load the space data
             space.ReadFromJson(spaceJson, users);
             
-            // If jobs were left active at disconnect time, mark all as failed
-            foreach (var job in space.Jobs)
-                if (job.Status.IsUnsettled())
-                    job.Status = JobStatus.Failed;
-
             // Just in case the space got moved after it was last saved
             space.RootDirectory = rootDirectory;
             

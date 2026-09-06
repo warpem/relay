@@ -90,6 +90,37 @@ public class ExecutionRuntimeTests
     }
 
     [Fact]
+    public async Task CommitFailureAfterManagedHandshakeDoesNotMisclassifyTheStart()
+    {
+        var store = new RecordingStateStore();
+        var operations = new FakeOperations
+        {
+            StartResult = new BackendStartResult(
+                new BackendReceipt("runner"),
+                IsRunning: false,
+                RequiresActivation: true),
+            OnStart = () => store.FailNextSave = true
+        };
+        await using var runtime = new ExecutionRuntime(
+            new ExecutionCoordinator([LocalQueue]),
+            operations,
+            store,
+            _ => Task.CompletedTask);
+        await runtime.InitializeAsync();
+        await runtime.RequestRunAsync(
+            new JobAddress(1, 1, 1), -1, new ResourceVector(1, 1, 0), true);
+        await WaitUntilAsync(() => operations.StartCalls == 1);
+        await WaitUntilAsync(() => store.FailNextSave == false);
+
+        await runtime.TickAsync();
+        await WaitUntilAsync(() => operations.ActivateCalls == 1);
+        await WaitUntilAsync(() => runtime.Attempts.Single().Phase == ExecutionPhase.Running);
+
+        Assert.Equal(1, operations.StartCalls);
+        Assert.Equal(ExecutionPhase.Running, runtime.Attempts.Single().Phase);
+    }
+
+    [Fact]
     public async Task JsonStoreRoundTripsTheCoordinatorSnapshot()
     {
         string directory = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
@@ -113,6 +144,32 @@ public class ExecutionRuntimeTests
             if (Directory.Exists(directory))
                 Directory.Delete(directory, true);
         }
+    }
+
+    [Fact]
+    public async Task UnchangedObservationsAreNotProjectedAgain()
+    {
+        int projectionCount = 0;
+        await using var runtime = new ExecutionRuntime(
+            new ExecutionCoordinator([LocalQueue]),
+            new FakeOperations(),
+            new RecordingStateStore(),
+            _ =>
+            {
+                projectionCount++;
+                return Task.CompletedTask;
+            });
+        await runtime.InitializeAsync();
+        await runtime.RequestRunAsync(
+            new JobAddress(1, 1, 1), -1, new ResourceVector(1, 1, 0), true);
+        await WaitUntilAsync(() => runtime.Attempts.Single().Phase == ExecutionPhase.Running);
+        await WaitUntilAsync(() => projectionCount >= 3);
+        int afterStart = projectionCount;
+
+        await runtime.TickAsync();
+        await runtime.TickAsync();
+
+        Assert.Equal(afterStart, projectionCount);
     }
 
     private static async Task WaitUntilAsync(Func<bool> condition)
@@ -169,6 +226,9 @@ public class ExecutionRuntimeTests
         public bool HoldPreparation { get; set; }
         public int PrepareCalls { get; private set; }
         public int StartCalls { get; private set; }
+        public int ActivateCalls { get; private set; }
+        public Action OnStart { get; init; }
+        public BackendStartResult StartResult { get; init; }
 
         public bool DependenciesReady(ExecutionAttemptSnapshot attempt) => true;
 
@@ -190,7 +250,8 @@ public class ExecutionRuntimeTests
             CancellationToken cancellationToken)
         {
             StartCalls++;
-            return Task.FromResult(new BackendStartResult(
+            OnStart?.Invoke();
+            return Task.FromResult(StartResult ?? new BackendStartResult(
                 new BackendReceipt(attempt.Id.ToString()), true));
         }
 
@@ -201,7 +262,11 @@ public class ExecutionRuntimeTests
 
         public Task ActivateAsync(
             ExecutionAttemptSnapshot attempt,
-            CancellationToken cancellationToken) => Task.CompletedTask;
+            CancellationToken cancellationToken)
+        {
+            ActivateCalls++;
+            return Task.CompletedTask;
+        }
 
         public Task<BackendObservation> CancelAsync(
             ExecutionAttemptSnapshot attempt,

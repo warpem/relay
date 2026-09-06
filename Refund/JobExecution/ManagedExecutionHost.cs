@@ -290,8 +290,8 @@ public sealed class ManagedExecutionHost
 
             try
             {
-                await _process.WaitForExitAsync(cancellationToken)
-                    .WaitAsync(_stopTimeout, cancellationToken);
+                await _process.WaitForExitAsync(CancellationToken.None)
+                    .WaitAsync(_stopTimeout, CancellationToken.None);
             }
             catch (TimeoutException)
             {

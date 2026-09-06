@@ -1,4 +1,5 @@
 using Refund.DataModel;
+using Refund.JobExecution;
 using Refund.JobQueues;
 
 namespace Refund.Tests.JobQueues;
@@ -8,30 +9,70 @@ public class ClusterQueueBatchTests
     [Fact]
     public void ListJobsTemplate_DefaultsToEmpty()
     {
-        var queue = new ClusterQueue((_, _) => { });
+        var queue = new ClusterQueue();
         Assert.Equal("", queue.ListJobsTemplate);
     }
 
     [Fact]
     public void CancelManyJobsTemplate_DefaultsToEmpty()
     {
-        var queue = new ClusterQueue((_, _) => { });
+        var queue = new ClusterQueue();
         Assert.Equal("", queue.CancelManyJobsTemplate);
     }
 
     [Fact]
-    public async Task ListActiveJobs_ThrowsWhenTemplateNotConfigured()
+    public async Task ObserveReceipts_FallsBackToPerReceiptStatusCommands()
     {
-        var queue = new ClusterQueue((_, _) => { });
-        await Assert.ThrowsAsync<InvalidOperationException>(() => queue.ListActiveJobs());
+        var queue = new ClusterQueue
+        {
+            SchedulerType = ClusterScheduler.Custom,
+            StatusJobTemplate = "printf RUNNING",
+            JobStatusParseTemplateRunning = "RUNNING"
+        };
+
+        var observations = await queue.ObserveReceipts(["123", "456"]);
+
+        Assert.All(observations.Values, observation =>
+            Assert.Equal(BackendObservationKind.Running, observation.Kind));
     }
 
     [Fact]
-    public async Task CancelJobs_ThrowsWhenTemplateNotConfigured()
+    public async Task ObserveReceipts_FallsBackWhenBulkOutputIsInconclusive()
     {
-        var queue = new ClusterQueue((_, _) => { });
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            queue.CancelJobs(new[] { "123", "456" }));
+        var queue = new ClusterQueue
+        {
+            SchedulerType = ClusterScheduler.Custom,
+            ListJobsTemplate = "printf '123,WHAT\\n'",
+            StatusJobTemplate = "printf RUNNING",
+            JobStatusParseTemplateRunning = "RUNNING"
+        };
+
+        var observations = await queue.ObserveReceipts(["123"]);
+
+        Assert.Equal(BackendObservationKind.Running, observations["123"].Kind);
+    }
+
+    [Fact]
+    public async Task CancelReceipts_FallsBackToPerReceiptCancellationCommands()
+    {
+        string path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var queue = new ClusterQueue
+        {
+            AbortJobTemplate = $"printf '%s\\n' {{{{ job_id }}}} >> {path}"
+        };
+        try
+        {
+            await queue.CancelReceipts(["123", "456"]);
+
+            Assert.Equal(
+                new[] { "123", "456" }.ToHashSet(),
+                File.ReadAllLines(path).ToHashSet());
+        }
+        finally
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
     }
 
     [Theory]
@@ -39,61 +80,63 @@ public class ClusterQueueBatchTests
     [InlineData("123\r\n456\r\n", new[] { "123", "456" })]
     [InlineData("  789  \n\n1011\n", new[] { "789", "1011" })]
     [InlineData("", new string[0])]
-    public void ParseActiveJobs_ParsesIdsAndHandlesLineEndingsAndBlanks(string output, string[] expectedIds)
+    public void ParseActiveReceipts_ParsesIdsAndHandlesLineEndingsAndBlanks(string output, string[] expectedIds)
     {
-        var queue = new ClusterQueue((_, _) => { });
-        var result = queue.ParseActiveJobs(output);
+        var queue = new ClusterQueue();
+        var result = queue.ParseActiveReceipts(output);
         Assert.Equal(expectedIds.ToHashSet(), result.Keys.ToHashSet());
     }
 
     [Fact]
-    public void ParseActiveJobs_IdOnlyLinesClassifyAsUnknown()
+    public void ParseActiveReceipts_IdOnlyLinesAreInconclusive()
     {
-        var queue = new ClusterQueue((_, _) => { });
-        var result = queue.ParseActiveJobs("123\n456\n");
-        Assert.Equal(ClusterJobStatus.Unknown, result["123"]);
-        Assert.Equal(ClusterJobStatus.Unknown, result["456"]);
+        var queue = new ClusterQueue();
+        var result = queue.ParseActiveReceipts("123\n456\n");
+        Assert.Equal(BackendObservationKind.AbsentFromActiveView, result["123"].Kind);
+        Assert.Equal(BackendObservationKind.AbsentFromActiveView, result["456"].Kind);
     }
 
     [Theory]
-    [InlineData("RUNNING", ClusterJobStatus.Running)]
-    [InlineData("R",       ClusterJobStatus.Running)]   // SLURM short state code
-    [InlineData("PENDING", ClusterJobStatus.Pending)]
-    [InlineData("PD",      ClusterJobStatus.Pending)]   // SLURM short state code
-    public void ParseActiveJobs_ClassifiesStateColumn(string state, ClusterJobStatus expected)
+    [InlineData("RUNNING", BackendObservationKind.Running)]
+    [InlineData("R",       BackendObservationKind.Running)]
+    [InlineData("PENDING", BackendObservationKind.Pending)]
+    [InlineData("PD",      BackendObservationKind.Pending)]
+    public void ParseActiveReceipts_ClassifiesStateColumn(
+        string state,
+        BackendObservationKind expected)
     {
-        var queue = new ClusterQueue((_, _) => { });
-        // Mirrors squeue -o "%i %T" (and "%i %t") — ID first, state second.
-        var result = queue.ParseActiveJobs($"12345 {state}\n");
-        Assert.Equal(expected, result["12345"]);
+        var queue = new ClusterQueue();
+        var result = queue.ParseActiveReceipts($"12345 {state}\n");
+        Assert.Equal(expected, result["12345"].Kind);
     }
 
     [Theory]
-    [InlineData("12345,RUNNING", "12345", ClusterJobStatus.Running)]   // space-free squeue -o "%i,%T"
-    [InlineData("12345,PENDING", "12345", ClusterJobStatus.Pending)]
-    public void ParseActiveJobs_AcceptsCommaSeparator(string line, string id, ClusterJobStatus expected)
+    [InlineData("12345,RUNNING", "12345", BackendObservationKind.Running)]
+    [InlineData("12345,PENDING", "12345", BackendObservationKind.Pending)]
+    public void ParseActiveReceipts_AcceptsCommaSeparator(
+        string line,
+        string id,
+        BackendObservationKind expected)
     {
-        var queue = new ClusterQueue((_, _) => { });
-        var result = queue.ParseActiveJobs(line + "\n");
-        Assert.Equal(expected, result[id]);
+        var queue = new ClusterQueue();
+        var result = queue.ParseActiveReceipts(line + "\n");
+        Assert.Equal(expected, result[id].Kind);
     }
 
     [Fact]
     public void BuildWorkerScript_PreservesDollarSignsInCommand()
     {
-        var queue = new ClusterQueue((_, _) => { }) { SubmissionScriptTemplate = "#!/bin/bash\n{{ command }}\n" };
+        var queue = new ClusterQueue { SubmissionScriptTemplate = "#!/bin/bash\n{{ command }}\n" };
         var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".sh");
         try
         {
-            // Shell content that the old Regex.Replace-as-substitution path corrupted:
-            // "$$" -> "$" (so bash later read "$-"), and "${VAR}" -> a group reference.
             queue.BuildWorkerScript(
-                "WarpWorker2 --worker-id \"$(hostname)-$$-0-0\" ${SLURM_JOB_ID:-x}",
+                "WarpWorker2 --worker-id \"$(hostname)-$$-0-0\" ${SCHEDULER_JOB_ID:-x}",
                 new Dictionary<string, string>(), Array.Empty<string>(), path);
 
             var script = File.ReadAllText(path);
-            Assert.Contains("$(hostname)-$$-0-0", script);   // $$ preserved (not collapsed to $)
-            Assert.Contains("${SLURM_JOB_ID:-x}", script);   // ${...} preserved (not a group ref)
+            Assert.Contains("$(hostname)-$$-0-0", script);
+            Assert.Contains("${SCHEDULER_JOB_ID:-x}", script);
         }
         finally { if (File.Exists(path)) File.Delete(path); }
     }

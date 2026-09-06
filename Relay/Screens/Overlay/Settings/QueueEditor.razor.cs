@@ -99,7 +99,7 @@ public partial class QueueEditor
 
     private async Task AddNewQueue()
     {
-        var template = new ClusterQueue((job, action) => { })
+        var template = new ClusterQueue
         {
             Alias = "New Queue"
         };
@@ -113,12 +113,10 @@ public partial class QueueEditor
         if (_selectedQueue == null)
             return;
 
-        var template = new ClusterQueue((job, action) => { });
+        var template = new ClusterQueue();
         template.ReadFromJson(_selectedQueue.ToJson());
         template.Alias += " Copy";
-        template.Clear();
 
-        // Copying a managed queue is the mistake the single-queue rule exists to catch.
         try
         {
             var newQueue = await DataManager.CreateClusterQueue(template);
@@ -132,10 +130,6 @@ public partial class QueueEditor
 
     private async Task DeleteQueue(ReadOnlyJobQueue queue)
     {
-        // Deleted first, deselected after: a managed queue that still owns processes on the host is
-        // refused, and clearing the selection up front would empty the editor for a queue that is
-        // still there. The delete button is already disabled while jobs are in the queue, but an
-        // executor entry outlives its job's membership of one, so the refusal is still reachable.
         try
         {
             await DataManager.DeleteQueue(queue);

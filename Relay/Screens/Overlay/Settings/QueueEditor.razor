@@ -212,6 +212,30 @@
                             </div>
 
                             <div class="settings-field">
+                                <span>Terminal status command template</span>
+
+                                <div class="setting-variable-chips">
+                                    Used when the active scheduler view no longer contains the job.
+                                    Available variables:
+
+                                    @foreach (var _variable in GetStatusJobTemplateVariables())
+                                    {
+                                        var variable = _variable;
+
+                                        <FluentBadge Style="font-family: monospace; font-size: 10px;"
+                                                     Appearance="Appearance.Neutral"
+                                                     Circular="true"
+                                                     OnClick="() => InsertSettingVariable(variable, nameof(_selectedQueue.TerminalStatusJobTemplate))">
+                                            {{ @variable }}
+                                        </FluentBadge>
+                                    }
+                                </div>
+
+                                <FluentTextField Value="@_selectedQueue.TerminalStatusJobTemplate"
+                                                 ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.TerminalStatusJobTemplate)))" />
+                            </div>
+
+                            <div class="settings-field">
                                 <span>Abort job command template</span>
                                 
                                 <div class="setting-variable-chips">
@@ -239,7 +263,7 @@
 
                                 <div class="setting-variable-chips">
                                     <span>
-                                        Required only for queues used as GPU worker pools. Print one job per line as
+                                        Optional worker-pool optimization. Print one job per line as
                                         <span style="font-family: monospace;">&lt;id&gt;,&lt;state&gt;</span>, e.g.
                                         <span style="font-family: monospace;">squeue -u $USER -h -o "%i,%T"</span>.
                                         Use a space-free format (a comma, not a quoted
@@ -257,7 +281,8 @@
                                 <span>Cancel many jobs command template</span>
 
                                 <div class="setting-variable-chips">
-                                    Required only for queues used as GPU worker pools.
+                                    Optional worker-pool optimization. Without it, Relay uses the ordinary
+                                    cancellation command once per worker.
                                     Available variables:
 
                                     @foreach (var _variable in GetCancelManyJobsTemplateVariables())
@@ -395,6 +420,18 @@
                                     <span>Job status parsing template (Failed)</span>
                                     <FluentTextField Value="@_selectedQueue.JobStatusParseTemplateFailed"
                                                      ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.JobStatusParseTemplateFailed)))" />
+                                </div>
+
+                                <div class="settings-field">
+                                    <span>Job status parsing template (Succeeded)</span>
+                                    <FluentTextField Value="@_selectedQueue.JobStatusParseTemplateSucceeded"
+                                                     ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.JobStatusParseTemplateSucceeded)))" />
+                                </div>
+
+                                <div class="settings-field">
+                                    <span>Job status parsing template (Canceled)</span>
+                                    <FluentTextField Value="@_selectedQueue.JobStatusParseTemplateCanceled"
+                                                     ValueChanged="@(value => HandleFieldChanged(value, nameof(ClusterQueue.JobStatusParseTemplateCanceled)))" />
                                 </div>
                             }
                             else if (IsManagedQueue)

@@ -34,7 +34,11 @@ public sealed class RelayExecutionOperations : IExecutionOperations
             if (attempt.BackendKind == ExecutionBackendKind.Local)
                 await PrepareLocalAsync(job, cancellationToken);
             else
-                await Queue(attempt.BackendConfiguration).PrepareAndWriteScript(job);
+            {
+                var queue = Queue(attempt.BackendConfiguration);
+                queue.ValidateSubmissionConfiguration();
+                await queue.PrepareAndWriteScript(job);
+            }
 
             cancellationToken.ThrowIfCancellationRequested();
             if (attempt.WorkerGroup != null)
@@ -127,7 +131,21 @@ public sealed class RelayExecutionOperations : IExecutionOperations
             return;
         }
 
-        await TrackProgressAsync(attempt, cancellationToken);
+        if (job.TrackProgressLogs() is { } logs)
+            await _updateJob(job, _ => logs());
+        while (job.TrackProgressResults() is { } results)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await _updateJob(job, _ => results());
+        }
+
+        await job.WriteToLifecycleLog(outcome switch
+        {
+            ExecutionOutcome.Succeeded => "Job completed",
+            ExecutionOutcome.Canceled => "Job canceled",
+            ExecutionOutcome.Interrupted => "Job interrupted",
+            _ => "Job failed"
+        });
     }
 
     public async Task<BackendStartResult> StartWorkerAsync(
@@ -137,7 +155,17 @@ public sealed class RelayExecutionOperations : IExecutionOperations
     {
         var job = FindJob(attempt);
         var queue = Queue(attempt.WorkerBackendConfiguration);
-        string receipt = await queue.SubmitScript(WorkerScriptPath(job));
+        string receipt;
+        try
+        {
+            receipt = await queue.SubmitScript(WorkerScriptPath(job));
+        }
+        catch (Exception exception)
+        {
+            throw new IndeterminateBackendStartException(
+                "The worker submission may have reached the scheduler, but no receipt was obtained.",
+                exception);
+        }
         await job.WriteToLifecycleLog($"Worker submitted with scheduler ID {receipt}");
         return new BackendStartResult(new BackendReceipt(receipt), false);
     }
@@ -148,25 +176,12 @@ public sealed class RelayExecutionOperations : IExecutionOperations
         CancellationToken cancellationToken)
     {
         var queue = Queue(attempt.WorkerBackendConfiguration);
-        var active = await queue.ListActiveJobs();
+        var observed = await queue.ObserveReceipts(receipts.Select(receipt => receipt.Id));
         var observations = new List<WorkerObservation>(receipts.Count);
 
         foreach (var receipt in receipts)
         {
-            if (active.TryGetValue(receipt.Id, out var status))
-            {
-                observations.Add(new WorkerObservation(receipt.Id, status switch
-                {
-                    ClusterJobStatus.Pending => BackendObservationKind.Pending,
-                    ClusterJobStatus.Running => BackendObservationKind.Running,
-                    ClusterJobStatus.Finished => BackendObservationKind.Succeeded,
-                    ClusterJobStatus.Failed => BackendObservationKind.Failed,
-                    _ => BackendObservationKind.Indeterminate
-                }));
-                continue;
-            }
-
-            var observation = await queue.ObserveReceipt(receipt.Id);
+            var observation = observed[receipt.Id];
             observations.Add(new WorkerObservation(
                 receipt.Id, observation.Kind, observation.Detail));
         }
@@ -180,7 +195,7 @@ public sealed class RelayExecutionOperations : IExecutionOperations
         CancellationToken cancellationToken)
     {
         var queue = Queue(attempt.WorkerBackendConfiguration);
-        await queue.CancelJobs(receipts.Select(receipt => receipt.Id));
+        await queue.CancelReceipts(receipts.Select(receipt => receipt.Id));
         return receipts.Select(receipt => new WorkerObservation(
             receipt.Id,
             BackendObservationKind.Indeterminate,
@@ -208,7 +223,8 @@ public sealed class RelayExecutionOperations : IExecutionOperations
         var localTasks = _local.Values.Select(execution => execution.Task).ToArray();
         try
         {
-            await Task.WhenAll(localTasks).WaitAsync(cancellationToken);
+            await Task.WhenAll(localTasks)
+                .WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
         }
         catch
         {
@@ -240,7 +256,18 @@ public sealed class RelayExecutionOperations : IExecutionOperations
             throw new InvalidOperationException($"Job {job.Id} does not support local execution.");
 
         var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_shutdown.Token);
-        var task = Task.Run(() => localJob.RunLocal(cancellation.Token), CancellationToken.None);
+        var task = Task.Run(async () =>
+        {
+            try
+            {
+                localJob.RunLocal(cancellation.Token);
+            }
+            catch (Exception exception)
+            {
+                await job.WriteToErrorLog(exception.ToString());
+                throw;
+            }
+        }, CancellationToken.None);
         if (!_local.TryAdd(attempt.Id, new LocalExecution(task, cancellation)))
         {
             cancellation.Cancel();
@@ -281,20 +308,12 @@ public sealed class RelayExecutionOperations : IExecutionOperations
                 "The local task is not owned by this Relay process.");
 
         execution.Cancellation.Cancel();
-        try
-        {
-            await execution.Task.WaitAsync(cancellationToken);
-        }
-        catch
-        {
-        }
-        finally
-        {
-            _local.TryRemove(attempt.Id, out _);
-            execution.Cancellation.Dispose();
-        }
+        if (!execution.Task.IsCompleted)
+            return new BackendObservation(
+                BackendObservationKind.Indeterminate,
+                "Cancellation was requested; the local task is still exiting.");
 
-        return new BackendObservation(BackendObservationKind.Canceled);
+        return ObserveLocal(attempt);
     }
 
     private static async Task<BackendStartResult> StartExternalAsync(
@@ -303,8 +322,18 @@ public sealed class RelayExecutionOperations : IExecutionOperations
     {
         string rawOutput = null;
         var queue = Queue(attempt.BackendConfiguration);
-        string receipt = await queue.SubmitScript(
-            SubmissionScriptPath(job), output => rawOutput = output);
+        string receipt;
+        try
+        {
+            receipt = await queue.SubmitScript(
+                SubmissionScriptPath(job), output => rawOutput = output);
+        }
+        catch (Exception exception)
+        {
+            throw new IndeterminateBackendStartException(
+                "The submission may have reached the scheduler, but no receipt was obtained.",
+                exception);
+        }
         await job.WriteToLifecycleLog(rawOutput ?? "");
         await job.WriteToLifecycleLog($"Scheduler receipt: {receipt}");
         return new BackendStartResult(new BackendReceipt(receipt), false);
@@ -316,6 +345,7 @@ public sealed class RelayExecutionOperations : IExecutionOperations
             throw new InvalidOperationException($"Job {job.Id} does not define worker commands.");
 
         var queue = Queue(attempt.WorkerBackendConfiguration);
+        queue.ValidateSubmissionConfiguration();
         string logs = Path.Combine(job.DirectoryPath, "worker_logs");
         Directory.CreateDirectory(logs);
         queue.BuildWorkerScript(
@@ -337,8 +367,8 @@ public sealed class RelayExecutionOperations : IExecutionOperations
 
         var node = JsonNode.Parse(configuration)
                    ?? throw new InvalidDataException("The queue configuration snapshot is invalid JSON.");
-        var queue = new ClusterQueue(null);
-        queue.ReadFromJson(node, (_, _, _) => null);
+        var queue = new ClusterQueue();
+        queue.ReadFromJson(node);
         return queue;
     }
 

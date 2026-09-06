@@ -439,11 +439,6 @@ public partial class DataManager
     /// <param name="user">The user aborting the job</param>
     /// <param name="job">The job to abort</param>
     /// <returns>A task that completes when the job has been marked for abortion</returns>
-    /// <remarks>
-    /// This method sets the job status to Aborting, which signals the job queue to
-    /// terminate the job's process. The actual abortion is handled by the job queue,
-    /// which will eventually transition the job to the Aborted state.
-    /// </remarks>
     /// <summary>
     /// Throws with a human-readable message if a job has unmet parameter or port-connection
     /// requirements. Mirrors the GUI's pre-queue validation (<see cref="Job.ValidateInputs"/> +
@@ -471,32 +466,18 @@ public partial class DataManager
 
     public async Task AbortJob(ReadOnlyUser user, ReadOnlyJob job)
     {
-        var originalUser = _userRepository.FindUser(user.Id);
-        var originalJob = ResolveJob(job.Space.Project.Id, job.Space.Id, job.Id);
-
-        if (!originalJob.CanTransitionState(JobStatus.Aborting))
-            throw new Exception($"Job cannot be aborted from its current state ({originalJob.Status}).");
-
-        await UpdateJob(user, job, j =>
+        var originalJob = await ExecuteWithLock(async () =>
         {
-            j.Status = JobStatus.Aborting;
-            j.AddEvent(EventType.Aborting, originalUser);
-        });
-    }
+            var originalUser = ResolveUser(user.Id);
+            var mutableJob = ResolveJob(job.Space.Project.Id, job.Space.Id, job.Id);
+            if (!mutableJob.CanTransitionState(JobStatus.Aborting))
+                throw new Exception($"Job cannot be aborted from its current state ({mutableJob.Status}).");
 
-    /// <summary>
-    /// Force-aborts a job that is stuck in an active state but not tracked by any queue.
-    /// This bypasses normal state transition validation as an emergency recovery mechanism.
-    /// </summary>
-    public async Task ForceAbortOrphanedJob(ReadOnlyUser user, ReadOnlyJob job)
-    {
-        var originalUser = _userRepository.FindUser(user.Id);
-
-        await UpdateJob(user, job, originalJob =>
-        {
-            originalJob.Status = JobStatus.Aborted;
-            originalJob.AddEvent(EventType.Aborted, originalUser);
+            _dataRepository.UpdateJob(originalUser, mutableJob, _ => { });
+            return mutableJob;
         });
+
+        await _queueRepository.CancelJobAsync(originalJob);
     }
 
     /// <summary>
@@ -517,49 +498,43 @@ public partial class DataManager
     /// </remarks>
     public async Task QueueLocalJob(ReadOnlyUser user, ReadOnlyJob job)
     {
-        await ExecuteWithLock(async () =>
+        Job originalJob;
+        try
         {
-            try
+            originalJob = await ExecuteWithLock(async () =>
             {
                 var originalUser = ResolveUser(user.Id);
-                var originalJob = ResolveJob(job.Space.Project.Id, job.Space.Id, job.Id);
+                var mutableJob = ResolveJob(job.Space.Project.Id, job.Space.Id, job.Id);
 
-                // Check if the job can be transitioned to the Waiting state
-                if (!originalJob.CanTransitionState(JobStatus.Waiting))
+                if (!mutableJob.CanTransitionState(JobStatus.Waiting))
                     throw new Exception("Job cannot be started.");
 
-                // Enforce the same input/connectivity requirements the GUI checks before queueing.
-                EnsureJobInputsValid(originalJob);
+                EnsureJobInputsValid(mutableJob);
 
-                // Inherit color from first colored parent if not already set
-                if (originalJob.ColorTag == null)
+                if (mutableJob.ColorTag == null)
                 {
-                    var parentColor = originalJob.GetParents()
+                    var parentColor = mutableJob.GetParents()
                         .Select(p => p.ColorTag)
                         .FirstOrDefault(c => c != null);
                     if (parentColor != null)
-                        originalJob.ColorTag = parentColor;
+                        mutableJob.ColorTag = parentColor;
                 }
 
-                // Update the job status and record which queue it's assigned to
-                _dataRepository.UpdateJob(originalUser, originalJob, j =>
-                {
-                    j.Status = JobStatus.Waiting;
-                    j.QueueId = _queueRepository.LocalQueue.Id;
-                    j.AddEvent(EventType.WaitingStarted, originalUser);
-                });
+                _dataRepository.UpdateJob(
+                    originalUser,
+                    mutableJob,
+                    queued => queued.QueueId = _queueRepository.LocalQueue.Id);
+                return mutableJob;
+            });
 
-                // Queue the job for local execution
-                _queueRepository.QueueLocalJob(originalJob);
-            }
-            catch (Exception e)
-            {
-                Log.ForContext<DataManager>().Error(e, "Failed to queue local job {JobId} by user {UserId}", job.Id, user.Id);
-                throw;
-            }
-        });
+            await _queueRepository.QueueJobAsync(originalJob, _queueRepository.LocalQueue);
+        }
+        catch (Exception e)
+        {
+            Log.ForContext<DataManager>().Error(e, "Failed to queue local job {JobId} by user {UserId}", job.Id, user.Id);
+            throw;
+        }
 
-        await JobUpdated.InvokeHierarchy(job, GroupName.JobHierarchy(job.Space.Project.Id, job.Space.Id, job.Id));
         await JobQueued.InvokeHierarchy(job, GroupName.JobHierarchy(job.Space.Project.Id, job.Space.Id, job.Id));
     }
 
@@ -583,50 +558,45 @@ public partial class DataManager
     /// </remarks>
     public async Task QueueClusterJob(ReadOnlyUser user, ReadOnlyJob job, ReadOnlyJobQueue queue)
     {
-        await ExecuteWithLock(async () =>
+        Job originalJob;
+        JobQueue originalQueue;
+        try
         {
-            try
+            (originalJob, originalQueue) = await ExecuteWithLock(async () =>
             {
                 var originalUser = ResolveUser(user.Id);
-                var originalJob = ResolveJob(job.Space.Project.Id, job.Space.Id, job.Id);
-                var originalQueue = ResolveQueue(queue.Id);
+                var mutableJob = ResolveJob(job.Space.Project.Id, job.Space.Id, job.Id);
+                var mutableQueue = ResolveQueue(queue.Id);
 
-                // Check if the job can be transitioned to the Waiting state
-                if (!originalJob.CanTransitionState(JobStatus.Waiting))
+                if (!mutableJob.CanTransitionState(JobStatus.Waiting))
                     throw new Exception("Job cannot be started.");
 
-                // Enforce the same input/connectivity requirements the GUI checks before queueing.
-                EnsureJobInputsValid(originalJob);
+                EnsureJobInputsValid(mutableJob);
 
-                // Inherit color from first colored parent if not already set
-                if (originalJob.ColorTag == null)
+                if (mutableJob.ColorTag == null)
                 {
-                    var parentColor = originalJob.GetParents()
+                    var parentColor = mutableJob.GetParents()
                         .Select(p => p.ColorTag)
                         .FirstOrDefault(c => c != null);
                     if (parentColor != null)
-                        originalJob.ColorTag = parentColor;
+                        mutableJob.ColorTag = parentColor;
                 }
 
-                // Update the job status and record which queue it's assigned to
-                _dataRepository.UpdateJob(originalUser, originalJob, j =>
-                {
-                    j.Status = JobStatus.Waiting;
-                    j.QueueId = originalQueue.Id;
-                    j.AddEvent(EventType.WaitingStarted, originalUser);
-                });
+                _dataRepository.UpdateJob(
+                    originalUser,
+                    mutableJob,
+                    queued => queued.QueueId = mutableQueue.Id);
+                return (mutableJob, mutableQueue);
+            });
 
-                // Queue the job for cluster execution
-                _queueRepository.QueueClusterJob(originalJob, originalQueue);
-            }
-            catch (Exception e)
-            {
-                Log.ForContext<DataManager>().Error(e, "Failed to queue cluster job {JobId} by user {UserId} to queue {QueueId}", job.Id, user.Id, queue.Id);
-                throw;
-            }
-        });
+            await _queueRepository.QueueJobAsync(originalJob, originalQueue);
+        }
+        catch (Exception e)
+        {
+            Log.ForContext<DataManager>().Error(e, "Failed to queue cluster job {JobId} by user {UserId} to queue {QueueId}", job.Id, user.Id, queue.Id);
+            throw;
+        }
 
-        await JobUpdated.InvokeHierarchy(job, GroupName.JobHierarchy(job.Space.Project.Id, job.Space.Id, job.Id));
         await JobQueued.InvokeHierarchy(job, GroupName.JobHierarchy(job.Space.Project.Id, job.Space.Id, job.Id));
     }
 
@@ -646,36 +616,32 @@ public partial class DataManager
     /// </remarks>
     public async Task FinalizeLocalJob(ReadOnlyUser user, ReadOnlyJob job)
     {
-        await ExecuteWithLock(async () =>
+        Job originalJob;
+        try
         {
-            try
+            originalJob = await ExecuteWithLock(async () =>
             {
                 var originalUser = ResolveUser(user.Id);
-                var originalJob = ResolveJob(job.Space.Project.Id, job.Space.Id, job.Id);
+                var mutableJob = ResolveJob(job.Space.Project.Id, job.Space.Id, job.Id);
 
-                // Check if the job can be transitioned to the Waiting state
-                if (!originalJob.CanTransitionState(JobStatus.Finalizing))
+                if (!mutableJob.CanTransitionState(JobStatus.Finalizing))
                     throw new Exception("Job cannot be finalized");
 
-                // Update the job status and record queue assignment
-                _dataRepository.UpdateJob(originalUser, originalJob, j =>
-                {
-                    j.Status = JobStatus.Finalizing;
-                    j.QueueId = _queueRepository.LocalQueue.Id;
-                    j.AddEvent(EventType.FinalizingStarted, originalUser);
-                });
+                _dataRepository.UpdateJob(
+                    originalUser,
+                    mutableJob,
+                    queued => queued.QueueId = _queueRepository.LocalQueue.Id);
+                return mutableJob;
+            });
 
-                // Queue the job for local execution
-                _queueRepository.QueueLocalJob(originalJob);
-            }
-            catch (Exception e)
-            {
-                Log.ForContext<DataManager>().Error(e, "Failed to queue local job {JobId} for finalization by user {UserId}", job.Id, user.Id);
-                throw;
-            }
-        });
+            await _queueRepository.FinalizeJobAsync(originalJob);
+        }
+        catch (Exception e)
+        {
+            Log.ForContext<DataManager>().Error(e, "Failed to queue local job {JobId} for finalization by user {UserId}", job.Id, user.Id);
+            throw;
+        }
 
-        await JobUpdated.InvokeHierarchy(job, GroupName.JobHierarchy(job.Space.Project.Id, job.Space.Id, job.Id));
         await JobQueued.InvokeHierarchy(job, GroupName.JobHierarchy(job.Space.Project.Id, job.Space.Id, job.Id));
     }
 

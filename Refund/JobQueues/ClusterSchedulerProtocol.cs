@@ -34,6 +34,30 @@ internal static class ClusterSchedulerProtocol
         };
     }
 
+    public static string ParseReceipt(ClusterQueue queue, string output)
+    {
+        if (queue.IsManaged)
+            throw new InvalidOperationException("Managed queues do not parse scheduler receipts.");
+
+        string receipt = queue.SchedulerType switch
+        {
+            ClusterScheduler.Slurm => Match(output, @"Submitted batch job (\d+)"),
+            ClusterScheduler.Lsf => Match(output, @"Job <(\d+)> is submitted"),
+            ClusterScheduler.Pbs => Regex.Match(output, @"\b\d+\.[A-Za-z0-9_.-]+\b") is { Success: true } pbs
+                ? pbs.Value
+                : null,
+            ClusterScheduler.Sge => Match(output, @"Your job (\d+)"),
+            ClusterScheduler.Flux => ParseBareReceipt(output),
+            ClusterScheduler.Custom => string.IsNullOrWhiteSpace(queue.JobIdParseRegex)
+                ? null
+                : Match(output, queue.JobIdParseRegex),
+            _ => null
+        };
+
+        return receipt ?? throw new InvalidOperationException(
+            $"Could not parse a {queue.SchedulerType} scheduler receipt from: {output}");
+    }
+
     private static BackendObservation ParseSlurm(string output)
     {
         var states = Tokens(output)
@@ -79,6 +103,17 @@ internal static class ClusterSchedulerProtocol
     {
         var states = Tokens(output).ToArray();
 
+        var exitStatus = Regex.Match(
+            output,
+            @"\bExit_status\s*=\s*(-?\d+)\b",
+            RegexOptions.IgnoreCase);
+        if (exitStatus.Success && int.TryParse(exitStatus.Groups[1].Value, out int exitCode))
+            return new BackendObservation(
+                exitCode == 0
+                    ? BackendObservationKind.Succeeded
+                    : BackendObservationKind.Failed,
+                $"Scheduler exit status: {exitCode}");
+
         if (states.Any(state => state is "COMPLETED" or "SUCCEEDED"))
             return new BackendObservation(BackendObservationKind.Succeeded);
         if (states.Any(state => state is "FAILED" or "EXITING"))
@@ -94,6 +129,28 @@ internal static class ClusterSchedulerProtocol
     private static BackendObservation ParseSge(string output)
     {
         var states = Tokens(output).ToArray();
+
+        var failedStatus = Regex.Match(
+            output,
+            @"^\s*failed\s+(-?\d+)\s*$",
+            RegexOptions.IgnoreCase | RegexOptions.Multiline);
+        if (failedStatus.Success &&
+            int.TryParse(failedStatus.Groups[1].Value, out int failedCode) &&
+            failedCode != 0)
+            return new BackendObservation(
+                BackendObservationKind.Failed,
+                $"Scheduler failure status: {failedCode}");
+
+        var exitStatus = Regex.Match(
+            output,
+            @"^\s*exit_status\s+(-?\d+)\s*$",
+            RegexOptions.IgnoreCase | RegexOptions.Multiline);
+        if (exitStatus.Success && int.TryParse(exitStatus.Groups[1].Value, out int exitCode))
+            return new BackendObservation(
+                exitCode == 0
+                    ? BackendObservationKind.Succeeded
+                    : BackendObservationKind.Failed,
+                $"Scheduler exit status: {exitCode}");
 
         if (states.Any(state => state is "DONE" or "COMPLETED" or "SUCCEEDED"))
             return new BackendObservation(BackendObservationKind.Succeeded);
@@ -152,4 +209,16 @@ internal static class ClusterSchedulerProtocol
     private static BackendObservation Unparseable(string output) => new(
         BackendObservationKind.Unparseable,
         $"The scheduler response did not contain a recognized state: {output.Trim()}");
+
+    private static string Match(string output, string pattern)
+    {
+        var match = Regex.Match(output, pattern);
+        return match.Success && match.Groups.Count > 1 ? match.Groups[1].Value : null;
+    }
+
+    private static string ParseBareReceipt(string output)
+    {
+        string receipt = output.Trim();
+        return receipt.Length > 0 && !receipt.Any(char.IsWhiteSpace) ? receipt : null;
+    }
 }

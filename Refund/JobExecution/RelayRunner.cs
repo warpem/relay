@@ -55,8 +55,9 @@ public static class RelayRunner
             gpus,
             standardOutput,
             standardError);
+        using var monitorCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         Task payloadExit = payload.WaitForExitAsync(CancellationToken.None);
-        Task<string> controlCommand = controlReader.ReadLineAsync(cancellationToken).AsTask();
+        Task<string> controlCommand = controlReader.ReadLineAsync(monitorCancellation.Token).AsTask();
         Task completed = await Task.WhenAny(payloadExit, controlCommand);
 
         if (completed == controlCommand)
@@ -67,6 +68,14 @@ public static class RelayRunner
         }
 
         await payloadExit;
+        monitorCancellation.Cancel();
+        try
+        {
+            await controlCommand;
+        }
+        catch (OperationCanceledException)
+        {
+        }
         return payload.ExitCode;
     }
 

@@ -1,421 +1,646 @@
-using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using System.Text.Json.Serialization.Metadata;
-using Serilog;
 using Refund.DataModel;
-using Refund.DataModel.ReadOnly;
+using Refund.JobExecution;
 using Refund.JobQueues;
-using Refund.Jobs;
-using Refund.Utils;
-using Timer = System.Threading.Timer;
+using Serilog;
 
 namespace Refund.Services.Core.Repositories;
 
-/// <summary>
-/// Repository for managing job queues, including the local queue and cluster queues.
-/// Handles queue state persistence, job submission, status monitoring, and auto-saving functionality.
-/// Includes a daemon process that periodically checks job status and updates jobs accordingly.
-/// </summary>
-public partial class QueueRepository
+public sealed class QueueRepository
 {
-    /// <summary>
-    /// Path to the file where queue state is persisted.
-    /// </summary>
     private readonly string _statePath;
-    
-    /// <summary>
-    /// Lock object for thread-safe operations.
-    /// </summary>
-    private readonly object _saveLock = new();
-    
-    /// <summary>
-    /// Flag indicating whether changes need to be saved.
-    /// </summary>
-    private bool _needsSaving = false;
-    
-    /// <summary>
-    /// JSON serialization options used for reading/writing data.
-    /// </summary>
-    private readonly JsonSerializerOptions _jsonOptions;
-
-    /// <summary>
-    /// Logger instance for structured logging.
-    /// </summary>
+    private readonly object _queuesLock = new();
+    private readonly SemaphoreSlim _configurationGate = new(1, 1);
+    private readonly JsonSerializerOptions _jsonOptions = new() { WriteIndented = true };
     private readonly ILogger _logger = Log.ForContext<QueueRepository>();
-
-    /// <summary>
-    /// The single local queue for running jobs on the same machine.
-    /// </summary>
-    private readonly LocalQueue _localQueue;
-    
-    /// <summary>
-    /// List of cluster queues for submitting jobs to remote compute resources.
-    /// </summary>
+    private readonly Func<Job, Action<Job>, Task> _updateJob;
+    private readonly LocalQueue _localQueue = new();
     private readonly List<JobQueue> _clusterQueues = new();
+    private readonly ExecutionCoordinator _coordinator;
+    private readonly RelayExecutionOperations _operations;
+    private readonly ExecutionRuntime _runtime;
+    private CancellationTokenSource _daemonCancellation;
+    private Task _daemonTask;
+    private DataRepository _dataRepository;
+    private int _shutdownStarted;
 
-    // Auto-save fields
-    private int _autoSaveInterval;
-    private Timer _autoSaveTimer;
-    private bool _disposed;
-
-    // Daemon fields
-    private int _daemonInterval;
-    private Timer _daemonTimer;
-
-    /// <summary>
-    /// Set by <see cref="StopDaemon"/>. Volatile because an in-flight iteration reads it on a
-    /// thread-pool thread while shutdown writes it on another.
-    /// </summary>
-    private volatile bool _daemonStopped;
-
-    /// <summary>
-    /// Maps jobs to their log tracking tasks to avoid duplicate tracking.
-    /// </summary>
-    private readonly Dictionary<Job, Task> _trackProgressLogsTasks = new();
-    
-    /// <summary>
-    /// Maps jobs to their results tracking tasks to avoid duplicate tracking.
-    /// </summary>
-    private readonly Dictionary<Job, Task> _trackProgressResultsTasks = new();
-    
-    /// <summary>
-    /// Maps jobs to their finalization tasks to avoid duplicate finalization.
-    /// </summary>
-    private readonly ConcurrentDictionary<Job, Task> _finalizationTasks = new();
-
-    /// <summary>
-    /// Active worker pools keyed by their Manager job. One pool per running pooled job.
-    /// </summary>
-    private readonly ConcurrentDictionary<Job, WorkerPool> _workerPools = new();
-    
-    /// <summary>
-    /// Semaphore to limit concurrent progress tracking operations
-    /// </summary>
-    private readonly SemaphoreSlim _progressTrackingSemaphore = new(Environment.ProcessorCount * 2);
-    
-    /// <summary>
-    /// Semaphore to limit concurrent cluster operations
-    /// </summary>
-    private readonly SemaphoreSlim _clusterOperationsSemaphore = new(Environment.ProcessorCount);
-    
-    /// <summary>
-    /// Timeout for progress tracking operations (30 seconds)
-    /// </summary>
-    private readonly TimeSpan _progressTrackingTimeout = TimeSpan.FromSeconds(30);
-    
-    /// <summary>
-    /// Timeout for cluster operations (60 seconds)
-    /// </summary>
-    private readonly TimeSpan _clusterOperationTimeout = TimeSpan.FromSeconds(60);
-
-    /// <summary>
-    /// Tracks currently running progress operations to prevent duplicates
-    /// </summary>
-    private readonly ConcurrentDictionary<Job, DateTime> _activeProgressOperations = new();
-    
-    /// <summary>
-    /// Callback for updating job state in a thread-safe manner.
-    /// </summary>
-    private readonly Action<Job, Action<Job>> _jobUpdateCallback;
-
-    /// <summary>
-    /// Async callback for updating job state without blocking a thread pool thread.
-    /// Used by progress tracking to avoid thread pool starvation from .Wait() calls.
-    /// </summary>
-    private readonly Func<Job, Action<Job>, Task> _jobUpdateCallbackAsync;
-
-    /// <summary>
-    /// Gets the local job queue.
-    /// </summary>
-    public JobQueue LocalQueue => _localQueue;
-
-    /// <summary>
-    /// Gets a read-only collection of cluster queues.
-    /// </summary>
-    public ReadOnlyCollection<JobQueue> ClusterQueues => _clusterQueues.ToList().AsReadOnly();
-
-    /// <summary>
-    /// One executor per host, shared by every managed queue. A host has one set of GPUs, so it has
-    /// one ledger — per-queue executors would let two managed queues each reserve the whole machine
-    /// and both hand out CUDA device 0.
-    /// </summary>
-    public ManagedExecutor ManagedExecutor { get; }
-
-    /// <summary>
-    /// Initializes a new instance of the QueueRepository class.
-    /// </summary>
-    /// <param name="statePath">Path to the file where queue state will be persisted</param>
-    /// <param name="jobUpdateCallback">Callback function for updating job state in a thread-safe manner</param>
-    public QueueRepository(string statePath, Action<Job, Action<Job>> jobUpdateCallback, Func<Job, Action<Job>, Task> jobUpdateCallbackAsync)
+    public QueueRepository(
+        string statePath,
+        Func<Job, Action<Job>, Task> updateJob)
     {
         _statePath = statePath;
-        _jobUpdateCallback = jobUpdateCallback;
-        _jobUpdateCallbackAsync = jobUpdateCallbackAsync;
+        _updateJob = updateJob;
 
-        _jsonOptions = new JsonSerializerOptions
-        {
-            WriteIndented = true,
-            TypeInfoResolver = new DefaultJsonTypeInfoResolver()
-        };
+        var localPolicy = PolicyFor(_localQueue);
+        _coordinator = new ExecutionCoordinator([localPolicy]);
+        _operations = new RelayExecutionOperations(
+            address => _dataRepository?.FindJob(
+                address.ProjectId,
+                address.SpaceId,
+                address.JobId),
+            updateJob);
+        _runtime = new ExecutionRuntime(
+            _coordinator,
+            _operations,
+            new JsonExecutionStateStore($"{statePath}.executions"),
+            ProjectAttemptAsync);
 
-        _jsonOptions.MakeReadOnly();
-
-        // Initialize the local queue
-        _localQueue = new LocalQueue(_jobUpdateCallback)
-        {
-            Id = -1,
-            QueueType = JobQueueType.Local
-        };
-
-        var registryPath = Path.Combine(Path.GetDirectoryName(_statePath) ?? "", "managed-processes.json");
-
-        // Before anything is admitted: kill compute left running by a Relay that crashed rather
-        // than shut down. An orphan holding a GPU blocks every later job on a single-GPU host.
-        IReadOnlyList<ManagedProcessRecord> survivors = Array.Empty<ManagedProcessRecord>();
-
-        try
-        {
-            var sweep = ManagedProcessRegistry.KillLeftovers(
-                registryPath, ManagedProcessRegistry.LiveProcessStartTime);
-
-            if (sweep.Killed > 0)
-                _logger.Warning("Killed {Count} managed process(es) left over from a previous run", sweep.Killed);
-
-            survivors = sweep.Unconfirmed;
-
-            // Named individually, at Error, because this is the state in which nothing will start.
-            // A count alone leaves nothing to go and look at with ps.
-            foreach (var survivor in survivors)
-                _logger.Error(
-                    "Managed process {Pid} (process group {Pgid}) of job {ProjectId}/{SpaceId}/{JobId} " +
-                    "was left over from a previous run and did not die when killed. It may still be " +
-                    "using this host's cores and GPUs, so managed queues will hold every job Waiting " +
-                    "until it is gone. Relay retries the kill on each daemon tick; if it persists, " +
-                    "kill it by hand.",
-                    survivor.Pid, survivor.Pgid, survivor.ProjectId, survivor.SpaceId, survivor.JobId);
-        }
-        catch (Exception exc)
-        {
-            // A sweep that cannot run is bad, but a Relay that cannot start is worse: every job on
-            // the host is then unreachable, not just the ones sharing a GPU with an orphan.
-            _logger.Error(exc, "Could not sweep managed processes left over from a previous run");
-        }
-
-        ManagedExecutor = new ManagedExecutor(new ManagedProcessRegistry(registryPath), survivors);
-
-        InitializeClusterQueues();
+        _localQueue.SetJobsProvider(() => ActiveJobs(_localQueue.Id));
     }
 
-    private void InitializeClusterQueues()
+    public JobQueue LocalQueue => _localQueue;
+
+    public ReadOnlyCollection<JobQueue> ClusterQueues
     {
+        get
+        {
+            lock (_queuesLock)
+                return _clusterQueues.ToList().AsReadOnly();
+        }
     }
 
-    /// <summary>
-    /// Loads queue state from persistent storage, restoring queues and their jobs.
-    /// Uses the dataRepository to find jobs by ID for reconnecting them to queues.
-    /// </summary>
-    /// <param name="dataRepository">The data repository used to look up job references</param>
     public void LoadQueues(DataRepository dataRepository)
     {
+        _dataRepository = dataRepository ?? throw new ArgumentNullException(nameof(dataRepository));
+        LoadConfiguration();
+
+        foreach (var queue in ClusterQueues)
+            _coordinator.UpsertQueue(PolicyFor(queue));
+
+        _runtime.InitializeAsync().GetAwaiter().GetResult();
+        MarkUnownedJobsInterruptedAsync().GetAwaiter().GetResult();
+    }
+
+    public async Task<JobQueue> CreateClusterQueueAsync(
+        ClusterQueue template = null,
+        CancellationToken cancellationToken = default)
+    {
+        await _configurationGate.WaitAsync(cancellationToken);
         try
         {
-            if (!File.Exists(_statePath))
+            var queue = template == null ? new ClusterQueue() : Clone(template);
+            lock (_queuesLock)
             {
-                _logger.Information("No previous queue state found in {StatePath}", Path.GetFullPath(_statePath));
-                return;
+                ManagedQueueRules.ValidateOnly(_clusterQueues.OfType<ClusterQueue>(), queue);
+                queue.Id = _clusterQueues.Select(item => item.Id).DefaultIfEmpty(0).Max() + 1;
+                queue.SetJobsProvider(() => ActiveJobs(queue.Id));
+                _clusterQueues.Add(queue);
             }
 
-            var stateJson = File.ReadAllText(_statePath);
-            var stateNode = JsonNode.Parse(stateJson);
+            bool configurationSaved = false;
+            try
+            {
+                SaveConfiguration();
+                configurationSaved = true;
+                await _runtime.UpsertQueueAsync(PolicyFor(queue), CancellationToken.None);
+            }
+            catch
+            {
+                lock (_queuesLock)
+                    _clusterQueues.Remove(queue);
+                if (configurationSaved)
+                    SaveConfiguration();
+                throw;
+            }
 
-            if (stateNode == null)
-                throw new Exception($"Couldn't parse JSON from {Path.GetFullPath(_statePath)}");
-
-            // Load local queue's persisted job list (restores Waiting and unsettled jobs)
-            if (stateNode["Local"] != null)
-                _localQueue.ReadFromJson(stateNode["Local"], (pId, sId, jId) => dataRepository.FindJob(pId, sId, jId));
-
-            // Load cluster queues from the JSON file
-            if (stateNode["Cluster"]?.AsArray() != null)
-                foreach (var queueNode in stateNode["Cluster"].AsArray())
-                {
-                    var queue = new ClusterQueue(_jobUpdateCallback);
-                    // The job finder delegate allows the queue to resolve job references by ID
-                    queue.ReadFromJson(queueNode, (pId, sId, jId) => dataRepository.FindJob(pId, sId, jId));
-
-                    // Attached unconditionally, not only when the queue reads back as Managed: the
-                    // scheduler type can be switched to Managed in the editor afterwards, and a
-                    // queue with no executor rejects every job it is handed.
-                    queue.Executor = ManagedExecutor;
-
-                    _clusterQueues.Add(queue);
-                }
-
-            // The fully deserialized set, before the daemon runs a single tick. CreateClusterQueue
-            // and UpdateQueue both refuse a second managed queue, but nothing guarded loading, so a
-            // hand-edited, copied or half-migrated state file could start Relay in exactly the
-            // configuration its own UI cannot produce: two queues sharing the host-wide executor
-            // while each declares the whole machine, both handing out CUDA device 0.
-            foreach (var disabled in ManagedQueueRules.DisableDuplicateManagedQueues(
-                         _clusterQueues.OfType<ClusterQueue>()))
-                _logger.Error(
-                    "Queue {QueueId} (\"{QueueAlias}\") was loaded as a second managed queue and " +
-                    "has been disabled: {Reason}",
-                    disabled.Id, disabled.Alias, disabled.ManagedDisabledReason);
-
-            _logger.Information("Successfully loaded {LocalJobCount} local jobs and {ClusterQueueCount} cluster queues from {StatePath}",
-                _localQueue.QueuedJobs.Count, _clusterQueues.Count, Path.GetFullPath(_statePath));
-
-            // Re-adopt worker pools for any pooled jobs that were running at shutdown.
-            var pooledJobsToReadopt = _localQueue.QueuedJobs
-                .Concat(_clusterQueues.SelectMany(q => q.QueuedJobs))
-                .ToList();
-            ReAdoptPools(pooledJobsToReadopt);
-        }
-        catch (Exception ex)
-        {
-            _logger.Error(ex, "Error loading queue state from {StatePath}", _statePath);
-        }
-    }
-
-    #region Auto-save methods
-
-    /// <summary>
-    /// Starts the timer for periodically saving queue state to disk.
-    /// </summary>
-    /// <param name="milliseconds">The interval, in milliseconds, at which to save changes</param>
-    public void StartAutoSave(int milliseconds)
-    {
-        _autoSaveInterval = milliseconds;
-        _autoSaveTimer = new Timer(SaveChanges, null, _autoSaveInterval, Timeout.Infinite);
-    }
-
-    /// <summary>
-    /// Stops the auto-save timer.
-    /// </summary>
-    public void StopAutoSave()
-    {
-        _autoSaveTimer?.Dispose();
-    }
-
-    /// <summary>
-    /// Timer callback that saves queue state to disk if changes have been made.
-    /// Reschedules itself after completion if the repository is not disposed.
-    /// </summary>
-    /// <param name="state">State object passed by the Timer (not used)</param>
-    private void SaveChanges(object state)
-    {
-        try
-        {
-            if (_needsSaving)
-                SaveQueues();
-            _needsSaving = false;
-        }
-        catch (Exception ex)
-        {
-            _logger.Error(ex, "Error saving queue state to {StatePath}", _statePath);
+            return queue;
         }
         finally
         {
-            if (!_disposed)
-                _autoSaveTimer?.Change(_autoSaveInterval, Timeout.Infinite);
+            _configurationGate.Release();
         }
     }
 
-    /// <summary>
-    /// Persists all queues to the state file.
-    /// Creates the directory if it doesn't exist.
-    /// </summary>
-    private void SaveQueues()
+    public async Task UpdateQueueAsync(
+        JobQueue queue,
+        Action<JobQueue> updateAction,
+        CancellationToken cancellationToken = default)
     {
-        lock (_saveLock)
+        ArgumentNullException.ThrowIfNull(queue);
+        ArgumentNullException.ThrowIfNull(updateAction);
+
+        await _configurationGate.WaitAsync(cancellationToken);
+        try
         {
-            var directoryPath = Path.GetDirectoryName(_statePath);
+            JsonNode original = queue.ToJson();
+            if (queue is ClusterQueue cluster)
+            {
+                var proposed = Clone(cluster);
+                updateAction(proposed);
+                proposed.Id = cluster.Id;
+                ManagedQueueRules.ValidateChange(
+                    cluster,
+                    proposed,
+                    ClusterQueues.OfType<ClusterQueue>(),
+                    IsQueueInUse(cluster.Id));
+                cluster.ReadFromJson(proposed.ToJson());
+                ManagedQueueRules.DisableDuplicateManagedQueues(
+                    ClusterQueues.OfType<ClusterQueue>());
+            }
+            else
+            {
+                updateAction(queue);
+                queue.Id = _localQueue.Id;
+                queue.QueueType = JobQueueType.Local;
+            }
 
-            if (!string.IsNullOrWhiteSpace(directoryPath) && !Directory.Exists(directoryPath))
-                Directory.CreateDirectory(directoryPath);
-
-            var queuesJson = new JsonObject();
-
-            // Save local queue
-            var localJson = new JsonObject();
-            _localQueue.WriteToJson(localJson);
-            queuesJson["Local"] = localJson;
-
-            queuesJson["Cluster"] = new JsonArray(_clusterQueues.Where(q => q is ClusterQueue)
-                                                                .Select(q =>
-                                                                {
-                                                                    var queueWriter = new JsonObject();
-                                                                    q.WriteToJson(queueWriter);
-
-                                                                    return queueWriter;
-                                                                })
-                                                                .ToArray<JsonNode>());
-
-            File.WriteAllText(_statePath, queuesJson.ToJsonString(_jsonOptions));
-            
-            _logger.Information("Successfully saved queue state with {ClusterQueueCount} cluster queues to {StatePath}", 
-                _clusterQueues.Count(q => q is ClusterQueue), Path.GetFullPath(_statePath));
+            bool configurationSaved = false;
+            try
+            {
+                SaveConfiguration();
+                configurationSaved = true;
+                await _runtime.UpsertQueueAsync(PolicyFor(queue), CancellationToken.None);
+            }
+            catch
+            {
+                queue.ReadFromJson(original);
+                ManagedQueueRules.DisableDuplicateManagedQueues(
+                    ClusterQueues.OfType<ClusterQueue>());
+                if (configurationSaved)
+                {
+                    SaveConfiguration();
+                    await _runtime.UpsertQueueAsync(PolicyFor(queue), CancellationToken.None);
+                }
+                throw;
+            }
+        }
+        finally
+        {
+            _configurationGate.Release();
         }
     }
 
-    #endregion
+    public async Task DeleteClusterQueueAsync(
+        ClusterQueue queue,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(queue);
 
-    #region Shutdown
+        await _configurationGate.WaitAsync(cancellationToken);
+        try
+        {
+            ManagedQueueRules.ValidateDelete(
+                queue,
+                IsQueueInUse(queue.Id));
 
-    /// <summary>
-    /// Stops the daemon and kills every managed process tree. Ordered: admission closes first, so a
-    /// job admitted but not yet launched cannot have its staging task spawn a process after the
-    /// sweep has passed.
-    /// </summary>
-    /// <remarks>
-    /// Called from the host's ApplicationStopping hook, not from <see cref="Dispose()"/>:
-    /// DataManager implements no disposal and is registered as an externally-constructed singleton,
-    /// which the DI container never disposes.
-    /// </remarks>
+            int index;
+            lock (_queuesLock)
+            {
+                index = _clusterQueues.IndexOf(queue);
+                if (index < 0)
+                    throw new InvalidOperationException($"Queue {queue.Id} does not exist.");
+                _clusterQueues.RemoveAt(index);
+            }
+
+            bool configurationSaved = false;
+            try
+            {
+                SaveConfiguration();
+                configurationSaved = true;
+                await _runtime.RemoveQueueAsync(queue.Id, CancellationToken.None);
+            }
+            catch
+            {
+                lock (_queuesLock)
+                    _clusterQueues.Insert(index, queue);
+                if (configurationSaved)
+                {
+                    SaveConfiguration();
+                    await _runtime.UpsertQueueAsync(PolicyFor(queue), CancellationToken.None);
+                }
+                throw;
+            }
+
+            ManagedQueueRules.DisableDuplicateManagedQueues(
+                ClusterQueues.OfType<ClusterQueue>());
+        }
+        finally
+        {
+            _configurationGate.Release();
+        }
+    }
+
+    public async Task ReorderClusterQueueAsync(
+        JobQueue queue,
+        int newPosition,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(queue);
+
+        await _configurationGate.WaitAsync(cancellationToken);
+        try
+        {
+            int currentPosition;
+            lock (_queuesLock)
+            {
+                currentPosition = _clusterQueues.IndexOf(queue);
+                if (currentPosition < 0)
+                    throw new InvalidOperationException($"Queue {queue.Id} does not exist.");
+                if (newPosition < 0 || newPosition >= _clusterQueues.Count)
+                    throw new ArgumentOutOfRangeException(nameof(newPosition));
+
+                _clusterQueues.RemoveAt(currentPosition);
+                _clusterQueues.Insert(newPosition, queue);
+            }
+
+            try
+            {
+                SaveConfiguration();
+            }
+            catch
+            {
+                lock (_queuesLock)
+                {
+                    _clusterQueues.Remove(queue);
+                    _clusterQueues.Insert(currentPosition, queue);
+                }
+                throw;
+            }
+        }
+        finally
+        {
+            _configurationGate.Release();
+        }
+    }
+
+    public async Task QueueJobAsync(
+        Job job,
+        JobQueue queue,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(job);
+        ArgumentNullException.ThrowIfNull(queue);
+
+        await _configurationGate.WaitAsync(cancellationToken);
+        try
+        {
+            var registeredQueue = FindQueue(queue.Id);
+            if (!ReferenceEquals(registeredQueue, queue))
+                throw new InvalidOperationException($"Queue {queue.Id} is no longer registered.");
+            if (queue is ClusterQueue { ManagedDisabledReason: { Length: > 0 } reason })
+                throw new InvalidOperationException(reason);
+
+            WorkerGroupRequest workerGroup = null;
+            if (job is IPooledJob pooled && pooled.PoolQueueId > 0)
+            {
+                var workerQueue = FindQueue(pooled.PoolQueueId) as ClusterQueue
+                    ?? throw new InvalidOperationException(
+                        $"Worker queue {pooled.PoolQueueId} does not exist.");
+                if (workerQueue.IsManaged)
+                    throw new InvalidOperationException(
+                        "Worker pools require an external scheduler queue.");
+
+                workerGroup = new WorkerGroupRequest(
+                    workerQueue.Id,
+                    pooled.PoolSize,
+                    pooled.PoolSubmissionCap);
+            }
+
+            await _runtime.RequestRunAsync(
+                AddressOf(job),
+                queue.Id,
+                RequestFor(job, queue),
+                job.IsReadyToStage(),
+                workerGroup,
+                cancellationToken);
+        }
+        finally
+        {
+            _configurationGate.Release();
+        }
+    }
+
+    public Task CancelJobAsync(
+        Job job,
+        CancellationToken cancellationToken = default) =>
+        _runtime.RequestCancelAsync(AddressOf(job), cancellationToken);
+
+    public Task FinalizeJobAsync(
+        Job job,
+        CancellationToken cancellationToken = default) =>
+        _runtime.RequestFinalizationAsync(
+            AddressOf(job),
+            _localQueue.Id,
+            cancellationToken);
+
+    public Task ResizeWorkerGroupAsync(
+        Job job,
+        int desiredCount,
+        CancellationToken cancellationToken = default) =>
+        _runtime.ResizeWorkerGroupAsync(
+            AddressOf(job),
+            desiredCount,
+            cancellationToken);
+
+    public JobQueue FindQueue(int id)
+    {
+        if (id == _localQueue.Id)
+            return _localQueue;
+
+        lock (_queuesLock)
+            return _clusterQueues.FirstOrDefault(queue => queue.Id == id);
+    }
+
+    public void StartDaemon(int milliseconds)
+    {
+        if (_daemonTask != null)
+            throw new InvalidOperationException("The execution daemon is already running.");
+        if (milliseconds <= 0)
+            throw new ArgumentOutOfRangeException(nameof(milliseconds));
+
+        _daemonCancellation = new CancellationTokenSource();
+        _daemonTask = RunDaemonAsync(
+            TimeSpan.FromMilliseconds(milliseconds),
+            _daemonCancellation.Token);
+    }
+
     public async Task ShutdownAsync()
     {
-        ManagedExecutor.BeginShutdown();
-        StopDaemon();
-        await ManagedExecutor.KillAllAsync();
-    }
-
-    #endregion
-
-    #region IDisposable
-
-    /// <summary>
-    /// Disposes of the resources used by the QueueRepository.
-    /// </summary>
-    public void Dispose()
-    {
-        Dispose(true);
-        GC.SuppressFinalize(this);
-    }
-
-    /// <summary>
-    /// Releases unmanaged and - optionally - managed resources.
-    /// Performs a final save of any pending changes and disposes of the auto-save and daemon timers.
-    /// </summary>
-    /// <param name="disposing">True to release both managed and unmanaged resources; false to release only unmanaged resources</param>
-    protected virtual void Dispose(bool disposing)
-    {
-        if (_disposed)
+        if (Interlocked.Exchange(ref _shutdownStarted, 1) != 0)
             return;
 
-        if (disposing)
+        if (_daemonCancellation != null)
         {
-            SaveChanges(null); // Final save of any pending changes
-            _autoSaveTimer?.Dispose();
-            _daemonTimer?.Dispose();
-            _progressTrackingSemaphore?.Dispose();
-            _clusterOperationsSemaphore?.Dispose();
+            _daemonCancellation.Cancel();
+            try
+            {
+                await _daemonTask;
+            }
+            catch (OperationCanceledException)
+            {
+            }
         }
 
-        _disposed = true;
+        await _runtime.ShutdownAsync();
+        SaveConfiguration();
     }
 
-    #endregion
+    internal static JobStatus StatusFor(ExecutionAttemptSnapshot attempt) =>
+        attempt.Phase switch
+        {
+            ExecutionPhase.WaitingForDependencies or
+            ExecutionPhase.Preparing or
+            ExecutionPhase.Queued => JobStatus.Waiting,
+            ExecutionPhase.Starting or
+            ExecutionPhase.Pending => JobStatus.Staging,
+            ExecutionPhase.Running => JobStatus.Running,
+            ExecutionPhase.Cancelling => JobStatus.Aborting,
+            ExecutionPhase.Finalizing => JobStatus.Finalizing,
+            ExecutionPhase.Succeeded => JobStatus.Finished,
+            ExecutionPhase.Failed => JobStatus.Failed,
+            ExecutionPhase.Canceled => JobStatus.Aborted,
+            ExecutionPhase.Interrupted => JobStatus.Interrupted,
+            _ => throw new ArgumentOutOfRangeException(nameof(attempt.Phase))
+        };
+
+    private async Task ProjectAttemptAsync(ExecutionAttemptSnapshot attempt)
+    {
+        var job = _dataRepository?.FindJob(
+            attempt.Job.ProjectId,
+            attempt.Job.SpaceId,
+            attempt.Job.JobId);
+        if (job == null)
+            return;
+
+        JobStatus projectedStatus = StatusFor(attempt);
+        bool changed = false;
+        await _updateJob(job, mutable =>
+            changed = ApplyProjection(mutable, attempt));
+
+        string detail = attempt.History.LastOrDefault()?.Detail;
+        if (changed && !string.IsNullOrWhiteSpace(detail) &&
+            projectedStatus is JobStatus.Failed or JobStatus.Interrupted)
+            await job.WriteToErrorLog(detail);
+    }
+
+    internal static bool ApplyProjection(Job job, ExecutionAttemptSnapshot attempt)
+    {
+        job.QueueId = attempt.QueueId;
+        job.ClusterJobId = attempt.Receipt?.Id;
+
+        if (job is IPooledJob pooled && attempt.WorkerGroup != null)
+        {
+            pooled.PoolWorkersAlive = attempt.WorkerGroup.Workers.Count(
+                worker => worker.Phase != WorkerPhase.Ended);
+            pooled.PoolWorkersRunning = attempt.WorkerGroup.Workers.Count(
+                worker => worker.Phase == WorkerPhase.Running);
+            pooled.PoolWorkersSubmitted = attempt.WorkerGroup.TotalSubmissions;
+        }
+
+        JobStatus status = StatusFor(attempt);
+        if (job.Status == status)
+            return false;
+        if (attempt.Phase.IsTerminal() && job.Status is not (
+                JobStatus.Waiting or
+                JobStatus.Staging or
+                JobStatus.Running or
+                JobStatus.Finalizing or
+                JobStatus.Aborting))
+            return false;
+
+        job.Status = status;
+        job.AddEvent(status.ToEventType(), job.UpdatedBy);
+        return true;
+    }
+
+    private async Task MarkUnownedJobsInterruptedAsync()
+    {
+        var owned = _runtime.Attempts
+            .Where(attempt => !attempt.Phase.IsTerminal())
+            .Select(attempt => attempt.Job)
+            .ToHashSet();
+
+        foreach (var project in _dataRepository.Projects)
+        foreach (var space in project.Spaces)
+        foreach (var job in space.Jobs)
+        {
+            if (job.Status == JobStatus.Clearing ||
+                job.Status != JobStatus.Waiting && !job.Status.IsUnsettled() ||
+                owned.Contains(AddressOf(job)))
+                continue;
+
+            await _updateJob(job, mutable =>
+            {
+                mutable.Status = JobStatus.Interrupted;
+                mutable.AddEvent(EventType.Interrupted);
+            });
+        }
+    }
+
+    private IReadOnlyList<Job> ActiveJobs(int queueId)
+    {
+        if (_dataRepository == null)
+            return Array.Empty<Job>();
+
+        return _runtime.ActiveAttempts(queueId)
+            .Concat(_runtime.Attempts.Where(attempt =>
+                !attempt.Phase.IsTerminal() && attempt.WorkerGroup?.QueueId == queueId))
+            .DistinctBy(attempt => attempt.Id)
+            .Select(attempt => _dataRepository.FindJob(
+                attempt.Job.ProjectId,
+                attempt.Job.SpaceId,
+                attempt.Job.JobId))
+            .Where(job => job != null)
+            .ToArray();
+    }
+
+    private bool IsQueueInUse(int queueId) => _runtime.Attempts.Any(attempt =>
+        !attempt.Phase.IsTerminal() &&
+        (attempt.QueueId == queueId || attempt.WorkerGroup?.QueueId == queueId));
+
+    private async Task RunDaemonAsync(
+        TimeSpan interval,
+        CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(interval);
+        while (await timer.WaitForNextTickAsync(cancellationToken))
+        {
+            try
+            {
+                await _runtime.TickAsync(cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception exception)
+            {
+                _logger.Error(exception, "Execution daemon tick failed");
+            }
+        }
+    }
+
+    private void LoadConfiguration()
+    {
+        if (!File.Exists(_statePath))
+            return;
+
+        var root = JsonNode.Parse(File.ReadAllText(_statePath)) as JsonObject
+            ?? throw new InvalidDataException($"Queue configuration {_statePath} is invalid.");
+
+        if (root["Local"] is JsonNode local)
+            _localQueue.ReadFromJson(local);
+        _localQueue.Id = -1;
+        _localQueue.QueueType = JobQueueType.Local;
+
+        if (root["Cluster"] is JsonArray clusterNodes)
+        {
+            lock (_queuesLock)
+            {
+                _clusterQueues.Clear();
+                foreach (var node in clusterNodes)
+                {
+                    if (node == null)
+                        continue;
+                    var queue = new ClusterQueue();
+                    queue.ReadFromJson(node);
+                    if (queue.Id == _localQueue.Id ||
+                        _clusterQueues.Any(existing => existing.Id == queue.Id))
+                        throw new InvalidDataException(
+                            $"Queue configuration contains duplicate ID {queue.Id}.");
+                    queue.SetJobsProvider(() => ActiveJobs(queue.Id));
+                    _clusterQueues.Add(queue);
+                }
+            }
+        }
+
+        foreach (var disabled in ManagedQueueRules.DisableDuplicateManagedQueues(
+                     ClusterQueues.OfType<ClusterQueue>()))
+            _logger.Error(
+                "Queue {QueueId} is disabled: {Reason}",
+                disabled.Id,
+                disabled.ManagedDisabledReason);
+    }
+
+    private void SaveConfiguration()
+    {
+        JsonNode[] queues;
+        lock (_queuesLock)
+            queues = _clusterQueues.Select(queue => queue.ToJson()).ToArray();
+
+        var document = new JsonObject
+        {
+            ["Local"] = _localQueue.ToJson(),
+            ["Cluster"] = new JsonArray(queues)
+        };
+        string json = document.ToJsonString(_jsonOptions);
+        string directory = Path.GetDirectoryName(_statePath);
+        if (!string.IsNullOrEmpty(directory))
+            Directory.CreateDirectory(directory);
+
+        string temporaryPath =
+            $"{_statePath}.tmp.{Environment.ProcessId}.{Guid.NewGuid():N}";
+        try
+        {
+            using (var stream = new FileStream(
+                       temporaryPath,
+                       FileMode.CreateNew,
+                       FileAccess.Write,
+                       FileShare.None,
+                       4096,
+                       FileOptions.WriteThrough))
+            {
+                byte[] bytes = Encoding.UTF8.GetBytes(json);
+                stream.Write(bytes);
+                stream.Flush(flushToDisk: true);
+            }
+
+            File.Move(temporaryPath, _statePath, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+                File.Delete(temporaryPath);
+        }
+    }
+
+    private static ExecutionQueuePolicy PolicyFor(JobQueue queue)
+    {
+        if (queue is LocalQueue)
+            return new ExecutionQueuePolicy(
+                queue.Id,
+                ExecutionBackendKind.Local,
+                new ResourceVector(Environment.ProcessorCount, int.MaxValue, 0));
+
+        var cluster = (ClusterQueue)queue;
+        return new ExecutionQueuePolicy(
+            cluster.Id,
+            cluster.IsManaged
+                ? ExecutionBackendKind.Managed
+                : ExecutionBackendKind.ExternalScheduler,
+            cluster.IsManaged
+                ? new ResourceVector(
+                    Math.Max(0, cluster.ManagedCores),
+                    Math.Max(0, cluster.ManagedMemoryGb),
+                    Math.Max(0, cluster.ManagedGpus))
+                : null,
+            cluster.ToJson().ToJsonString());
+    }
+
+    private static ResourceVector RequestFor(Job job, JobQueue queue)
+    {
+        if (queue is LocalQueue)
+            return new ResourceVector(1, 0, 0);
+
+        long cores = Math.Min(
+            (long)Math.Max(0, job.ProcessCount) * Math.Max(0, job.CoreCount),
+            int.MaxValue);
+        return new ResourceVector(
+            (int)cores,
+            Math.Max(0, job.MemoryGb),
+            Math.Max(0, job.GpuCount));
+    }
+
+    private static JobAddress AddressOf(Job job) =>
+        new(job.Space.Project.Id, job.Space.Id, job.Id);
+
+    private static ClusterQueue Clone(ClusterQueue queue)
+    {
+        var clone = new ClusterQueue();
+        clone.ReadFromJson(queue.ToJson());
+        return clone;
+    }
 }

@@ -422,7 +422,7 @@ public class ExecutionCoordinatorTests
     }
 
     [Fact]
-    public void RecoveryDoesNotResubmitAnAmbiguousExternalStart()
+    public void RecoveryInterruptsAnAmbiguousExternalStartWithoutResubmittingIt()
     {
         var external = new ExecutionQueuePolicy(4, ExecutionBackendKind.ExternalScheduler);
         var original = new ExecutionCoordinator([external]);
@@ -436,9 +436,29 @@ public class ExecutionCoordinatorTests
         var copy = Assert.Single(restored.Attempts);
 
         Assert.Empty(effects);
-        Assert.Equal(ExecutionPhase.Starting, copy.Phase);
+        Assert.Equal(ExecutionPhase.Interrupted, copy.Phase);
         Assert.Equal(ExecutionHealth.Indeterminate, copy.Health);
-        Assert.DoesNotContain(copy.History, entry => entry.Detail == copy.HealthDetail);
+        Assert.Contains(copy.History, entry => entry.Detail == copy.HealthDetail);
+    }
+
+    [Fact]
+    public void UnknownSubmissionOutcomeInterruptsTheAttemptAndAdvancesFifo()
+    {
+        var external = new ExecutionQueuePolicy(4, ExecutionBackendKind.ExternalScheduler);
+        var coordinator = new ExecutionCoordinator([external]);
+        var first = coordinator.RequestRun(
+            Job(1), 4, ResourceVector.None, dependenciesReady: true).Attempt;
+        var second = coordinator.RequestRun(
+            Job(2), 4, ResourceVector.None, dependenciesReady: true).Attempt;
+        coordinator.PreparationCompleted(first.Id);
+        coordinator.PreparationCompleted(second.Id);
+
+        var effects = coordinator.StartIndeterminate(first.Id, "submission timed out");
+
+        Assert.Equal(ExecutionPhase.Interrupted, first.Phase);
+        Assert.Equal(ExecutionHealth.Indeterminate, first.Health);
+        Assert.Single(effects, effect =>
+            effect is StartExecution { AttemptId: var id } && id == second.Id);
     }
 
     [Fact]

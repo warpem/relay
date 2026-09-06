@@ -195,9 +195,7 @@ builder.Services.AddMcpServer()
 // Build the application
 var app = builder.Build();
 
-// QueueRepository.Dispose is unreachable: DataManager implements no disposal and is registered as
-// an externally-constructed singleton, which the DI container does not dispose. Without this hook
-// nothing would kill managed processes on a graceful shutdown.
+// Stop the execution loop and supervised processes during graceful shutdown.
 app.Lifetime.ApplicationStopping.Register(() =>
 {
     try
@@ -206,8 +204,6 @@ app.Lifetime.ApplicationStopping.Register(() =>
     }
     catch (Exception ex)
     {
-        // Shutdown must not be able to throw out of the lifetime callback; the remaining
-        // ApplicationStopping registrations still have to run.
         Log.Error(ex, "Error shutting down managed job execution");
     }
 });

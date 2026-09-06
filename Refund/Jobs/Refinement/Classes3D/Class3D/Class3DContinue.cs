@@ -187,18 +187,14 @@ public class Class3DContinue : Class3D
     }
 
     /// <summary>
-    /// True if a predecessor-relative path belongs to worker-pool state that must NOT be copied into a
-    /// continued job: the RELION coordination directory (--pool_dir, <see cref="PoolDirName"/>) and
-    /// Relay's WorkerPool state/logs/script (pool_state.json, worker_logs, worker_submit.sh — see
-    /// <c>WorkerPool</c>). Copying them would corrupt this job's fresh pool with the previous run's
-    /// worker registrations, task queue, and submitted-id bookkeeping.
+    /// True if a predecessor-relative path belongs to worker-pool coordination data that must not
+    /// be copied into a continued job.
     /// </summary>
     public bool IsPoolArtifact(string relativePath)
     {
         var top = relativePath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)[0];
         return top == PoolDirName
             || top == "worker_logs"
-            || top == "pool_state.json"
             || top == "worker_submit.sh";
     }
 
@@ -206,8 +202,7 @@ public class Class3DContinue : Class3D
     {
         base.Stage();
 
-        // Copy all data and visualizations, including hidden folders, from the continued job's directory
-        // to the new job's directory — except the previous run's worker-pool artifacts (see IsPoolArtifact).
+        // Copy result data and visualizations while creating fresh worker-pool coordination data.
         var predecessor = PortsIn[PortInOptimizer].Edges.First().Source.Job as Class3D;
         foreach (var filePath in Directory.EnumerateFiles(predecessor.DirectoryPath, "*", SearchOption.AllDirectories))
         {

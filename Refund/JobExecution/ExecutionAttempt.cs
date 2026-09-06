@@ -70,6 +70,7 @@ public enum WorkerPhase
     Starting,
     Pending,
     Running,
+    Indeterminate,
     Cancelling,
     Ended
 }
