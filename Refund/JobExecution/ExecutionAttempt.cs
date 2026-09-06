@@ -163,6 +163,8 @@ public sealed record PrepareExecution(Guid AttemptId) : ExecutionEffect(AttemptI
 public sealed record StartExecution(Guid AttemptId, IReadOnlyList<int> GpuIndices)
     : ExecutionEffect(AttemptId);
 
+public sealed record ActivateExecution(Guid AttemptId) : ExecutionEffect(AttemptId);
+
 public sealed record CancelExecution(Guid AttemptId, BackendReceipt Receipt = null)
     : ExecutionEffect(AttemptId);
 

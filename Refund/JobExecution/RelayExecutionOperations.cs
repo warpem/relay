@@ -47,7 +47,7 @@ public sealed class RelayExecutionOperations : IExecutionOperations
         }
     }
 
-    public Task<BackendStartResult> StartAsync(
+    public async Task<BackendStartResult> StartAsync(
         ExecutionAttemptSnapshot attempt,
         IReadOnlyList<int> gpuIndices,
         CancellationToken cancellationToken)
@@ -55,18 +55,27 @@ public sealed class RelayExecutionOperations : IExecutionOperations
         var job = FindJob(attempt);
         return attempt.BackendKind switch
         {
-            ExecutionBackendKind.Local => Task.FromResult(StartLocal(attempt, job)),
-            ExecutionBackendKind.Managed => Task.FromResult(_managed.Start(
+            ExecutionBackendKind.Local => StartLocal(attempt, job),
+            ExecutionBackendKind.Managed => await _managed.StartAsync(
                 attempt,
                 SubmissionScriptPath(job),
                 job.RunDirectory,
                 job.PathStdOut,
                 job.PathStdErr,
-                gpuIndices)),
-            ExecutionBackendKind.ExternalScheduler => StartExternalAsync(attempt, job),
+                gpuIndices,
+                cancellationToken),
+            ExecutionBackendKind.ExternalScheduler => await StartExternalAsync(attempt, job),
             _ => throw new ArgumentOutOfRangeException(nameof(attempt.BackendKind))
         };
     }
+
+    public Task ActivateAsync(
+        ExecutionAttemptSnapshot attempt,
+        CancellationToken cancellationToken) =>
+        attempt.BackendKind == ExecutionBackendKind.Managed
+            ? _managed.ActivateAsync(attempt, cancellationToken)
+            : throw new InvalidOperationException(
+                $"The {attempt.BackendKind} backend does not require activation.");
 
     public async Task<BackendObservation> ObserveAsync(
         ExecutionAttemptSnapshot attempt,

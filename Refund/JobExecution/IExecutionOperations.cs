@@ -1,6 +1,9 @@
 namespace Refund.JobExecution;
 
-public sealed record BackendStartResult(BackendReceipt Receipt, bool IsRunning);
+public sealed record BackendStartResult(
+    BackendReceipt Receipt,
+    bool IsRunning,
+    bool RequiresActivation = false);
 
 public interface IExecutionOperations
 {
@@ -11,6 +14,10 @@ public interface IExecutionOperations
     Task<BackendStartResult> StartAsync(
         ExecutionAttemptSnapshot attempt,
         IReadOnlyList<int> gpuIndices,
+        CancellationToken cancellationToken);
+
+    Task ActivateAsync(
+        ExecutionAttemptSnapshot attempt,
         CancellationToken cancellationToken);
 
     Task<BackendObservation> ObserveAsync(

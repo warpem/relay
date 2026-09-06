@@ -391,6 +391,9 @@ public sealed class ExecutionRuntime : IAsyncDisposable
             case StartExecution start:
                 await StartAsync(start, cancellationToken);
                 break;
+            case ActivateExecution activate:
+                await ActivateAsync(activate, cancellationToken);
+                break;
             case CancelExecution cancel:
                 await CancelAsync(cancel, cancellationToken);
                 break;
@@ -446,13 +449,39 @@ public sealed class ExecutionRuntime : IAsyncDisposable
                 attempt, effect.GpuIndices, cancellationToken);
             await ApplyEffectsAsync(
                 () => _coordinator.StartCompleted(
-                    effect.AttemptId, started.Receipt, started.IsRunning),
+                    effect.AttemptId,
+                    started.Receipt,
+                    started.IsRunning,
+                    started.RequiresActivation),
                 CancellationToken.None);
         }
         catch (Exception exception)
         {
             await ApplyEffectsAsync(
                 () => _coordinator.StartFailed(effect.AttemptId, exception.Message),
+                CancellationToken.None);
+        }
+    }
+
+    private async Task ActivateAsync(
+        ActivateExecution effect,
+        CancellationToken cancellationToken)
+    {
+        var attempt = FindAttempt(effect.AttemptId);
+        if (attempt == null)
+            return;
+
+        try
+        {
+            await _operations.ActivateAsync(attempt, cancellationToken);
+            await ApplyEffectsAsync(
+                () => _coordinator.ActivationCompleted(effect.AttemptId),
+                CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            await ApplyEffectsAsync(
+                () => _coordinator.ActivationFailed(effect.AttemptId, exception.Message),
                 CancellationToken.None);
         }
     }

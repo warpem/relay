@@ -147,6 +147,54 @@ public class ExecutionCoordinatorTests
     }
 
     [Fact]
+    public void ManagedStartIsActivatedOnlyAfterItsReceiptIsRecorded()
+    {
+        var managed = new ExecutionQueuePolicy(
+            3,
+            ExecutionBackendKind.Managed,
+            new ResourceVector(4, 16, 1));
+        var coordinator = new ExecutionCoordinator([managed]);
+        var attempt = coordinator.RequestRun(
+            Job(1), 3, new ResourceVector(1, 1, 0), dependenciesReady: true).Attempt;
+        coordinator.PreparationCompleted(attempt.Id);
+
+        var effects = coordinator.StartCompleted(
+            attempt.Id,
+            new BackendReceipt("runner"),
+            isRunning: false,
+            requiresActivation: true);
+
+        Assert.Equal(ExecutionPhase.Starting, attempt.Phase);
+        Assert.Equal("runner", attempt.Receipt.Id);
+        Assert.Single(effects, effect => effect is ActivateExecution);
+
+        coordinator.ActivationCompleted(attempt.Id);
+
+        Assert.Equal(ExecutionPhase.Running, attempt.Phase);
+    }
+
+    [Fact]
+    public void ExternalSubmissionsAreIssuedOneAtATimeInFifoOrder()
+    {
+        var external = new ExecutionQueuePolicy(4, ExecutionBackendKind.ExternalScheduler);
+        var coordinator = new ExecutionCoordinator([external]);
+        var first = coordinator.RequestRun(
+            Job(1), 4, ResourceVector.None, dependenciesReady: true).Attempt;
+        var second = coordinator.RequestRun(
+            Job(2), 4, ResourceVector.None, dependenciesReady: true).Attempt;
+
+        var firstEffects = coordinator.PreparationCompleted(first.Id);
+        Assert.Single(firstEffects, effect => effect is StartExecution { AttemptId: var id } && id == first.Id);
+        Assert.Empty(coordinator.PreparationCompleted(second.Id));
+
+        var secondEffects = coordinator.StartCompleted(
+            first.Id, new BackendReceipt("first"), isRunning: false);
+
+        Assert.Single(secondEffects, effect => effect is StartExecution { AttemptId: var id } && id == second.Id);
+        Assert.Equal(ExecutionPhase.Starting, second.Phase);
+    }
+
+    [Fact]
     public void RerunGetsANewIdentityAndIgnoresLateResultsFromTheOldAttempt()
     {
         var coordinator = new ExecutionCoordinator([LocalQueue]);

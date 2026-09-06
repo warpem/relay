@@ -199,6 +199,10 @@ public class ExecutionRuntimeTests
             CancellationToken cancellationToken) =>
             Task.FromResult(new BackendObservation(BackendObservationKind.Running));
 
+        public Task ActivateAsync(
+            ExecutionAttemptSnapshot attempt,
+            CancellationToken cancellationToken) => Task.CompletedTask;
+
         public Task<BackendObservation> CancelAsync(
             ExecutionAttemptSnapshot attempt,
             BackendReceipt receipt,

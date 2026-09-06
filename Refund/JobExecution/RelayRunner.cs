@@ -1,19 +1,34 @@
-using System.Diagnostics;
-using Refund.JobQueues;
+using System.IO.Pipes;
 
 namespace Refund.JobExecution;
 
 public static class RelayRunner
 {
     public const string Command = "--relay-runner";
+    internal const string ReadySignal = "READY";
+    internal const string GoSignal = "GO";
+    internal const string StopSignal = "STOP";
 
     public static async Task<int> RunAsync(
         IReadOnlyList<string> arguments,
         CancellationToken cancellationToken = default)
     {
         var options = Parse(arguments);
-        int parentPid = int.Parse(Required(options, "parent-pid"));
-        long parentStartTicks = long.Parse(Required(options, "parent-start-ticks"));
+        await using var control = new AnonymousPipeClientStream(
+            PipeDirection.In,
+            Required(options, "control-handle"));
+        await using var ready = new AnonymousPipeClientStream(
+            PipeDirection.Out,
+            Required(options, "ready-handle"));
+        return await RunAsync(options, control, ready, cancellationToken);
+    }
+
+    internal static async Task<int> RunAsync(
+        IReadOnlyDictionary<string, string> options,
+        Stream control,
+        Stream ready,
+        CancellationToken cancellationToken = default)
+    {
         string script = Required(options, "script");
         string workingDirectory = Required(options, "working-directory");
         string standardOutput = Required(options, "stdout");
@@ -23,63 +38,39 @@ public static class RelayRunner
             .Select(int.Parse)
             .ToArray();
 
-        var payload = SystemManagedProcess.Start(
-            script, workingDirectory, gpus, standardOutput, standardError);
+        using var controlReader = new StreamReader(control);
+        await using (var readyWriter = new StreamWriter(ready) { AutoFlush = true })
+        {
+            await readyWriter.WriteLineAsync(ReadySignal.AsMemory(), cancellationToken);
+            await readyWriter.FlushAsync(cancellationToken);
+        }
 
-        void StopPayload()
+        string command = await controlReader.ReadLineAsync(cancellationToken);
+        if (command != GoSignal)
+            return 125;
+
+        using var payload = SupervisedProcess.Start(
+            script,
+            workingDirectory,
+            gpus,
+            standardOutput,
+            standardError);
+        Task payloadExit = payload.WaitForExitAsync(CancellationToken.None);
+        Task<string> controlCommand = controlReader.ReadLineAsync(cancellationToken).AsTask();
+        Task completed = await Task.WhenAny(payloadExit, controlCommand);
+
+        if (completed == controlCommand)
         {
             payload.KillTree();
+            await payloadExit;
+            return 137;
         }
 
-        EventHandler processExit = (_, _) => StopPayload();
-        ConsoleCancelEventHandler cancel = (_, eventArgs) =>
-        {
-            eventArgs.Cancel = true;
-            StopPayload();
-        };
-        AppDomain.CurrentDomain.ProcessExit += processExit;
-        Console.CancelKeyPress += cancel;
-
-        try
-        {
-            while (!payload.HasExited)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (!ParentMatches(parentPid, parentStartTicks))
-                {
-                    StopPayload();
-                    await payload.WaitForExitAsync(CancellationToken.None);
-                    return 137;
-                }
-
-                await Task.Delay(500, cancellationToken);
-            }
-
-            await payload.WaitForExitAsync(CancellationToken.None);
-            return payload.ExitCode;
-        }
-        finally
-        {
-            AppDomain.CurrentDomain.ProcessExit -= processExit;
-            Console.CancelKeyPress -= cancel;
-            StopPayload();
-        }
+        await payloadExit;
+        return payload.ExitCode;
     }
 
-    private static bool ParentMatches(int pid, long startTicks)
-    {
-        try
-        {
-            using var parent = Process.GetProcessById(pid);
-            return !parent.HasExited && parent.StartTime.ToUniversalTime().Ticks == startTicks;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private static Dictionary<string, string> Parse(IReadOnlyList<string> arguments)
+    internal static Dictionary<string, string> Parse(IReadOnlyList<string> arguments)
     {
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
         for (int index = 0; index < arguments.Count; index += 2)

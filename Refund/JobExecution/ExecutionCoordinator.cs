@@ -201,7 +201,8 @@ public sealed class ExecutionCoordinator
     public IReadOnlyList<ExecutionEffect> StartCompleted(
         Guid attemptId,
         BackendReceipt receipt,
-        bool isRunning)
+        bool isRunning,
+        bool requiresActivation = false)
     {
         if (!TryGetCurrent(attemptId, out var attempt) ||
             attempt.Phase is not (ExecutionPhase.Starting or ExecutionPhase.Cancelling))
@@ -214,12 +215,48 @@ public sealed class ExecutionCoordinator
         if (attempt.Phase == ExecutionPhase.Cancelling)
             return new ExecutionEffect[] { new CancelExecution(attempt.Id, receipt) };
 
+        if (requiresActivation)
+        {
+            if (isRunning)
+                throw new InvalidOperationException("An already-running backend cannot require activation.");
+            return new ExecutionEffect[] { new ActivateExecution(attempt.Id) };
+        }
+
         attempt.TransitionTo(isRunning ? ExecutionPhase.Running : ExecutionPhase.Pending, Now());
 
         if (isRunning)
             return ReconcileWorkers(attempt);
 
-        return Array.Empty<ExecutionEffect>();
+        return ReconcileQueue(attempt.QueueId);
+    }
+
+    public IReadOnlyList<ExecutionEffect> ActivationCompleted(Guid attemptId)
+    {
+        if (!TryGetCurrent(attemptId, out var attempt) || attempt.Receipt == null)
+            return Array.Empty<ExecutionEffect>();
+
+        if (attempt.Phase == ExecutionPhase.Cancelling)
+            return new ExecutionEffect[] { new CancelExecution(attempt.Id, attempt.Receipt) };
+        if (attempt.Phase != ExecutionPhase.Starting)
+            return Array.Empty<ExecutionEffect>();
+
+        attempt.TransitionTo(ExecutionPhase.Running, Now());
+        return ReconcileWorkers(attempt);
+    }
+
+    public IReadOnlyList<ExecutionEffect> ActivationFailed(Guid attemptId, string detail)
+    {
+        if (!TryGetCurrent(attemptId, out var attempt) ||
+            attempt.Phase is not (ExecutionPhase.Starting or ExecutionPhase.Cancelling))
+            return Array.Empty<ExecutionEffect>();
+
+        Release(attempt);
+        var terminal = attempt.Phase == ExecutionPhase.Cancelling
+            ? ExecutionPhase.Canceled
+            : ExecutionPhase.Failed;
+        attempt.TransitionTo(terminal, Now(), detail);
+        _currentAttempts.Remove(attempt.Job);
+        return ReconcileQueue(attempt.QueueId);
     }
 
     public IReadOnlyList<ExecutionEffect> StartFailed(Guid attemptId, string detail)
@@ -647,6 +684,11 @@ public sealed class ExecutionCoordinator
             .OrderBy(attempt => attempt.EnqueueSequence)
             .ToList();
 
+        bool serializeStarts = queue.BackendKind == ExecutionBackendKind.ExternalScheduler;
+        if (serializeStarts && _attempts.Values.Any(attempt =>
+                attempt.QueueId == queueId && attempt.Phase == ExecutionPhase.Starting))
+            return effects;
+
         foreach (var attempt in ordered)
         {
             if (attempt.Phase == ExecutionPhase.Preparing)
@@ -663,6 +705,8 @@ public sealed class ExecutionCoordinator
 
             attempt.TransitionTo(ExecutionPhase.Starting, Now());
             effects.Add(new StartExecution(attempt.Id, attempt.GpuIndices));
+            if (serializeStarts)
+                return effects;
         }
 
         return effects;

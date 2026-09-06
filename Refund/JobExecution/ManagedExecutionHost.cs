@@ -1,46 +1,113 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.IO.Pipes;
 using System.Reflection;
 
 namespace Refund.JobExecution;
 
 public sealed class ManagedExecutionHost
 {
-    private readonly ConcurrentDictionary<Guid, Process> _processes = new();
+    private static readonly TimeSpan ReadyTimeout = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(15);
 
-    public BackendStartResult Start(
+    private readonly ConcurrentDictionary<Guid, ManagedExecution> _executions = new();
+
+    public async Task<BackendStartResult> StartAsync(
         ExecutionAttemptSnapshot attempt,
         string scriptPath,
         string workingDirectory,
         string standardOutput,
         string standardError,
-        IReadOnlyList<int> gpuIndices)
+        IReadOnlyList<int> gpuIndices,
+        CancellationToken cancellationToken)
     {
-        var process = StartRunner(
-            scriptPath, workingDirectory, standardOutput, standardError, gpuIndices);
-        if (!_processes.TryAdd(attempt.Id, process))
-        {
-            TryKill(process);
-            process.Dispose();
-            throw new InvalidOperationException($"Attempt {attempt.Id} already has a managed process.");
-        }
+        var control = new AnonymousPipeServerStream(
+            PipeDirection.Out,
+            HandleInheritability.Inheritable);
+        var ready = new AnonymousPipeServerStream(
+            PipeDirection.In,
+            HandleInheritability.Inheritable);
+        Process process = null;
 
-        return new BackendStartResult(new BackendReceipt(process.Id.ToString()), true);
+        try
+        {
+            process = StartRunner(
+                scriptPath,
+                workingDirectory,
+                standardOutput,
+                standardError,
+                gpuIndices,
+                control.GetClientHandleAsString(),
+                ready.GetClientHandleAsString());
+            control.DisposeLocalCopyOfClientHandle();
+            ready.DisposeLocalCopyOfClientHandle();
+
+            using (ready)
+            using (var reader = new StreamReader(ready))
+            {
+                string signal = await reader.ReadLineAsync(cancellationToken)
+                    .AsTask()
+                    .WaitAsync(ReadyTimeout, cancellationToken);
+                if (signal != RelayRunner.ReadySignal)
+                    throw new InvalidOperationException(
+                        $"relay-runner exited before becoming ready (signal: {signal ?? "EOF"}).");
+            }
+
+            var execution = new ManagedExecution(process, control, StopTimeout);
+            if (!_executions.TryAdd(attempt.Id, execution))
+                throw new InvalidOperationException(
+                    $"Attempt {attempt.Id} already has a managed execution.");
+
+            process = null;
+            control = null;
+            return new BackendStartResult(
+                new BackendReceipt(execution.ProcessId.ToString()),
+                IsRunning: false,
+                RequiresActivation: true);
+        }
+        catch
+        {
+            control?.Dispose();
+            if (process != null)
+                await StopProcessAsync(process, cancellationToken);
+            throw;
+        }
+    }
+
+    public async Task ActivateAsync(
+        ExecutionAttemptSnapshot attempt,
+        CancellationToken cancellationToken)
+    {
+        if (!_executions.TryGetValue(attempt.Id, out var execution))
+            throw new InvalidOperationException(
+                "The managed execution is not owned by this Relay process.");
+
+        try
+        {
+            await execution.ActivateAsync(cancellationToken);
+        }
+        catch
+        {
+            _executions.TryRemove(attempt.Id, out _);
+            await execution.StopAsync(CancellationToken.None);
+            execution.Dispose();
+            throw;
+        }
     }
 
     public BackendObservation Observe(ExecutionAttemptSnapshot attempt)
     {
-        if (!_processes.TryGetValue(attempt.Id, out var process))
+        if (!_executions.TryGetValue(attempt.Id, out var execution))
             return new BackendObservation(
                 BackendObservationKind.Indeterminate,
-                "The managed process is not owned by this Relay process.");
+                "The managed execution is not owned by this Relay process.");
 
-        if (!process.HasExited)
+        if (!execution.HasExited)
             return new BackendObservation(BackendObservationKind.Running);
 
-        _processes.TryRemove(attempt.Id, out _);
-        int exitCode = process.ExitCode;
-        process.Dispose();
+        _executions.TryRemove(attempt.Id, out _);
+        int exitCode = execution.ExitCode;
+        execution.Dispose();
         return new BackendObservation(
             exitCode == 0 ? BackendObservationKind.Succeeded : BackendObservationKind.Failed,
             $"relay-runner exited with code {exitCode}.");
@@ -50,46 +117,42 @@ public sealed class ManagedExecutionHost
         ExecutionAttemptSnapshot attempt,
         CancellationToken cancellationToken)
     {
-        if (!_processes.TryGetValue(attempt.Id, out var process))
+        if (!_executions.TryRemove(attempt.Id, out var execution))
             return new BackendObservation(
                 BackendObservationKind.Indeterminate,
-                "The managed process is not owned by this Relay process.");
+                "The managed execution is not owned by this Relay process.");
 
-        TryKill(process);
         try
         {
-            await process.WaitForExitAsync(cancellationToken);
+            await execution.StopAsync(cancellationToken);
+            return new BackendObservation(BackendObservationKind.Canceled);
         }
         finally
         {
-            _processes.TryRemove(attempt.Id, out _);
-            process.Dispose();
+            execution.Dispose();
         }
-
-        return new BackendObservation(BackendObservationKind.Canceled);
     }
 
     public async Task ShutdownAsync(CancellationToken cancellationToken)
     {
-        var processes = _processes.ToArray();
-        foreach (var (_, process) in processes)
-            TryKill(process);
-
-        foreach (var (attemptId, process) in processes)
+        var executions = _executions.ToArray();
+        await Task.WhenAll(executions.Select(async pair =>
         {
+            if (!_executions.TryRemove(pair.Key, out var execution))
+                return;
+
             try
             {
-                await process.WaitForExitAsync(cancellationToken);
+                await execution.StopAsync(cancellationToken);
             }
             catch
             {
             }
             finally
             {
-                _processes.TryRemove(attemptId, out _);
-                process.Dispose();
+                execution.Dispose();
             }
-        }
+        }));
     }
 
     private static Process StartRunner(
@@ -97,13 +160,14 @@ public sealed class ManagedExecutionHost
         string workingDirectory,
         string standardOutput,
         string standardError,
-        IReadOnlyList<int> gpuIndices)
+        IReadOnlyList<int> gpuIndices,
+        string controlHandle,
+        string readyHandle)
     {
         string entryAssembly = Assembly.GetEntryAssembly()?.Location
                                ?? throw new InvalidOperationException("Relay executable path is unavailable.");
         string processPath = Environment.ProcessPath
                              ?? throw new InvalidOperationException("Relay process path is unavailable.");
-        using var current = Process.GetCurrentProcess();
 
         var info = new ProcessStartInfo
         {
@@ -117,8 +181,8 @@ public sealed class ManagedExecutionHost
             info.ArgumentList.Add(entryAssembly);
 
         info.ArgumentList.Add(RelayRunner.Command);
-        Add(info, "parent-pid", current.Id.ToString());
-        Add(info, "parent-start-ticks", current.StartTime.ToUniversalTime().Ticks.ToString());
+        Add(info, "control-handle", controlHandle);
+        Add(info, "ready-handle", readyHandle);
         Add(info, "script", scriptPath);
         Add(info, "working-directory", workingDirectory);
         Add(info, "stdout", standardOutput);
@@ -136,15 +200,123 @@ public sealed class ManagedExecutionHost
         info.ArgumentList.Add(value);
     }
 
-    private static void TryKill(Process process)
+    private static async Task StopProcessAsync(
+        Process process,
+        CancellationToken cancellationToken)
     {
         try
         {
             if (!process.HasExited)
                 process.Kill(entireProcessTree: true);
+            await process.WaitForExitAsync(cancellationToken);
         }
         catch
         {
+        }
+        finally
+        {
+            process.Dispose();
+        }
+    }
+
+    private sealed class ManagedExecution : IDisposable
+    {
+        private readonly Process _process;
+        private readonly StreamWriter _control;
+        private readonly SemaphoreSlim _gate = new(1, 1);
+        private readonly TimeSpan _stopTimeout;
+        private bool _activated;
+        private bool _stopping;
+
+        public ManagedExecution(
+            Process process,
+            Stream control,
+            TimeSpan stopTimeout)
+        {
+            _process = process;
+            _control = new StreamWriter(control) { AutoFlush = true };
+            _stopTimeout = stopTimeout;
+        }
+
+        public int ProcessId => _process.Id;
+        public bool HasExited => _process.HasExited;
+        public int ExitCode => _process.ExitCode;
+
+        public async Task ActivateAsync(CancellationToken cancellationToken)
+        {
+            await _gate.WaitAsync(cancellationToken);
+            try
+            {
+                if (_stopping)
+                    throw new InvalidOperationException("The managed execution is stopping.");
+                if (_activated)
+                    return;
+
+                await _control.WriteLineAsync(RelayRunner.GoSignal.AsMemory(), cancellationToken);
+                await _control.FlushAsync(cancellationToken);
+                _activated = true;
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }
+
+        public async Task StopAsync(CancellationToken cancellationToken)
+        {
+            await _gate.WaitAsync(cancellationToken);
+            try
+            {
+                if (!_stopping)
+                {
+                    _stopping = true;
+                    try
+                    {
+                        await _control.WriteLineAsync(
+                            RelayRunner.StopSignal.AsMemory(),
+                            cancellationToken);
+                        await _control.FlushAsync(cancellationToken);
+                    }
+                    catch
+                    {
+                    }
+                    _control.Dispose();
+                }
+            }
+            finally
+            {
+                _gate.Release();
+            }
+
+            try
+            {
+                await _process.WaitForExitAsync(cancellationToken)
+                    .WaitAsync(_stopTimeout, cancellationToken);
+            }
+            catch (TimeoutException)
+            {
+                TryKill();
+                await _process.WaitForExitAsync(CancellationToken.None);
+            }
+        }
+
+        public void Dispose()
+        {
+            _control.Dispose();
+            _process.Dispose();
+            _gate.Dispose();
+        }
+
+        private void TryKill()
+        {
+            try
+            {
+                if (!_process.HasExited)
+                    _process.Kill(entireProcessTree: true);
+            }
+            catch
+            {
+            }
         }
     }
 }
