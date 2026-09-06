@@ -40,6 +40,21 @@ public class ExecutionCoordinatorTests
     }
 
     [Fact]
+    public void DependencyCheckFailureIsTerminalAndDoesNotRetry()
+    {
+        var coordinator = new ExecutionCoordinator([LocalQueue]);
+        var attempt = coordinator.RequestRun(
+            Job(1), -1, new ResourceVector(1, 1, 0), dependenciesReady: false).Attempt;
+
+        Assert.Empty(coordinator.DependencyCheckFailed(attempt.Id, "broken dependency graph"));
+        Assert.Equal(ExecutionPhase.Failed, attempt.Phase);
+        Assert.Null(coordinator.CurrentAttempt(attempt.Job));
+        Assert.Contains(attempt.History, entry => entry.Detail == "broken dependency graph");
+
+        Assert.Empty(coordinator.DependencyCheckFailed(attempt.Id, "again"));
+    }
+
+    [Fact]
     public void StrictFifoDoesNotFillAGapBehindAnOlderAttempt()
     {
         var coordinator = new ExecutionCoordinator([LocalQueue]);
@@ -431,6 +446,101 @@ public class ExecutionCoordinatorTests
 
         Assert.Equal(ExecutionPhase.Interrupted, attempt.Phase);
         Assert.Contains(attempt.History, entry => entry.Detail == attempt.HealthDetail);
+    }
+
+    [Fact]
+    public void UnknownWorkerStartAfterParentCompletionInterruptsTheParent()
+    {
+        var workerQueue = new ExecutionQueuePolicy(2, ExecutionBackendKind.ExternalScheduler);
+        var coordinator = new ExecutionCoordinator([LocalQueue, workerQueue]);
+        var attempt = coordinator.RequestRun(
+            Job(1), -1, new ResourceVector(1, 1, 0), dependenciesReady: true,
+            new WorkerGroupRequest(2, DesiredCount: 1, SubmissionLimit: 2)).Attempt;
+        coordinator.PreparationCompleted(attempt.Id);
+        var workerStart = Assert.IsType<StartWorker>(Assert.Single(coordinator.StartCompleted(
+            attempt.Id, new BackendReceipt("manager"), isRunning: true)));
+
+        Assert.Empty(coordinator.Observe(
+            attempt.Id, new BackendObservation(BackendObservationKind.Succeeded)));
+        var effects = coordinator.WorkerStartIndeterminate(
+            attempt.Id, workerStart.OperationId, "submission timed out");
+
+        var finalization = Assert.IsType<FinalizeExecution>(Assert.Single(effects));
+        Assert.Equal(ExecutionOutcome.Interrupted, finalization.Outcome);
+        coordinator.FinalizationCompleted(attempt.Id);
+        Assert.Equal(ExecutionPhase.Interrupted, attempt.Phase);
+    }
+
+    [Fact]
+    public void RecoveryMakesReceiptlessWorkerStartsExplicitlyUntraceable()
+    {
+        var managerQueue = new ExecutionQueuePolicy(1, ExecutionBackendKind.ExternalScheduler);
+        var workerQueue = new ExecutionQueuePolicy(2, ExecutionBackendKind.ExternalScheduler);
+        var original = new ExecutionCoordinator([managerQueue, workerQueue]);
+        var attempt = original.RequestRun(
+            Job(1), 1, ResourceVector.None, dependenciesReady: true,
+            new WorkerGroupRequest(2, DesiredCount: 1, SubmissionLimit: 2)).Attempt;
+        original.PreparationCompleted(attempt.Id);
+        Assert.IsType<StartWorker>(Assert.Single(original.StartCompleted(
+            attempt.Id, new BackendReceipt("manager"), isRunning: true)));
+
+        var restored = new ExecutionCoordinator([managerQueue, workerQueue]);
+        restored.Restore(original.CreateSnapshot());
+        restored.Recover();
+        var copy = Assert.Single(restored.Attempts);
+
+        Assert.Equal(WorkerPhase.Indeterminate, Assert.Single(copy.WorkerGroup.Workers).Phase);
+        Assert.Equal(ExecutionHealth.Indeterminate, copy.Health);
+
+        var completion = restored.Observe(
+            copy.Id, new BackendObservation(BackendObservationKind.Succeeded));
+        Assert.Equal(
+            ExecutionOutcome.Interrupted,
+            Assert.IsType<FinalizeExecution>(Assert.Single(completion)).Outcome);
+    }
+
+    [Fact]
+    public void RecoveryResumesWorkerCancellationBeforeFinalization()
+    {
+        var managerQueue = new ExecutionQueuePolicy(1, ExecutionBackendKind.ExternalScheduler);
+        var workerQueue = new ExecutionQueuePolicy(2, ExecutionBackendKind.ExternalScheduler);
+        var original = new ExecutionCoordinator([managerQueue, workerQueue]);
+        var attempt = original.RequestRun(
+            Job(1), 1, ResourceVector.None, dependenciesReady: true,
+            new WorkerGroupRequest(2, DesiredCount: 1, SubmissionLimit: 2)).Attempt;
+        original.PreparationCompleted(attempt.Id);
+        var workerStart = Assert.IsType<StartWorker>(Assert.Single(original.StartCompleted(
+            attempt.Id, new BackendReceipt("manager"), isRunning: true)));
+        original.WorkerStarted(
+            attempt.Id, workerStart.OperationId, new BackendReceipt("worker"), isRunning: true);
+        Assert.Single(original.Observe(
+            attempt.Id, new BackendObservation(BackendObservationKind.Succeeded)),
+            effect => effect is CancelWorkers);
+
+        var restored = new ExecutionCoordinator([managerQueue, workerQueue]);
+        restored.Restore(original.CreateSnapshot());
+        var effects = restored.Recover();
+
+        Assert.Single(effects, effect => effect is CancelWorkers);
+        Assert.DoesNotContain(effects, effect => effect is FinalizeExecution);
+        Assert.Equal(ExecutionPhase.Finalizing, Assert.Single(restored.Attempts).Phase);
+    }
+
+    [Fact]
+    public void BackendFailureDetailSurvivesFinalization()
+    {
+        var coordinator = new ExecutionCoordinator([LocalQueue]);
+        var attempt = coordinator.RequestRun(
+            Job(1), -1, ResourceVector.None, dependenciesReady: true).Attempt;
+        coordinator.PreparationCompleted(attempt.Id);
+        coordinator.StartCompleted(attempt.Id, new BackendReceipt("local"), isRunning: true);
+        coordinator.Observe(
+            attempt.Id, new BackendObservation(BackendObservationKind.Failed, "exit code 17"));
+
+        coordinator.FinalizationCompleted(attempt.Id);
+
+        Assert.Equal(ExecutionPhase.Failed, attempt.Phase);
+        Assert.Equal("exit code 17", attempt.History.Last().Detail);
     }
 
     [Fact]

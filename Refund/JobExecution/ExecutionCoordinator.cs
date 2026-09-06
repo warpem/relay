@@ -165,6 +165,17 @@ public sealed class ExecutionCoordinator
         return new ExecutionEffect[] { new PrepareExecution(attempt.Id) };
     }
 
+    public IReadOnlyList<ExecutionEffect> DependencyCheckFailed(Guid attemptId, string detail)
+    {
+        if (!TryGetCurrent(attemptId, out var attempt) ||
+            attempt.Phase != ExecutionPhase.WaitingForDependencies)
+            return Array.Empty<ExecutionEffect>();
+
+        attempt.TransitionTo(ExecutionPhase.Failed, Now(), detail);
+        _currentAttempts.Remove(attempt.Job);
+        return Array.Empty<ExecutionEffect>();
+    }
+
     public IReadOnlyList<ExecutionEffect> PreparationCompleted(Guid attemptId)
     {
         if (!TryGetCurrent(attemptId, out var attempt) ||
@@ -367,8 +378,8 @@ public sealed class ExecutionCoordinator
                 _ => ExecutionPhase.Failed
             };
 
-        string detail = failure ?? (phase == ExecutionPhase.Interrupted
-            ? attempt.HealthDetail
+        string detail = failure ?? (phase is ExecutionPhase.Failed or ExecutionPhase.Interrupted
+            ? attempt.HealthDetail ?? attempt.History.LastOrDefault()?.Detail
             : null);
         attempt.TransitionTo(phase, Now(), detail);
         _currentAttempts.Remove(attempt.Job);
@@ -502,6 +513,8 @@ public sealed class ExecutionCoordinator
             : WorkerPhase.Indeterminate;
         attempt.Health = ExecutionHealth.Indeterminate;
         attempt.HealthDetail = detail;
+        if (attempt.Phase == ExecutionPhase.Finalizing)
+            attempt.PendingOutcome = ExecutionOutcome.Interrupted;
         return attempt.Phase == ExecutionPhase.Finalizing
             ? ContinueFinalization(attempt)
             : Array.Empty<ExecutionEffect>();
@@ -579,12 +592,22 @@ public sealed class ExecutionCoordinator
 
     public IReadOnlyList<ExecutionEffect> Recover()
     {
+        foreach (var attempt in _attempts.Values.Where(attempt => !attempt.IsTerminal))
+            RecoverReceiptlessWorkers(attempt);
+
         var effects = new List<ExecutionEffect>(InterruptOwnerBoundAttempts());
         var queuesToReconcile = new HashSet<int>();
 
         foreach (var attempt in _attempts.Values.Where(attempt =>
                      !attempt.IsTerminal && attempt.BackendKind == ExecutionBackendKind.ExternalScheduler))
         {
+            var workerCancellations = attempt.WorkerGroup?.Workers
+                .Where(worker => worker.Phase == WorkerPhase.Cancelling && worker.Receipt != null)
+                .Select(worker => worker.Receipt)
+                .ToArray();
+            if (workerCancellations is { Length: > 0 })
+                effects.Add(new CancelWorkers(attempt.Id, workerCancellations));
+
             switch (attempt.Phase)
             {
                 case ExecutionPhase.Preparing:
@@ -642,7 +665,7 @@ public sealed class ExecutionCoordinator
             if (attempt.Phase == ExecutionPhase.Cancelling && attempt.Receipt != null)
                 effects.Add(new CancelExecution(attempt.Id, attempt.Receipt));
 
-            if (attempt.Phase == ExecutionPhase.Finalizing && attempt.WorkerGroup != null)
+            if (attempt.WorkerGroup != null)
             {
                 var receipts = attempt.WorkerGroup.Workers
                     .Where(worker => worker.Phase == WorkerPhase.Cancelling && worker.Receipt != null)
@@ -730,20 +753,34 @@ public sealed class ExecutionCoordinator
 
     private IReadOnlyList<ExecutionEffect> RecoverFinalization(ExecutionAttempt attempt)
     {
-        if (attempt.WorkerGroup != null)
-            foreach (var worker in attempt.WorkerGroup.Workers.Where(worker =>
-                         worker.Receipt == null && worker.Phase != WorkerPhase.Ended))
-                worker.Phase = WorkerPhase.Ended;
+        attempt.FinalizationIssued = false;
+        return ContinueFinalization(attempt);
+    }
 
-        var cleanup = ContinueFinalization(attempt);
-        if (cleanup.Count > 0)
-            return cleanup;
+    private static void RecoverReceiptlessWorkers(ExecutionAttempt attempt)
+    {
+        if (attempt.WorkerGroup == null)
+            return;
 
-        attempt.FinalizationIssued = true;
-        return new ExecutionEffect[]
+        bool untraceable = false;
+        foreach (var worker in attempt.WorkerGroup.Workers.Where(worker =>
+                     worker.Receipt == null && worker.Phase is WorkerPhase.Starting or WorkerPhase.Cancelling))
         {
-            new FinalizeExecution(attempt.Id, attempt.PendingOutcome ?? ExecutionOutcome.Failed)
-        };
+            worker.Phase = WorkerPhase.Indeterminate;
+            untraceable = true;
+        }
+
+        untraceable |= attempt.WorkerGroup.Workers.Any(worker =>
+            worker.Phase == WorkerPhase.Indeterminate);
+        if (!untraceable)
+            return;
+
+        attempt.Health = ExecutionHealth.Indeterminate;
+        attempt.HealthDetail =
+            "A worker submission has an unknown outcome and no scheduler receipt; " +
+            "Relay cannot prove that all worker processes stopped.";
+        if (attempt.Phase == ExecutionPhase.Finalizing)
+            attempt.PendingOutcome = ExecutionOutcome.Interrupted;
     }
 
     private IReadOnlyList<ExecutionEffect> ReconcileQueue(int queueId)
