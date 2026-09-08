@@ -218,9 +218,9 @@ only post observations. They never mutate jobs or attempts directly.
 
 Effects are state-derived rather than stored in a second in-memory outbox. Reconciliation may derive
 the same effect again while its phase remains unchanged; the runtime permits only one concurrent
-effect for a stable attempt/operation key. A completed effect changes durable state before its key is
-released. After restart, recovery first resolves ambiguous phases conservatively, then the same
-reconciliation pass derives any work that can safely resume.
+effect for a stable attempt/operation key. A completed effect posts its result through the same
+serialized state path before its key is released. After restart, recovery first resolves ambiguous
+phases conservatively, then the same reconciliation pass derives any work that can safely resume.
 
 State changes follow this order:
 
