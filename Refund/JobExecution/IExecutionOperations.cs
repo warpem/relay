@@ -2,8 +2,7 @@ namespace Refund.JobExecution;
 
 public sealed record BackendStartResult(
     BackendReceipt Receipt,
-    bool IsRunning,
-    bool RequiresActivation = false);
+    bool IsRunning);
 
 public sealed class IndeterminateBackendStartException : Exception
 {

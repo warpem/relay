@@ -160,8 +160,10 @@ WaitingForDependencies
           Succeeded | Failed | Canceled | Interrupted
 ```
 
-`Cancelling` may be entered from any non-terminal phase. It ends only after the backend and worker
-group have reached a state that makes the cancellation outcome truthful.
+`Cancelling` may be entered from any non-terminal phase and means a backend stop command still needs
+to settle. `Stopping` means that command was accepted and Relay is waiting for terminal evidence.
+Cancellation ends only after the backend and worker group have reached a state that makes the
+outcome truthful.
 
 The diagram omits failure and cancellation edges for readability. The rules are:
 
@@ -193,8 +195,8 @@ One in-process `ExecutionCoordinator` is the only component allowed to:
 - assign FIFO sequence numbers;
 - update worker-group desired and observed state;
 - append lifecycle history;
-- decide which backend effects to issue; and
-- persist runtime state.
+- reconcile automatic lifecycle transitions; and
+- derive the backend effects required by its current state.
 
 It processes commands and backend results serially, for example:
 
@@ -208,19 +210,29 @@ It processes commands and backend results serially, for example:
 The coordinator may use an in-process channel and a small reducer. It does not need an actor system,
 database server, or event-sourcing framework.
 
-Long-running work never executes on the coordinator loop. The loop persists a transition and emits
-an effect; an asynchronous backend operation later posts a result message containing the attempt ID.
-Timers and pollers only post observations. They never mutate jobs or attempts directly.
+Long-running work never executes on the coordinator loop. Commands and backend results mutate only
+coordinator state. One reconciliation pass then advances automatic transitions such as FIFO
+admission and worker resizing and derives every backend effect required by the resulting state. An
+asynchronous backend operation later posts a result containing the attempt ID. Timers and pollers
+only post observations. They never mutate jobs or attempts directly.
+
+Effects are state-derived rather than stored in a second in-memory outbox. Reconciliation may derive
+the same effect again while its phase remains unchanged; the runtime permits only one concurrent
+effect for a stable attempt/operation key. A completed effect changes durable state before its key is
+released. After restart, recovery first resolves ambiguous phases conservatively, then the same
+reconciliation pass derives any work that can safely resume.
 
 State changes follow this order:
 
-1. validate the command or observation against the current attempt;
-2. calculate the complete next state and any effects;
-3. persist the next state atomically;
-4. publish the projected UI update; and
+1. validate and apply the command or observation against the current attempt;
+2. reconcile the complete state and derive required effects;
+3. persist the reconciled state atomically;
+4. attempt the projected UI update; and
 5. execute effects asynchronously.
 
 If an effect can create external work, its intent is persisted before the effect begins.
+Projection is retried but is not a launch prerequisite: durable execution state remains authoritative,
+and a temporary UI-update failure cannot stall unrelated or already-admitted work.
 
 ## 7. Scheduling and admission
 

@@ -17,8 +17,9 @@ public sealed class JobProjectionTests
             new JobAddress(1, 1, 1),
             4,
             ResourceVector.None,
-            dependenciesReady: true).Attempt;
+            dependenciesReady: true);
         coordinator.PreparationCompleted(attempt.Id);
+        coordinator.PlanEffects();
         coordinator.StartCompleted(
             attempt.Id,
             new BackendReceipt("scheduler-42"),
@@ -44,7 +45,7 @@ public sealed class JobProjectionTests
             new JobAddress(1, 1, 1),
             4,
             ResourceVector.None,
-            dependenciesReady: true).Attempt;
+            dependenciesReady: true);
         coordinator.PreparationFailed(attempt.Id, "invalid input");
         var job = new Note { Status = JobStatus.Building };
 

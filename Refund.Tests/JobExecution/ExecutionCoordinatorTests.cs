@@ -20,6 +20,21 @@ public class ExecutionCoordinatorTests
     }
 
     [Fact]
+    public void PlanningDerivesStableEffectsWithoutAppendingHistory()
+    {
+        var coordinator = new ExecutionCoordinator([LocalQueue]);
+        var attempt = coordinator.RequestRun(
+            Job(1), -1, new ResourceVector(1, 1, 0), dependenciesReady: true);
+        int historyCount = attempt.History.Count;
+
+        var first = Assert.Single(coordinator.PlanEffects());
+        var second = Assert.Single(coordinator.PlanEffects());
+
+        Assert.Equal(first, second);
+        Assert.Equal(historyCount, attempt.History.Count);
+    }
+
+    [Fact]
     public void DependencyBlockedWorkDoesNotJoinFifoUntilItBecomesEligible()
     {
         var coordinator = new ExecutionCoordinator([LocalQueue]);
@@ -29,14 +44,17 @@ public class ExecutionCoordinatorTests
         var ready = coordinator.RequestRun(
             Job(2), -1, new ResourceVector(1, 1, 0), dependenciesReady: true);
 
-        Assert.Null(blocked.Attempt.EnqueueSequence);
-        Assert.Equal(1, ready.Attempt.EnqueueSequence);
-        Assert.Single(ready.Effects, effect => effect is PrepareExecution);
+        Assert.Null(blocked.EnqueueSequence);
+        Assert.Equal(1, ready.EnqueueSequence);
+        Assert.Contains(coordinator.PlanEffects(), effect =>
+            effect is PrepareExecution { AttemptId: var id } && id == ready.Id);
 
-        var effects = coordinator.DependenciesSatisfied(blocked.Attempt.Id);
+        coordinator.DependenciesSatisfied(blocked.Id);
+        var effects = coordinator.PlanEffects();
 
-        Assert.Equal(2, blocked.Attempt.EnqueueSequence);
-        Assert.Single(effects, effect => effect is PrepareExecution);
+        Assert.Equal(2, blocked.EnqueueSequence);
+        Assert.Contains(effects, effect =>
+            effect is PrepareExecution { AttemptId: var id } && id == blocked.Id);
     }
 
     [Fact]
@@ -44,14 +62,15 @@ public class ExecutionCoordinatorTests
     {
         var coordinator = new ExecutionCoordinator([LocalQueue]);
         var attempt = coordinator.RequestRun(
-            Job(1), -1, new ResourceVector(1, 1, 0), dependenciesReady: false).Attempt;
+            Job(1), -1, new ResourceVector(1, 1, 0), dependenciesReady: false);
 
-        Assert.Empty(coordinator.DependencyCheckFailed(attempt.Id, "broken dependency graph"));
+        coordinator.DependencyCheckFailed(attempt.Id, "broken dependency graph");
         Assert.Equal(ExecutionPhase.Failed, attempt.Phase);
         Assert.Null(coordinator.CurrentAttempt(attempt.Job));
         Assert.Contains(attempt.History, entry => entry.Detail == "broken dependency graph");
 
-        Assert.Empty(coordinator.DependencyCheckFailed(attempt.Id, "again"));
+        coordinator.DependencyCheckFailed(attempt.Id, "again");
+        Assert.Empty(coordinator.PlanEffects());
     }
 
     [Fact]
@@ -59,17 +78,20 @@ public class ExecutionCoordinatorTests
     {
         var coordinator = new ExecutionCoordinator([LocalQueue]);
         var holder = coordinator.RequestRun(
-            Job(1), -1, new ResourceVector(3, 1, 0), dependenciesReady: true).Attempt;
+            Job(1), -1, new ResourceVector(3, 1, 0), dependenciesReady: true);
         var oldLarge = coordinator.RequestRun(
-            Job(2), -1, new ResourceVector(2, 1, 0), dependenciesReady: true).Attempt;
+            Job(2), -1, new ResourceVector(2, 1, 0), dependenciesReady: true);
         var newSmall = coordinator.RequestRun(
-            Job(3), -1, new ResourceVector(1, 1, 0), dependenciesReady: true).Attempt;
+            Job(3), -1, new ResourceVector(1, 1, 0), dependenciesReady: true);
 
-        Assert.Single(coordinator.PreparationCompleted(holder.Id), effect => effect is StartExecution);
+        coordinator.PreparationCompleted(holder.Id);
+        Assert.Single(coordinator.PlanEffects(), effect => effect is StartExecution);
         coordinator.StartCompleted(holder.Id, new BackendReceipt("holder"), isRunning: true);
 
-        Assert.Empty(coordinator.PreparationCompleted(oldLarge.Id));
-        Assert.Empty(coordinator.PreparationCompleted(newSmall.Id));
+        coordinator.PreparationCompleted(oldLarge.Id);
+        coordinator.PreparationCompleted(newSmall.Id);
+
+        Assert.Empty(coordinator.PlanEffects());
         Assert.Equal(ExecutionPhase.Queued, oldLarge.Phase);
         Assert.Equal(ExecutionPhase.Queued, newSmall.Phase);
     }
@@ -79,14 +101,16 @@ public class ExecutionCoordinatorTests
     {
         var coordinator = new ExecutionCoordinator([LocalQueue]);
         var first = coordinator.RequestRun(
-            Job(1), -1, new ResourceVector(1, 1, 0), dependenciesReady: true).Attempt;
+            Job(1), -1, new ResourceVector(1, 1, 0), dependenciesReady: true);
         var second = coordinator.RequestRun(
-            Job(2), -1, new ResourceVector(1, 1, 0), dependenciesReady: true).Attempt;
+            Job(2), -1, new ResourceVector(1, 1, 0), dependenciesReady: true);
 
-        Assert.Empty(coordinator.PreparationCompleted(second.Id));
+        coordinator.PreparationCompleted(second.Id);
+        Assert.DoesNotContain(coordinator.PlanEffects(), effect => effect is StartExecution);
         Assert.Equal(ExecutionPhase.Queued, second.Phase);
 
-        var effects = coordinator.PreparationCompleted(first.Id);
+        coordinator.PreparationCompleted(first.Id);
+        var effects = coordinator.PlanEffects();
 
         Assert.Equal(2, effects.Count(effect => effect is StartExecution));
         Assert.Equal(ExecutionPhase.Starting, first.Phase);
@@ -98,8 +122,9 @@ public class ExecutionCoordinatorTests
     {
         var coordinator = new ExecutionCoordinator([LocalQueue]);
         var attempt = coordinator.RequestRun(
-            Job(1), -1, new ResourceVector(1, 1, 0), dependenciesReady: true).Attempt;
+            Job(1), -1, new ResourceVector(1, 1, 0), dependenciesReady: true);
         coordinator.PreparationCompleted(attempt.Id);
+        coordinator.PlanEffects();
         coordinator.StartCompleted(attempt.Id, new BackendReceipt("pid"), isRunning: true);
         int historyCount = attempt.History.Count;
 
@@ -118,11 +143,11 @@ public class ExecutionCoordinatorTests
     {
         var coordinator = new ExecutionCoordinator([LocalQueue]);
         var attempt = coordinator.RequestRun(
-            Job(1), -1, new ResourceVector(1, 1, 0), dependenciesReady: false).Attempt;
+            Job(1), -1, new ResourceVector(1, 1, 0), dependenciesReady: false);
 
-        var effects = coordinator.RequestCancel(attempt.Id);
+        coordinator.RequestCancel(attempt.Id);
 
-        Assert.Empty(effects);
+        Assert.Empty(coordinator.PlanEffects());
         Assert.Equal(ExecutionPhase.Canceled, attempt.Phase);
     }
 
@@ -131,11 +156,11 @@ public class ExecutionCoordinatorTests
     {
         var coordinator = new ExecutionCoordinator([LocalQueue]);
         var attempt = coordinator.RequestRun(
-            Job(1), -1, new ResourceVector(1, 1, 0), dependenciesReady: true).Attempt;
+            Job(1), -1, new ResourceVector(1, 1, 0), dependenciesReady: true);
 
-        var cancel = Assert.Single(coordinator.RequestCancel(attempt.Id));
+        coordinator.RequestCancel(attempt.Id);
 
-        Assert.Null(Assert.IsType<CancelExecution>(cancel).Receipt);
+        Assert.Empty(coordinator.PlanEffects());
         Assert.Equal(ExecutionPhase.Cancelling, attempt.Phase);
 
         coordinator.PreparationCompleted(attempt.Id);
@@ -146,19 +171,35 @@ public class ExecutionCoordinatorTests
     [Fact]
     public void CancelDuringStartCancelsTheReceiptWhenItArrives()
     {
-        var coordinator = new ExecutionCoordinator([LocalQueue]);
+        var externalQueue = new ExecutionQueuePolicy(4, ExecutionBackendKind.ExternalScheduler);
+        var coordinator = new ExecutionCoordinator([externalQueue]);
         var attempt = coordinator.RequestRun(
-            Job(1), -1, new ResourceVector(1, 1, 0), dependenciesReady: true).Attempt;
+            Job(1), 4, new ResourceVector(1, 1, 0), dependenciesReady: true);
         coordinator.PreparationCompleted(attempt.Id);
+        coordinator.PlanEffects();
 
-        var initialCancel = Assert.Single(coordinator.RequestCancel(attempt.Id));
-        Assert.Null(Assert.IsType<CancelExecution>(initialCancel).Receipt);
-        var effects = coordinator.StartCompleted(
-            attempt.Id, new BackendReceipt("late-receipt"), isRunning: true);
+        coordinator.RequestCancel(attempt.Id);
+        Assert.Empty(coordinator.PlanEffects());
+        coordinator.StartCompleted(attempt.Id, new BackendReceipt("late-receipt"), isRunning: true);
+        var effects = coordinator.PlanEffects();
 
         var cancel = Assert.Single(effects);
         Assert.Equal("late-receipt", Assert.IsType<CancelExecution>(cancel).Receipt.Id);
         Assert.Equal(ExecutionPhase.Cancelling, attempt.Phase);
+
+        coordinator.CancelCompleted(attempt.Id, new BackendObservation(
+            BackendObservationKind.Indeterminate,
+            "cancellation accepted"));
+
+        Assert.Equal(ExecutionPhase.Stopping, attempt.Phase);
+        Assert.Empty(coordinator.PlanEffects());
+
+        var restored = new ExecutionCoordinator([externalQueue]);
+        restored.Restore(coordinator.CreateSnapshot());
+        restored.Recover();
+
+        Assert.Equal(ExecutionPhase.Stopping, Assert.Single(restored.Attempts).Phase);
+        Assert.Empty(restored.PlanEffects());
     }
 
     [Fact]
@@ -170,14 +211,15 @@ public class ExecutionCoordinatorTests
             new ResourceVector(4, 16, 1));
         var coordinator = new ExecutionCoordinator([managed]);
         var attempt = coordinator.RequestRun(
-            Job(1), 3, new ResourceVector(1, 1, 0), dependenciesReady: true).Attempt;
+            Job(1), 3, new ResourceVector(1, 1, 0), dependenciesReady: true);
         coordinator.PreparationCompleted(attempt.Id);
+        coordinator.PlanEffects();
 
-        var effects = coordinator.StartCompleted(
+        coordinator.StartCompleted(
             attempt.Id,
             new BackendReceipt("runner"),
-            isRunning: false,
-            requiresActivation: true);
+            isRunning: false);
+        var effects = coordinator.PlanEffects();
 
         Assert.Equal(ExecutionPhase.Starting, attempt.Phase);
         Assert.Equal("runner", attempt.Receipt.Id);
@@ -194,16 +236,19 @@ public class ExecutionCoordinatorTests
         var external = new ExecutionQueuePolicy(4, ExecutionBackendKind.ExternalScheduler);
         var coordinator = new ExecutionCoordinator([external]);
         var first = coordinator.RequestRun(
-            Job(1), 4, ResourceVector.None, dependenciesReady: true).Attempt;
+            Job(1), 4, ResourceVector.None, dependenciesReady: true);
         var second = coordinator.RequestRun(
-            Job(2), 4, ResourceVector.None, dependenciesReady: true).Attempt;
+            Job(2), 4, ResourceVector.None, dependenciesReady: true);
 
-        var firstEffects = coordinator.PreparationCompleted(first.Id);
+        coordinator.PreparationCompleted(first.Id);
+        var firstEffects = coordinator.PlanEffects();
         Assert.Single(firstEffects, effect => effect is StartExecution { AttemptId: var id } && id == first.Id);
-        Assert.Empty(coordinator.PreparationCompleted(second.Id));
+        coordinator.PreparationCompleted(second.Id);
+        Assert.DoesNotContain(coordinator.PlanEffects(), effect =>
+            effect is StartExecution { AttemptId: var id } && id == second.Id);
 
-        var secondEffects = coordinator.StartCompleted(
-            first.Id, new BackendReceipt("first"), isRunning: false);
+        coordinator.StartCompleted(first.Id, new BackendReceipt("first"), isRunning: false);
+        var secondEffects = coordinator.PlanEffects();
 
         Assert.Single(secondEffects, effect => effect is StartExecution { AttemptId: var id } && id == second.Id);
         Assert.Equal(ExecutionPhase.Starting, second.Phase);
@@ -214,16 +259,15 @@ public class ExecutionCoordinatorTests
     {
         var coordinator = new ExecutionCoordinator([LocalQueue]);
         var first = coordinator.RequestRun(
-            Job(1), -1, new ResourceVector(1, 1, 0), dependenciesReady: true).Attempt;
+            Job(1), -1, new ResourceVector(1, 1, 0), dependenciesReady: true);
         coordinator.PreparationFailed(first.Id, "bad input");
 
         var second = coordinator.RequestRun(
-            Job(1), -1, new ResourceVector(1, 1, 0), dependenciesReady: true).Attempt;
-        var lateEffects = coordinator.StartCompleted(
-            first.Id, new BackendReceipt("stale"), isRunning: true);
+            Job(1), -1, new ResourceVector(1, 1, 0), dependenciesReady: true);
+        coordinator.StartCompleted(first.Id, new BackendReceipt("stale"), isRunning: true);
 
         Assert.NotEqual(first.Id, second.Id);
-        Assert.Empty(lateEffects);
+        Assert.DoesNotContain(coordinator.PlanEffects(), effect => effect.AttemptId == first.Id);
         Assert.Equal(ExecutionPhase.Preparing, second.Phase);
     }
 
@@ -232,15 +276,16 @@ public class ExecutionCoordinatorTests
     {
         var coordinator = new ExecutionCoordinator([LocalQueue]);
         var first = coordinator.RequestRun(
-            Job(1), -1, new ResourceVector(4, 1, 2), dependenciesReady: true).Attempt;
+            Job(1), -1, new ResourceVector(4, 1, 2), dependenciesReady: true);
         var second = coordinator.RequestRun(
-            Job(2), -1, new ResourceVector(4, 1, 2), dependenciesReady: true).Attempt;
+            Job(2), -1, new ResourceVector(4, 1, 2), dependenciesReady: true);
         coordinator.PreparationCompleted(first.Id);
+        coordinator.PlanEffects();
         coordinator.StartCompleted(first.Id, new BackendReceipt("first"), isRunning: true);
         coordinator.PreparationCompleted(second.Id);
 
-        var effects = coordinator.Observe(
-            first.Id, new BackendObservation(BackendObservationKind.Succeeded));
+        coordinator.Observe(first.Id, new BackendObservation(BackendObservationKind.Succeeded));
+        var effects = coordinator.PlanEffects();
 
         Assert.Contains(effects, effect => effect is FinalizeExecution { AttemptId: var id } && id == first.Id);
         Assert.Contains(effects, effect => effect is StartExecution { AttemptId: var id } && id == second.Id);
@@ -253,8 +298,9 @@ public class ExecutionCoordinatorTests
     {
         var coordinator = new ExecutionCoordinator([LocalQueue]);
         var attempt = coordinator.RequestRun(
-            Job(1), -1, new ResourceVector(1, 1, 0), dependenciesReady: true).Attempt;
+            Job(1), -1, new ResourceVector(1, 1, 0), dependenciesReady: true);
         coordinator.PreparationCompleted(attempt.Id);
+        coordinator.PlanEffects();
         coordinator.StartCompleted(attempt.Id, new BackendReceipt("job"), isRunning: false);
 
         coordinator.Observe(attempt.Id, new BackendObservation(BackendObservationKind.Running));
@@ -268,16 +314,17 @@ public class ExecutionCoordinatorTests
     {
         var coordinator = new ExecutionCoordinator([LocalQueue]);
         var running = coordinator.RequestRun(
-            Job(1), -1, new ResourceVector(4, 1, 0), dependenciesReady: true).Attempt;
+            Job(1), -1, new ResourceVector(4, 1, 0), dependenciesReady: true);
         var queued = coordinator.RequestRun(
-            Job(2), -1, new ResourceVector(4, 1, 0), dependenciesReady: true).Attempt;
+            Job(2), -1, new ResourceVector(4, 1, 0), dependenciesReady: true);
         coordinator.PreparationCompleted(running.Id);
+        coordinator.PlanEffects();
         coordinator.StartCompleted(running.Id, new BackendReceipt("running"), isRunning: true);
         coordinator.PreparationCompleted(queued.Id);
 
-        var effects = coordinator.InterruptOwnerBoundAttempts();
+        coordinator.InterruptOwnerBoundAttempts();
 
-        Assert.Empty(effects);
+        Assert.Empty(coordinator.PlanEffects());
         Assert.Equal(ExecutionPhase.Interrupted, running.Phase);
         Assert.Equal(ExecutionPhase.Interrupted, queued.Phase);
     }
@@ -288,9 +335,10 @@ public class ExecutionCoordinatorTests
         var external = new ExecutionQueuePolicy(4, ExecutionBackendKind.ExternalScheduler);
         var original = new ExecutionCoordinator([LocalQueue, external]);
         var attempt = original.RequestRun(
-            Job(1), 4, new ResourceVector(8, 64, 1), dependenciesReady: true).Attempt;
+            Job(1), 4, new ResourceVector(8, 64, 1), dependenciesReady: true);
         original.PreparationCompleted(attempt.Id);
-        original.StartCompleted(attempt.Id, new BackendReceipt("slurm-42"), isRunning: false);
+        original.PlanEffects();
+        original.StartCompleted(attempt.Id, new BackendReceipt("scheduler-42"), isRunning: false);
         original.Observe(attempt.Id, new BackendObservation(
             BackendObservationKind.Indeterminate, "accounting delayed"));
 
@@ -300,7 +348,7 @@ public class ExecutionCoordinatorTests
         var copy = Assert.Single(restored.Attempts);
         Assert.Equal(attempt.Id, copy.Id);
         Assert.Equal(attempt.EnqueueSequence, copy.EnqueueSequence);
-        Assert.Equal("slurm-42", copy.Receipt.Id);
+        Assert.Equal("scheduler-42", copy.Receipt.Id);
         Assert.Equal(ExecutionPhase.Pending, copy.Phase);
         Assert.Equal(ExecutionHealth.Indeterminate, copy.Health);
         Assert.Equal(attempt.History, copy.History);
@@ -309,7 +357,7 @@ public class ExecutionCoordinatorTests
         original.FinalizationCompleted(attempt.Id);
 
         var rerun = restored.RequestRun(
-            Job(2), 4, new ResourceVector(1, 1, 0), dependenciesReady: true).Attempt;
+            Job(2), 4, new ResourceVector(1, 1, 0), dependenciesReady: true);
         Assert.True(rerun.EnqueueSequence > copy.EnqueueSequence);
     }
 
@@ -318,7 +366,7 @@ public class ExecutionCoordinatorTests
     {
         var coordinator = new ExecutionCoordinator([LocalQueue]);
         var first = coordinator.RequestRun(
-            Job(1), -1, new ResourceVector(1, 1, 0), dependenciesReady: true).Attempt;
+            Job(1), -1, new ResourceVector(1, 1, 0), dependenciesReady: true);
         var firstSnapshot = first.CreateSnapshot();
         var duplicate = firstSnapshot with { Id = Guid.NewGuid() };
         var snapshot = new ExecutionCoordinatorSnapshot(
@@ -337,11 +385,12 @@ public class ExecutionCoordinatorTests
         var coordinator = new ExecutionCoordinator([LocalQueue, workerQueue]);
         var attempt = coordinator.RequestRun(
             Job(1), -1, new ResourceVector(1, 1, 0), dependenciesReady: true,
-            new WorkerGroupRequest(2, DesiredCount: 2, SubmissionLimit: 4)).Attempt;
+            new WorkerGroupRequest(2, DesiredCount: 2, SubmissionLimit: 4));
         coordinator.PreparationCompleted(attempt.Id);
+        coordinator.PlanEffects();
 
-        var effects = coordinator.StartCompleted(
-            attempt.Id, new BackendReceipt("manager"), isRunning: true);
+        coordinator.StartCompleted(attempt.Id, new BackendReceipt("manager"), isRunning: true);
+        var effects = coordinator.PlanEffects();
         var starts = effects.OfType<StartWorker>().ToArray();
 
         Assert.Equal(2, starts.Length);
@@ -352,11 +401,12 @@ public class ExecutionCoordinatorTests
         coordinator.WorkerStarted(
             attempt.Id, starts[1].OperationId, new BackendReceipt("worker-2"), isRunning: false);
 
-        effects = coordinator.ObserveWorkers(attempt.Id,
+        coordinator.ObserveWorkers(attempt.Id,
         [
             new WorkerObservation("worker-1", BackendObservationKind.Succeeded),
             new WorkerObservation("worker-2", BackendObservationKind.Running)
         ]);
+        effects = coordinator.PlanEffects();
 
         Assert.Single(effects, effect => effect is StartWorker);
         Assert.Equal(3, attempt.WorkerGroup.TotalSubmissions);
@@ -371,10 +421,11 @@ public class ExecutionCoordinatorTests
         var coordinator = new ExecutionCoordinator([LocalQueue, workerQueue]);
         var attempt = coordinator.RequestRun(
             Job(1), -1, new ResourceVector(1, 1, 0), dependenciesReady: true,
-            new WorkerGroupRequest(2, DesiredCount: 2, SubmissionLimit: 6)).Attempt;
+            new WorkerGroupRequest(2, DesiredCount: 2, SubmissionLimit: 6));
         coordinator.PreparationCompleted(attempt.Id);
-        var starts = coordinator.StartCompleted(
-                attempt.Id, new BackendReceipt("manager"), isRunning: true)
+        coordinator.PlanEffects();
+        coordinator.StartCompleted(attempt.Id, new BackendReceipt("manager"), isRunning: true);
+        var starts = coordinator.PlanEffects()
             .OfType<StartWorker>()
             .ToArray();
         coordinator.WorkerStarted(
@@ -382,12 +433,14 @@ public class ExecutionCoordinatorTests
         coordinator.WorkerStarted(
             attempt.Id, starts[1].OperationId, new BackendReceipt("worker-2"), isRunning: true);
 
-        var shrink = coordinator.ResizeWorkerGroup(attempt.Id, 1);
+        coordinator.ResizeWorkerGroup(attempt.Id, 1);
+        var shrink = coordinator.PlanEffects();
         var cancel = Assert.Single(shrink);
         Assert.Single(Assert.IsType<CancelWorkers>(cancel).Receipts);
 
         coordinator.WorkersCanceled(attempt.Id, ["worker-2"]);
-        var grow = coordinator.ResizeWorkerGroup(attempt.Id, 3);
+        coordinator.ResizeWorkerGroup(attempt.Id, 3);
+        var grow = coordinator.PlanEffects();
 
         Assert.Equal(2, grow.Count(effect => effect is StartWorker));
         Assert.Equal(3, attempt.WorkerGroup.DesiredCount);
@@ -400,22 +453,24 @@ public class ExecutionCoordinatorTests
         var coordinator = new ExecutionCoordinator([LocalQueue, workerQueue]);
         var attempt = coordinator.RequestRun(
             Job(1), -1, new ResourceVector(1, 1, 0), dependenciesReady: true,
-            new WorkerGroupRequest(2, DesiredCount: 1, SubmissionLimit: 2)).Attempt;
+            new WorkerGroupRequest(2, DesiredCount: 1, SubmissionLimit: 2));
         coordinator.PreparationCompleted(attempt.Id);
-        var start = Assert.Single(coordinator.StartCompleted(
-            attempt.Id, new BackendReceipt("manager"), isRunning: true));
+        coordinator.PlanEffects();
+        coordinator.StartCompleted(attempt.Id, new BackendReceipt("manager"), isRunning: true);
+        var start = Assert.Single(coordinator.PlanEffects());
         var workerStart = Assert.IsType<StartWorker>(start);
         coordinator.WorkerStarted(
             attempt.Id, workerStart.OperationId, new BackendReceipt("worker"), isRunning: true);
 
-        var completion = coordinator.Observe(
-            attempt.Id, new BackendObservation(BackendObservationKind.Succeeded));
+        coordinator.Observe(attempt.Id, new BackendObservation(BackendObservationKind.Succeeded));
+        var completion = coordinator.PlanEffects();
 
         var cancel = Assert.Single(completion.OfType<CancelWorkers>());
         Assert.Equal("worker", Assert.Single(cancel.Receipts).Id);
         Assert.DoesNotContain(completion, effect => effect is FinalizeExecution);
 
-        var cleanup = coordinator.WorkersCanceled(attempt.Id, ["worker"]);
+        coordinator.WorkersCanceled(attempt.Id, ["worker"]);
+        var cleanup = coordinator.PlanEffects();
 
         Assert.Single(cleanup, effect => effect is FinalizeExecution);
     }
@@ -427,15 +482,16 @@ public class ExecutionCoordinatorTests
         var coordinator = new ExecutionCoordinator([LocalQueue, workerQueue]);
         var attempt = coordinator.RequestRun(
             Job(1), -1, new ResourceVector(1, 1, 0), dependenciesReady: true,
-            new WorkerGroupRequest(2, DesiredCount: 1, SubmissionLimit: 2)).Attempt;
+            new WorkerGroupRequest(2, DesiredCount: 1, SubmissionLimit: 2));
         coordinator.PreparationCompleted(attempt.Id);
-        var workerStart = Assert.IsType<StartWorker>(Assert.Single(coordinator.StartCompleted(
-            attempt.Id, new BackendReceipt("manager"), isRunning: true)));
+        coordinator.PlanEffects();
+        coordinator.StartCompleted(attempt.Id, new BackendReceipt("manager"), isRunning: true);
+        var workerStart = Assert.IsType<StartWorker>(Assert.Single(coordinator.PlanEffects()));
         coordinator.WorkerStartIndeterminate(
             attempt.Id, workerStart.OperationId, "submission timed out");
 
-        var completion = coordinator.Observe(
-            attempt.Id, new BackendObservation(BackendObservationKind.Succeeded));
+        coordinator.Observe(attempt.Id, new BackendObservation(BackendObservationKind.Succeeded));
+        var completion = coordinator.PlanEffects();
         var finalization = Assert.IsType<FinalizeExecution>(Assert.Single(completion));
 
         Assert.Equal(ExecutionOutcome.Interrupted, finalization.Outcome);
@@ -455,15 +511,17 @@ public class ExecutionCoordinatorTests
         var coordinator = new ExecutionCoordinator([LocalQueue, workerQueue]);
         var attempt = coordinator.RequestRun(
             Job(1), -1, new ResourceVector(1, 1, 0), dependenciesReady: true,
-            new WorkerGroupRequest(2, DesiredCount: 1, SubmissionLimit: 2)).Attempt;
+            new WorkerGroupRequest(2, DesiredCount: 1, SubmissionLimit: 2));
         coordinator.PreparationCompleted(attempt.Id);
-        var workerStart = Assert.IsType<StartWorker>(Assert.Single(coordinator.StartCompleted(
-            attempt.Id, new BackendReceipt("manager"), isRunning: true)));
+        coordinator.PlanEffects();
+        coordinator.StartCompleted(attempt.Id, new BackendReceipt("manager"), isRunning: true);
+        var workerStart = Assert.IsType<StartWorker>(Assert.Single(coordinator.PlanEffects()));
 
-        Assert.Empty(coordinator.Observe(
-            attempt.Id, new BackendObservation(BackendObservationKind.Succeeded)));
-        var effects = coordinator.WorkerStartIndeterminate(
+        coordinator.Observe(attempt.Id, new BackendObservation(BackendObservationKind.Succeeded));
+        Assert.DoesNotContain(coordinator.PlanEffects(), effect => effect is FinalizeExecution);
+        coordinator.WorkerStartIndeterminate(
             attempt.Id, workerStart.OperationId, "submission timed out");
+        var effects = coordinator.PlanEffects();
 
         var finalization = Assert.IsType<FinalizeExecution>(Assert.Single(effects));
         Assert.Equal(ExecutionOutcome.Interrupted, finalization.Outcome);
@@ -479,10 +537,11 @@ public class ExecutionCoordinatorTests
         var original = new ExecutionCoordinator([managerQueue, workerQueue]);
         var attempt = original.RequestRun(
             Job(1), 1, ResourceVector.None, dependenciesReady: true,
-            new WorkerGroupRequest(2, DesiredCount: 1, SubmissionLimit: 2)).Attempt;
+            new WorkerGroupRequest(2, DesiredCount: 1, SubmissionLimit: 2));
         original.PreparationCompleted(attempt.Id);
-        Assert.IsType<StartWorker>(Assert.Single(original.StartCompleted(
-            attempt.Id, new BackendReceipt("manager"), isRunning: true)));
+        original.PlanEffects();
+        original.StartCompleted(attempt.Id, new BackendReceipt("manager"), isRunning: true);
+        Assert.IsType<StartWorker>(Assert.Single(original.PlanEffects()));
 
         var restored = new ExecutionCoordinator([managerQueue, workerQueue]);
         restored.Restore(original.CreateSnapshot());
@@ -492,8 +551,8 @@ public class ExecutionCoordinatorTests
         Assert.Equal(WorkerPhase.Indeterminate, Assert.Single(copy.WorkerGroup.Workers).Phase);
         Assert.Equal(ExecutionHealth.Indeterminate, copy.Health);
 
-        var completion = restored.Observe(
-            copy.Id, new BackendObservation(BackendObservationKind.Succeeded));
+        restored.Observe(copy.Id, new BackendObservation(BackendObservationKind.Succeeded));
+        var completion = restored.PlanEffects();
         Assert.Equal(
             ExecutionOutcome.Interrupted,
             Assert.IsType<FinalizeExecution>(Assert.Single(completion)).Outcome);
@@ -507,19 +566,20 @@ public class ExecutionCoordinatorTests
         var original = new ExecutionCoordinator([managerQueue, workerQueue]);
         var attempt = original.RequestRun(
             Job(1), 1, ResourceVector.None, dependenciesReady: true,
-            new WorkerGroupRequest(2, DesiredCount: 1, SubmissionLimit: 2)).Attempt;
+            new WorkerGroupRequest(2, DesiredCount: 1, SubmissionLimit: 2));
         original.PreparationCompleted(attempt.Id);
-        var workerStart = Assert.IsType<StartWorker>(Assert.Single(original.StartCompleted(
-            attempt.Id, new BackendReceipt("manager"), isRunning: true)));
+        original.PlanEffects();
+        original.StartCompleted(attempt.Id, new BackendReceipt("manager"), isRunning: true);
+        var workerStart = Assert.IsType<StartWorker>(Assert.Single(original.PlanEffects()));
         original.WorkerStarted(
             attempt.Id, workerStart.OperationId, new BackendReceipt("worker"), isRunning: true);
-        Assert.Single(original.Observe(
-            attempt.Id, new BackendObservation(BackendObservationKind.Succeeded)),
-            effect => effect is CancelWorkers);
+        original.Observe(attempt.Id, new BackendObservation(BackendObservationKind.Succeeded));
+        Assert.Single(original.PlanEffects(), effect => effect is CancelWorkers);
 
         var restored = new ExecutionCoordinator([managerQueue, workerQueue]);
         restored.Restore(original.CreateSnapshot());
-        var effects = restored.Recover();
+        restored.Recover();
+        var effects = restored.PlanEffects();
 
         Assert.Single(effects, effect => effect is CancelWorkers);
         Assert.DoesNotContain(effects, effect => effect is FinalizeExecution);
@@ -531,8 +591,9 @@ public class ExecutionCoordinatorTests
     {
         var coordinator = new ExecutionCoordinator([LocalQueue]);
         var attempt = coordinator.RequestRun(
-            Job(1), -1, ResourceVector.None, dependenciesReady: true).Attempt;
+            Job(1), -1, ResourceVector.None, dependenciesReady: true);
         coordinator.PreparationCompleted(attempt.Id);
+        coordinator.PlanEffects();
         coordinator.StartCompleted(attempt.Id, new BackendReceipt("local"), isRunning: true);
         coordinator.Observe(
             attempt.Id, new BackendObservation(BackendObservationKind.Failed, "exit code 17"));
@@ -550,13 +611,13 @@ public class ExecutionCoordinatorTests
 
         var requested = coordinator.RequestFinalization(Job(1), -1);
 
-        Assert.Equal(ExecutionPurpose.FinalizeOnly, requested.Attempt.Purpose);
-        Assert.Equal(ExecutionPhase.Finalizing, requested.Attempt.Phase);
-        Assert.Single(requested.Effects, effect => effect is FinalizeExecution);
+        Assert.Equal(ExecutionPurpose.FinalizeOnly, requested.Purpose);
+        Assert.Equal(ExecutionPhase.Finalizing, requested.Phase);
+        Assert.Single(coordinator.PlanEffects(), effect => effect is FinalizeExecution);
 
-        coordinator.FinalizationCompleted(requested.Attempt.Id);
+        coordinator.FinalizationCompleted(requested.Id);
 
-        Assert.Equal(ExecutionPhase.Succeeded, requested.Attempt.Phase);
+        Assert.Equal(ExecutionPhase.Succeeded, requested.Phase);
     }
 
     [Fact]
@@ -565,12 +626,14 @@ public class ExecutionCoordinatorTests
         var external = new ExecutionQueuePolicy(4, ExecutionBackendKind.ExternalScheduler);
         var original = new ExecutionCoordinator([external]);
         var attempt = original.RequestRun(
-            Job(1), 4, new ResourceVector(1, 1, 0), dependenciesReady: true).Attempt;
+            Job(1), 4, new ResourceVector(1, 1, 0), dependenciesReady: true);
         original.PreparationCompleted(attempt.Id);
+        original.PlanEffects();
 
         var restored = new ExecutionCoordinator([external]);
         restored.Restore(original.CreateSnapshot());
-        var effects = restored.Recover();
+        restored.Recover();
+        var effects = restored.PlanEffects();
         var copy = Assert.Single(restored.Attempts);
 
         Assert.Empty(effects);
@@ -585,11 +648,12 @@ public class ExecutionCoordinatorTests
         var external = new ExecutionQueuePolicy(4, ExecutionBackendKind.ExternalScheduler);
         var original = new ExecutionCoordinator([external]);
         var first = original.RequestRun(
-            Job(1), 4, ResourceVector.None, dependenciesReady: true).Attempt;
+            Job(1), 4, ResourceVector.None, dependenciesReady: true);
         var second = original.RequestRun(
-            Job(2), 4, ResourceVector.None, dependenciesReady: true).Attempt;
+            Job(2), 4, ResourceVector.None, dependenciesReady: true);
         original.PreparationCompleted(first.Id);
         original.PreparationCompleted(second.Id);
+        original.PlanEffects();
         var snapshot = original.CreateSnapshot();
         snapshot = snapshot with
         {
@@ -601,7 +665,8 @@ public class ExecutionCoordinatorTests
 
         var restored = new ExecutionCoordinator([external]);
         restored.Restore(snapshot);
-        var effects = restored.Recover();
+        restored.Recover();
+        var effects = restored.PlanEffects();
 
         Assert.Equal(ExecutionPhase.Pending, restored.CurrentAttempt(first.Job).Phase);
         Assert.Single(effects, effect =>
@@ -614,13 +679,15 @@ public class ExecutionCoordinatorTests
         var external = new ExecutionQueuePolicy(4, ExecutionBackendKind.ExternalScheduler);
         var coordinator = new ExecutionCoordinator([external]);
         var first = coordinator.RequestRun(
-            Job(1), 4, ResourceVector.None, dependenciesReady: true).Attempt;
+            Job(1), 4, ResourceVector.None, dependenciesReady: true);
         var second = coordinator.RequestRun(
-            Job(2), 4, ResourceVector.None, dependenciesReady: true).Attempt;
+            Job(2), 4, ResourceVector.None, dependenciesReady: true);
         coordinator.PreparationCompleted(first.Id);
         coordinator.PreparationCompleted(second.Id);
+        coordinator.PlanEffects();
 
-        var effects = coordinator.StartIndeterminate(first.Id, "submission timed out");
+        coordinator.StartIndeterminate(first.Id, "submission timed out");
+        var effects = coordinator.PlanEffects();
 
         Assert.Equal(ExecutionPhase.Interrupted, first.Phase);
         Assert.Equal(ExecutionHealth.Indeterminate, first.Health);
@@ -637,8 +704,9 @@ public class ExecutionCoordinatorTests
             BackendConfiguration: "{\"scheduler\":\"snapshot\"}");
         var original = new ExecutionCoordinator([external]);
         var attempt = original.RequestRun(
-            Job(1), 4, new ResourceVector(1, 1, 0), dependenciesReady: true).Attempt;
+            Job(1), 4, new ResourceVector(1, 1, 0), dependenciesReady: true);
         original.PreparationCompleted(attempt.Id);
+        original.PlanEffects();
         original.StartCompleted(attempt.Id, new BackendReceipt("42"), isRunning: false);
 
         var restored = new ExecutionCoordinator([]);
@@ -646,6 +714,7 @@ public class ExecutionCoordinatorTests
 
         var copy = Assert.Single(restored.Attempts);
         Assert.Equal("42", copy.Receipt.Id);
-        Assert.Empty(restored.Recover());
+        restored.Recover();
+        Assert.Empty(restored.PlanEffects());
     }
 }

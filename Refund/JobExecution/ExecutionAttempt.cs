@@ -9,6 +9,7 @@ public enum ExecutionPhase
     Pending,
     Running,
     Cancelling,
+    Stopping,
     Finalizing,
     Succeeded,
     Failed,
@@ -121,7 +122,6 @@ public sealed record ExecutionAttemptSnapshot(
     int[] GpuIndices,
     BackendReceipt Receipt,
     ExecutionOutcome? PendingOutcome,
-    bool FinalizationIssued,
     WorkerGroupSnapshot WorkerGroup,
     DateTimeOffset CreatedAt,
     ExecutionHistoryEntry[] History);
@@ -166,7 +166,7 @@ public sealed record StartExecution(Guid AttemptId, IReadOnlyList<int> GpuIndice
 
 public sealed record ActivateExecution(Guid AttemptId) : ExecutionEffect(AttemptId);
 
-public sealed record CancelExecution(Guid AttemptId, BackendReceipt Receipt = null)
+public sealed record CancelExecution(Guid AttemptId, BackendReceipt Receipt)
     : ExecutionEffect(AttemptId);
 
 public sealed record FinalizeExecution(Guid AttemptId, ExecutionOutcome Outcome)
@@ -301,7 +301,6 @@ public sealed class ExecutionAttempt
         GpuIndices = snapshot.GpuIndices ?? Array.Empty<int>();
         Receipt = snapshot.Receipt;
         PendingOutcome = snapshot.PendingOutcome;
-        FinalizationIssued = snapshot.FinalizationIssued;
         WorkerGroup = snapshot.WorkerGroup == null ? null : new WorkerGroupState(snapshot.WorkerGroup);
         CreatedAt = snapshot.CreatedAt;
         _history.AddRange(snapshot.History ?? Array.Empty<ExecutionHistoryEntry>());
@@ -326,7 +325,6 @@ public sealed class ExecutionAttempt
     public IReadOnlyList<int> GpuIndices { get; internal set; } = Array.Empty<int>();
     public BackendReceipt Receipt { get; internal set; }
     public ExecutionOutcome? PendingOutcome { get; internal set; }
-    public bool FinalizationIssued { get; internal set; }
     public WorkerGroupState WorkerGroup { get; }
     public DateTimeOffset CreatedAt { get; }
     public IReadOnlyList<ExecutionHistoryEntry> History => _history;
@@ -359,7 +357,6 @@ public sealed class ExecutionAttempt
         GpuIndices.ToArray(),
         Receipt,
         PendingOutcome,
-        FinalizationIssued,
         WorkerGroup?.CreateSnapshot(),
         CreatedAt,
         _history.ToArray());

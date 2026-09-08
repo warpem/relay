@@ -62,6 +62,28 @@ public class ExecutionRuntimeTests
     }
 
     [Fact]
+    public async Task RepeatedReconciliationDoesNotDuplicateAnInFlightEffect()
+    {
+        var operations = new FakeOperations { HoldPreparation = true };
+        await using var runtime = new ExecutionRuntime(
+            new ExecutionCoordinator([LocalQueue]),
+            operations,
+            new RecordingStateStore(),
+            _ => Task.CompletedTask);
+        await runtime.InitializeAsync();
+
+        await runtime.RequestRunAsync(
+            new JobAddress(1, 1, 1), -1, new ResourceVector(1, 1, 0), true);
+        await WaitUntilAsync(() => operations.PrepareCalls == 1);
+
+        await runtime.TickAsync();
+        await runtime.TickAsync();
+
+        Assert.Equal(1, operations.PrepareCalls);
+        operations.ReleasePreparation();
+    }
+
+    [Fact]
     public async Task CancelDuringPreparationSettlesAsCanceled()
     {
         var operations = new FakeOperations { HoldPreparation = true };
@@ -92,17 +114,17 @@ public class ExecutionRuntimeTests
     [Fact]
     public async Task CommitFailureAfterManagedHandshakeDoesNotMisclassifyTheStart()
     {
+        var managedQueue = LocalQueue with { BackendKind = ExecutionBackendKind.Managed };
         var store = new RecordingStateStore();
         var operations = new FakeOperations
         {
             StartResult = new BackendStartResult(
                 new BackendReceipt("runner"),
-                IsRunning: false,
-                RequiresActivation: true),
+                IsRunning: false),
             OnStart = () => store.FailNextSave = true
         };
         await using var runtime = new ExecutionRuntime(
-            new ExecutionCoordinator([LocalQueue]),
+            new ExecutionCoordinator([managedQueue]),
             operations,
             store,
             _ => Task.CompletedTask);
@@ -129,7 +151,7 @@ public class ExecutionRuntimeTests
         {
             var coordinator = new ExecutionCoordinator([LocalQueue]);
             var attempt = coordinator.RequestRun(
-                new JobAddress(2, 3, 4), -1, new ResourceVector(1, 2, 0), true).Attempt;
+                new JobAddress(2, 3, 4), -1, new ResourceVector(1, 2, 0), true);
             var store = new JsonExecutionStateStore(path);
 
             await store.SaveAsync(coordinator.CreateSnapshot(), CancellationToken.None);
@@ -199,20 +221,25 @@ public class ExecutionRuntimeTests
     }
 
     [Fact]
-    public async Task ProjectionFailureOnlyWithholdsEffectsForThatAttempt()
+    public async Task ProjectionFailureDoesNotWithholdExecutionAndIsRetried()
     {
         var firstQueue = new ExecutionQueuePolicy(1, ExecutionBackendKind.Local);
         var secondQueue = new ExecutionQueuePolicy(2, ExecutionBackendKind.Local);
         var operations = new FakeOperations();
         bool failFirstProjection = true;
+        int firstProjectionCalls = 0;
         await using var runtime = new ExecutionRuntime(
             new ExecutionCoordinator([firstQueue, secondQueue]),
             operations,
             new RecordingStateStore(),
             attempt =>
             {
-                if (failFirstProjection && attempt.Job.JobId == 1)
-                    throw new IOException("projection unavailable");
+                if (attempt.Job.JobId == 1)
+                {
+                    Interlocked.Increment(ref firstProjectionCalls);
+                    if (failFirstProjection)
+                        throw new IOException("projection unavailable");
+                }
                 return Task.CompletedTask;
             });
         await runtime.InitializeAsync();
@@ -221,12 +248,44 @@ public class ExecutionRuntimeTests
         await runtime.RequestRunAsync(
             new JobAddress(1, 1, 2), 2, ResourceVector.None, true);
 
-        await WaitUntilAsync(() => operations.PreparedJobs.Contains(new JobAddress(1, 1, 2)));
-        Assert.DoesNotContain(new JobAddress(1, 1, 1), operations.PreparedJobs);
+        await WaitUntilAsync(() => operations.PreparedJobs.Count == 2);
+        Assert.Contains(new JobAddress(1, 1, 1), operations.PreparedJobs);
+        Assert.Contains(new JobAddress(1, 1, 2), operations.PreparedJobs);
 
+        int failedProjectionCalls = Volatile.Read(ref firstProjectionCalls);
         failFirstProjection = false;
         await runtime.TickAsync();
-        await WaitUntilAsync(() => operations.PreparedJobs.Contains(new JobAddress(1, 1, 1)));
+        Assert.True(Volatile.Read(ref firstProjectionCalls) > failedProjectionCalls);
+    }
+
+    [Fact]
+    public async Task AcceptedCancellationIsNotSentAgainWhileWaitingForTerminalEvidence()
+    {
+        var externalQueue = new ExecutionQueuePolicy(1, ExecutionBackendKind.ExternalScheduler);
+        var operations = new FakeOperations
+        {
+            StartResult = new BackendStartResult(new BackendReceipt("scheduler-1"), IsRunning: false),
+            CancelResult = new BackendObservation(
+                BackendObservationKind.Indeterminate,
+                "cancellation accepted"),
+            ObserveResult = new BackendObservation(BackendObservationKind.Indeterminate)
+        };
+        await using var runtime = new ExecutionRuntime(
+            new ExecutionCoordinator([externalQueue]),
+            operations,
+            new RecordingStateStore(),
+            _ => Task.CompletedTask);
+        await runtime.InitializeAsync();
+        var address = new JobAddress(1, 1, 1);
+        await runtime.RequestRunAsync(address, 1, ResourceVector.None, true);
+        await WaitUntilAsync(() => runtime.Attempts.Single().Phase == ExecutionPhase.Pending);
+
+        await runtime.RequestCancelAsync(address);
+        await WaitUntilAsync(() => runtime.Attempts.Single().Phase == ExecutionPhase.Stopping);
+        await runtime.TickAsync();
+        await runtime.TickAsync();
+
+        Assert.Equal(1, operations.CancelCalls);
     }
 
     [Fact]
@@ -330,6 +389,7 @@ public class ExecutionRuntimeTests
         public int PrepareCalls { get; private set; }
         public int StartCalls { get; private set; }
         public int ActivateCalls { get; private set; }
+        public int CancelCalls { get; private set; }
         public int ShutdownCalls { get; private set; }
         public int FinalizeCalls { get; private set; }
         public bool HoldMaintenance { get; set; }
@@ -341,6 +401,8 @@ public class ExecutionRuntimeTests
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         public BackendObservation ObserveResult { get; set; } =
             new(BackendObservationKind.Running);
+        public BackendObservation CancelResult { get; init; } =
+            new(BackendObservationKind.Canceled);
 
         public bool DependenciesReady(ExecutionAttemptSnapshot attempt) =>
             DependenciesReadyHandler?.Invoke(attempt) ?? true;
@@ -385,8 +447,11 @@ public class ExecutionRuntimeTests
         public Task<BackendObservation> CancelAsync(
             ExecutionAttemptSnapshot attempt,
             BackendReceipt receipt,
-            CancellationToken cancellationToken) =>
-            Task.FromResult(new BackendObservation(BackendObservationKind.Canceled));
+            CancellationToken cancellationToken)
+        {
+            CancelCalls++;
+            return Task.FromResult(CancelResult);
+        }
 
         public Task FinalizeAsync(
             ExecutionAttemptSnapshot attempt,

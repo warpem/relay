@@ -85,8 +85,7 @@ public sealed class ManagedExecutionHost
                 control = null;
                 return new BackendStartResult(
                     new BackendReceipt(execution.ProcessId.ToString()),
-                    IsRunning: false,
-                    RequiresActivation: true);
+                    IsRunning: false);
             }
             finally
             {

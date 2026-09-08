@@ -397,7 +397,8 @@ public sealed class QueueRepository
             ExecutionPhase.Starting or
             ExecutionPhase.Pending => JobStatus.Staging,
             ExecutionPhase.Running => JobStatus.Running,
-            ExecutionPhase.Cancelling => JobStatus.Aborting,
+            ExecutionPhase.Cancelling or
+            ExecutionPhase.Stopping => JobStatus.Aborting,
             ExecutionPhase.Finalizing => JobStatus.Finalizing,
             ExecutionPhase.Succeeded => JobStatus.Finished,
             ExecutionPhase.Failed => JobStatus.Failed,
