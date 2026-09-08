@@ -707,24 +707,15 @@ public sealed class ExecutionRuntime : IAsyncDisposable
         ExecutionAttemptSnapshot attempt,
         CancellationToken cancellationToken)
     {
-        var key = new EffectKey(nameof(RunMaintenanceAsync), attempt.Id, Guid.Empty, "");
-        if (!_runningEffects.TryAdd(key, 0))
+        var maintenanceGate = _maintenanceGates.GetOrAdd(
+            attempt.Id,
+            _ => new SemaphoreSlim(1, 1));
+        if (!maintenanceGate.Wait(0))
             return;
 
         try
         {
-            var maintenanceGate = _maintenanceGates.GetOrAdd(
-                attempt.Id,
-                _ => new SemaphoreSlim(1, 1));
-            await maintenanceGate.WaitAsync(cancellationToken);
-            try
-            {
-                await _operations.TrackProgressAsync(attempt, cancellationToken);
-            }
-            finally
-            {
-                maintenanceGate.Release();
-            }
+            await _operations.TrackProgressAsync(attempt, cancellationToken);
         }
         catch (Exception exception)
         {
@@ -735,7 +726,7 @@ public sealed class ExecutionRuntime : IAsyncDisposable
         }
         finally
         {
-            _runningEffects.TryRemove(key, out _);
+            maintenanceGate.Release();
         }
     }
 
