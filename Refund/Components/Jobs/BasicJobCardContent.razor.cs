@@ -23,8 +23,9 @@ public partial class BasicJobCardContent : ComponentBase, IAsyncDisposable
     private IJSObjectReference _module;
     private bool _isModuleInitialized;
 
+    private bool _showErrorTail;
     private bool _showLogTail;
-    private bool _logTailNeedsInit;
+    private bool _tailNeedsInit;
     private bool _showQueueInfo;
     private string _queueAlias;
 
@@ -51,15 +52,34 @@ public partial class BasicJobCardContent : ComponentBase, IAsyncDisposable
             _previousVisIteration = Job.VisAvailableIteration;
         }
 
+        bool wasShowingErrorTail = _showErrorTail;
         bool wasShowingLogTail = _showLogTail;
+        bool wasShowingAnyTail = wasShowingErrorTail || wasShowingLogTail;
 
+        _showErrorTail = false;
         _showLogTail = false;
+        _tailNeedsInit = false;
         _showQueueInfo = false;
         _queueAlias = null;
 
-        if (Job == null || Job.Status == JobStatus.Failed || Job.VisAvailableIteration >= 0)
+        if (Job == null)
         {
-            if (wasShowingLogTail && !jobChanged)
+            if (wasShowingAnyTail && !jobChanged)
+                _staleElementId = _elementId;
+            return;
+        }
+
+        if (Job.Status == JobStatus.Failed)
+        {
+            _showErrorTail = true;
+            if (!wasShowingErrorTail || jobChanged)
+                _tailNeedsInit = true;
+            return;
+        }
+
+        if (Job.VisAvailableIteration >= 0)
+        {
+            if (wasShowingAnyTail && !jobChanged)
                 _staleElementId = _elementId;
             return;
         }
@@ -78,9 +98,9 @@ public partial class BasicJobCardContent : ComponentBase, IAsyncDisposable
         {
             _showLogTail = true;
             if (!wasShowingLogTail || jobChanged)
-                _logTailNeedsInit = true;
+                _tailNeedsInit = true;
         }
-        else if (wasShowingLogTail && !jobChanged)
+        else if (wasShowingAnyTail && !jobChanged)
         {
             _staleElementId = _elementId;
         }
@@ -98,32 +118,40 @@ public partial class BasicJobCardContent : ComponentBase, IAsyncDisposable
 
         if (_isModuleInitialized && _staleElementId != null)
         {
-            await _module.InvokeVoidAsync("cleanupLogTail", _staleElementId);
+            await _module.InvokeVoidAsync("cleanupFileTail", _staleElementId);
             _staleElementId = null;
         }
 
-        if (_isModuleInitialized && _logTailNeedsInit)
+        if (_isModuleInitialized && _tailNeedsInit)
         {
-            _logTailNeedsInit = false;
-            await StartLogTail();
+            _tailNeedsInit = false;
+            await StartFileTail();
         }
     }
 
-    private async Task StartLogTail()
+    private async Task StartFileTail()
     {
         if (_module == null)
             return;
 
-        // Prefer the Relay log file (.relay/log_it{NNNN}.txt) — works for both local and cluster jobs.
-        // Fall back to raw stdout for cluster jobs that haven't had logs processed yet.
-        string logPath = Job.LogsAvailableIteration >= 0
-            ? Job.LogFilePath(Job.LogsAvailableIteration)
-            : Path.Combine(Job.DirectoryPath, Job.NameStdOut);
+        string filePath;
+        if (_showErrorTail)
+        {
+            filePath = Job.ErrorFilePath;
+        }
+        else
+        {
+            // Prefer the Relay log file (.relay/log_it{NNNN}.txt) — works for both local and cluster jobs.
+            // Fall back to raw stdout for cluster jobs that haven't had logs processed yet.
+            filePath = Job.LogsAvailableIteration >= 0
+                ? Job.LogFilePath(Job.LogsAvailableIteration)
+                : Path.Combine(Job.DirectoryPath, Job.NameStdOut);
+        }
 
-        var url = FileService.GetUrl(logPath);
-        var pollInterval = Job.Status.IsUnsettled() ? 3000 : 0;
+        var url = FileService.GetUrl(filePath);
+        var pollInterval = !_showErrorTail && Job.Status.IsUnsettled() ? 3000 : 0;
 
-        await _module.InvokeVoidAsync("initializeLogTail", _elementId, url, pollInterval);
+        await _module.InvokeVoidAsync("initializeFileTail", _elementId, url, pollInterval);
     }
 
     public async ValueTask DisposeAsync()
@@ -132,7 +160,7 @@ public partial class BasicJobCardContent : ComponentBase, IAsyncDisposable
         {
             if (_module != null)
             {
-                await _module.InvokeVoidAsync("cleanupLogTail", _elementId);
+                await _module.InvokeVoidAsync("cleanupFileTail", _elementId);
                 await _module.DisposeAsync();
             }
         }

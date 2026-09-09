@@ -6,14 +6,7 @@
     <div style="display: flex; justify-content: stretch;
                 align-items: stretch; width: 100%; height: 100%; padding: 0 10px;">
         <pre style="padding: 0.3rem 0.5rem; min-width: 100%; min-height: 100%;" class="error-message">
-            @if (File.Exists(Job.ErrorFilePath))
-            {
-                @File.ReadAllText(Job.ErrorFilePath)
-            }
-            else
-            {
-                <span>No error information available</span>
-            }
+            <span id="@_elementId">No error information available</span>
         </pre>
     </div>
 }
@@ -21,6 +14,7 @@ else if (Job.VisAvailableIteration >= 0)
 {
     <div style="display: flex; justify-content: center; align-items: center; height: 100%;">
         <ServerImage ServerPath="@Job.VisCard(Job.IsIterative ? Job.VisAvailableIteration : 0)"
+                     CacheKey="@Job.UpdateDate.Ticks.ToString()"
                      style="@($"height: {VisualProvider.JabCardContentSquareSideLength * Job.CardSquareCount.Y}px")"/>
     </div>
 }

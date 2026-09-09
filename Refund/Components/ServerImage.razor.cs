@@ -25,6 +25,12 @@ public partial class ServerImage : ComponentBase
     public string ServerPath { get; set; }
 
     /// <summary>
+    /// Optional semantic cache version supplied by the caller without touching the filesystem.
+    /// </summary>
+    [Parameter]
+    public string CacheKey { get; set; }
+
+    /// <summary>
     /// Additional HTML attributes to apply to the img element
     /// </summary>
     [Parameter(CaptureUnmatchedValues = true)]

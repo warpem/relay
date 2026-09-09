@@ -1,9 +1,10 @@
 const activeTails = new Map();
 
-async function fetchTail(url) {
+async function fetchTail(url, signal) {
     try {
         const response = await fetch(`${url}?t=${Date.now()}`, {
-            headers: { 'Range': 'bytes=-4096' }
+            headers: { 'Range': 'bytes=-4096' },
+            signal
         });
 
         if (!response.ok)
@@ -29,33 +30,40 @@ async function fetchTail(url) {
     }
 }
 
-async function updateElement(elementId, url) {
+async function updateElement(elementId, url, state) {
     const element = document.getElementById(elementId);
     if (!element)
         return;
 
-    const content = await fetchTail(url);
-    if (content !== null)
+    state.controller?.abort();
+    state.controller = new AbortController();
+    const content = await fetchTail(url, state.controller.signal);
+    if (!state.disposed && content !== null)
         element.textContent = content;
 }
 
-function initializeLogTail(elementId, url, pollIntervalMs) {
-    cleanupLogTail(elementId);
+function initializeFileTail(elementId, url, pollIntervalMs) {
+    cleanupFileTail(elementId);
 
-    updateElement(elementId, url);
+    const state = { intervalId: null, controller: null, disposed: false };
+    activeTails.set(elementId, state);
 
-    if (pollIntervalMs > 0) {
-        const intervalId = setInterval(() => updateElement(elementId, url), pollIntervalMs);
-        activeTails.set(elementId, intervalId);
-    }
+    updateElement(elementId, url, state);
+
+    if (pollIntervalMs > 0)
+        state.intervalId = setInterval(() => updateElement(elementId, url, state), pollIntervalMs);
 }
 
-function cleanupLogTail(elementId) {
-    const intervalId = activeTails.get(elementId);
-    if (intervalId) {
-        clearInterval(intervalId);
-        activeTails.delete(elementId);
-    }
+function cleanupFileTail(elementId) {
+    const state = activeTails.get(elementId);
+    if (!state)
+        return;
+
+    state.disposed = true;
+    state.controller?.abort();
+    if (state.intervalId)
+        clearInterval(state.intervalId);
+    activeTails.delete(elementId);
 }
 
-export { initializeLogTail, cleanupLogTail };
+export { initializeFileTail, cleanupFileTail };
