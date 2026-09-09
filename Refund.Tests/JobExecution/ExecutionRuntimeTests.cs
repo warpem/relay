@@ -104,10 +104,10 @@ public class ExecutionRuntimeTests
         await WaitUntilAsync(() => operations.PrepareCalls == 1);
 
         await runtime.RequestCancelAsync(address);
-        await WaitUntilAsync(() => runtime.Attempts.Single().Phase == ExecutionPhase.Canceled);
+        await WaitUntilAsync(() => projected.Contains(ExecutionPhase.Canceled));
 
         Assert.Contains(ExecutionPhase.Cancelling, projected);
-        Assert.Equal(ExecutionPhase.Canceled, runtime.Attempts.Single().Phase);
+        Assert.Empty(runtime.Attempts);
         Assert.Equal(0, operations.StartCalls);
     }
 
@@ -201,11 +201,17 @@ public class ExecutionRuntimeTests
         {
             DependenciesReadyHandler = _ => throw new InvalidOperationException("invalid graph")
         };
+        var projected = new ConcurrentQueue<ExecutionAttemptSnapshot>();
+        var store = new RecordingStateStore();
         await using var runtime = new ExecutionRuntime(
             new ExecutionCoordinator([LocalQueue]),
             operations,
-            new RecordingStateStore(),
-            _ => Task.CompletedTask);
+            store,
+            attempt =>
+            {
+                projected.Enqueue(attempt);
+                return Task.CompletedTask;
+            });
         await runtime.InitializeAsync();
         await runtime.RequestRunAsync(
             new JobAddress(1, 1, 1), -1, new ResourceVector(1, 1, 0), false);
@@ -213,11 +219,104 @@ public class ExecutionRuntimeTests
         await runtime.TickAsync();
         await runtime.TickAsync();
 
-        var attempt = Assert.Single(runtime.Attempts);
+        var attempt = projected.Last(item => item.Phase == ExecutionPhase.Failed);
         Assert.Equal(ExecutionPhase.Failed, attempt.Phase);
         Assert.Single(attempt.History, entry =>
             entry.Detail == "Dependency readiness check failed: invalid graph");
+        Assert.Empty(runtime.Attempts);
+        Assert.Empty(store.Snapshot.Attempts);
         Assert.Equal(0, operations.PrepareCalls);
+    }
+
+    [Fact]
+    public async Task TerminalAttemptRemainsDurableUntilProjectionSucceeds()
+    {
+        var operations = new FakeOperations
+        {
+            DependenciesReadyHandler = _ => throw new InvalidOperationException("invalid graph")
+        };
+        var store = new RecordingStateStore();
+        bool rejectTerminalProjection = true;
+        await using var runtime = new ExecutionRuntime(
+            new ExecutionCoordinator([LocalQueue]),
+            operations,
+            store,
+            attempt =>
+            {
+                if (attempt.Phase.IsTerminal() && rejectTerminalProjection)
+                    throw new IOException("space unavailable");
+                return Task.CompletedTask;
+            });
+        await runtime.InitializeAsync();
+        await runtime.RequestRunAsync(
+            new JobAddress(1, 1, 1), -1, ResourceVector.None, false);
+
+        await runtime.TickAsync();
+
+        Assert.Equal(ExecutionPhase.Failed, Assert.Single(runtime.Attempts).Phase);
+        Assert.Equal(ExecutionPhase.Failed, Assert.Single(store.Snapshot.Attempts).Phase);
+
+        rejectTerminalProjection = false;
+        await runtime.TickAsync();
+
+        Assert.Empty(runtime.Attempts);
+        Assert.Empty(store.Snapshot.Attempts);
+    }
+
+    [Fact]
+    public async Task InitializationProjectsAndPrunesStoredTerminalAttempts()
+    {
+        var coordinator = new ExecutionCoordinator([LocalQueue]);
+        var attempt = coordinator.RequestRun(
+            new JobAddress(1, 1, 1), -1, ResourceVector.None, true);
+        coordinator.PreparationFailed(attempt.Id, "invalid input");
+        var store = new RecordingStateStore();
+        await store.SaveAsync(coordinator.CreateSnapshot(), CancellationToken.None);
+        var projected = new ConcurrentQueue<ExecutionPhase>();
+        await using var runtime = new ExecutionRuntime(
+            new ExecutionCoordinator([LocalQueue]),
+            new FakeOperations(),
+            store,
+            snapshot =>
+            {
+                projected.Enqueue(snapshot.Phase);
+                return Task.CompletedTask;
+            });
+
+        await runtime.InitializeAsync();
+
+        Assert.Contains(ExecutionPhase.Failed, projected);
+        Assert.Empty(runtime.Attempts);
+        Assert.Empty(store.Snapshot.Attempts);
+    }
+
+    [Fact]
+    public async Task ActiveAttemptSupersedesStoredTerminalHistoryForTheSameAddress()
+    {
+        var externalQueue = new ExecutionQueuePolicy(1, ExecutionBackendKind.ExternalScheduler);
+        var address = new JobAddress(1, 1, 1);
+        var coordinator = new ExecutionCoordinator([externalQueue]);
+        var oldAttempt = coordinator.RequestRun(address, 1, ResourceVector.None, true);
+        coordinator.PreparationFailed(oldAttempt.Id, "old failure");
+        var activeAttempt = coordinator.RequestRun(address, 1, ResourceVector.None, false);
+        var store = new RecordingStateStore();
+        await store.SaveAsync(coordinator.CreateSnapshot(), CancellationToken.None);
+        var projected = new ConcurrentQueue<Guid>();
+        await using var runtime = new ExecutionRuntime(
+            new ExecutionCoordinator([externalQueue]),
+            new FakeOperations(),
+            store,
+            snapshot =>
+            {
+                projected.Enqueue(snapshot.Id);
+                return Task.CompletedTask;
+            });
+
+        await runtime.InitializeAsync();
+
+        Assert.Equal(activeAttempt.Id, Assert.Single(projected));
+        Assert.Equal(activeAttempt.Id, Assert.Single(runtime.Attempts).Id);
+        Assert.Equal(activeAttempt.Id, Assert.Single(store.Snapshot.Attempts).Id);
     }
 
     [Fact]
@@ -310,11 +409,16 @@ public class ExecutionRuntimeTests
     public async Task FinalizationWaitsForOutstandingProgressTracking()
     {
         var operations = new FakeOperations { HoldMaintenance = true };
+        var projected = new ConcurrentQueue<ExecutionPhase>();
         await using var runtime = new ExecutionRuntime(
             new ExecutionCoordinator([LocalQueue]),
             operations,
             new RecordingStateStore(),
-            _ => Task.CompletedTask);
+            attempt =>
+            {
+                projected.Enqueue(attempt.Phase);
+                return Task.CompletedTask;
+            });
         await runtime.InitializeAsync();
         await runtime.RequestRunAsync(
             new JobAddress(1, 1, 1), -1, ResourceVector.None, true);
@@ -328,7 +432,8 @@ public class ExecutionRuntimeTests
         Assert.Equal(0, operations.FinalizeCalls);
 
         operations.ReleaseMaintenance();
-        await WaitUntilAsync(() => runtime.Attempts.Single().Phase == ExecutionPhase.Succeeded);
+        await WaitUntilAsync(() => projected.Contains(ExecutionPhase.Succeeded));
+        Assert.Empty(runtime.Attempts);
         Assert.Equal(1, operations.FinalizeCalls);
     }
 

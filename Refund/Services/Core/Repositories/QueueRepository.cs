@@ -417,45 +417,107 @@ public sealed class QueueRepository
             return;
 
         JobStatus projectedStatus = StatusFor(attempt);
-        bool changed = false;
-        await _updateJob(job, mutable =>
-            changed = ApplyProjection(mutable, attempt));
+        bool statusChanged = false;
+        if (ProjectionWouldChange(job, attempt))
+        {
+            await _updateJob(job, mutable =>
+            {
+                JobStatus previousStatus = mutable.Status;
+                ApplyProjection(mutable, attempt);
+                statusChanged = mutable.Status != previousStatus;
+            });
+        }
+
+        if (attempt.Phase.IsTerminal() && CanApplyProjection(job, attempt, projectedStatus))
+            _dataRepository.SaveSpaceImmediately(job.Space);
 
         string detail = attempt.History.LastOrDefault()?.Detail;
-        if (changed && !string.IsNullOrWhiteSpace(detail) &&
+        if (statusChanged && !string.IsNullOrWhiteSpace(detail) &&
             projectedStatus is JobStatus.Failed or JobStatus.Interrupted)
             await job.WriteToErrorLog(detail);
     }
 
     internal static bool ApplyProjection(Job job, ExecutionAttemptSnapshot attempt)
     {
-        job.QueueId = attempt.QueueId;
-        job.ClusterJobId = attempt.Receipt?.Id;
+        JobStatus status = StatusFor(attempt);
+        if (!CanApplyProjection(job, attempt, status))
+            return false;
 
-        if (job is IPooledJob pooled && attempt.WorkerGroup != null)
+        bool changed = false;
+        if (job.QueueId != attempt.QueueId)
         {
-            pooled.PoolWorkersAlive = attempt.WorkerGroup.Workers.Count(
-                worker => worker.Phase != WorkerPhase.Ended);
-            pooled.PoolWorkersRunning = attempt.WorkerGroup.Workers.Count(
-                worker => worker.Phase == WorkerPhase.Running);
-            pooled.PoolWorkersSubmitted = attempt.WorkerGroup.TotalSubmissions;
+            job.QueueId = attempt.QueueId;
+            changed = true;
         }
 
-        JobStatus status = StatusFor(attempt);
+        string receiptId = attempt.Receipt?.Id;
+        if (job.ClusterJobId != receiptId)
+        {
+            job.ClusterJobId = receiptId;
+            changed = true;
+        }
+
+        if (job is IPooledJob pooled)
+        {
+            int alive = attempt.WorkerGroup?.Workers.Count(
+                worker => worker.Phase != WorkerPhase.Ended) ?? 0;
+            int running = attempt.WorkerGroup?.Workers.Count(
+                worker => worker.Phase == WorkerPhase.Running) ?? 0;
+            int submitted = attempt.WorkerGroup?.TotalSubmissions ?? 0;
+            if (pooled.PoolWorkersAlive != alive)
+            {
+                pooled.PoolWorkersAlive = alive;
+                changed = true;
+            }
+            if (pooled.PoolWorkersRunning != running)
+            {
+                pooled.PoolWorkersRunning = running;
+                changed = true;
+            }
+            if (pooled.PoolWorkersSubmitted != submitted)
+            {
+                pooled.PoolWorkersSubmitted = submitted;
+                changed = true;
+            }
+        }
+
         if (job.Status == status)
-            return false;
-        if (attempt.Phase.IsTerminal() && job.Status is not (
-                JobStatus.Waiting or
-                JobStatus.Staging or
-                JobStatus.Running or
-                JobStatus.Finalizing or
-                JobStatus.Aborting))
-            return false;
+            return changed;
 
         job.Status = status;
         job.AddEvent(status.ToEventType(), job.UpdatedBy);
         return true;
     }
+
+    private static bool ProjectionWouldChange(Job job, ExecutionAttemptSnapshot attempt)
+    {
+        JobStatus status = StatusFor(attempt);
+        if (!CanApplyProjection(job, attempt, status))
+            return false;
+        if (job.QueueId != attempt.QueueId || job.ClusterJobId != attempt.Receipt?.Id ||
+            job.Status != status)
+            return true;
+        if (job is not IPooledJob pooled)
+            return false;
+
+        return pooled.PoolWorkersAlive != (attempt.WorkerGroup?.Workers.Count(
+                   worker => worker.Phase != WorkerPhase.Ended) ?? 0) ||
+               pooled.PoolWorkersRunning != (attempt.WorkerGroup?.Workers.Count(
+                   worker => worker.Phase == WorkerPhase.Running) ?? 0) ||
+               pooled.PoolWorkersSubmitted != (attempt.WorkerGroup?.TotalSubmissions ?? 0);
+    }
+
+    private static bool CanApplyProjection(
+        Job job,
+        ExecutionAttemptSnapshot attempt,
+        JobStatus status) =>
+        !attempt.Phase.IsTerminal() ||
+        job.Status == status ||
+        job.Status is JobStatus.Waiting or
+            JobStatus.Staging or
+            JobStatus.Running or
+            JobStatus.Finalizing or
+            JobStatus.Aborting;
 
     private async Task MarkUnownedJobsInterruptedAsync()
     {

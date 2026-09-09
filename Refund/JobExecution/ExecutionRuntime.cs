@@ -348,12 +348,12 @@ public sealed class ExecutionRuntime : IAsyncDisposable
         await _stateStore.SaveAsync(snapshot, cancellationToken);
         Volatile.Write(ref _latestSnapshot, snapshot);
 
-        var latestAttempts = LatestAttempts(snapshot);
-        var latestIds = latestAttempts.Select(attempt => attempt.Id).ToHashSet();
-        foreach (var stale in _projected.Keys.Where(id => !latestIds.Contains(id)).ToArray())
+        var projectionAttempts = ProjectionAttempts(snapshot);
+        var projectionIds = projectionAttempts.Select(attempt => attempt.Id).ToHashSet();
+        foreach (var stale in _projected.Keys.Where(id => !projectionIds.Contains(id)).ToArray())
             _projected.Remove(stale);
 
-        foreach (var attempt in latestAttempts)
+        foreach (var attempt in projectionAttempts)
         {
             var fingerprint = ProjectionFingerprint.For(attempt);
             if (_projected.TryGetValue(attempt.Id, out var current) && current == fingerprint)
@@ -373,13 +373,35 @@ public sealed class ExecutionRuntime : IAsyncDisposable
             }
         }
 
+        var terminalAttempts = snapshot.Attempts
+            .Where(attempt => attempt.Phase.IsTerminal())
+            .Where(attempt =>
+                !projectionIds.Contains(attempt.Id) ||
+                _projected.TryGetValue(attempt.Id, out var projected) &&
+                projected == ProjectionFingerprint.For(attempt))
+            .Select(attempt => attempt.Id)
+            .ToArray();
+        if (terminalAttempts.Length > 0)
+        {
+            _coordinator.ForgetTerminalAttempts(terminalAttempts);
+            snapshot = _coordinator.CreateSnapshot();
+            await _stateStore.SaveAsync(snapshot, cancellationToken);
+            Volatile.Write(ref _latestSnapshot, snapshot);
+            foreach (var attemptId in terminalAttempts)
+            {
+                _projected.Remove(attemptId);
+                _maintenanceGates.TryRemove(attemptId, out var maintenanceGate);
+                maintenanceGate?.Dispose();
+            }
+        }
+
         return effects;
     }
 
-    private static IReadOnlyList<ExecutionAttemptSnapshot> LatestAttempts(
+    private static IReadOnlyList<ExecutionAttemptSnapshot> ProjectionAttempts(
         ExecutionCoordinatorSnapshot snapshot) => snapshot.Attempts
         .GroupBy(attempt => attempt.Job)
-        .Select(group => group
+        .Select(group => group.SingleOrDefault(attempt => !attempt.Phase.IsTerminal()) ?? group
             .OrderBy(attempt => attempt.CreatedAt)
             .ThenBy(attempt => attempt.Id)
             .Last())

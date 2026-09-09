@@ -84,6 +84,23 @@ public sealed class ExecutionCoordinator
             : null;
     }
 
+    public void ForgetTerminalAttempts(IEnumerable<Guid> attemptIds)
+    {
+        foreach (var attemptId in attemptIds.Distinct())
+        {
+            if (!_attempts.TryGetValue(attemptId, out var attempt))
+                continue;
+            if (!attempt.IsTerminal)
+                throw new InvalidOperationException(
+                    $"Attempt {attemptId} cannot be forgotten before it becomes terminal.");
+
+            _attempts.Remove(attemptId);
+            if (_currentAttempts.TryGetValue(attempt.Job, out var currentId) &&
+                currentId == attemptId)
+                _currentAttempts.Remove(attempt.Job);
+        }
+    }
+
     public ExecutionAttempt RequestRun(
         JobAddress job,
         int queueId,

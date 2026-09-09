@@ -47,10 +47,17 @@ public sealed class JobProjectionTests
             ResourceVector.None,
             dependenciesReady: true);
         coordinator.PreparationFailed(attempt.Id, "invalid input");
-        var job = new Note { Status = JobStatus.Building };
+        var job = new Note
+        {
+            Status = JobStatus.Building,
+            QueueId = 9,
+            ClusterJobId = "current-receipt"
+        };
 
         Assert.False(QueueRepository.ApplyProjection(job, attempt.CreateSnapshot()));
         Assert.Equal(JobStatus.Building, job.Status);
+        Assert.Equal(9, job.QueueId);
+        Assert.Equal("current-receipt", job.ClusterJobId);
         Assert.DoesNotContain(job.Events, item => item.Type == EventType.Failed);
     }
 }

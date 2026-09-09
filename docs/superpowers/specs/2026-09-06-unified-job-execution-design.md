@@ -94,9 +94,10 @@ An execution attempt is one immutable intention to run a job. It has:
 - progress and health information; and
 - an append-only history of meaningful transitions.
 
-A job has at most one non-terminal attempt. Completed attempts remain records; rerun creates a new
-one. Every asynchronous result carries its `AttemptId`, and results for anything other than the
-current matching attempt are ignored.
+A job has at most one non-terminal attempt. A terminal attempt remains in runtime state only until
+its projected job status and history are durably saved. Rerun creates a new attempt. Every
+asynchronous result carries its `AttemptId`, and results for anything other than the current matching
+attempt are ignored.
 
 ### 4.3 Queue definition
 
@@ -434,11 +435,12 @@ the operation as cancel-then-clear. Removing state while execution may still exi
 
 The coordinator persists one atomically replaced runtime snapshot. A small journal or generation
 number may be used to detect torn writes, but a database and full event sourcing are unnecessary.
-History is persisted for users; it is not replayed as the source of truth.
+User-visible history is persisted with the job in its space; coordinator transition history exists
+only while an attempt still needs recovery or durable projection.
 
 The snapshot contains only orchestration data required to reconstruct active attempts, reservations,
-backend receipts, FIFO order, and worker groups. Queue configuration and space/job definitions remain
-separate durable data.
+backend receipts, FIFO order, worker groups, and terminal attempts whose job projection has not yet
+been saved durably. Queue configuration and space/job definitions remain separate durable data.
 
 Startup recovery is deterministic:
 
@@ -449,7 +451,8 @@ Startup recovery is deterministic:
 5. resume observation of external scheduler attempts from durable receipts;
 6. reconcile ambiguous external submissions conservatively by correlation token;
 7. resume cluster worker-group reconciliation; and
-8. persist the recovered state before admitting new work.
+8. durably project terminal outcomes into their jobs and remove those attempts; and
+9. persist the recovered state before admitting new work.
 
 No backend callback held in memory is required for recovery. No attempt may become runnable merely
 because a queue-local list was reconstructed differently.
@@ -505,6 +508,8 @@ The implementation and tests must enforce these invariants:
 13. An exception while processing one attempt or queue cannot stop scheduling unrelated work.
 14. Rerun never reuses an attempt ID, backend receipt, reservation, or worker group.
 15. Restart recovery makes no claim stronger than the evidence available for that backend.
+16. A terminal attempt is removed from central runtime state after its job projection is durably
+    saved; completed execution history does not accumulate globally.
 
 ## 15. Test strategy before replacement
 

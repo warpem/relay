@@ -190,6 +190,17 @@ public class DataRepository : IDisposable
         File.Move(tempPath, space.FilePath, true);
     }
 
+    internal void SaveSpaceImmediately(Space space)
+    {
+        ArgumentNullException.ThrowIfNull(space);
+
+        lock (_saveLock)
+        {
+            SaveSpace(space);
+            _pendingUpdateSpaces.Remove(space);
+        }
+    }
+
     #endregion
 
     #region Project Operations
