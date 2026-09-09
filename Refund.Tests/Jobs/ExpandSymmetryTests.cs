@@ -28,7 +28,6 @@ public class ExpandSymmetryTests
         {
             Space = new Space { RootDirectory = "/tmp/relay-test" },
             Id = 1,
-            DirectoryName = "J1_ExpandSym",
         };
 
         var portIn = job.PortsIn[ExpandSymmetryJob.PortInParticles];
@@ -72,7 +71,7 @@ public class ExpandSymmetryTests
         var args = job.ComposeCommandArguments();
 
         Assert.Equal("input/particles.star", args["i"]);
-        Assert.Equal("J1_ExpandSym/expanded.star", args["o"]);
+        Assert.Equal("1/expanded.star", args["o"]);
         Assert.Contains("C3", args["sym"]); // stored quoted by the base composer
 
         // Helical-only flags must not leak into a point-group run (RELION rejects --sym with --helix).
@@ -163,7 +162,6 @@ public class ExpandSymmetryTests
             {
                 Space = new Space { RootDirectory = root },
                 Id = 203,
-                DirectoryName = "203",
             };
             var portIn = job.PortsIn[ExpandSymmetryJob.PortInParticles];
             var source = new PortOut(job, typeof(ParticleSet), "src", "src", _ => particles);
@@ -204,7 +202,6 @@ public class ExpandSymmetryTests
             {
                 Space = new Space { RootDirectory = root },
                 Id = 7,
-                DirectoryName = "7",
             };
             var portIn = job.PortsIn[ExpandSymmetryJob.PortInParticles];
             var source = new PortOut(job, typeof(ParticleSet), "src", "src", _ => particles);

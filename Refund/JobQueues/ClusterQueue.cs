@@ -95,17 +95,7 @@ public sealed class ClusterQueue : JobQueue
         Guid attemptId,
         Dictionary<string, string> customValues = null)
     {
-        job.DirectoryName = job.Id.ToString();
-        string jobDirectory = Path.GetFullPath(job.DirectoryPath)
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        string spaceDirectory = Path.GetFullPath(job.Space.RootDirectory)
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-
-        if (Directory.Exists(job.DirectoryPath) &&
-            !jobDirectory.Equals(spaceDirectory, StringComparison.OrdinalIgnoreCase))
-            Directory.Delete(job.DirectoryPath, true);
-
-        Directory.CreateDirectory(job.DirectoryPath);
+        job.ResetWorkingDirectory();
         Directory.CreateDirectory(job.RelayResultsDirectoryPath);
         await job.WriteToLifecycleLog("Preparation started");
         job.Stage();

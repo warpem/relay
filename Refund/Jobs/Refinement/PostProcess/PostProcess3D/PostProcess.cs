@@ -22,7 +22,6 @@ namespace Refund.Jobs.Refinement.PostProcess.PostProcess3D;
 /// PostProcess ppJob = new PostProcess();
 /// ppJob.Space = Space;
 /// ppJob.Id = 3;
-/// ppJob.DirectoryName = "TestPostProcess";
 /// </code>
 /// 
 /// The job integrates with the ClusterQueue system, which uses its CommandName and

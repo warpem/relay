@@ -9,7 +9,7 @@ namespace Refund.Tests.Jobs;
 public class Refine3DPoolTests
 {
     private static Refine3DJob NewJob() =>
-        new() { Space = new Space { RootDirectory = "/tmp/relay-test" } };
+        new() { Space = new Space { RootDirectory = "/tmp/relay-test" }, Id = 1 };
 
     // A CPU-worker pooled job (explicit, so it doesn't depend on the UseGpuWorkers default).
     private static Refine3DJob NewPooledJob()

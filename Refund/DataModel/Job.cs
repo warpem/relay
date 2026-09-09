@@ -131,22 +131,39 @@ public abstract class Job : RelayBase, IFolderContent
     [RelayProperty(Order = -106)]
     public int Id { get; set; } = -1;
 
+    private string _serializedDirectoryName = "";
+
+    /// <summary>
+    /// Whether this job is a factory blueprint rather than a materialized job in a space.
+    /// Blueprints contain configuration only and must never resolve filesystem paths.
+    /// </summary>
+    public bool IsBlueprint { get; private set; }
+
     /// <summary>
     /// Name of the directory where job data is stored.
-    /// This is typically the job ID or a user-defined name.
+    /// Materialized jobs always use their numeric ID. Legacy serialized values are read
+    /// separately and validated, but cannot change this property.
     /// </summary>
-    [RelayProperty(Order = -105)]
-    public string DirectoryName { get; set; } = "";
+    public string DirectoryName => IsBlueprint || Id <= 0
+        ? ""
+        : Id.ToString(CultureInfo.InvariantCulture);
 
     /// <summary>
     /// Full path to the job's directory, combining the space root and the job directory name.
     /// </summary>
-    public string DirectoryPath => Path.Combine(Space?.RootDirectory ?? "", DirectoryName);
+    public string DirectoryPath => GetCanonicalDirectoryPath();
 
     /// <summary>
     /// Path to the job's directory relative to the space root.
     /// </summary>
-    public string DirectoryPathInSpace => DirectoryName;
+    public string DirectoryPathInSpace
+    {
+        get
+        {
+            EnsureMaterializedStorage();
+            return Id.ToString(CultureInfo.InvariantCulture);
+        }
+    }
 
     /// <summary>
     /// Name of the subdirectory where Relay-specific results are stored.
@@ -645,18 +662,68 @@ public abstract class Job : RelayBase, IFolderContent
     /// </summary>
     public virtual void Clear()
     {
-        // Make super sure we're not deleting the parent space directory
-        if (!string.IsNullOrEmpty(DirectoryName) &&
-            Directory.Exists(DirectoryPath) &&
-            !Path.GetFullPath(DirectoryPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-                 .Equals(Path.GetFullPath(Space.RootDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
-                         StringComparison.OrdinalIgnoreCase))
+        string directoryPath = GetCanonicalDirectoryPath();
+        if (Directory.Exists(directoryPath))
         {
-            Directory.Delete(DirectoryPath, true);
-            Directory.CreateDirectory(DirectoryPath);
+            DeleteWorkingDirectory();
+            Directory.CreateDirectory(directoryPath);
         }
 
         ClearProperties();
+    }
+
+    /// <summary>
+    /// Deletes this job's canonical working directory, if it exists.
+    /// </summary>
+    internal void DeleteWorkingDirectory()
+    {
+        string directoryPath = GetCanonicalDirectoryPath();
+        if (Directory.Exists(directoryPath))
+            Directory.Delete(directoryPath, true);
+    }
+
+    /// <summary>
+    /// Recreates this job's canonical working directory from scratch.
+    /// </summary>
+    internal void ResetWorkingDirectory()
+    {
+        string directoryPath = GetCanonicalDirectoryPath();
+        if (Directory.Exists(directoryPath))
+            Directory.Delete(directoryPath, true);
+        Directory.CreateDirectory(directoryPath);
+    }
+
+    private string GetCanonicalDirectoryPath()
+    {
+        EnsureMaterializedStorage();
+
+        string rootPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Space.RootDirectory));
+        string directoryPath = Path.TrimEndingDirectorySeparator(
+            Path.GetFullPath(Path.Combine(rootPath, Id.ToString(CultureInfo.InvariantCulture))));
+        string parentPath = Path.GetDirectoryName(directoryPath) is { } parent
+            ? Path.TrimEndingDirectorySeparator(parent)
+            : null;
+
+        if (!string.Equals(parentPath, rootPath, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(directoryPath, rootPath, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"Job {Id} directory must be a direct child of space root '{Space.RootDirectory}'.");
+        }
+
+        return directoryPath;
+    }
+
+    private void EnsureMaterializedStorage()
+    {
+        if (IsBlueprint)
+            throw new InvalidOperationException($"Factory blueprint {Id} does not have a filesystem directory.");
+        if (Space == null)
+            throw new InvalidOperationException($"Job {Id} is not attached to a space.");
+        if (Id <= 0)
+            throw new InvalidOperationException("A materialized job must have a positive ID before resolving its directory.");
+        if (string.IsNullOrWhiteSpace(Space.RootDirectory))
+            throw new InvalidOperationException($"The space containing job {Id} does not have a root directory.");
     }
 
     /// <summary>
@@ -1241,7 +1308,11 @@ public abstract class Job : RelayBase, IFolderContent
 
     #region Read/write
 
-    public static Job CreateFromPolymorphicJson(JsonNode reader, Space space, ReadOnlyCollection<User> users)
+    public static Job CreateFromPolymorphicJson(
+        JsonNode reader,
+        Space space,
+        ReadOnlyCollection<User> users,
+        bool isBlueprint = false)
     {
         var typeString = reader["Type"].Deserialize<string>();
         var typeParts = typeString.Split(',', StringSplitOptions.TrimEntries);
@@ -1251,10 +1322,58 @@ public abstract class Job : RelayBase, IFolderContent
             throw new Exception($"Specified job type does not exist: {typeString}");
 
         var result = (Job)Activator.CreateInstance(Types[typeGuid]);
-        result.Space = space;
+        result.IsBlueprint = isBlueprint;
+        result.Space = isBlueprint ? null : space;
         result.ReadFromJson(reader["Job"], users);
+        result.ValidateSerializedDirectoryName();
 
         return result;
+    }
+
+    /// <summary>
+    /// Creates a configuration-only factory blueprint. Blueprints have local IDs and no storage.
+    /// </summary>
+    public static Job CreateBlueprint(Type type, Job template = null)
+    {
+        if (type == null || !typeof(Job).IsAssignableFrom(type))
+            throw new ArgumentException("Blueprint type must derive from Job.", nameof(type));
+
+        var result = (Job)Activator.CreateInstance(type);
+        result.IsBlueprint = true;
+        if (template != null)
+            result.AdoptState(template);
+        result.Space = null;
+        result._serializedDirectoryName = "";
+        return result;
+    }
+
+    /// <summary>
+    /// Creates a configuration-only factory blueprint by registered job type GUID.
+    /// </summary>
+    public static Job CreateBlueprint(string typeGuid, Job template = null)
+    {
+        if (!Types.TryGetValue(typeGuid, out var type))
+            throw new ArgumentException($"Job type {typeGuid} does not exist.", nameof(typeGuid));
+        return CreateBlueprint(type, template);
+    }
+
+    private void ValidateSerializedDirectoryName()
+    {
+        if (IsBlueprint || string.IsNullOrWhiteSpace(_serializedDirectoryName))
+        {
+            _serializedDirectoryName = "";
+            return;
+        }
+
+        string expected = Id.ToString(CultureInfo.InvariantCulture);
+        if (!string.Equals(_serializedDirectoryName, expected, StringComparison.Ordinal))
+        {
+            throw new InvalidDataException(
+                $"Job {Id} uses unsupported legacy directory '{_serializedDirectoryName}'. " +
+                $"Expected '{expected}'. Migrate the directory before loading this space.");
+        }
+
+        _serializedDirectoryName = "";
     }
 
     public static void WritePolymorphicJson(JsonNode writer, Job job)
@@ -1276,6 +1395,9 @@ public abstract class Job : RelayBase, IFolderContent
     {
         base.WriteToJson(writer);
 
+        // Keep writing the legacy field for backwards compatibility, but never use it
+        // as mutable path state.
+        writer["DirectoryName"] = DirectoryName;
         writer["UpdatedBy"] = UpdatedBy?.Id;
         
         if (Events != null && Events.Count > 0)
@@ -1298,6 +1420,7 @@ public abstract class Job : RelayBase, IFolderContent
     public void ReadFromJson(JsonNode reader, ReadOnlyCollection<User> users)
     {
         base.ReadFromJson(reader);
+        _serializedDirectoryName = reader["DirectoryName"]?.Deserialize<string>() ?? "";
 
         // Handle UpdatedBy
         if (reader["UpdatedBy"] != null)

@@ -170,18 +170,15 @@ public partial class DataManager
                 newDef.ReadFromJson(json); // Copies scalar properties but overwrites Id
                 newDef.Id = correctId; // Restore the correct new ID
 
-                // Clone sub-job blueprints — use Space.CreateJob then remove from space list
-                // since blueprints live only inside the definition, not in Space._Jobs.
+                // Clone sub-job blueprints without materializing them in the space.
                 // Preserve the blueprint-local IDs (1, 2, 3...) so that InternalEdges,
                 // ExposedPorts, QueueAssignments, and DiagramLayout references stay valid.
                 newDef.SubJobs.Clear();
                 foreach (var blueprint in originalDef.SubJobs)
                 {
-                    var clonedBlueprint = originalSpace.CreateJob(blueprint.TypeGuid, blueprint, null);
-                    originalSpace.RemoveJobFromList(clonedBlueprint);
+                    var clonedBlueprint = Job.CreateBlueprint(blueprint.TypeGuid, blueprint);
                     clonedBlueprint.Id = blueprint.Id; // Preserve blueprint-local ID
                     clonedBlueprint.Status = JobStatus.Building;
-                    clonedBlueprint.DirectoryName = "";
                     clonedBlueprint.ClearProperties();
                     newDef.SubJobs.Add(clonedBlueprint);
                 }
@@ -257,13 +254,9 @@ public partial class DataManager
                     var originalJob = originalSpace.FindJob(roJob.Id)
                         ?? throw new Exception($"Job {roJob.Id} not found");
 
-                    // Clone via Space.CreateJob then remove from space's job list
-                    // (blueprints live only inside the definition, not in Space._Jobs)
-                    var blueprint = originalSpace.CreateJob(originalJob.TypeGuid, originalJob, null);
-                    originalSpace.RemoveJobFromList(blueprint);
+                    var blueprint = Job.CreateBlueprint(originalJob.TypeGuid, originalJob);
                     blueprint.Id = blueprintId;
                     blueprint.Status = JobStatus.Building;
-                    blueprint.DirectoryName = "";
                     blueprint.ClearProperties();
 
                     def.SubJobs.Add(blueprint);

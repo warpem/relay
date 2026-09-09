@@ -202,6 +202,9 @@ public class Space : RelayBase
     /// <param name="view">The view to add the job to</param>
     public void AddJob(Job job, View view)
     {
+        if (job.IsBlueprint)
+            throw new InvalidOperationException("Factory blueprints must be materialized through CreateJob.");
+
         job.Space = this;
         _Jobs.Add(job);
         view?.AddJob(job);
@@ -226,15 +229,6 @@ public class Space : RelayBase
         foreach (var view in _Views)
             if (view.Jobs.Contains(job))
                 view.RemoveJob(job);
-    }
-
-    /// <summary>
-    /// Removes a job from the internal jobs list without deleting edges, views, or favorites.
-    /// Used for blueprint jobs created via CreateJob that should not persist in the space.
-    /// </summary>
-    internal void RemoveJobFromList(Job job)
-    {
-        _Jobs.Remove(job);
     }
 
     /// <summary>

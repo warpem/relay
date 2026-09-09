@@ -241,16 +241,7 @@ public sealed class RelayExecutionOperations : IExecutionOperations
 
     private static async Task PrepareLocalAsync(Job job, CancellationToken cancellationToken)
     {
-        job.DirectoryName = job.Id.ToString();
-        if (Directory.Exists(job.DirectoryPath) &&
-            !Path.GetFullPath(job.DirectoryPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-                .Equals(
-                    Path.GetFullPath(job.Space.RootDirectory)
-                        .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
-                    StringComparison.OrdinalIgnoreCase))
-            Directory.Delete(job.DirectoryPath, true);
-
-        Directory.CreateDirectory(job.DirectoryPath);
+        job.ResetWorkingDirectory();
         Directory.CreateDirectory(job.RelayResultsDirectoryPath);
         await job.WriteToLifecycleLog("Preparation started");
         cancellationToken.ThrowIfCancellationRequested();

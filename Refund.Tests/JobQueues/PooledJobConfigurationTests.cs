@@ -20,7 +20,7 @@ public class PooledJobConfigurationTests
     private static MotionAndCTF2D MakeJobWithSpace()
     {
         EnsurePopulated();
-        return new MotionAndCTF2D { Space = new Space { RootDirectory = "/tmp/relay-test" } };
+        return new MotionAndCTF2D { Space = new Space { RootDirectory = "/tmp/relay-test" }, Id = 1 };
     }
 
     [Fact]
@@ -48,6 +48,7 @@ public class PooledJobConfigurationTests
         var job = new MissAlignmentJob
         {
             Space = new Space { RootDirectory = "/tmp/relay-test" },
+            Id = 1,
             NGpus = 4,
             PerDevice = 3,
             NWorkers = 4,
@@ -81,6 +82,7 @@ public class PooledJobConfigurationTests
         var off = new MissAlignmentJob
         {
             Space = new Space { RootDirectory = "/tmp/relay-test" },
+            Id = 1,
             UseWorkerPool = false,
             PoolSize = 6,
         };
@@ -90,6 +92,7 @@ public class PooledJobConfigurationTests
         var on = new MissAlignmentJob
         {
             Space = new Space { RootDirectory = "/tmp/relay-test" },
+            Id = 1,
             UseWorkerPool = true,
             PoolSize = 6,
         };
@@ -111,6 +114,7 @@ public class PooledJobConfigurationTests
         var job = new MissAlignmentJob
         {
             Space = new Space { RootDirectory = "/tmp/relay-test" },
+            Id = 1,
             NGpus = nGpus,
             PerDevice = perDevice,
         };

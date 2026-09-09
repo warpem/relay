@@ -107,7 +107,7 @@ public class FactoryDefinition : RelayBase
         {
             foreach (var sjNode in reader["SubJobs"].AsArray())
             {
-                var blueprint = Job.CreateFromPolymorphicJson(sjNode, space, users);
+                var blueprint = Job.CreateFromPolymorphicJson(sjNode, space, users, isBlueprint: true);
                 SubJobs.Add(blueprint);
             }
         }

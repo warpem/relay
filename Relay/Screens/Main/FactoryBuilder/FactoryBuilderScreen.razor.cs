@@ -106,13 +106,12 @@ public partial class FactoryBuilderScreen : ComponentBase, IDisposable
     {
         try
         {
-            Job template = Activator.CreateInstance(type) as Job;
+            Job template = Job.CreateBlueprint(type);
             template.Status = JobStatus.Building;
 
             await DataManager.UpdateFactoryDefinition(Session.User, Session.Space, Definition, def =>
             {
                 template.Id = def.SubJobs.Count > 0 ? def.SubJobs.Max(j => j.Id) + 1 : 1;
-                template.DirectoryName = "";
                 def.SubJobs.Add(template);
 
                 // If a port was clicked, create an internal edge to the new sub-job's first compatible port
@@ -146,13 +145,12 @@ public partial class FactoryBuilderScreen : ComponentBase, IDisposable
     {
         try
         {
-            Job template = Activator.CreateInstance(args.jobType) as Job;
+            Job template = Job.CreateBlueprint(args.jobType);
             template.Status = JobStatus.Building;
 
             await DataManager.UpdateFactoryDefinition(Session.User, Session.Space, Definition, def =>
             {
                 template.Id = def.SubJobs.Count > 0 ? def.SubJobs.Max(j => j.Id) + 1 : 1;
-                template.DirectoryName = "";
                 def.SubJobs.Add(template);
 
                 if (args.portOut != null)

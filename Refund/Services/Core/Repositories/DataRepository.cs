@@ -530,7 +530,6 @@ public class DataRepository : IDisposable
         {
             clone = space.CreateJob(original.TypeGuid, original, view);
             clone.Status = JobStatus.Building;
-            clone.DirectoryName = "";
             clone.Clear();
 
             // Find unique name for the clone

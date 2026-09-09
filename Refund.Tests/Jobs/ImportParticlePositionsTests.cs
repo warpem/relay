@@ -28,7 +28,6 @@ public class ImportParticlePositionsTests
         {
             Space = new Space { RootDirectory = "/tmp/relay-test" },
             Id = 1,
-            DirectoryName = "J1_ImportPositions",
             InputType = InputTypes.MultipleFiles,
             MultipleFilesDirectory = "/data/matching",
             ResolvedFilesSuffix = resolvedSuffix
@@ -191,7 +190,7 @@ public class ImportParticlePositionsTests
         var particles = OutputParticles(job);
 
         // Consumers pass the tomostar file name from processed_items.json, not a bare series name.
-        Assert.Equal(Path.Combine("/tmp/relay-test", "J1_ImportPositions", "TS_01_10.00Apx_ribosome.star"),
+        Assert.Equal(Path.Combine("/tmp/relay-test", "1", "TS_01_10.00Apx_ribosome.star"),
                      particles.ToMultiStarPath("TS_01.tomostar"));
     }
 
@@ -201,7 +200,7 @@ public class ImportParticlePositionsTests
         var job = MakeJob("_10.00Apx_ribosome");
         var particles = OutputParticles(job);
 
-        Assert.Equal(Path.Combine("/tmp/relay-test", "J1_ImportPositions", "TS_01_10.00Apx_ribosome.star"),
+        Assert.Equal(Path.Combine("/tmp/relay-test", "1", "TS_01_10.00Apx_ribosome.star"),
                      particles.ToMultiStarPath("tiltseries/TS_01.tomostar"));
     }
 
@@ -211,7 +210,7 @@ public class ImportParticlePositionsTests
         var job = MakeJob("_8.00Apx_apoF");
         var particles = OutputParticles(job);
 
-        Assert.Equal(Path.Combine("/tmp/relay-test", "J1_ImportPositions", "grid3.lamella-04_8.00Apx_apoF.star"),
+        Assert.Equal(Path.Combine("/tmp/relay-test", "1", "grid3.lamella-04_8.00Apx_apoF.star"),
                      particles.ToMultiStarPath("grid3.lamella-04.tomostar"));
     }
 
@@ -224,7 +223,6 @@ public class ImportParticlePositionsTests
         {
             Space = new Space { RootDirectory = "/tmp/relay-test" },
             Id = 1,
-            DirectoryName = "J1_ImportPositions",
             InputType = InputTypes.SingleFile,
             SingleFilePath = "/data/particles.star"
         };

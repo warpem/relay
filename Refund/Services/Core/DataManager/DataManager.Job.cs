@@ -121,12 +121,14 @@ public partial class DataManager
     /// </remarks>
     public async Task DeleteJob(ReadOnlyUser user, ReadOnlyJob job)
     {
+        Job deletedJob = null;
         await ExecuteWithLock(async () =>
         {
             try
             {
                 var originalUser = ResolveUser(user.Id);
                 var originalJob = ResolveJob(job.Space.Project.Id, job.Space.Id, job.Id);
+                deletedJob = originalJob;
 
                 EnsureNoActiveExecutions([originalJob], $"Job {originalJob.QualifiedName}");
 
@@ -195,11 +197,7 @@ public partial class DataManager
 
         // Physical deletion can take time, so we don't want to block
         // This runs in a separate task to avoid blocking the UI while files are deleted
-        await Task.Run(() =>
-        {
-            if (!string.IsNullOrWhiteSpace(job.DirectoryName) && Directory.Exists(job.DirectoryPath))
-                Directory.Delete(job.DirectoryPath, true);
-        });
+        await Task.Run(deletedJob.DeleteWorkingDirectory);
 
         await JobDeleted.InvokeHierarchy(job, GroupName.JobHierarchy(job.Space.Project.Id, job.Space.Id, job.Id));
         await SpaceUpdated.InvokeHierarchy(job.Space, GroupName.SpaceHierarchy(job.Space.Project.Id, job.Space.Id));
@@ -390,46 +388,42 @@ public partial class DataManager
         try
         {
             var originalUser = _userRepository.FindUser(user.Id);
+            Job originalJob = null;
 
             // First transition the job to the Clearing state
-            await UpdateJob(user, job, originalJob =>
+            await UpdateJob(user, job, resolvedJob =>
             {
                 EnsureNoActiveExecutions(
-                    [originalJob],
-                    $"Job {originalJob.QualifiedName}");
-                originalJob.AddEvent(EventType.ClearingStarted, originalUser);
-                originalJob.Status = JobStatus.Clearing;
+                    [resolvedJob],
+                    $"Job {resolvedJob.QualifiedName}");
+                resolvedJob.AddEvent(EventType.ClearingStarted, originalUser);
+                resolvedJob.Status = JobStatus.Clearing;
+                originalJob = resolvedJob;
             } );
-            await Task.Delay(500);
 
-            // Clearing is a potentially long operation, so we don't want to block
-            // We run it on a background thread to avoid blocking the UI
-            Job originalJob = _dataRepository.FindJob(job.Space.Project.Id, job.Space.Id, job.Id);
-            await Task.Run(async () =>
+            try
             {
-                try
-                {
-                    originalJob.Clear();
+                // Directory deletion is synchronous and can be slow, so keep it off the request context.
+                await Task.Run(originalJob.Clear);
 
-                    // After successful clearing, transition the job back to the Building state
-                    await UpdateJob(user, job, originalJob =>
-                    {
-                        originalJob.AddEvent(EventType.ClearingFinished);
-                        originalJob.Status = JobStatus.Building;
-                    } );
-                }
-                catch (Exception ex)
+                // After successful clearing, transition the job back to the Building state
+                await UpdateJob(user, job, resolvedJob =>
                 {
-                    Directory.CreateDirectory(job.RelayResultsDirectoryPath);
-                    await job.WriteToErrorLog("Failed to clear job:\n" + ex);
+                    resolvedJob.AddEvent(EventType.ClearingFinished);
+                    resolvedJob.Status = JobStatus.Building;
+                } );
+            }
+            catch (Exception ex)
+            {
+                Log.ForContext<DataManager>().Error(ex, "Failed to clear files for job {JobId}", job.Id);
+                await originalJob.WriteToErrorLog("Failed to clear job:\n" + ex);
 
-                    await UpdateJob(user, job, originalJob =>
-                    {
-                        originalJob.AddEvent(EventType.Failed);
-                        originalJob.Status = JobStatus.Failed;
-                    } );
-                }
-            });
+                await UpdateJob(user, job, resolvedJob =>
+                {
+                    resolvedJob.AddEvent(EventType.Failed);
+                    resolvedJob.Status = JobStatus.Failed;
+                } );
+            }
         }
         catch (Exception e)
         {
