@@ -130,7 +130,7 @@ public partial class DataManager
                 var originalJob = ResolveJob(job.Space.Project.Id, job.Space.Id, job.Id);
                 deletedJob = originalJob;
 
-                EnsureNoActiveExecutions([originalJob], $"Job {originalJob.QualifiedName}");
+                EnsureNoPendingExecutions([originalJob], $"Job {originalJob.QualifiedName}");
 
                 // Check if the job is in a state that allows deletion
                 if (!originalJob.CanTransitionState(JobStatus.Deleted))
@@ -393,7 +393,7 @@ public partial class DataManager
             // First transition the job to the Clearing state
             await UpdateJob(user, job, resolvedJob =>
             {
-                EnsureNoActiveExecutions(
+                EnsureNoPendingExecutions(
                     [resolvedJob],
                     $"Job {resolvedJob.QualifiedName}");
                 resolvedJob.AddEvent(EventType.ClearingStarted, originalUser);

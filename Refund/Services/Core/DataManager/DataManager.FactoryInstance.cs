@@ -193,7 +193,7 @@ public partial class DataManager
                 var originalInst = originalSpace.FindFactoryInstance(instance.Id)
                     ?? throw new Exception($"Factory instance {instance.Id} not found");
 
-                EnsureNoActiveExecutions(
+                EnsureNoPendingExecutions(
                     originalInst.SubJobs,
                     $"Factory instance {originalInst.QualifiedName}");
 

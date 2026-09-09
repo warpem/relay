@@ -143,7 +143,7 @@ public partial class DataManager
             {
                 var originalProject = ResolveProject(project.Id);
 
-                EnsureNoActiveExecutions(
+                EnsureNoPendingExecutions(
                     originalProject.Spaces.SelectMany(space => space.Jobs),
                     $"Project {originalProject.Alias}");
 

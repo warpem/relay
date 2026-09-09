@@ -424,12 +424,15 @@ Cancellation is an idempotent command against an attempt ID.
 Repeated cancellation requests do not launch repeated cancellation workflows or append repeated
 history entries.
 
-Rerun is allowed only by creating a new attempt. Late observations from the old attempt cannot affect
-the new one because every message and receipt is attempt-scoped.
+Rerun is allowed only after the previous attempt has reached a terminal state, its job projection has
+been saved durably, and the coordinator has removed it. The rerun creates a new attempt. Late
+observations from the old attempt cannot affect the new one because every message and receipt is
+attempt-scoped.
 
-The product behavior for clearing or deleting a job with a non-terminal attempt must be chosen before
-implementation. The safe options are to reject the operation until cancellation completes, or define
-the operation as cancel-then-clear. Removing state while execution may still exist is not allowed.
+Clearing or deleting a job, disconnecting a space, and deleting a project are rejected while the
+coordinator owns an attempt for any affected job. Ownership ends only after execution stops and the
+terminal projection is saved. Removing job state while execution or projection work remains is not
+allowed.
 
 ## 12. Persistence and recovery
 

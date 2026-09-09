@@ -122,8 +122,7 @@ public sealed class ExecutionCoordinator
                 throw new InvalidOperationException("Worker groups require an external scheduler queue.");
         }
 
-        if (_currentAttempts.TryGetValue(job, out var currentId) && !_attempts[currentId].IsTerminal)
-            throw new InvalidOperationException($"Job {job} already has an active attempt.");
+        EnsureJobHasNoAttempt(job);
 
         var phase = dependenciesReady
             ? ExecutionPhase.Preparing
@@ -149,8 +148,7 @@ public sealed class ExecutionCoordinator
         if (!_queues.TryGetValue(queueId, out var queue))
             throw new InvalidOperationException($"Queue {queueId} does not exist.");
 
-        if (_currentAttempts.TryGetValue(job, out var currentId) && !_attempts[currentId].IsTerminal)
-            throw new InvalidOperationException($"Job {job} already has an active attempt.");
+        EnsureJobHasNoAttempt(job);
 
         var attempt = new ExecutionAttempt(
             Guid.NewGuid(), job, queueId, queue.BackendKind,
@@ -173,6 +171,12 @@ public sealed class ExecutionCoordinator
 
         AssignSequence(attempt);
         attempt.TransitionTo(ExecutionPhase.Preparing, Now());
+    }
+
+    private void EnsureJobHasNoAttempt(JobAddress job)
+    {
+        if (_attempts.Values.Any(attempt => attempt.Job == job))
+            throw new InvalidOperationException($"Job {job} already has an execution attempt.");
     }
 
     public void DependencyCheckFailed(Guid attemptId, string detail)

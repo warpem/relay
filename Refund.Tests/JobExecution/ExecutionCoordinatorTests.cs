@@ -10,7 +10,7 @@ public class ExecutionCoordinatorTests
     private static JobAddress Job(int id) => new(1, 1, id);
 
     [Fact]
-    public void OneJobCannotHaveTwoActiveAttempts()
+    public void OneJobCannotHaveTwoAttempts()
     {
         var coordinator = new ExecutionCoordinator([LocalQueue]);
         coordinator.RequestRun(Job(1), -1, new ResourceVector(1, 1, 0), dependenciesReady: true);
@@ -261,6 +261,7 @@ public class ExecutionCoordinatorTests
         var first = coordinator.RequestRun(
             Job(1), -1, new ResourceVector(1, 1, 0), dependenciesReady: true);
         coordinator.PreparationFailed(first.Id, "bad input");
+        coordinator.ForgetTerminalAttempts([first.Id]);
 
         var second = coordinator.RequestRun(
             Job(1), -1, new ResourceVector(1, 1, 0), dependenciesReady: true);
@@ -269,6 +270,25 @@ public class ExecutionCoordinatorTests
         Assert.NotEqual(first.Id, second.Id);
         Assert.DoesNotContain(coordinator.PlanEffects(), effect => effect.AttemptId == first.Id);
         Assert.Equal(ExecutionPhase.Preparing, second.Phase);
+    }
+
+    [Fact]
+    public void TerminalAttemptBlocksNewWorkUntilItIsForgotten()
+    {
+        var coordinator = new ExecutionCoordinator([LocalQueue]);
+        var attempt = coordinator.RequestRun(
+            Job(1), -1, new ResourceVector(1, 1, 0), dependenciesReady: true);
+        coordinator.PreparationFailed(attempt.Id, "bad input");
+
+        Assert.Throws<InvalidOperationException>(() =>
+            coordinator.RequestRun(Job(1), -1, ResourceVector.None, dependenciesReady: true));
+        Assert.Throws<InvalidOperationException>(() =>
+            coordinator.RequestFinalization(Job(1), -1));
+
+        coordinator.ForgetTerminalAttempts([attempt.Id]);
+
+        Assert.NotNull(coordinator.RequestRun(
+            Job(1), -1, ResourceVector.None, dependenciesReady: true));
     }
 
     [Fact]

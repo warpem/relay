@@ -229,7 +229,7 @@ public class ExecutionRuntimeTests
     }
 
     [Fact]
-    public async Task TerminalAttemptRemainsDurableUntilProjectionSucceeds()
+    public async Task TerminalAttemptBlocksRerunUntilProjectionSucceeds()
     {
         var operations = new FakeOperations
         {
@@ -248,19 +248,26 @@ public class ExecutionRuntimeTests
                 return Task.CompletedTask;
             });
         await runtime.InitializeAsync();
-        await runtime.RequestRunAsync(
-            new JobAddress(1, 1, 1), -1, ResourceVector.None, false);
+        var address = new JobAddress(1, 1, 1);
+        var first = await runtime.RequestRunAsync(
+            address, -1, ResourceVector.None, false);
 
         await runtime.TickAsync();
 
         Assert.Equal(ExecutionPhase.Failed, Assert.Single(runtime.Attempts).Phase);
         Assert.Equal(ExecutionPhase.Failed, Assert.Single(store.Snapshot.Attempts).Phase);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => runtime.RequestRunAsync(
+            address, -1, ResourceVector.None, false));
 
         rejectTerminalProjection = false;
         await runtime.TickAsync();
 
         Assert.Empty(runtime.Attempts);
         Assert.Empty(store.Snapshot.Attempts);
+
+        var rerun = await runtime.RequestRunAsync(
+            address, -1, ResourceVector.None, false);
+        Assert.NotEqual(first.Id, rerun.Id);
     }
 
     [Fact]
@@ -298,9 +305,16 @@ public class ExecutionRuntimeTests
         var coordinator = new ExecutionCoordinator([externalQueue]);
         var oldAttempt = coordinator.RequestRun(address, 1, ResourceVector.None, true);
         coordinator.PreparationFailed(oldAttempt.Id, "old failure");
+        var oldSnapshot = oldAttempt.CreateSnapshot();
+        coordinator.ForgetTerminalAttempts([oldAttempt.Id]);
         var activeAttempt = coordinator.RequestRun(address, 1, ResourceVector.None, false);
+        var activeSnapshot = activeAttempt.CreateSnapshot();
         var store = new RecordingStateStore();
-        await store.SaveAsync(coordinator.CreateSnapshot(), CancellationToken.None);
+        await store.SaveAsync(
+            new ExecutionCoordinatorSnapshot(
+                oldAttempt.EnqueueSequence!.Value,
+                [oldSnapshot, activeSnapshot]),
+            CancellationToken.None);
         var projected = new ConcurrentQueue<Guid>();
         await using var runtime = new ExecutionRuntime(
             new ExecutionCoordinator([externalQueue]),

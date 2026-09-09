@@ -367,16 +367,16 @@ public partial class DataManager
         }
     }
 
-    private bool HasActiveExecution(Job job) =>
+    private bool HasPendingExecution(Job job) =>
         job.Status == JobStatus.Waiting ||
         job.Status.IsUnsettled() ||
-        _queueRepository.HasActiveAttempt(job);
+        _queueRepository.HasExecutionAttempt(job);
 
-    private void EnsureNoActiveExecutions(IEnumerable<Job> jobs, string target)
+    private void EnsureNoPendingExecutions(IEnumerable<Job> jobs, string target)
     {
-        if (jobs.Any(HasActiveExecution))
+        if (jobs.Any(HasPendingExecution))
             throw new InvalidOperationException(
-                $"{target} contains active jobs. Abort them and wait for execution to stop first.");
+                $"{target} contains pending job execution work. Abort active jobs and wait for completion first.");
     }
 
     private static bool FolderContainsJob(Folder folder, int jobId)

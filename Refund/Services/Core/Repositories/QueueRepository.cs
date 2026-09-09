@@ -335,15 +335,8 @@ public sealed class QueueRepository
             desiredCount,
             cancellationToken);
 
-    public bool HasActiveAttempt(Job job) =>
-        HasActiveAttempts(job.Space.Project.Id, job.Space.Id, job.Id);
-
-    public bool HasActiveAttempts(int projectId, int? spaceId = null, int? jobId = null) =>
-        _runtime.Attempts.Any(attempt =>
-            !attempt.Phase.IsTerminal() &&
-            attempt.Job.ProjectId == projectId &&
-            (spaceId == null || attempt.Job.SpaceId == spaceId) &&
-            (jobId == null || attempt.Job.JobId == jobId));
+    public bool HasExecutionAttempt(Job job) =>
+        _runtime.Attempts.Any(attempt => attempt.Job == AddressOf(job));
 
     public JobQueue FindQueue(int id)
     {
@@ -522,7 +515,6 @@ public sealed class QueueRepository
     private async Task MarkUnownedJobsInterruptedAsync()
     {
         var owned = _runtime.Attempts
-            .Where(attempt => !attempt.Phase.IsTerminal())
             .Select(attempt => attempt.Job)
             .ToHashSet();
 

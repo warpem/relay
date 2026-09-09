@@ -165,7 +165,7 @@ public partial class DataManager
                 var originalUser = ResolveUser(user.Id);
                 var originalSpace = ResolveSpace(space.Project.Id, space.Id);
 
-                EnsureNoActiveExecutions(
+                EnsureNoPendingExecutions(
                     originalSpace.Jobs,
                     $"Space {originalSpace.Alias}");
 
