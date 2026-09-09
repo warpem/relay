@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Threading.Channels;
 using Serilog;
 using Refund.DataModel.ReadOnly;
 
@@ -16,11 +17,12 @@ namespace Refund.Services.Core.DataManager
     public class GroupEvent<T>
     {
         /// <summary>
-        /// Maps group name patterns to their associated event handlers.
+        /// Maps group name patterns to their associated subscriber queues.
         /// The keys are string patterns like "P1_S2_J*" (all jobs in space 2 of project 1).
-        /// The values are multicast delegates that will be invoked when an event matches the pattern.
+        /// Each subscriber queue is isolated so one observer cannot block another.
         /// </summary>
-        private Dictionary<string, Func<GroupEventArgs<T>, Task>> _groups = new();
+        private const int SubscriberQueueCapacity = 64;
+        private readonly Dictionary<string, List<GroupEventSubscriber<T>>> _groups = new();
 
         /// <summary>
         /// Subscribes to events for a specific group pattern.
@@ -40,15 +42,22 @@ namespace Refund.Services.Core.DataManager
         /// </remarks>
         public GroupEventSubscription Add(string groupName, Func<GroupEventArgs<T>, Task> action)
         {
+            ArgumentNullException.ThrowIfNull(action);
+
+            var subscriber = new GroupEventSubscriber<T>(groupName, action, SubscriberQueueCapacity);
             lock (_groups)
             {
-                if (!_groups.TryAdd(groupName, action))
-                    _groups[groupName] += action;
+                if (!_groups.TryGetValue(groupName, out var subscribers))
+                {
+                    subscribers = new List<GroupEventSubscriber<T>>();
+                    _groups[groupName] = subscribers;
+                }
+                subscribers.Add(subscriber);
 
                 if (Debugger.IsAttached)
                     Log.ForContext<GroupEvent<T>>().Debug("Added {MethodName} to {GroupName}", action.Method.Name, groupName);
                 
-                return new GroupEventSubscription(() => Remove(groupName, action));
+                return new GroupEventSubscription(() => Remove(groupName, subscriber));
             }
         }
 
@@ -57,18 +66,25 @@ namespace Refund.Services.Core.DataManager
         /// This is typically called indirectly via the GroupEventSubscription.Unsubscribe method.
         /// </summary>
         /// <param name="groupName">The group name pattern to unsubscribe from</param>
-        /// <param name="action">The action to remove from the event's invocation list</param>
-        public void Remove(string groupName, Func<GroupEventArgs<T>, Task> action)
+        /// <param name="subscriber">The subscriber queue to remove</param>
+        private void Remove(string groupName, GroupEventSubscriber<T> subscriber)
         {
             lock (_groups)
             {
-                if (!_groups.ContainsKey(groupName))
+                if (!_groups.TryGetValue(groupName, out var subscribers))
                     return;
 
-                _groups[groupName] -= action;
+                subscribers.Remove(subscriber);
+                if (subscribers.Count == 0)
+                    _groups.Remove(groupName);
+
+                subscriber.Dispose();
                 
                 if (Debugger.IsAttached)
-                    Log.ForContext<GroupEvent<T>>().Debug("Removed {MethodName} from {GroupName}", action.Method.Name, groupName);
+                    Log.ForContext<GroupEvent<T>>().Debug(
+                        "Removed {MethodName} from {GroupName}",
+                        subscriber.MethodName,
+                        groupName);
             }
         }
 
@@ -78,38 +94,117 @@ namespace Refund.Services.Core.DataManager
         /// </summary>
         /// <param name="groupName">The exact group name (not a pattern) to invoke handlers for</param>
         /// <param name="data">The event arguments containing the object that changed</param>
-        /// <returns>A task that completes when all event handlers have been invoked</returns>
+        /// <returns>A task that completes once notifications have been queued</returns>
         /// <remarks>
-        /// Handlers are invoked sequentially, but in a thread-safe manner that prevents
-        /// changes to the subscription list during iteration.
+        /// Each subscriber processes notifications in order on its own bounded queue. A slow
+        /// subscriber cannot block the publisher or other subscribers.
         /// </remarks>
-        public async Task InvokeHierarchy(T obj, string[] groupNames)
+        public Task InvokeHierarchy(T obj, string[] groupNames)
         {
             var args = new GroupEventArgs<T>(obj);
             foreach (var group in groupNames)
-                await Invoke(group, args);
+                Publish(group, args);
+            return Task.CompletedTask;
         }
 
-        public async Task Invoke(string groupName, GroupEventArgs<T> data)
+        public Task Invoke(string groupName, GroupEventArgs<T> data)
         {
-            Delegate[] invocationList;
+            Publish(groupName, data);
+            return Task.CompletedTask;
+        }
+
+        private void Publish(string groupName, GroupEventArgs<T> data)
+        {
+            GroupEventSubscriber<T>[] subscribers;
             lock (_groups)
             {
-                if (!_groups.TryGetValue(groupName, out var handler) || handler == null)
+                if (!_groups.TryGetValue(groupName, out var registered) || registered.Count == 0)
                     return;
-                invocationList = handler.GetInvocationList().ToArray();
+                subscribers = registered.ToArray();
             }
 
-            foreach (var del in invocationList)
+            foreach (var subscriber in subscribers)
+                subscriber.Publish(data);
+        }
+    }
+
+    /// <summary>
+    /// Isolates one observer behind a bounded, ordered queue. Publishers never wait for an
+    /// observer, and an overloaded observer receives the most recent notifications.
+    /// </summary>
+    internal sealed class GroupEventSubscriber<T> : IDisposable
+    {
+        private readonly string _groupName;
+        private readonly Func<GroupEventArgs<T>, Task> _action;
+        private readonly Channel<GroupEventArgs<T>> _queue;
+        private readonly CancellationTokenSource _cancellation = new();
+        private int _disposed;
+
+        public string MethodName => _action.Method.Name;
+
+        public GroupEventSubscriber(
+            string groupName,
+            Func<GroupEventArgs<T>, Task> action,
+            int capacity)
+        {
+            _groupName = groupName;
+            _action = action;
+            _queue = Channel.CreateBounded<GroupEventArgs<T>>(new BoundedChannelOptions(capacity)
             {
-                try
+                SingleReader = true,
+                SingleWriter = false,
+                FullMode = BoundedChannelFullMode.DropOldest,
+                AllowSynchronousContinuations = false
+            });
+            _ = ProcessAsync();
+        }
+
+        public void Publish(GroupEventArgs<T> data)
+        {
+            if (Volatile.Read(ref _disposed) == 0)
+                _queue.Writer.TryWrite(data);
+        }
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0)
+                return;
+
+            _cancellation.Cancel();
+            _queue.Writer.TryComplete();
+        }
+
+        private async Task ProcessAsync()
+        {
+            try
+            {
+                while (await _queue.Reader.WaitToReadAsync(_cancellation.Token).ConfigureAwait(false))
                 {
-                    await ((Func<GroupEventArgs<T>, Task>)del)(data);
+                    while (!_cancellation.IsCancellationRequested && _queue.Reader.TryRead(out var data))
+                    {
+                        try
+                        {
+                            await _action(data).ConfigureAwait(false);
+                        }
+                        catch (Exception ex)
+                        {
+                            Log.ForContext<GroupEvent<T>>().Error(
+                                ex,
+                                "Error invoking subscriber for group {GroupName}",
+                                _groupName);
+                        }
+                    }
                 }
-                catch (Exception ex)
-                {
-                    Log.ForContext<GroupEvent<T>>().Error(ex, "Error invoking subscriber for group {GroupName}", groupName);
-                }
+            }
+            catch (OperationCanceledException) when (_cancellation.IsCancellationRequested)
+            {
+            }
+            catch (Exception ex)
+            {
+                Log.ForContext<GroupEvent<T>>().Error(
+                    ex,
+                    "Notification dispatcher failed for group {GroupName}",
+                    _groupName);
             }
         }
     }
