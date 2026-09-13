@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO.Pipes;
-using System.Reflection;
+using Relay.Runner;
 
 namespace Refund.JobExecution;
 
@@ -65,7 +65,7 @@ public sealed class ManagedExecutionHost
                 string signal = await reader.ReadLineAsync(startCancellation.Token)
                     .AsTask()
                     .WaitAsync(ReadyTimeout, startCancellation.Token);
-                processGroup = RelayRunner.ParseReadySignal(signal);
+                processGroup = RunnerProtocol.ParseReadySignal(signal);
             }
 
             await _gate.WaitAsync(CancellationToken.None);
@@ -220,23 +220,15 @@ public sealed class ManagedExecutionHost
         string controlHandle,
         string readyHandle)
     {
-        string entryAssembly = Assembly.GetEntryAssembly()?.Location
-                               ?? throw new InvalidOperationException("Relay executable path is unavailable.");
-        string processPath = Environment.ProcessPath
-                             ?? throw new InvalidOperationException("Relay process path is unavailable.");
-
         var info = new ProcessStartInfo
         {
-            FileName = processPath,
+            FileName = Path.Combine(AppContext.BaseDirectory,
+                OperatingSystem.IsWindows() ? "Relay.Runner.exe" : "Relay.Runner"),
             UseShellExecute = false,
             CreateNoWindow = true,
             WorkingDirectory = Path.GetTempPath()
         };
 
-        if (Path.GetFileNameWithoutExtension(processPath).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
-            info.ArgumentList.Add(entryAssembly);
-
-        info.ArgumentList.Add(RelayRunner.Command);
         Add(info, "control-handle", controlHandle);
         Add(info, "ready-handle", readyHandle);
         Add(info, "script", scriptPath);
@@ -309,8 +301,8 @@ public sealed class ManagedExecutionHost
 
             // The runner can itself crash. Its exit alone says nothing about the
             // separate payload group whose identity it gave us before GO.
-            SupervisedProcess.KillProcessGroup(_processGroup);
-            return SupervisedProcess.ProcessGroupIsEmpty(_processGroup.Value);
+            ProcessGroup.Kill(_processGroup);
+            return ProcessGroup.IsEmpty(_processGroup.Value);
         }
 
         public async Task ActivateAsync(CancellationToken cancellationToken)
@@ -323,7 +315,7 @@ public sealed class ManagedExecutionHost
                 if (_activated)
                     return;
 
-                await _control.WriteLineAsync(RelayRunner.GoSignal.AsMemory(), cancellationToken);
+                await _control.WriteLineAsync(RunnerProtocol.GoSignal.AsMemory(), cancellationToken);
                 await _control.FlushAsync(cancellationToken);
                 _activated = true;
             }
@@ -344,7 +336,7 @@ public sealed class ManagedExecutionHost
                     try
                     {
                         await _control.WriteLineAsync(
-                            RelayRunner.StopSignal.AsMemory(),
+                            RunnerProtocol.StopSignal.AsMemory(),
                             cancellationToken);
                         await _control.FlushAsync(cancellationToken);
                     }
@@ -397,7 +389,7 @@ public sealed class ManagedExecutionHost
 
         private void TryKill()
         {
-            SupervisedProcess.KillProcessGroup(_processGroup);
+            ProcessGroup.Kill(_processGroup);
             try
             {
                 if (!_process.HasExited)

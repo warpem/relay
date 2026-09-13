@@ -1,6 +1,7 @@
 using System.IO.Pipes;
 using System.Diagnostics;
 using Refund.JobExecution;
+using Relay.Runner;
 
 namespace Refund.Tests.JobExecution;
 
@@ -20,13 +21,13 @@ public sealed class RelayRunnerProtocolTests
                 script,
                 $"touch '{marker}'\necho ready\necho problem >&2\nexit 7\n");
 
-            await using var protocol = await RunnerProtocol.StartAsync(
+            await using var protocol = await RunnerSession.StartAsync(
                 Options(script, directory, stdout, stderr));
 
-            RelayRunner.ParseReadySignal(await protocol.Ready.ReadLineAsync());
+            RunnerProtocol.ParseReadySignal(await protocol.Ready.ReadLineAsync());
             Assert.False(File.Exists(marker));
 
-            await protocol.Control.WriteLineAsync(RelayRunner.GoSignal);
+            await protocol.Control.WriteLineAsync(RunnerProtocol.GoSignal);
 
             Assert.Equal(7, await protocol.Result.WaitAsync(TimeSpan.FromSeconds(5)));
             Assert.Equal("ready\n", await File.ReadAllTextAsync(stdout));
@@ -47,14 +48,14 @@ public sealed class RelayRunnerProtocolTests
             string marker = Path.Combine(directory, "started");
             string script = Path.Combine(directory, "payload.sh");
             await File.WriteAllTextAsync(script, $"touch '{marker}'\nsleep 30\n");
-            await using var protocol = await RunnerProtocol.StartAsync(Options(
+            await using var protocol = await RunnerSession.StartAsync(Options(
                 script,
                 directory,
                 Path.Combine(directory, "stdout.txt"),
                 Path.Combine(directory, "stderr.txt")));
-            RelayRunner.ParseReadySignal(await protocol.Ready.ReadLineAsync());
+            RunnerProtocol.ParseReadySignal(await protocol.Ready.ReadLineAsync());
 
-            await protocol.Control.WriteLineAsync(RelayRunner.GoSignal);
+            await protocol.Control.WriteLineAsync(RunnerProtocol.GoSignal);
             await WaitUntilAsync(() => File.Exists(marker));
             protocol.CloseControl();
 
@@ -81,13 +82,13 @@ public sealed class RelayRunnerProtocolTests
             await File.WriteAllTextAsync(
                 script,
                 $"sleep 30 >/dev/null 2>&1 & echo $! > '{pidFile}'\n");
-            await using var protocol = await RunnerProtocol.StartAsync(Options(
+            await using var protocol = await RunnerSession.StartAsync(Options(
                 script,
                 directory,
                 Path.Combine(directory, "stdout.txt"),
                 Path.Combine(directory, "stderr.txt")));
-            RelayRunner.ParseReadySignal(await protocol.Ready.ReadLineAsync());
-            await protocol.Control.WriteLineAsync(RelayRunner.GoSignal);
+            RunnerProtocol.ParseReadySignal(await protocol.Ready.ReadLineAsync());
+            await protocol.Control.WriteLineAsync(RunnerProtocol.GoSignal);
             await WaitUntilAsync(() => File.Exists(pidFile), TimeSpan.FromSeconds(10));
             childPid = int.Parse(await File.ReadAllTextAsync(pidFile));
 
@@ -113,18 +114,18 @@ public sealed class RelayRunnerProtocolTests
             string marker = Path.Combine(directory, "started");
             string script = Path.Combine(directory, "payload.sh");
             await File.WriteAllTextAsync(script, $"touch '{marker}'\n");
-            await using var protocol = await RunnerProtocol.StartAsync(Options(
+            await using var protocol = await RunnerSession.StartAsync(Options(
                 script, directory,
                 Path.Combine(directory, "stdout.txt"),
                 Path.Combine(directory, "stderr.txt")));
-            int? processGroup = RelayRunner.ParseReadySignal(await protocol.Ready.ReadLineAsync());
+            int? processGroup = RunnerProtocol.ParseReadySignal(await protocol.Ready.ReadLineAsync());
             Assert.NotNull(processGroup);
             Assert.False(File.Exists(marker));
 
             protocol.CloseControl();
 
             Assert.Equal(125, await protocol.Result.WaitAsync(TimeSpan.FromSeconds(5)));
-            Assert.True(SupervisedProcess.ProcessGroupIsEmpty(processGroup.Value));
+            Assert.True(ProcessGroup.IsEmpty(processGroup.Value));
             Assert.False(File.Exists(marker));
         }
         finally
@@ -195,14 +196,14 @@ public sealed class RelayRunnerProtocolTests
             await File.WriteAllTextAsync(
                 script,
                 "for i in $(seq 1 20000); do echo output-$i; done\n");
-            await using var protocol = await RunnerProtocol.StartAsync(Options(
+            await using var protocol = await RunnerSession.StartAsync(Options(
                 script,
                 directory,
                 Path.Combine(blocker, "stdout.txt"),
                 Path.Combine(directory, "stderr.txt")));
-            RelayRunner.ParseReadySignal(await protocol.Ready.ReadLineAsync());
+            RunnerProtocol.ParseReadySignal(await protocol.Ready.ReadLineAsync());
 
-            await protocol.Control.WriteLineAsync(RelayRunner.GoSignal);
+            await protocol.Control.WriteLineAsync(RunnerProtocol.GoSignal);
 
             Assert.Equal(0, await protocol.Result.WaitAsync(TimeSpan.FromSeconds(10)));
         }
@@ -284,7 +285,7 @@ public sealed class RelayRunnerProtocolTests
         }
     }
 
-    private sealed class RunnerProtocol : IAsyncDisposable
+    private sealed class RunnerSession : IAsyncDisposable
     {
         private readonly NamedPipeServerStream _controlServer;
         private readonly NamedPipeServerStream _readyServer;
@@ -292,7 +293,7 @@ public sealed class RelayRunnerProtocolTests
         private readonly NamedPipeClientStream _readyClient;
         private bool _controlClosed;
 
-        private RunnerProtocol(
+        private RunnerSession(
             NamedPipeServerStream controlServer,
             NamedPipeServerStream readyServer,
             NamedPipeClientStream controlClient,
@@ -312,7 +313,7 @@ public sealed class RelayRunnerProtocolTests
         public StreamReader Ready { get; }
         public Task<int> Result { get; }
 
-        public static async Task<RunnerProtocol> StartAsync(
+        public static async Task<RunnerSession> StartAsync(
             IReadOnlyDictionary<string, string> options)
         {
             string suffix = Guid.NewGuid().ToString("N")[..8];
@@ -347,7 +348,7 @@ public sealed class RelayRunnerProtocolTests
                 options,
                 controlClient,
                 readyClient);
-            return new RunnerProtocol(
+            return new RunnerSession(
                 controlServer,
                 readyServer,
                 controlClient,

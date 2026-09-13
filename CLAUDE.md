@@ -99,6 +99,10 @@ Relay is a platform for cryo-EM data processing workflows with these key compone
 - `QueueRepository`: Queue configuration and execution integration; queue membership comes from attempts.
 - `LocalQueue`: Configuration for in-process `ILocalJob` execution.
 - `ClusterQueue`: Templates and scheduler protocol; `Managed` uses a supervised host process.
+- `Relay.Runner`: Standalone console project with only .NET runtime dependencies. Owns the
+  control-pipe protocol and process supervision; `Refund` references it for the shared protocol
+  and live process-group helpers. Normal SDK build/publish includes its executable and runtime
+  files beside Relay. `ManagedExecutionHost` launches that sibling executable directly.
 - Managed admission is strict FIFO among dependency-ready attempts. Reruns create new attempts.
 - Managed runners stop on ownership-channel EOF. Restart interrupts the old attempt and releases
   its reservation; do not adopt, probe, or kill saved PIDs, or block admission waiting for them.

@@ -1,14 +1,10 @@
 using System.IO.Pipes;
+using static Relay.Runner.RunnerProtocol;
 
-namespace Refund.JobExecution;
+namespace Relay.Runner;
 
-public static class RelayRunner
+internal static class RelayRunner
 {
-    public const string Command = "--relay-runner";
-    internal const string ReadySignal = "READY";
-    internal const string GoSignal = "GO";
-    internal const string StopSignal = "STOP";
-
     public static async Task<int> RunAsync(
         IReadOnlyList<string> arguments,
         CancellationToken cancellationToken = default)
@@ -94,16 +90,6 @@ public static class RelayRunner
         }
 
         return result;
-    }
-
-    internal static int? ParseReadySignal(string signal)
-    {
-        string[] fields = signal?.Split(' ') ?? [];
-        if (fields.Length != 2 || fields[0] != ReadySignal ||
-            !int.TryParse(fields[1], out int processGroup) || processGroup < 0 || processGroup == 1)
-            throw new InvalidOperationException(
-                $"relay-runner did not report its containment group (signal: {signal ?? "EOF"}).");
-        return processGroup == 0 ? null : processGroup;
     }
 
     private static string Required(IReadOnlyDictionary<string, string> options, string name) =>

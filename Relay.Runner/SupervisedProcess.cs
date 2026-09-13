@@ -1,8 +1,6 @@
 using System.Diagnostics;
-using System.Runtime.InteropServices;
-using Serilog;
 
-namespace Refund.JobExecution;
+namespace Relay.Runner;
 
 internal sealed class SupervisedProcess : IDisposable
 {
@@ -97,7 +95,7 @@ internal sealed class SupervisedProcess : IDisposable
 
     public void KillTree()
     {
-        if (KillProcessGroup(_processGroup))
+        if (global::Relay.Runner.ProcessGroup.Kill(_processGroup))
             return;
 
         try
@@ -134,12 +132,12 @@ internal sealed class SupervisedProcess : IDisposable
         var started = Stopwatch.StartNew();
         while (started.Elapsed < ContainmentGrace)
         {
-            if (ProcessGroupIsEmpty(_processGroup.Value))
+            if (global::Relay.Runner.ProcessGroup.IsEmpty(_processGroup.Value))
                 return true;
             await Task.Delay(25, cancellationToken);
         }
 
-        return ProcessGroupIsEmpty(_processGroup.Value);
+        return global::Relay.Runner.ProcessGroup.IsEmpty(_processGroup.Value);
     }
 
     public void Dispose()
@@ -157,7 +155,7 @@ internal sealed class SupervisedProcess : IDisposable
 
             try
             {
-                int group = GetProcessGroup(process.Id);
+                int group = global::Relay.Runner.ProcessGroup.Get(process.Id);
                 if (group == process.Id && group > 1)
                     return group;
             }
@@ -184,10 +182,8 @@ internal sealed class SupervisedProcess : IDisposable
         }
         catch (Exception exception)
         {
-            Log.ForContext<SupervisedProcess>().Warning(
-                exception,
-                "Could not open managed job output at {Path}; output will be discarded",
-                path);
+            Console.Error.WriteLine($"Could not open managed job output at {path}; " +
+                                    $"output will be discarded: {exception.Message}");
         }
 
         try
@@ -203,10 +199,8 @@ internal sealed class SupervisedProcess : IDisposable
                 }
                 catch (Exception exception)
                 {
-                    Log.ForContext<SupervisedProcess>().Warning(
-                        exception,
-                        "Stopped writing managed job output to {Path}; output will be discarded",
-                        path);
+                    Console.Error.WriteLine($"Stopped writing managed job output to {path}; " +
+                                            $"output will be discarded: {exception.Message}");
                     await writer.DisposeAsync();
                     writer = null;
                 }
@@ -214,10 +208,7 @@ internal sealed class SupervisedProcess : IDisposable
         }
         catch (Exception exception)
         {
-            Log.ForContext<SupervisedProcess>().Warning(
-                exception,
-                "Stopped reading managed job output for {Path}",
-                path);
+            Console.Error.WriteLine($"Stopped reading managed job output for {path}: {exception.Message}");
         }
         finally
         {
@@ -226,31 +217,4 @@ internal sealed class SupervisedProcess : IDisposable
         }
     }
 
-    internal static bool KillProcessGroup(int? processGroup) =>
-        processGroup is { } group && group > 1 && Kill(-group, SigKill) == 0;
-
-    internal static bool ProcessGroupIsEmpty(int processGroup)
-    {
-        if (processGroup <= 1)
-            return false;
-
-        try
-        {
-            return Kill(-processGroup, 0) != 0 &&
-                   Marshal.GetLastWin32Error() == NoSuchProcess;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private const int SigKill = 9;
-    private const int NoSuchProcess = 3;
-
-    [DllImport("libc", EntryPoint = "kill", SetLastError = true)]
-    private static extern int Kill(int pid, int signal);
-
-    [DllImport("libc", EntryPoint = "getpgid", SetLastError = true)]
-    private static extern int GetProcessGroup(int pid);
 }

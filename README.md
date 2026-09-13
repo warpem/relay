@@ -26,11 +26,16 @@ git submodule update --init --recursive
 dotnet build
 ```
 
-To publish a self-contained deployment:
+To publish a deployment using the installed .NET 10 runtime:
 
 ```bash
 dotnet publish Relay -c Release -o publish/
 ```
+
+The solution includes `Relay.Runner`, a standalone console supervisor for managed jobs.
+The standard build and publish automatically include its executable, DLL, and runtime files
+alongside Relay. Deploy the complete output directory; the runner needs no separate service or
+configuration. It depends only on the .NET runtime, with no web or scientific-library dependencies.
 
 ## Install Bakery (visualization)
 

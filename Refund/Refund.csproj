@@ -27,6 +27,7 @@
         <PackageReference Include="VYaml" Version="1.2.0" />
     </ItemGroup>
     <ItemGroup>
+        <ProjectReference Include="..\Relay.Runner\Relay.Runner.csproj" />
         <ProjectReference Include="..\Emoji\Emoji.csproj" />
         <ProjectReference Include="..\SourceGenerators\RelaySourceGenerators\RelaySourceGenerators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
         <ProjectReference Include="..\Warp\WarpLib\WarpLib.csproj" />

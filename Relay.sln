@@ -35,6 +35,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ElkSharp", "ElkSharp\src\El
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Refund.Tests", "Refund.Tests\Refund.Tests.csproj", "{C2F60B53-648F-4E19-BB50-28732002F69A}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Relay.Runner", "Relay.Runner\Relay.Runner.csproj", "{6D7EF295-DEB9-4C82-83F6-62895A487548}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -165,6 +167,18 @@ Global
 		{C2F60B53-648F-4E19-BB50-28732002F69A}.Release|x64.Build.0 = Release|Any CPU
 		{C2F60B53-648F-4E19-BB50-28732002F69A}.Release|x86.ActiveCfg = Release|Any CPU
 		{C2F60B53-648F-4E19-BB50-28732002F69A}.Release|x86.Build.0 = Release|Any CPU
+		{6D7EF295-DEB9-4C82-83F6-62895A487548}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6D7EF295-DEB9-4C82-83F6-62895A487548}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6D7EF295-DEB9-4C82-83F6-62895A487548}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{6D7EF295-DEB9-4C82-83F6-62895A487548}.Debug|x64.Build.0 = Debug|Any CPU
+		{6D7EF295-DEB9-4C82-83F6-62895A487548}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{6D7EF295-DEB9-4C82-83F6-62895A487548}.Debug|x86.Build.0 = Debug|Any CPU
+		{6D7EF295-DEB9-4C82-83F6-62895A487548}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6D7EF295-DEB9-4C82-83F6-62895A487548}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6D7EF295-DEB9-4C82-83F6-62895A487548}.Release|x64.ActiveCfg = Release|Any CPU
+		{6D7EF295-DEB9-4C82-83F6-62895A487548}.Release|x64.Build.0 = Release|Any CPU
+		{6D7EF295-DEB9-4C82-83F6-62895A487548}.Release|x86.ActiveCfg = Release|Any CPU
+		{6D7EF295-DEB9-4C82-83F6-62895A487548}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

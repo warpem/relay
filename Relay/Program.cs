@@ -21,13 +21,6 @@ using Microsoft.AspNetCore.DataProtection;
 using AuthenticationService = Refund.Services.AuthenticationService;
 using Serilog;
 using System.Runtime.InteropServices;
-using Refund.JobExecution;
-
-if (args.FirstOrDefault() == RelayRunner.Command)
-{
-    Environment.ExitCode = await RelayRunner.RunAsync(args.Skip(1).ToArray());
-    return;
-}
 
 // Program.cs is the entry point for the Relay application and sets up the application
 // with all necessary services, configuration, and middleware.

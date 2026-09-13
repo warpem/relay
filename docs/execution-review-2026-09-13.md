@@ -42,6 +42,10 @@ steps: [SchedMD sacct documentation](https://slurm.schedmd.com/sacct.html).
 
 ### Managed restart ends the old ownership
 
+The supervisor now has its own `Relay.Runner` console project, depending only on the .NET runtime.
+Relay launches its sibling executable directly. The SDK includes it in the ordinary build and publish
+output through the project reference; no second deployment or web-entry-point mode is needed.
+
 `ExecutionCoordinator.Recover()` releases managed reservations and gives old attempts the `Interrupted`
 outcome. The old runner owns cleanup through EOF on its inherited control channel. The new Relay
 process neither adopts that runner nor probes or kills saved process IDs, and admission does not wait
@@ -106,11 +110,15 @@ execution-state migration.
 - Baseline: **379/379** Refund tests passed before edits.
 - Initial audit result: **403/403** Refund tests passed after the original review edits, before the
   additional resizing and explicit restart-contract coverage.
-- Final result: **420/420** Refund tests passed, including active pool projection/MCP output,
-  resize validation, immediate successive cancellation batches, and fixed lifetime budgets.
+- Final result: **423/423** Refund tests passed, including active pool projection/MCP output,
+  resize validation, immediate successive cancellation batches, fixed lifetime budgets, and actual
+  standalone runner launch/EOF cleanup before and after activation.
 - Explicit managed restart contract: **2/2** focused tests passed, covering a saved receipt before
   and after activation, interruption/resource release, and new admission without stale-PID effects.
 - `dotnet build Relay/Relay.csproj --no-restore`: succeeded, no errors; existing warnings remain.
+- Release publish with the deployment pipeline's flags succeeded and included the standalone runner.
+  An isolated copy of its four runtime files successfully cleaned up its payload after its owner
+  process was killed with SIGKILL, with no application assemblies present.
 - Actual queue-card component rendering verified the minimum, running/busy disabled states, and
   click/mouseup/double-click propagation guards using existing ASP.NET/Fluent assemblies. No browser
   visual check was performed.
@@ -121,5 +129,5 @@ execution-state migration.
 
 Tests use deterministic gates and completion signals for concurrency cases. No scheduler jobs were
 submitted and no existing project data was modified. The Warp submodule is updated to upstream main
-`88932134e9a1b996eac22085a6de875b93725e60`; all 420 Refund tests also pass with that revision.
+`88932134e9a1b996eac22085a6de875b93725e60`; all 423 Refund tests pass with that revision.
 Existing local OS metadata files were retained and are now ignored by Warp's upstream ignore rules.

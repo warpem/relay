@@ -320,6 +320,12 @@ death definitively ends the task; a non-terminal local attempt loaded on restart
 Every managed command runs under a small generic supervisor named `relay-runner`. Individual tools
 do not need modification or heartbeats.
 
+The supervisor is the separate `Relay.Runner` console project, with no packages or dependencies on
+the application. `Refund` references its assembly for shared protocol and process-group helpers.
+The .NET SDK includes the runner executable, DLL, dependency manifest, and runtime configuration in
+Relay's build and publish output. The managed host launches the sibling executable directly; Relay's
+web entry point has no runner mode. Both executables ship in the same deployment directory.
+
 The startup protocol closes the dangerous launch windows:
 
 1. Relay persists the attempt in `Starting` with its reservation and launch token.
