@@ -9,7 +9,7 @@ using Warp.Tools;
 namespace Refund.Jobs.M.CreateSpecies;
 
 [GenerateReadOnly]
-public class CreateSpecies : WarpJobGpu, IClusterJob
+public class CreateSpecies : WarpJob, IClusterJob
 {
     /// <summary>
     /// Gets or sets the dimensions of the job card in the workflow editor.
@@ -41,8 +41,12 @@ public class CreateSpecies : WarpJobGpu, IClusterJob
 
     /// <summary>
     /// Gets the queue type this job should be submitted to.
-    /// Import jobs run locally as they typically involve only file I/O operations.
+    /// Species creation runs as a single GPU job without worker pool support.
     /// </summary>
+    public override JobQueueType QueueType => JobQueueType.GPU;
+
+    public override string[] RequiredModules => base.RequiredModules.Concat(["gpu"]).ToArray();
+
     /// <summary>
     /// Gets whether this job produces iterative results.
     /// Import jobs are non-iterative as they simply copy existing files.
@@ -211,9 +215,7 @@ public class CreateSpecies : WarpJobGpu, IClusterJob
     
     #endregion
 
-    public override int PerDevice { get; set; } = 1;
     public override int MemoryPerWorker { get; set; } = 1;
-    public override int NGpus { get; set; } = 1;
 
     #endregion
 

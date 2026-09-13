@@ -9,7 +9,7 @@ using Warp.Tools;
 namespace Refund.Jobs.M.EstimateWeights;
 
 [GenerateReadOnly]
-public class EstimateWeights : WarpJobGpu, IClusterJob
+public class EstimateWeights : WarpJob, IClusterJob
 {
     public override int2 CardSquareCount { get; set; } = new int2(2, 1);
 
@@ -47,6 +47,11 @@ public class EstimateWeights : WarpJobGpu, IClusterJob
     public override Type ExpandedViewType => null;
 
     public override string CommandName => $"EstimateWeights";
+
+    // Weight estimation runs as a single GPU job without worker pool support.
+    public override JobQueueType QueueType => JobQueueType.GPU;
+
+    public override string[] RequiredModules => base.RequiredModules.Concat(["gpu"]).ToArray();
 
     protected override int DefaultMemoryPerWorker => 48;
 
@@ -112,9 +117,6 @@ public class EstimateWeights : WarpJobGpu, IClusterJob
            helpText: "Number of CPU cores to request.")]
     [RelayProperty]
     public int CoresPerWorker { get; set; } = 16;
-
-    public override int NGpus { get; set; } = 1;
-    public override int PerDevice { get; set; } = 1;
 
     #endregion
 

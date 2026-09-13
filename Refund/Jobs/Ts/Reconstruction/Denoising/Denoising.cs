@@ -15,7 +15,7 @@ namespace Refund.Jobs.Ts.Reconstruction.Denoising;
 /// This is based on the WarpTools ReconstructTiltseries command.
 /// </summary>
 [GenerateReadOnly]
-public class Denoising : WarpJobGpu, IClusterJob
+public class Denoising : WarpJob, IClusterJob
 {
     public override string TypeGuid => "ef2ac481-e330-4f3c-9238-8f5e270e2d58";
     
@@ -30,6 +30,11 @@ public class Denoising : WarpJobGpu, IClusterJob
     public override Type ExpandedViewType => typeof(DenoisingExpandedView);
 
     public override int2 CardSquareCount { set; get; } = new int2(2, 1);
+
+    // Noise2Map runs as a single GPU job without worker pool support.
+    public override JobQueueType QueueType => JobQueueType.GPU;
+
+    public override string[] RequiredModules => base.RequiredModules.Concat(["gpu"]).ToArray();
 
     public override int CoreCount => 8;
 
@@ -63,9 +68,7 @@ public class Denoising : WarpJobGpu, IClusterJob
            ConditionalOnField = nameof(PerformTraining), ConditionalOnValue = true)]
     public int TrainingIterations { get; set; } = 10000;
 
-    public override int NGpus { get; set; } = 1;
     public override int MemoryPerWorker { get; set; } = 12;
-    public override int PerDevice { get; set; } = 1;
 
     #endregion
     
