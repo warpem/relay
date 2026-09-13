@@ -32,6 +32,7 @@ from .ts_export_particles_job_card import ts_export_particles_job_card
 from .import_fs_job_card import import_fs_job_card
 from .m_species_job_card import m_species_job_card
 from .m_refine_job_card import m_refine_job_card
+from .m_species_fsc import m_species_fsc
 
 import matplotlib
 

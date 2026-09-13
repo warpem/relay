@@ -71,16 +71,11 @@ def _plot_single_species(species_folder: Path, output_file: Path):
     star = starfile.read(fsc_star_file)
     
     # parse XML file for GlobalResolution
-    tree = ET.parse(species_xml_file)
-    root = tree.getroot()
-    global_resolution = None
-    for param in root.findall('Param'):
-        if param.get('Name') == 'GlobalResolution':
-            global_resolution = float(param.get('Value'))
-            break
+    global_resolution = _read_global_resolution(species_xml_file)
     
     # grab volume slice
-    slice = take_slice(mrcfile.mmap(volume_file).data, axis='z', thickness=1)
+    with mrcfile.mmap(volume_file) as volume:
+        slice = take_slice(volume.data, axis='z', thickness=1)
     
     # plot...
     fig, axs = plt.subplots(ncols=2, figsize=(2, 1))
@@ -140,25 +135,23 @@ def _plot_multiple_species(species_folders: list, output_file: Path):
             raise FileNotFoundError(f"Species XML file not found: {species_xml_file}")
         
         # grab volume slice
-        slice = take_slice(mrcfile.mmap(volume_file).data, axis='z', thickness=1)
+        with mrcfile.mmap(volume_file) as volume:
+            slice = take_slice(volume.data, axis='z', thickness=1)
         volume_slices.append(slice)
         
         # parse XML file for GlobalResolution
-        tree = ET.parse(species_xml_file)
-        root = tree.getroot()
-        global_resolution = None
-        for param in root.findall('Param'):
-            if param.get('Name') == 'GlobalResolution':
-                global_resolution = float(param.get('Value'))
-                break
-        resolution_values.append(global_resolution)
+        resolution_values.append(_read_global_resolution(species_xml_file))
     
-    # stack and normalize volume slices (following class3d-job-card)
-    volume_slices = np.stack(volume_slices)
-    idx_nonzero = np.abs(volume_slices) > 1e-8
-    n_nonzero = np.sum(idx_nonzero)
-    normalized_l2_norm = np.linalg.norm(volume_slices[idx_nonzero]) / np.sqrt(n_nonzero)
-    volume_slices = volume_slices / normalized_l2_norm
+    # Keep native slice dimensions: species can have different box sizes.
+    # Compute the shared contrast scale without stacking differently shaped arrays.
+    sum_squares = 0.0
+    n_nonzero = 0
+    for image in volume_slices:
+        values = image[np.abs(image) > 1e-8].astype(np.float64)
+        sum_squares += np.dot(values, values)
+        n_nonzero += values.size
+    normalized_l2_norm = np.sqrt(sum_squares / n_nonzero) if n_nonzero else 1.0
+    volume_slices = [image / normalized_l2_norm for image in volume_slices]
     
     # setup plot
     fig, axs = plt.subplots(nrows=n_rows, ncols=n_cols, figsize=(aspect_ratio, 1))
@@ -185,6 +178,15 @@ def _plot_multiple_species(species_folders: list, output_file: Path):
     plt.tight_layout(pad=0.1)  # avoids stray white pixels at edges
     fig.savefig(output_file, dpi=288, transparent=True)
     fig.savefig(str(output_file.with_suffix('.pdf')), dpi=288, transparent=True)
+    plt.close(fig)
+
+
+def _read_global_resolution(species_xml_file: Path) -> Optional[float]:
+    root = ET.parse(species_xml_file).getroot()
+    for param in root.findall('Param'):
+        if param.get('Name') == 'GlobalResolution':
+            return float(param.get('Value'))
+    return None
 
 
 def draw_z_slice_panel(
@@ -219,6 +221,8 @@ def draw_z_slice_panel_with_resolution(
         origin="lower",
         interpolation='sinc',
         interpolation_stage='data',
+        # Fill an equal-sized square for every species, regardless of box size.
+        extent=(0, 1, 0, 1),
         vmin=-0.25 * std_scale,
         vmax=0.75 * std_scale,
     )
@@ -271,14 +275,16 @@ def _draw_fsc_on_axes(ax: matplotlib.axes.Axes, df: pd.DataFrame, global_resolut
     ax.plot(
         resolution_inv,
         df['wrpFSCRandomized'],
-        color='#eea9dd'  # seaborn colorblind pink
+        color='#eea9dd',  # seaborn colorblind pink
+        label='Phase randomized',
     )
 
     # unmasked
     ax.plot(
         resolution_inv,
         df['wrpFSCUnmasked'],
-        color='#be5b1eff'  # seaborn colorblind reddish brown
+        color='#be5b1eff',  # seaborn colorblind reddish brown
+        label='Unmasked',
     )
 
     # corrected
@@ -286,10 +292,11 @@ def _draw_fsc_on_axes(ax: matplotlib.axes.Axes, df: pd.DataFrame, global_resolut
         resolution_inv,
         df['wrpFSCCorrected'],
         color='#3d916a',  # seaborn colorblind dark green
+        label='Corrected',
     )
 
     # add 0.143 threshold line
-    ax.axhline(y=0.143, color='red', linestyle='--', alpha=0.7, linewidth=1)
+    ax.axhline(y=0.143, color='red', linestyle='--', alpha=0.7, linewidth=1, label='0.143 threshold')
 
     # add resolution label from XML
     xlim = ax.get_xlim()

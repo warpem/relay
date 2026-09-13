@@ -1,18 +1,33 @@
 @using Refund.Components.IsosurfaceViewer
+@implements IAsyncDisposable
+
 @if (_job == null)
 {
     <span>No job available to display.</span>
 }
-else
+else if (_job.VisAvailableIteration >= 0)
 {
-    if (_job.VisAvailableIteration >= 0)
-        foreach (var species in _job.GetPopulation(0).Species)
+    <FluentTabs @key="_job.DirectoryPath" Class="species-tabs">
+        @foreach (var species in _job.GetPopulation(0).Species.OrderBy(s => s.Name, StringComparer.Ordinal))
         {
-            if (File.Exists(species.DenoisedMapPath))
-            {
-                <div style="max-width: 500px; max-height: 500px;">
-                    <IsosurfaceViewer MinHeight="500" MinWidth="500" VolumePath="@species.DenoisedMapPath"/>
+            <FluentTab @key="species.Name" Id="@($"species-{Uri.EscapeDataString(species.Name)}")"
+                       Label="@species.Name" DeferredLoading="true">
+                <div class="species-visualizations">
+                    @if (File.Exists(species.DenoisedMapPath))
+                    {
+                        <div class="species-map">
+                            <IsosurfaceViewer @key="species.DenoisedMapPath" MinHeight="500" MinWidth="500"
+                                              VolumePath="@species.DenoisedMapPath"/>
+                        </div>
+                    }
+                    @if (File.Exists(_job.VisFsc(species.Name)))
+                    {
+                        <ServerImage CacheKey="@_job.UpdateDate.Ticks.ToString()"
+                                     ServerPath="@_job.VisFsc(species.Name)" height="300"
+                                     alt="@($"FSC curves for {species.Name}")"/>
+                    }
                 </div>
-            }
+            </FluentTab>
         }
+    </FluentTabs>
 }

@@ -1,7 +1,5 @@
 using Microsoft.AspNetCore.Components;
-using Microsoft.FluentUI.AspNetCore.Components;
 using Refund.DataModel.ReadOnly;
-using Refund.Jobs.Refinement.Refinement3D.Refine3D;
 using Refund.Services;
 
 namespace Refund.Jobs.M.Refine;
@@ -14,12 +12,7 @@ public partial class RefineExpandedView
     [Inject] private ExpandedJobViewService ExpandedViewService { get; set; }
     
     /// <summary>
-    /// Service for displaying toast notifications
-    /// </summary>
-    [Inject] private IToastService ToastService { get; set; }
-    
-    /// <summary>
-    /// The Refine3D job currently being viewed
+    /// The M refinement job currently being viewed
     /// </summary>
     private ReadOnlyRefine _job;
 
@@ -45,7 +38,7 @@ public partial class RefineExpandedView
     /// <param name="job">The new job being displayed</param>
     private async Task HandleJobChanged(ReadOnlyJob job)
     {
-        // Check if this is a Refine3D job
+        // Check if this is an M refinement job
         if (job is ReadOnlyRefine refine)
         {
             _job = refine;
@@ -78,10 +71,11 @@ public partial class RefineExpandedView
     /// <summary>
     /// Unsubscribes from events when the component is disposed
     /// </summary>
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         ExpandedViewService.OnJobChanged -= HandleJobChanged;
         ExpandedViewService.OnJobUpdated -= HandleJobUpdated;
         ExpandedViewService.OnIterationChanged -= HandleIterationChanged;
+        return ValueTask.CompletedTask;
     }
 }

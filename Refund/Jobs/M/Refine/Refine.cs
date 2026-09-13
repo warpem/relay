@@ -270,6 +270,8 @@ public class Refine : WarpJobGpu, IClusterJob
     public string ResDataSourceFolderPath(MDataSource source) => Path.Combine(DirectoryPath, "data", source.Name);
     public string ResDataSourceFilePath(MDataSource source) => Path.Combine(ResDataSourceFolderPath(source), $"{source.Name}.source");
 
+    public string VisFsc(string speciesName) => Path.Combine(RelayResultsDirectoryPath, $"fsc_{speciesName}.png");
+
     /// <summary>
     /// Initializes a new instance of the ImportMap job.
     /// Configures the output port that will provide the imported map to downstream jobs.
@@ -375,16 +377,19 @@ public class Refine : WarpJobGpu, IClusterJob
 
         if (hasFinished && !File.Exists(VisCard(0)))
         {
-            var species = GetPopulation(0).Species.FirstOrDefault();
+            var population = GetPopulation(0);
+            if (population.Species.Count == 0)
+                return result;
 
-            if (species == null)
-                return null;
-            
-            var allSpeciesPath = Path.GetDirectoryName(Path.GetDirectoryName(species.CanonicalPath));
+            Directory.CreateDirectory(RelayResultsDirectoryPath);
+            foreach (var species in population.Species)
+            {
+                if (File.Exists(species.FscStarPath))
+                    BakeryWrapper.MSpeciesFsc(species.FscStarPath, species.CanonicalPath, VisFsc(species.Name));
+            }
 
-            BakeryWrapper.MRefineJobCard(allSpeciesPath,
-                                         VisCard(0));
-            
+            BakeryWrapper.MRefineJobCard(population.SpeciesDirectoryPath, VisCard(0));
+
             return () =>
             {
                 result?.Invoke();

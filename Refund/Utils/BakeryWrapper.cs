@@ -905,11 +905,25 @@ public static class BakeryWrapper
         string outputImageFile
     )
     {
-        var command = "m-refine-job-card " +
-                      $"--species-folder {speciesFolder} " +
-                      $"--output-file {outputImageFile} ";
+        RunCommand(new ProcessStartInfo("bakery")
+        {
+            ArgumentList = { "m-refine-job-card", "--species-folder", speciesFolder, "--output-file", outputImageFile }
+        });
+    }
 
-        RunCommand(command);
+    /// <summary>
+    /// Generates standalone FSC curves for an M species, using its reported global resolution.
+    /// </summary>
+    public static void MSpeciesFsc(string fscStarFile, string speciesXmlFile, string outputFile)
+    {
+        RunCommand(new ProcessStartInfo("bakery")
+        {
+            ArgumentList =
+            {
+                "m-species-fsc", "--fsc-star-file", fscStarFile,
+                "--species-xml-file", speciesXmlFile, "--output-file", outputFile
+            }
+        });
     }
 
     /// <summary>
