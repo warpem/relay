@@ -268,7 +268,11 @@ public partial class DataManager
             config.QueuesPath,
             async (job, action) =>
         {
-            await UpdateJob(job.UpdatedBy.AsReadOnly(), job.AsReadOnly(), action);
+            // Execution owns this job until its terminal projection is saved. The repository
+            // serializes data writes; do not re-enter the command lock from the runtime gate.
+            _dataRepository.UpdateJob(job.UpdatedBy, job, action);
+            await JobUpdated.InvokeHierarchy(job.AsReadOnly(),
+                GroupName.JobHierarchy(job.Space.Project.Id, job.Space.Id, job.Id));
         });
         _queueRepository.LoadQueues(_dataRepository);
 
@@ -374,9 +378,9 @@ public partial class DataManager
 
     private void EnsureNoPendingExecutions(IEnumerable<Job> jobs, string target)
     {
-        if (jobs.Any(HasPendingExecution))
+        if (jobs.Any(job => HasPendingExecution(job) || job.GetChildren().Any(HasPendingExecution)))
             throw new InvalidOperationException(
-                $"{target} contains pending job execution work. Abort active jobs and wait for completion first.");
+                $"{target} has pending execution work or active dependent jobs. Abort active jobs and wait for completion first.");
     }
 
     private static bool FolderContainsJob(Folder folder, int jobId)

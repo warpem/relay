@@ -19,6 +19,7 @@ public sealed class ClusterQueue : JobQueue
 {
     private static readonly ConditionalWeakTable<ClusterQueue, ReadOnlyClusterQueue> ReadOnlyCache = new();
     private static readonly ConcurrentDictionary<int, SemaphoreSlim> ClusterCommandGates = new();
+    private static readonly JsonSerializerOptions CustomVariableJsonOptions = new() { IncludeFields = true };
 
     [RelayProperty]
     public ClusterScheduler SchedulerType { get; set; } = ClusterScheduler.Slurm;
@@ -435,13 +436,13 @@ public sealed class ClusterQueue : JobQueue
         if (reader["customVariables"] != null)
             CustomVariables = JsonSerializer.Deserialize<
                 Dictionary<string, (string description, string defaultValue)>>(
-                reader["customVariables"].ToJsonString()) ?? new();
+                reader["customVariables"].ToJsonString(), CustomVariableJsonOptions) ?? new();
     }
 
     public override void WriteToJson(JsonNode writer)
     {
         base.WriteToJson(writer);
-        writer["customVariables"] = JsonSerializer.SerializeToNode(CustomVariables);
+        writer["customVariables"] = JsonSerializer.SerializeToNode(CustomVariables, CustomVariableJsonOptions);
     }
 
     public override ReadOnlyJobQueue AsReadOnly() =>

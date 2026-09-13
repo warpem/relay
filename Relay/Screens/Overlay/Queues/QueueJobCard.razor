@@ -103,18 +103,52 @@
         }
     </div>
 
-    @if (Job is IPoolStatus pool && pool.IsPooled)
+    @if (!string.IsNullOrWhiteSpace(Job.ExecutionWarning))
+    {
+        <div role="status" style="color: var(--error); overflow-wrap: anywhere;">
+            @Job.ExecutionWarning
+        </div>
+    }
+
+    @if (Job is IPoolStatus pool && (pool.IsPooled || Job.PoolDesiredSize.HasValue))
     {
         <div style="display: flex; align-items: flex-start; gap: 4px;">
             <span style="flex-shrink: 0; display: inline-flex; margin-top: 2px;">
                 <FluentIcon Value="@(new Icons.Regular.Size12.Server())"/>
             </span>
             <span style="display: flex; flex-wrap: wrap; column-gap: 5px; row-gap: 2px; align-items: center;">
-                <span style="white-space: nowrap;">Pool: @pool.PoolWorkersRunning/@pool.PoolSize running,</span>
-                <span style="white-space: nowrap;">@(pool.PoolWorkersAlive - pool.PoolWorkersRunning) pending</span>
+                <span style="white-space: nowrap;">Pool: @pool.PoolWorkersRunning running,</span>
+                <span style="white-space: nowrap;">@Math.Max(0, pool.PoolWorkersAlive - pool.PoolWorkersRunning - Job.PoolWorkersStopping) pending</span>
+                @if (Job.PoolWorkersStopping > 0)
+                {
+                    <span style="white-space: nowrap;">@Job.PoolWorkersStopping stopping</span>
+                }
                 <FluentBadge>@pool.PoolWorkersSubmitted submitted</FluentBadge>
             </span>
         </div>
+
+        @if (Job.PoolDesiredSize is { } desiredSize)
+        {
+            <div class="pool-size-controls"
+                 @onclick:stopPropagation="true"
+                 @onmouseup:stopPropagation="true"
+                 @ondblclick:stopPropagation="true">
+                <span>Workers</span>
+                <FluentButton Appearance="Appearance.Neutral"
+                              Disabled="@(!CanResizePool || desiredSize <= 1)"
+                              aria-label="Decrease worker pool size"
+                              OnClick="@(() => ChangePoolSize(-1))">
+                    −
+                </FluentButton>
+                <span class="pool-size-value" aria-live="polite">@desiredSize</span>
+                <FluentButton Appearance="Appearance.Neutral"
+                              Disabled="@(!CanResizePool || desiredSize == int.MaxValue)"
+                              aria-label="Increase worker pool size"
+                              OnClick="@(() => ChangePoolSize(1))">
+                    +
+                </FluentButton>
+            </div>
+        }
     }
 
     <FluentMenu Anchor="@($"job-card-{_id}")" Trigger="MouseButton.Right"

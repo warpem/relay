@@ -38,47 +38,48 @@ public static class RelayRunner
             .Select(int.Parse)
             .ToArray();
 
-        using var controlReader = new StreamReader(control);
-        await using (var readyWriter = new StreamWriter(ready) { AutoFlush = true })
-        {
-            await readyWriter.WriteLineAsync(ReadySignal.AsMemory(), cancellationToken);
-            await readyWriter.FlushAsync(cancellationToken);
-        }
-
-        string command = await controlReader.ReadLineAsync(cancellationToken);
-        if (command != GoSignal)
-            return 125;
-
-        using var payload = SupervisedProcess.Start(
+        using var payload = SupervisedProcess.Prepare(
             script,
             workingDirectory,
             gpus,
             standardOutput,
             standardError);
-        using var monitorCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        Task payloadExit = payload.WaitForProcessExitAsync(CancellationToken.None);
-        Task<string> controlCommand = controlReader.ReadLineAsync(monitorCancellation.Token).AsTask();
-        Task completed = await Task.WhenAny(payloadExit, controlCommand);
-
-        if (completed == controlCommand)
-        {
-            payload.KillTree();
-            await payload.WaitForContainmentAsync(CancellationToken.None);
-            return 137;
-        }
-
-        await payloadExit;
-        int exitCode = payload.ExitCode;
-        payload.KillTree();
-        bool contained = await payload.WaitForContainmentAsync(CancellationToken.None);
-        monitorCancellation.Cancel();
+        int exitCode = 125;
+        bool contained;
         try
         {
-            await controlCommand;
+            using var controlReader = new StreamReader(control);
+            await using (var readyWriter = new StreamWriter(ready) { AutoFlush = true })
+            {
+                await readyWriter.WriteLineAsync(
+                    $"{ReadySignal} {payload.ProcessGroup ?? 0}".AsMemory(), cancellationToken);
+            }
+
+            string command = await controlReader.ReadLineAsync(cancellationToken);
+            if (command == GoSignal)
+            {
+                await payload.ActivateAsync(cancellationToken);
+                using var monitorCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                Task payloadExit = payload.WaitForProcessExitAsync(CancellationToken.None);
+                Task<string> controlCommand = controlReader.ReadLineAsync(monitorCancellation.Token).AsTask();
+                Task completed = await Task.WhenAny(payloadExit, controlCommand);
+                exitCode = completed == controlCommand ? 137 : payload.ExitCode;
+                monitorCancellation.Cancel();
+                try
+                {
+                    await controlCommand;
+                }
+                catch (OperationCanceledException)
+                {
+                }
+            }
         }
-        catch (OperationCanceledException)
+        finally
         {
+            payload.KillTree();
+            contained = await payload.WaitForContainmentAsync(CancellationToken.None);
         }
+
         return contained ? exitCode : 125;
     }
 
@@ -93,6 +94,16 @@ public static class RelayRunner
         }
 
         return result;
+    }
+
+    internal static int? ParseReadySignal(string signal)
+    {
+        string[] fields = signal?.Split(' ') ?? [];
+        if (fields.Length != 2 || fields[0] != ReadySignal ||
+            !int.TryParse(fields[1], out int processGroup) || processGroup < 0 || processGroup == 1)
+            throw new InvalidOperationException(
+                $"relay-runner did not report its containment group (signal: {signal ?? "EOF"}).");
+        return processGroup == 0 ? null : processGroup;
     }
 
     private static string Required(IReadOnlyDictionary<string, string> options, string name) =>

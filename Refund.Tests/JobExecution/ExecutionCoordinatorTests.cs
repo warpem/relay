@@ -458,12 +458,180 @@ public class ExecutionCoordinatorTests
         var cancel = Assert.Single(shrink);
         Assert.Single(Assert.IsType<CancelWorkers>(cancel).Receipts);
 
-        coordinator.WorkersCanceled(attempt.Id, ["worker-2"]);
+        coordinator.ObserveWorkers(attempt.Id,
+            [new WorkerObservation("worker-2", BackendObservationKind.Canceled)]);
         coordinator.ResizeWorkerGroup(attempt.Id, 3);
         var grow = coordinator.PlanEffects();
 
         Assert.Equal(2, grow.Count(effect => effect is StartWorker));
         Assert.Equal(3, attempt.WorkerGroup.DesiredCount);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void WorkerPoolResizeRequiresAPositiveTarget(int desiredCount)
+    {
+        var (coordinator, attempt) = CreateRunningPool(2, 4);
+
+        var error = Assert.Throws<InvalidOperationException>(() =>
+            coordinator.ResizeWorkerGroup(attempt.Id, desiredCount));
+
+        Assert.Contains("at least 1", error.Message);
+        Assert.Equal(2, attempt.WorkerGroup.DesiredCount);
+    }
+
+    [Fact]
+    public void WorkerPoolResizeRejectsInactiveAndNonPooledAttempts()
+    {
+        var coordinator = new ExecutionCoordinator([LocalQueue]);
+        Assert.Throws<InvalidOperationException>(() => coordinator.ResizeWorkerGroup(Guid.NewGuid(), 1));
+        var attempt = coordinator.RequestRun(Job(1), -1, ResourceVector.None, true);
+        coordinator.PreparationCompleted(attempt.Id);
+        coordinator.PlanEffects();
+        coordinator.StartCompleted(attempt.Id, new BackendReceipt("manager"), true);
+
+        var error = Assert.Throws<InvalidOperationException>(() =>
+            coordinator.ResizeWorkerGroup(attempt.Id, 1));
+
+        Assert.Contains("does not have a worker pool", error.Message);
+    }
+
+    [Fact]
+    public void WorkerPoolResizeRejectsEveryNonRunningPhase()
+    {
+        var workerQueue = new ExecutionQueuePolicy(2, ExecutionBackendKind.ExternalScheduler);
+        var coordinator = new ExecutionCoordinator([LocalQueue, workerQueue]);
+        var attempt = coordinator.RequestRun(Job(1), -1, ResourceVector.None, false,
+            new WorkerGroupRequest(2, 1, 2));
+
+        void AssertRejected()
+        {
+            Assert.Throws<InvalidOperationException>(() => coordinator.ResizeWorkerGroup(attempt.Id, 2));
+            Assert.Equal(1, attempt.WorkerGroup.DesiredCount);
+        }
+
+        AssertRejected();
+        coordinator.DependenciesSatisfied(attempt.Id);
+        AssertRejected();
+        coordinator.PreparationCompleted(attempt.Id);
+        AssertRejected();
+        coordinator.PlanEffects();
+        AssertRejected();
+        coordinator.StartCompleted(attempt.Id, new BackendReceipt("manager"), false);
+        AssertRejected();
+        coordinator.RequestCancel(attempt.Id);
+        AssertRejected();
+        coordinator.CancelCompleted(attempt.Id, new BackendObservation(BackendObservationKind.Indeterminate));
+        AssertRejected();
+        coordinator.Observe(attempt.Id, new BackendObservation(BackendObservationKind.Canceled));
+        AssertRejected();
+        coordinator.FinalizationCompleted(attempt.Id);
+        AssertRejected();
+    }
+
+    [Fact]
+    public void WorkerPoolIncreaseCannotReuseRetiringWorkersOrResetTheSubmissionBudget()
+    {
+        var (coordinator, attempt) = CreateRunningPool(3, 4);
+        Assert.Throws<InvalidOperationException>(() => coordinator.ResizeWorkerGroup(attempt.Id, 5));
+        coordinator.ResizeWorkerGroup(attempt.Id, 2);
+        var cancel = Assert.Single(coordinator.PlanEffects().OfType<CancelWorkers>());
+        coordinator.WorkerCancellationCompleted(attempt.Id, cancel.Receipts.Select(receipt =>
+            new WorkerObservation(receipt.Id, BackendObservationKind.Indeterminate)).ToArray());
+
+        var error = Assert.Throws<InvalidOperationException>(() =>
+            coordinator.ResizeWorkerGroup(attempt.Id, 4));
+
+        Assert.Contains("cannot exceed 3", error.Message);
+        Assert.Contains("remaining lifetime submission budget is 1", error.Message);
+        Assert.Equal(2, attempt.WorkerGroup.DesiredCount);
+        Assert.Equal(4, attempt.WorkerGroup.SubmissionLimit);
+        Assert.Equal(3, attempt.WorkerGroup.TotalSubmissions);
+        coordinator.ResizeWorkerGroup(attempt.Id, 3);
+        Assert.Equal(3, attempt.WorkerGroup.DesiredCount);
+    }
+
+    [Fact]
+    public void ExhaustedWorkerPoolsCanStillBeDecreasedAndSetToTheSameTarget()
+    {
+        var (coordinator, attempt) = CreateRunningPool(4, 4);
+        coordinator.ObserveWorkers(attempt.Id, attempt.WorkerGroup.Workers.Skip(1).Select(worker =>
+            new WorkerObservation(worker.Receipt.Id, BackendObservationKind.Failed)).ToArray());
+        Assert.Equal(1, attempt.WorkerGroup.AliveCount);
+
+        coordinator.ResizeWorkerGroup(attempt.Id, 4);
+        coordinator.ResizeWorkerGroup(attempt.Id, 3);
+        coordinator.ResizeWorkerGroup(attempt.Id, 3);
+
+        Assert.Equal(3, attempt.WorkerGroup.DesiredCount);
+        Assert.Empty(coordinator.PlanEffects());
+        Assert.Equal(4, attempt.WorkerGroup.SubmissionLimit);
+        Assert.Equal(4, attempt.WorkerGroup.TotalSubmissions);
+        Assert.Throws<InvalidOperationException>(() => coordinator.ResizeWorkerGroup(attempt.Id, 4));
+    }
+
+    [Fact]
+    public void AcceptedWorkerCancellationWaitsForTerminalEvidenceAcrossRestart()
+    {
+        var managerQueue = new ExecutionQueuePolicy(1, ExecutionBackendKind.ExternalScheduler);
+        var workerQueue = new ExecutionQueuePolicy(2, ExecutionBackendKind.ExternalScheduler);
+        var coordinator = new ExecutionCoordinator([managerQueue, workerQueue]);
+        var attempt = coordinator.RequestRun(
+            Job(1), 1, ResourceVector.None, dependenciesReady: true,
+            new WorkerGroupRequest(2, DesiredCount: 3, SubmissionLimit: 3));
+        coordinator.PreparationCompleted(attempt.Id);
+        coordinator.PlanEffects();
+        coordinator.StartCompleted(attempt.Id, new BackendReceipt("manager"), isRunning: true);
+        foreach (var start in coordinator.PlanEffects().OfType<StartWorker>())
+            coordinator.WorkerStarted(
+                attempt.Id, start.OperationId, new BackendReceipt(start.OperationId.ToString()), true);
+
+        coordinator.ResizeWorkerGroup(attempt.Id, 1);
+        var cancel = Assert.Single(coordinator.PlanEffects().OfType<CancelWorkers>());
+        Assert.Equal(2, cancel.Receipts.Count);
+        coordinator.WorkerCancellationCompleted(attempt.Id, cancel.Receipts
+            .Select(receipt => new WorkerObservation(receipt.Id, BackendObservationKind.Indeterminate))
+            .ToArray());
+
+        var restored = new ExecutionCoordinator([managerQueue, workerQueue]);
+        restored.Restore(coordinator.CreateSnapshot());
+        restored.Recover();
+        Assert.Empty(restored.PlanEffects());
+        var workers = Assert.Single(restored.Attempts).WorkerGroup;
+        Assert.Equal(3, workers.AliveCount);
+        Assert.Equal(2, workers.Workers.Count(worker => worker.Phase == WorkerPhase.Stopping));
+
+        restored.ObserveWorkers(attempt.Id, cancel.Receipts
+            .Select(receipt => new WorkerObservation(receipt.Id, BackendObservationKind.Canceled))
+            .ToArray());
+        Assert.Empty(restored.PlanEffects());
+        Assert.Equal(1, workers.AliveCount);
+    }
+
+    [Theory]
+    [InlineData(BackendObservationKind.Pending)]
+    [InlineData(BackendObservationKind.Running)]
+    public void LateWorkerObservationsCannotResurrectAnEndedWorker(BackendObservationKind staleKind)
+    {
+        var workerQueue = new ExecutionQueuePolicy(2, ExecutionBackendKind.ExternalScheduler);
+        var coordinator = new ExecutionCoordinator([LocalQueue, workerQueue]);
+        var attempt = coordinator.RequestRun(
+            Job(1), -1, ResourceVector.None, dependenciesReady: true,
+            new WorkerGroupRequest(2, DesiredCount: 1, SubmissionLimit: 1));
+        coordinator.PreparationCompleted(attempt.Id);
+        coordinator.PlanEffects();
+        coordinator.StartCompleted(attempt.Id, new BackendReceipt("manager"), isRunning: true);
+        var start = Assert.Single(coordinator.PlanEffects().OfType<StartWorker>());
+        coordinator.WorkerStarted(attempt.Id, start.OperationId, new BackendReceipt("worker"), true);
+
+        coordinator.ObserveWorkers(attempt.Id,
+            [new WorkerObservation("worker", BackendObservationKind.Canceled)]);
+        coordinator.ObserveWorkers(attempt.Id,
+            [new WorkerObservation("worker", staleKind)]);
+
+        Assert.Equal(0, attempt.WorkerGroup.AliveCount);
+        Assert.Equal(WorkerPhase.Ended, Assert.Single(attempt.WorkerGroup.Workers).Phase);
     }
 
     [Fact]
@@ -489,7 +657,8 @@ public class ExecutionCoordinatorTests
         Assert.Equal("worker", Assert.Single(cancel.Receipts).Id);
         Assert.DoesNotContain(completion, effect => effect is FinalizeExecution);
 
-        coordinator.WorkersCanceled(attempt.Id, ["worker"]);
+        coordinator.ObserveWorkers(attempt.Id,
+            [new WorkerObservation("worker", BackendObservationKind.Canceled)]);
         var cleanup = coordinator.PlanEffects();
 
         Assert.Single(cleanup, effect => effect is FinalizeExecution);
@@ -509,6 +678,10 @@ public class ExecutionCoordinatorTests
         var workerStart = Assert.IsType<StartWorker>(Assert.Single(coordinator.PlanEffects()));
         coordinator.WorkerStartIndeterminate(
             attempt.Id, workerStart.OperationId, "submission timed out");
+
+        coordinator.Observe(attempt.Id, new BackendObservation(BackendObservationKind.Running));
+        Assert.Equal(ExecutionHealth.Indeterminate, attempt.Health);
+        Assert.Contains("worker submission", attempt.HealthDetail);
 
         coordinator.Observe(attempt.Id, new BackendObservation(BackendObservationKind.Succeeded));
         var completion = coordinator.PlanEffects();
@@ -736,5 +909,21 @@ public class ExecutionCoordinatorTests
         Assert.Equal("42", copy.Receipt.Id);
         restored.Recover();
         Assert.Empty(restored.PlanEffects());
+    }
+
+    private static (ExecutionCoordinator Coordinator, ExecutionAttempt Attempt) CreateRunningPool(
+        int desiredCount, int submissionLimit)
+    {
+        var workerQueue = new ExecutionQueuePolicy(2, ExecutionBackendKind.ExternalScheduler);
+        var coordinator = new ExecutionCoordinator([LocalQueue, workerQueue]);
+        var attempt = coordinator.RequestRun(Job(1), -1, ResourceVector.None, true,
+            new WorkerGroupRequest(2, desiredCount, submissionLimit));
+        coordinator.PreparationCompleted(attempt.Id);
+        coordinator.PlanEffects();
+        coordinator.StartCompleted(attempt.Id, new BackendReceipt("manager"), true);
+        foreach (var start in coordinator.PlanEffects().OfType<StartWorker>())
+            coordinator.WorkerStarted(attempt.Id, start.OperationId,
+                new BackendReceipt(start.OperationId.ToString()), true);
+        return (coordinator, attempt);
     }
 }

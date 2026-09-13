@@ -299,6 +299,9 @@ public sealed class QueueRepository
                     pooled.PoolSubmissionCap);
             }
 
+            // Recovery uses this frozen definition. Persist it before the execution intent
+            // so a restart cannot combine a new resource request with old job parameters.
+            _dataRepository.SaveSpaceImmediately(job.Space);
             await _runtime.RequestRunAsync(
                 AddressOf(job),
                 queue.Id,
@@ -320,11 +323,14 @@ public sealed class QueueRepository
 
     public Task FinalizeJobAsync(
         Job job,
-        CancellationToken cancellationToken = default) =>
-        _runtime.RequestFinalizationAsync(
+        CancellationToken cancellationToken = default)
+    {
+        _dataRepository.SaveSpaceImmediately(job.Space);
+        return _runtime.RequestFinalizationAsync(
             AddressOf(job),
             _localQueue.Id,
             cancellationToken);
+    }
 
     public Task ResizeWorkerGroupAsync(
         Job job,
@@ -410,33 +416,37 @@ public sealed class QueueRepository
             return;
 
         JobStatus projectedStatus = StatusFor(attempt);
-        bool statusChanged = false;
-        if (ProjectionWouldChange(job, attempt))
-        {
-            await _updateJob(job, mutable =>
-            {
-                JobStatus previousStatus = mutable.Status;
-                ApplyProjection(mutable, attempt);
-                statusChanged = mutable.Status != previousStatus;
-            });
-        }
-
-        if (attempt.Phase.IsTerminal() && CanApplyProjection(job, attempt, projectedStatus))
-            _dataRepository.SaveSpaceImmediately(job.Space);
-
         string detail = attempt.History.LastOrDefault()?.Detail;
-        if (statusChanged && !string.IsNullOrWhiteSpace(detail) &&
+        if (job.Status != projectedStatus && !string.IsNullOrWhiteSpace(detail) &&
             projectedStatus is JobStatus.Failed or JobStatus.Interrupted)
             await job.WriteToErrorLog(detail);
+
+        if (ProjectionWouldChange(job, attempt))
+            await _updateJob(job, mutable => ApplyProjection(mutable, attempt));
+
+        if (attempt.Phase.IsTerminal())
+            _dataRepository.SaveSpaceImmediately(job.Space);
     }
 
     internal static bool ApplyProjection(Job job, ExecutionAttemptSnapshot attempt)
     {
         JobStatus status = StatusFor(attempt);
-        if (!CanApplyProjection(job, attempt, status))
-            return false;
-
         bool changed = false;
+        int? desiredSize = attempt.Phase.IsTerminal() ? null : attempt.WorkerGroup?.DesiredCount;
+        int stopping = attempt.WorkerGroup?.Workers.Count(worker =>
+            worker.Phase is WorkerPhase.Cancelling or WorkerPhase.Stopping) ?? 0;
+        if (job.PoolDesiredSize != desiredSize || job.PoolWorkersStopping != stopping)
+        {
+            job.PoolDesiredSize = desiredSize;
+            job.PoolWorkersStopping = stopping;
+            changed = true;
+        }
+        string warning = attempt.Health == ExecutionHealth.Healthy ? null : attempt.HealthDetail;
+        if (job.ExecutionWarning != warning)
+        {
+            job.ExecutionWarning = warning;
+            changed = true;
+        }
         if (job.QueueId != attempt.QueueId)
         {
             job.QueueId = attempt.QueueId;
@@ -485,9 +495,11 @@ public sealed class QueueRepository
     private static bool ProjectionWouldChange(Job job, ExecutionAttemptSnapshot attempt)
     {
         JobStatus status = StatusFor(attempt);
-        if (!CanApplyProjection(job, attempt, status))
-            return false;
-        if (job.QueueId != attempt.QueueId || job.ClusterJobId != attempt.Receipt?.Id ||
+        if (job.PoolDesiredSize != (attempt.Phase.IsTerminal() ? null : attempt.WorkerGroup?.DesiredCount) ||
+            job.PoolWorkersStopping != (attempt.WorkerGroup?.Workers.Count(worker =>
+                worker.Phase is WorkerPhase.Cancelling or WorkerPhase.Stopping) ?? 0) ||
+            job.ExecutionWarning != (attempt.Health == ExecutionHealth.Healthy ? null : attempt.HealthDetail) ||
+            job.QueueId != attempt.QueueId || job.ClusterJobId != attempt.Receipt?.Id ||
             job.Status != status)
             return true;
         if (job is not IPooledJob pooled)
@@ -499,18 +511,6 @@ public sealed class QueueRepository
                    worker => worker.Phase == WorkerPhase.Running) ?? 0) ||
                pooled.PoolWorkersSubmitted != (attempt.WorkerGroup?.TotalSubmissions ?? 0);
     }
-
-    private static bool CanApplyProjection(
-        Job job,
-        ExecutionAttemptSnapshot attempt,
-        JobStatus status) =>
-        !attempt.Phase.IsTerminal() ||
-        job.Status == status ||
-        job.Status is JobStatus.Waiting or
-            JobStatus.Staging or
-            JobStatus.Running or
-            JobStatus.Finalizing or
-            JobStatus.Aborting;
 
     private async Task MarkUnownedJobsInterruptedAsync()
     {

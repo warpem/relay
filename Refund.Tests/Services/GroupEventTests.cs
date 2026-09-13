@@ -5,6 +5,44 @@ namespace Refund.Tests.Services;
 public class GroupEventTests
 {
     [Fact]
+    public async Task SlowSubscriberDoesNotLoseDistinctObjectNotifications()
+    {
+        var events = new GroupEvent<int>();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var completed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var received = new List<int>();
+        var subscription = events.Add("deleted", async args =>
+        {
+            if (args.Object == 0)
+            {
+                entered.SetResult();
+                await release.Task;
+            }
+            received.Add(args.Object);
+            if (args.Object == 100)
+                completed.SetResult();
+        });
+
+        try
+        {
+            await events.Invoke("deleted", new GroupEventArgs<int>(0));
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            for (int id = 1; id <= 100; id++)
+                await events.Invoke("deleted", new GroupEventArgs<int>(id));
+            release.SetResult();
+            await completed.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+            Assert.Equal(Enumerable.Range(0, 101), received);
+        }
+        finally
+        {
+            release.TrySetResult();
+            subscription.Unsubscribe();
+        }
+    }
+
+    [Fact]
     public async Task Invoke_DoesNotWaitForBlockedSubscriber()
     {
         var events = new GroupEvent<int>();

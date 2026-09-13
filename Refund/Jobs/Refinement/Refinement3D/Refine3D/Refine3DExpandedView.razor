@@ -34,15 +34,15 @@ else
 
         <!-- FSC, Angular Distribution, and Fourier Sampling in a row -->
         <div class="visualizations-row">
-            <ServerImage ServerPath="@_job.VisFsc(ExpandedViewService.CurrentVisIteration)"
+            <ServerImage CacheKey="@_job.UpdateDate.Ticks.ToString()" ServerPath="@_job.VisFsc(ExpandedViewService.CurrentVisIteration)"
                          height="250"
                          class="visualization-item"/>
 
-            <ServerImage ServerPath="@_job.VisAngularDistribution(ExpandedViewService.CurrentVisIteration)"
+            <ServerImage CacheKey="@_job.UpdateDate.Ticks.ToString()" ServerPath="@_job.VisAngularDistribution(ExpandedViewService.CurrentVisIteration)"
                          height="250"
                          class="visualization-item"/>
 
-            <ServerImage ServerPath="@_job.VisFourierSampling(ExpandedViewService.CurrentVisIteration)"
+            <ServerImage CacheKey="@_job.UpdateDate.Ticks.ToString()" ServerPath="@_job.VisFourierSampling(ExpandedViewService.CurrentVisIteration)"
                          height="250"
                          class="visualization-item"/>
         </div>

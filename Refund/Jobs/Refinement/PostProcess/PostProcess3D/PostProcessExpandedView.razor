@@ -32,11 +32,11 @@ else
 
         <!-- FSC, Guinier plots -->
         <div class="visualizations-column">
-            <ServerImage ServerPath="@_job.VisFsc"
+            <ServerImage CacheKey="@_job.UpdateDate.Ticks.ToString()" ServerPath="@_job.VisFsc"
                          height="300"
                          class="visualization-item"/>
 
-            <ServerImage ServerPath="@_job.VisGuinier"
+            <ServerImage CacheKey="@_job.UpdateDate.Ticks.ToString()" ServerPath="@_job.VisGuinier"
                          height="300"
                          class="visualization-item"/>
         </div>

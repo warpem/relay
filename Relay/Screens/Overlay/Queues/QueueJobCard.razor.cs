@@ -29,6 +29,9 @@ public partial class QueueJobCard : ComponentBase, IAsyncDisposable
     [Inject]
     private IJSRuntime JSRuntime { get; set; }
 
+    [Inject]
+    private IToastService ToastService { get; set; }
+
     private string _id;
     private ReadOnlyJob _job;
     private bool _isSelected = false;
@@ -36,6 +39,11 @@ public partial class QueueJobCard : ComponentBase, IAsyncDisposable
     private List<MenuAction> _contextMenuActions;
     private DotNetObjectReference<QueueJobCard>? _objectReference;
     private IJSObjectReference _module;
+    private bool _isResizingPool;
+
+    private bool CanResizePool => !_isResizingPool &&
+                                  Job?.Status == JobStatus.Running &&
+                                  Job.PoolDesiredSize.HasValue;
 
     protected override void OnInitialized()
     {
@@ -127,6 +135,27 @@ public partial class QueueJobCard : ComponentBase, IAsyncDisposable
             _contextMenuActions = MenuActions.GetQueueJobActions([Job]);
         else
             _contextMenuActions = null;
+    }
+
+    private async Task ChangePoolSize(int delta)
+    {
+        if (!CanResizePool || Job.PoolDesiredSize is not { } desiredSize ||
+            (delta < 0 && desiredSize <= 1) || (delta > 0 && desiredSize == int.MaxValue))
+            return;
+
+        _isResizingPool = true;
+        try
+        {
+            await DataManager.ResizeJobPool(Session.User, Job, desiredSize + delta);
+        }
+        catch (Exception exception)
+        {
+            ToastService.ShowError($"Couldn't resize worker pool: {exception.Message}");
+        }
+        finally
+        {
+            _isResizingPool = false;
+        }
     }
 
     private async Task HandleMouseUp(MouseEventArgs args)

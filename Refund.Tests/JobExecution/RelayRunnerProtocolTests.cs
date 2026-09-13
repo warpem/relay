@@ -23,7 +23,7 @@ public sealed class RelayRunnerProtocolTests
             await using var protocol = await RunnerProtocol.StartAsync(
                 Options(script, directory, stdout, stderr));
 
-            Assert.Equal(RelayRunner.ReadySignal, await protocol.Ready.ReadLineAsync());
+            RelayRunner.ParseReadySignal(await protocol.Ready.ReadLineAsync());
             Assert.False(File.Exists(marker));
 
             await protocol.Control.WriteLineAsync(RelayRunner.GoSignal);
@@ -52,7 +52,7 @@ public sealed class RelayRunnerProtocolTests
                 directory,
                 Path.Combine(directory, "stdout.txt"),
                 Path.Combine(directory, "stderr.txt")));
-            Assert.Equal(RelayRunner.ReadySignal, await protocol.Ready.ReadLineAsync());
+            RelayRunner.ParseReadySignal(await protocol.Ready.ReadLineAsync());
 
             await protocol.Control.WriteLineAsync(RelayRunner.GoSignal);
             await WaitUntilAsync(() => File.Exists(marker));
@@ -77,23 +77,19 @@ public sealed class RelayRunnerProtocolTests
         try
         {
             string pidFile = Path.Combine(directory, "child.pid");
-            string release = Path.Combine(directory, "release");
             string script = Path.Combine(directory, "payload.sh");
             await File.WriteAllTextAsync(
                 script,
-                $"sleep 30 >/dev/null 2>&1 & echo $! > '{pidFile}'\n" +
-                $"while [ ! -f '{release}' ]; do sleep 0.05; done\n");
+                $"sleep 30 >/dev/null 2>&1 & echo $! > '{pidFile}'\n");
             await using var protocol = await RunnerProtocol.StartAsync(Options(
                 script,
                 directory,
                 Path.Combine(directory, "stdout.txt"),
                 Path.Combine(directory, "stderr.txt")));
-            Assert.Equal(RelayRunner.ReadySignal, await protocol.Ready.ReadLineAsync());
+            RelayRunner.ParseReadySignal(await protocol.Ready.ReadLineAsync());
             await protocol.Control.WriteLineAsync(RelayRunner.GoSignal);
             await WaitUntilAsync(() => File.Exists(pidFile), TimeSpan.FromSeconds(10));
             childPid = int.Parse(await File.ReadAllTextAsync(pidFile));
-
-            await File.WriteAllTextAsync(release, "");
 
             Assert.Equal(0, await protocol.Result.WaitAsync(TimeSpan.FromSeconds(10)));
             await WaitUntilAsync(() => !IsAlive(childPid), TimeSpan.FromSeconds(10));
@@ -102,6 +98,87 @@ public sealed class RelayRunnerProtocolTests
         {
             SupervisedProcess.SetsidPathOverride = previous;
             KillIfAlive(childPid);
+            Directory.Delete(directory, true);
+        }
+    }
+
+    [Fact]
+    public async Task ClosingControlBeforeGoLeavesNoPayload()
+    {
+        string directory = CreateDirectory();
+        string previous = SupervisedProcess.SetsidPathOverride;
+        SupervisedProcess.SetsidPathOverride = CreateSetsidStandIn(directory);
+        try
+        {
+            string marker = Path.Combine(directory, "started");
+            string script = Path.Combine(directory, "payload.sh");
+            await File.WriteAllTextAsync(script, $"touch '{marker}'\n");
+            await using var protocol = await RunnerProtocol.StartAsync(Options(
+                script, directory,
+                Path.Combine(directory, "stdout.txt"),
+                Path.Combine(directory, "stderr.txt")));
+            int? processGroup = RelayRunner.ParseReadySignal(await protocol.Ready.ReadLineAsync());
+            Assert.NotNull(processGroup);
+            Assert.False(File.Exists(marker));
+
+            protocol.CloseControl();
+
+            Assert.Equal(125, await protocol.Result.WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.True(SupervisedProcess.ProcessGroupIsEmpty(processGroup.Value));
+            Assert.False(File.Exists(marker));
+        }
+        finally
+        {
+            SupervisedProcess.SetsidPathOverride = previous;
+            Directory.Delete(directory, true);
+        }
+    }
+
+    [Fact]
+    public async Task RunnerDeathDoesNotReleaseItsLivePayloadGroup()
+    {
+        string directory = CreateDirectory();
+        string previous = SupervisedProcess.SetsidPathOverride;
+        SupervisedProcess.SetsidPathOverride = CreateSetsidStandIn(directory);
+        int payloadPid = 0;
+        try
+        {
+            string pidFile = Path.Combine(directory, "payload.pid");
+            string script = Path.Combine(directory, "payload.sh");
+            await File.WriteAllTextAsync(script, $"echo $$ > '{pidFile}'\nexec sleep 30\n");
+            using var payload = SupervisedProcess.Prepare(
+                script, directory, [],
+                Path.Combine(directory, "stdout.txt"),
+                Path.Combine(directory, "stderr.txt"));
+            Assert.NotNull(payload.ProcessGroup);
+
+            // An independent process stands in for a runner that dies abruptly;
+            // the real payload group deliberately remains alive after its death.
+            var runner = Process.Start(new ProcessStartInfo("/bin/bash")
+            {
+                ArgumentList = { "-c", "exec sleep 30" },
+                UseShellExecute = false
+            })!;
+            using var execution = new ManagedExecutionHost.ManagedExecution(
+                runner, Stream.Null, payload.ProcessGroup, TimeSpan.FromSeconds(5));
+            await payload.ActivateAsync(CancellationToken.None);
+            await WaitUntilAsync(() => File.Exists(pidFile));
+            payloadPid = int.Parse(await File.ReadAllTextAsync(pidFile));
+
+            runner.Kill();
+            await runner.WaitForExitAsync();
+            Assert.True(execution.HasExited);
+            Assert.True(IsAlive(payloadPid));
+
+            await execution.StopAsync(CancellationToken.None);
+
+            Assert.True(execution.TryConfirmStopped());
+            Assert.False(IsAlive(payloadPid));
+        }
+        finally
+        {
+            SupervisedProcess.SetsidPathOverride = previous;
+            KillIfAlive(payloadPid);
             Directory.Delete(directory, true);
         }
     }
@@ -123,7 +200,7 @@ public sealed class RelayRunnerProtocolTests
                 directory,
                 Path.Combine(blocker, "stdout.txt"),
                 Path.Combine(directory, "stderr.txt")));
-            Assert.Equal(RelayRunner.ReadySignal, await protocol.Ready.ReadLineAsync());
+            RelayRunner.ParseReadySignal(await protocol.Ready.ReadLineAsync());
 
             await protocol.Control.WriteLineAsync(RelayRunner.GoSignal);
 

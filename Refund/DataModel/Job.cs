@@ -201,6 +201,21 @@ public abstract class Job : RelayBase, IFolderContent
     /// </summary>
     [RelayProperty(Order = -103)]
     public JobStatus Status { get; set; } = JobStatus.Building;
+
+    /// <summary>Current execution observation or cleanup warning, projected by the coordinator.</summary>
+    [Clearable]
+    [RelayProperty]
+    public string ExecutionWarning { get; set; }
+
+    /// <summary>The active attempt's worker target; null when no worker group is owned.</summary>
+    [Clearable]
+    [RelayProperty]
+    public int? PoolDesiredSize { get; set; }
+
+    /// <summary>Workers whose cancellation has been requested but whose exit is not yet confirmed.</summary>
+    [Clearable]
+    [RelayProperty]
+    public int PoolWorkersStopping { get; set; }
     
     [Clearable]
     [RelayProperty]

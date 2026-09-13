@@ -61,9 +61,9 @@ else
                                           SpacingPx="5"
                                           IsVerticalLayout/>
                         <div style="display: flex; flex-direction: column; gap: 5px; margin-top: 5px;">
-                            <ServerImage ServerPath="@_job.VisFsc(currentClass)" width="200"/>
-                            <ServerImage ServerPath="@_job.VisAngularDistribution(currentClass)" width="200"/>
-                            <ServerImage ServerPath="@_job.VisFourierSampling(currentClass)" width="200"/>
+                            <ServerImage CacheKey="@_job.UpdateDate.Ticks.ToString()" ServerPath="@_job.VisFsc(currentClass)" width="200"/>
+                            <ServerImage CacheKey="@_job.UpdateDate.Ticks.ToString()" ServerPath="@_job.VisAngularDistribution(currentClass)" width="200"/>
+                            <ServerImage CacheKey="@_job.UpdateDate.Ticks.ToString()" ServerPath="@_job.VisFourierSampling(currentClass)" width="200"/>
                         </div>
                     </div>
             }

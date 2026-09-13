@@ -107,6 +107,14 @@ public partial class DataManager
         await JobUpdated.InvokeHierarchy(job, GroupName.JobHierarchy(job.Space.Project.Id, job.Space.Id, job.Id));
     }
 
+    /// <summary>Changes execution parameters only while no execution depends on this definition.</summary>
+    public Task UpdateJobParameters(ReadOnlyUser user, ReadOnlyJob job, Action<Job> updateAction) =>
+        UpdateJob(user, job, mutable =>
+        {
+            EnsureNoPendingExecutions([mutable], $"Job {mutable.QualifiedName}");
+            updateAction(mutable);
+        });
+
     /// <summary>
     /// Deletes an existing job.
     /// </summary>
@@ -465,7 +473,7 @@ public partial class DataManager
 
     public async Task AbortJob(ReadOnlyUser user, ReadOnlyJob job)
     {
-        var originalJob = await ExecuteWithLock(async () =>
+        await ExecuteWithLock(async () =>
         {
             var originalUser = ResolveUser(user.Id);
             var mutableJob = ResolveJob(job.Space.Project.Id, job.Space.Id, job.Id);
@@ -473,10 +481,25 @@ public partial class DataManager
                 throw new Exception($"Job cannot be aborted from its current state ({mutableJob.Status}).");
 
             _dataRepository.UpdateJob(originalUser, mutableJob, _ => { });
-            return mutableJob;
+            await _queueRepository.CancelJobAsync(mutableJob);
+        });
+    }
+
+    /// <summary>
+    /// Changes a running job's worker target. Excess workers are canceled immediately.
+    /// This affects the current attempt only, leaving future-run parameters unchanged.
+    /// </summary>
+    public async Task ResizeJobPool(ReadOnlyUser user, ReadOnlyJob job, int desiredSize)
+    {
+        await ExecuteWithLock(async () =>
+        {
+            var originalUser = ResolveUser(user.Id);
+            var originalJob = ResolveJob(job.Space.Project.Id, job.Space.Id, job.Id);
+            await _queueRepository.ResizeWorkerGroupAsync(originalJob, desiredSize);
+            _dataRepository.UpdateJob(originalUser, originalJob, _ => { });
         });
 
-        await _queueRepository.CancelJobAsync(originalJob);
+        await JobUpdated.InvokeHierarchy(job, GroupName.JobHierarchy(job.Space.Project.Id, job.Space.Id, job.Id));
     }
 
     /// <summary>
@@ -495,47 +518,8 @@ public partial class DataManager
     ///
     /// Local execution means the job will run on the same machine where the Relay server is running.
     /// </remarks>
-    public async Task QueueLocalJob(ReadOnlyUser user, ReadOnlyJob job)
-    {
-        Job originalJob;
-        try
-        {
-            originalJob = await ExecuteWithLock(async () =>
-            {
-                var originalUser = ResolveUser(user.Id);
-                var mutableJob = ResolveJob(job.Space.Project.Id, job.Space.Id, job.Id);
-
-                if (!mutableJob.CanTransitionState(JobStatus.Waiting))
-                    throw new Exception("Job cannot be started.");
-
-                EnsureJobInputsValid(mutableJob);
-
-                if (mutableJob.ColorTag == null)
-                {
-                    var parentColor = mutableJob.GetParents()
-                        .Select(p => p.ColorTag)
-                        .FirstOrDefault(c => c != null);
-                    if (parentColor != null)
-                        mutableJob.ColorTag = parentColor;
-                }
-
-                _dataRepository.UpdateJob(
-                    originalUser,
-                    mutableJob,
-                    queued => queued.QueueId = _queueRepository.LocalQueue.Id);
-                return mutableJob;
-            });
-
-            await _queueRepository.QueueJobAsync(originalJob, _queueRepository.LocalQueue);
-        }
-        catch (Exception e)
-        {
-            Log.ForContext<DataManager>().Error(e, "Failed to queue local job {JobId} by user {UserId}", job.Id, user.Id);
-            throw;
-        }
-
-        await JobQueued.InvokeHierarchy(job, GroupName.JobHierarchy(job.Space.Project.Id, job.Space.Id, job.Id));
-    }
+    public Task QueueLocalJob(ReadOnlyUser user, ReadOnlyJob job) =>
+        QueueJob(user, job, _queueRepository.LocalQueue.AsReadOnly());
 
     /// <summary>
     /// Queues a job for execution on a remote cluster.
@@ -555,19 +539,21 @@ public partial class DataManager
     /// Cluster execution means the job will run on a remote computing cluster,
     /// which typically offers more computational resources than the local machine.
     /// </remarks>
-    public async Task QueueClusterJob(ReadOnlyUser user, ReadOnlyJob job, ReadOnlyJobQueue queue)
+    public Task QueueClusterJob(ReadOnlyUser user, ReadOnlyJob job, ReadOnlyJobQueue queue) =>
+        QueueJob(user, job, queue);
+
+    private async Task QueueJob(ReadOnlyUser user, ReadOnlyJob job, ReadOnlyJobQueue queue)
     {
-        Job originalJob;
-        JobQueue originalQueue;
         try
         {
-            (originalJob, originalQueue) = await ExecuteWithLock(async () =>
+            await ExecuteWithLock(async () =>
             {
                 var originalUser = ResolveUser(user.Id);
                 var mutableJob = ResolveJob(job.Space.Project.Id, job.Space.Id, job.Id);
                 var mutableQueue = ResolveQueue(queue.Id);
 
-                if (!mutableJob.CanTransitionState(JobStatus.Waiting))
+                if (_queueRepository.HasExecutionAttempt(mutableJob) ||
+                    !mutableJob.CanTransitionState(JobStatus.Waiting))
                     throw new Exception("Job cannot be started.");
 
                 EnsureJobInputsValid(mutableJob);
@@ -585,14 +571,12 @@ public partial class DataManager
                     originalUser,
                     mutableJob,
                     queued => queued.QueueId = mutableQueue.Id);
-                return (mutableJob, mutableQueue);
+                await _queueRepository.QueueJobAsync(mutableJob, mutableQueue);
             });
-
-            await _queueRepository.QueueJobAsync(originalJob, originalQueue);
         }
         catch (Exception e)
         {
-            Log.ForContext<DataManager>().Error(e, "Failed to queue cluster job {JobId} by user {UserId} to queue {QueueId}", job.Id, user.Id, queue.Id);
+            Log.ForContext<DataManager>().Error(e, "Failed to queue job {JobId} by user {UserId} to queue {QueueId}", job.Id, user.Id, queue.Id);
             throw;
         }
 
@@ -615,25 +599,23 @@ public partial class DataManager
     /// </remarks>
     public async Task FinalizeLocalJob(ReadOnlyUser user, ReadOnlyJob job)
     {
-        Job originalJob;
         try
         {
-            originalJob = await ExecuteWithLock(async () =>
+            await ExecuteWithLock(async () =>
             {
                 var originalUser = ResolveUser(user.Id);
                 var mutableJob = ResolveJob(job.Space.Project.Id, job.Space.Id, job.Id);
 
-                if (!mutableJob.CanTransitionState(JobStatus.Finalizing))
+                if (_queueRepository.HasExecutionAttempt(mutableJob) ||
+                    !mutableJob.CanTransitionState(JobStatus.Finalizing))
                     throw new Exception("Job cannot be finalized");
 
                 _dataRepository.UpdateJob(
                     originalUser,
                     mutableJob,
                     queued => queued.QueueId = _queueRepository.LocalQueue.Id);
-                return mutableJob;
+                await _queueRepository.FinalizeJobAsync(mutableJob);
             });
-
-            await _queueRepository.FinalizeJobAsync(originalJob);
         }
         catch (Exception e)
         {

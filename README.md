@@ -148,14 +148,44 @@ Things worth knowing:
 
 - **Cores and memory are accounting, not enforcement.** Relay will not start a job unless its declared requirements fit, but nothing stops a running job from exceeding them. GPUs are the exception: each job sees only its assigned devices via `CUDA_VISIBLE_DEVICES`.
 - **One managed queue per host.** A second would double-book the same machine, so Relay refuses to create one or to switch an existing queue to `Managed` when one already exists. The rule is also applied to the queues loaded from the state file at startup, so a hand-edited or copied state carrying two does not slip past: the lowest-numbered managed queue keeps working, every other one is logged as an error and refuses to start jobs until you switch it to another scheduler or delete it. Resolving the duplication re-enables it immediately; no restart is needed.
-- **Jobs do not survive a Relay restart.** They are killed on shutdown, and anything left behind by a crash is killed at the next startup. Jobs that were running are marked failed.
-- **Worker pools cannot use a managed queue.** Pools submit bare scripts with no resource request attached, so there is nothing to admit against.
-- **Jobs run in order of fit, not strictly in order of submission.** A small job may start ahead of a queued larger one. On a multi-GPU host a large job can in principle be held off indefinitely by a stream of small ones.
-- **macOS is a development-only configuration.** `setsid` is absent there, so Relay cannot clean up compute processes left behind by a crash — only by a graceful shutdown. On Linux both work.
+- **Managed payloads belong to Relay.** A `relay-runner` supervisor stops its payload when Relay closes the ownership channel, including after a Relay crash. Restart marks the old managed attempt `Interrupted` and releases its reservation. It does not reconnect to the runner, act on saved process IDs, or hold admission waiting for the old process. This owner-bound contract relies on asynchronous EOF cleanup; it does not promise instantaneous cleanup or cleanup after simultaneous loss of both Relay and its supervisor.
+- **Pool workers require an external scheduler queue.** A managed queue may run the pool manager, but worker groups currently support only scheduler-backed receipts.
+- **Admission is strict FIFO among dependency-ready jobs.** Once the oldest eligible job is waiting for resources, later jobs cannot bypass it. Jobs still waiting for inputs do not block independent work.
+- **macOS is a development-only configuration.** Without `setsid`, cleanup uses process-tree termination, which cannot reliably find descendants after their parent exits. Linux private process groups provide stronger containment.
 
 **Change note — 2D classification memory.** `Class2D` now declares its real memory footprint — 16 GB per MPI worker rank, `(processes - 1) x 16 GB` — instead of the flat 16 GB it inherited before. A VDAM run with 8 processes therefore asks for 112 GB, which does not fit the default managed-queue total of 64 GB, so it is rejected outright with a message naming both figures rather than queued to wait for memory that will never appear. Raise **Memory (GB)** to match the host, or lower the job's process count.
 
 The cores, memory and GPU totals can only be changed while the queue is idle. If jobs are still running on it, the edit is refused rather than leaving the accounting to disagree with what is on the host.
+
+### Execution state and restart
+
+Queue definitions are stored in `QueuesPath`; active attempts are stored beside them in
+`QueuesPath.executions`. Each run gets a new attempt ID and a snapshot of its queue configuration.
+Job parameters and input connections remain fixed while an execution owns them. Clear or delete
+operations are rejected while active dependent jobs still use the job's files.
+
+External scheduler jobs with saved receipts survive an ordinary Relay restart. Missing records or
+failed queries keep the last known state and show an observation warning in the queue view. Configure
+an active-status command and, where needed, a terminal-status command that can report completed jobs;
+an empty active listing alone cannot establish completion. Slurm has a built-in allocation-only
+`sacct` fallback. Queue edits affect future attempts, so validate these commands before submitting.
+
+If submission reached a scheduler but its receipt was lost, Relay marks the attempt `Interrupted`
+and does not automatically submit another copy. Use `{{ attempt_id }}` in scheduler-visible metadata
+to help locate such jobs. The redesign does not import active runtime state from the old queue system;
+finish or stop that work before upgrading.
+
+### Changing pool size during a run
+
+For a running pooled job, the queue card's **Workers** controls change the target for the current run.
+The minimum is one worker. Decreasing the target requests immediate cancellation of excess workers,
+including work in progress; those workers remain shown as stopping until the scheduler confirms exit.
+Increasing it starts additional workers within the run's remaining lifetime submission budget. A
+target that exceeds the attainable size is rejected. Resizing does not reset that budget or change
+the job's configured pool size for future runs.
+
+MCP clients can call `resize_job_pool(projectId, spaceId, jobId, desiredSize)`. The `Pool` field returned
+by `get_job` reports `DesiredSize`, `Running`, `Pending`, `Stopping`, `Submitted`, and `CanResize`.
 
 ### Submission script template
 

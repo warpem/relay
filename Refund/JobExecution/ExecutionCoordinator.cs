@@ -7,6 +7,10 @@ namespace Refund.JobExecution;
 /// </summary>
 public sealed class ExecutionCoordinator
 {
+    private const string UntraceableWorkerDetail =
+        "A worker submission has an unknown outcome and no scheduler receipt; " +
+        "Relay cannot prove that all worker processes stopped.";
+
     private readonly Dictionary<int, ExecutionQueuePolicy> _queues;
     private readonly Dictionary<Guid, ExecutionAttempt> _attempts = new();
     private readonly Dictionary<JobAddress, Guid> _currentAttempts = new();
@@ -273,6 +277,20 @@ public sealed class ExecutionCoordinator
         _currentAttempts.Remove(attempt.Job);
     }
 
+    public void ActivationIndeterminate(Guid attemptId, string detail)
+    {
+        if (!TryGetCurrent(attemptId, out var attempt) ||
+            attempt.Phase is not (ExecutionPhase.Starting or ExecutionPhase.Cancelling))
+            return;
+
+        attempt.PendingOutcome = attempt.Phase == ExecutionPhase.Cancelling
+            ? ExecutionOutcome.Canceled
+            : ExecutionOutcome.Failed;
+        attempt.Health = ExecutionHealth.Indeterminate;
+        attempt.HealthDetail = detail;
+        attempt.TransitionTo(ExecutionPhase.Cancelling, Now(), detail);
+    }
+
     public void StartFailed(Guid attemptId, string detail)
     {
         if (!TryGetCurrent(attemptId, out var attempt) ||
@@ -316,15 +334,13 @@ public sealed class ExecutionCoordinator
                 return;
 
             case BackendObservationKind.Pending:
-                attempt.Health = ExecutionHealth.Healthy;
-                attempt.HealthDetail = null;
+                MarkObservationHealthy(attempt);
                 if (attempt.Phase == ExecutionPhase.Starting)
                     attempt.TransitionTo(ExecutionPhase.Pending, Now());
                 return;
 
             case BackendObservationKind.Running:
-                attempt.Health = ExecutionHealth.Healthy;
-                attempt.HealthDetail = null;
+                MarkObservationHealthy(attempt);
                 bool enteredRunning = attempt.Phase is ExecutionPhase.Starting or ExecutionPhase.Pending;
                 if (enteredRunning)
                     attempt.TransitionTo(ExecutionPhase.Running, Now());
@@ -431,17 +447,19 @@ public sealed class ExecutionCoordinator
             or ExecutionPhase.Stopping))
             return;
 
-        var outcome = attempt.Phase is ExecutionPhase.Cancelling or ExecutionPhase.Stopping
+        var outcome = attempt.PendingOutcome ?? (attempt.Phase is ExecutionPhase.Cancelling or ExecutionPhase.Stopping
             ? ExecutionOutcome.Canceled
-            : observedOutcome;
+            : observedOutcome);
+        if (attempt.PendingOutcome == ExecutionOutcome.Failed)
+            detail = attempt.History.LastOrDefault(entry => entry.Phase == ExecutionPhase.Cancelling)?.Detail
+                     ?? detail;
 
         bool hasUntraceableWorker = attempt.WorkerGroup?.Workers.Any(worker =>
             worker.Phase == WorkerPhase.Indeterminate) == true;
         if (hasUntraceableWorker)
         {
             outcome = ExecutionOutcome.Interrupted;
-            detail = "A worker submission has an unknown outcome and no scheduler receipt; " +
-                     "Relay cannot prove that all worker processes stopped.";
+            detail = UntraceableWorkerDetail;
         }
 
         Release(attempt);
@@ -523,7 +541,8 @@ public sealed class ExecutionCoordinator
             .GroupBy(observation => observation.ReceiptId)
             .ToDictionary(group => group.Key, group => group.Last());
 
-        foreach (var worker in attempt.WorkerGroup.Workers.Where(worker => worker.Receipt != null))
+        foreach (var worker in attempt.WorkerGroup.Workers.Where(worker =>
+                     worker.Receipt != null && worker.Phase != WorkerPhase.Ended))
         {
             if (!byReceipt.TryGetValue(worker.Receipt.Id, out var observation))
                 continue;
@@ -531,11 +550,11 @@ public sealed class ExecutionCoordinator
             switch (observation.Kind)
             {
                 case BackendObservationKind.Pending:
-                    if (worker.Phase != WorkerPhase.Cancelling)
+                    if (worker.Phase is WorkerPhase.Starting or WorkerPhase.Pending)
                         worker.Phase = WorkerPhase.Pending;
                     break;
                 case BackendObservationKind.Running:
-                    if (worker.Phase != WorkerPhase.Cancelling)
+                    if (worker.Phase is WorkerPhase.Starting or WorkerPhase.Pending or WorkerPhase.Running)
                         worker.Phase = WorkerPhase.Running;
                     break;
                 case BackendObservationKind.Succeeded:
@@ -548,30 +567,43 @@ public sealed class ExecutionCoordinator
 
     }
 
-    public void WorkersCanceled(
+    public void WorkerCancellationCompleted(
         Guid attemptId,
-        IReadOnlyCollection<string> receiptIds)
+        IReadOnlyList<WorkerObservation> observations)
     {
         if (!TryGetCurrent(attemptId, out var attempt) || attempt.WorkerGroup == null)
             return;
 
-        var canceled = receiptIds.ToHashSet();
+        ObserveWorkers(attemptId, observations);
+        var accepted = observations.Select(observation => observation.ReceiptId).ToHashSet();
         foreach (var worker in attempt.WorkerGroup.Workers)
-            if (worker.Receipt != null && canceled.Contains(worker.Receipt.Id))
-                worker.Phase = WorkerPhase.Ended;
+            if (worker.Phase == WorkerPhase.Cancelling &&
+                worker.Receipt != null && accepted.Contains(worker.Receipt.Id))
+                worker.Phase = WorkerPhase.Stopping;
     }
 
     public void ResizeWorkerGroup(Guid attemptId, int desiredCount)
     {
-        if (desiredCount < 0)
-            throw new InvalidOperationException("Worker count cannot be negative.");
+        if (desiredCount < 1)
+            throw new InvalidOperationException("Worker pool size must be at least 1.");
 
-        if (!TryGetCurrent(attemptId, out var attempt) ||
-            attempt.Phase != ExecutionPhase.Running ||
-            attempt.WorkerGroup == null)
-            return;
+        if (!TryGetCurrent(attemptId, out var attempt))
+            throw new InvalidOperationException($"Execution attempt {attemptId} is no longer active.");
+        if (attempt.Phase != ExecutionPhase.Running)
+            throw new InvalidOperationException("Worker pools can only be resized while their job is running.");
+        if (attempt.WorkerGroup is not { } workerGroup)
+            throw new InvalidOperationException("This job does not have a worker pool.");
 
-        attempt.WorkerGroup.DesiredCount = desiredCount;
+        int remainingSubmissions = Math.Max(0, workerGroup.SubmissionLimit - workerGroup.TotalSubmissions);
+        int retainedWorkers = workerGroup.Workers.Count(worker => worker.Phase is not (
+            WorkerPhase.Ended or WorkerPhase.Cancelling or WorkerPhase.Stopping));
+        int maximumSize = retainedWorkers + remainingSubmissions;
+        if (desiredCount > workerGroup.DesiredCount && desiredCount > maximumSize)
+            throw new InvalidOperationException(
+                $"Worker pool size cannot exceed {maximumSize}; this attempt's " +
+                $"remaining lifetime submission budget is {remainingSubmissions}.");
+
+        workerGroup.DesiredCount = desiredCount;
     }
 
     public void Recover()
@@ -683,11 +715,13 @@ public sealed class ExecutionCoordinator
         int excess = workerGroup.AliveCount - workerGroup.DesiredCount;
         if (excess > 0)
         {
+            int retiring = workerGroup.Workers.Count(worker =>
+                worker.Phase is WorkerPhase.Cancelling or WorkerPhase.Stopping);
             foreach (var worker in workerGroup.Workers
-                         .Where(worker => worker.Phase is not (
-                             WorkerPhase.Ended or WorkerPhase.Indeterminate))
+                         .Where(worker => worker.Phase is
+                             WorkerPhase.Starting or WorkerPhase.Pending or WorkerPhase.Running)
                          .Reverse()
-                         .Take(excess))
+                         .Take(Math.Max(0, excess - retiring)))
             {
                 worker.Phase = WorkerPhase.Cancelling;
             }
@@ -735,9 +769,7 @@ public sealed class ExecutionCoordinator
             return;
 
         attempt.Health = ExecutionHealth.Indeterminate;
-        attempt.HealthDetail =
-            "A worker submission has an unknown outcome and no scheduler receipt; " +
-            "Relay cannot prove that all worker processes stopped.";
+        attempt.HealthDetail = UntraceableWorkerDetail;
         if (attempt.Phase == ExecutionPhase.Finalizing)
             attempt.PendingOutcome = ExecutionOutcome.Interrupted;
     }
@@ -824,6 +856,14 @@ public sealed class ExecutionCoordinator
     {
         attempt.HasAllocation = false;
         attempt.GpuIndices = Array.Empty<int>();
+    }
+
+    private static void MarkObservationHealthy(ExecutionAttempt attempt)
+    {
+        bool untraceable = attempt.WorkerGroup?.Workers.Any(worker =>
+            worker.Phase == WorkerPhase.Indeterminate) == true;
+        attempt.Health = untraceable ? ExecutionHealth.Indeterminate : ExecutionHealth.Healthy;
+        attempt.HealthDetail = untraceable ? UntraceableWorkerDetail : null;
     }
 
     private bool TryGetCurrent(Guid attemptId, out ExecutionAttempt attempt)

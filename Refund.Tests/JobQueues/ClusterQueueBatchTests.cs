@@ -215,4 +215,34 @@ public class ClusterQueueBatchTests
                 File.Delete(path);
         }
     }
+
+    [Fact]
+    public void ConfigurationSnapshotPreservesCustomVariableDefaultsInSubmissionScripts()
+    {
+        var queue = new ClusterQueue
+        {
+            SubmissionScriptTemplate = "# account={{ account }}\n{{ command }}\n",
+            CustomVariables = new()
+            {
+                ["account"] = ("Billing account", "cryo-em"),
+                ["optional"] = ("Optional setting", "")
+            }
+        };
+        var snapshot = new ClusterQueue();
+        snapshot.ReadFromJson(queue.ToJson());
+
+        Assert.Equal(queue.CustomVariables, snapshot.CustomVariables);
+
+        string path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".sh");
+        try
+        {
+            snapshot.BuildWorkerScript("worker", new(), Array.Empty<string>(), path);
+
+            Assert.Equal("# account=cryo-em\nworker\n", File.ReadAllText(path));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }

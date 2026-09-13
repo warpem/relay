@@ -9,6 +9,192 @@ public class ExecutionRuntimeTests
         new(-1, ExecutionBackendKind.Local, new ResourceVector(1, 8, 0));
 
     [Fact]
+    public async Task SynchronousWorkerCompletionsDoNotDispatchStaleStarts()
+    {
+        var operations = new FakeOperations();
+        var workerQueue = new ExecutionQueuePolicy(2, ExecutionBackendKind.ExternalScheduler);
+        await using var runtime = new ExecutionRuntime(
+            new ExecutionCoordinator([LocalQueue, workerQueue]),
+            operations,
+            new RecordingStateStore(),
+            _ => Task.CompletedTask);
+        await runtime.InitializeAsync();
+
+        await runtime.RequestRunAsync(
+            new JobAddress(1, 1, 1), -1, ResourceVector.None, true,
+            new WorkerGroupRequest(2, DesiredCount: 2, SubmissionLimit: 2));
+
+        Assert.Equal(2, operations.WorkerStarts.Count);
+        Assert.Equal(2, operations.WorkerStarts.Distinct().Count());
+    }
+
+    [Fact]
+    public async Task FurtherWorkerCancellationsDispatchAsSoonAsThePreviousBatchSettles()
+    {
+        var firstCancellation = new TaskCompletionSource<IReadOnlyList<WorkerObservation>>();
+        int calls = 0;
+        var operations = new FakeOperations
+        {
+            WorkerCancellationHandler = receipts => ++calls == 1
+                ? firstCancellation.Task
+                : Task.FromResult<IReadOnlyList<WorkerObservation>>(receipts.Select(receipt =>
+                    new WorkerObservation(receipt.Id, BackendObservationKind.Indeterminate)).ToArray())
+        };
+        var workerQueue = new ExecutionQueuePolicy(2, ExecutionBackendKind.ExternalScheduler);
+        await using var runtime = new ExecutionRuntime(
+            new ExecutionCoordinator([LocalQueue, workerQueue]),
+            operations,
+            new RecordingStateStore(),
+            _ => Task.CompletedTask);
+        await runtime.InitializeAsync();
+        var address = new JobAddress(1, 1, 1);
+        await runtime.RequestRunAsync(
+            address, -1, ResourceVector.None, true,
+            new WorkerGroupRequest(2, DesiredCount: 3, SubmissionLimit: 3));
+
+        await runtime.ResizeWorkerGroupAsync(address, 2);
+        var first = Assert.Single(operations.WorkerCancellations);
+        await runtime.ResizeWorkerGroupAsync(address, 1);
+        Assert.Single(operations.WorkerCancellations);
+        Assert.Equal(2, Assert.Single(runtime.Attempts).WorkerGroup.Workers.Count(worker =>
+            worker.Phase == WorkerPhase.Cancelling));
+
+        firstCancellation.SetResult(first.Select(receipt =>
+            new WorkerObservation(receipt.Id, BackendObservationKind.Indeterminate)).ToArray());
+
+        Assert.Equal(2, operations.WorkerCancellations.Count);
+        Assert.Equal(2, operations.WorkerCancellations.SelectMany(receipts => receipts).Count());
+        Assert.Equal(2, operations.WorkerCancellations.SelectMany(receipts => receipts)
+            .Select(receipt => receipt.Id).Distinct().Count());
+        Assert.Equal(2, Assert.Single(runtime.Attempts).WorkerGroup.Workers.Count(worker =>
+            worker.Phase == WorkerPhase.Stopping));
+    }
+
+    [Fact]
+    public async Task FailedWorkerCancellationDoesNotImmediatelyRetryAnUnchangedBatch()
+    {
+        var operations = new FakeOperations
+        {
+            WorkerCancellationHandler = _ => Task.FromException<IReadOnlyList<WorkerObservation>>(
+                new IOException("scheduler unavailable"))
+        };
+        var workerQueue = new ExecutionQueuePolicy(2, ExecutionBackendKind.ExternalScheduler);
+        await using var runtime = new ExecutionRuntime(
+            new ExecutionCoordinator([LocalQueue, workerQueue]), operations, new RecordingStateStore(),
+            _ => Task.CompletedTask);
+        await runtime.InitializeAsync();
+        var address = new JobAddress(1, 1, 1);
+        await runtime.RequestRunAsync(address, -1, ResourceVector.None, true,
+            new WorkerGroupRequest(2, DesiredCount: 2, SubmissionLimit: 2));
+
+        await runtime.ResizeWorkerGroupAsync(address, 1);
+
+        Assert.Single(operations.WorkerCancellations);
+        Assert.Single(Assert.Single(runtime.Attempts).WorkerGroup.Workers,
+            worker => worker.Phase == WorkerPhase.Cancelling);
+    }
+
+    [Fact]
+    public async Task ResizeImmediatelyCancelsExcessWorkersAndProjectsTargetOnlyChanges()
+    {
+        var cancellation = new TaskCompletionSource<IReadOnlyList<WorkerObservation>>();
+        var operations = new FakeOperations { WorkerCancellationHandler = _ => cancellation.Task };
+        var projected = new ConcurrentQueue<ExecutionAttemptSnapshot>();
+        var store = new RecordingStateStore();
+        var workerQueue = new ExecutionQueuePolicy(2, ExecutionBackendKind.ExternalScheduler);
+        await using var runtime = new ExecutionRuntime(
+            new ExecutionCoordinator([LocalQueue, workerQueue]), operations, store,
+            attempt =>
+            {
+                projected.Enqueue(attempt);
+                return Task.CompletedTask;
+            });
+        await runtime.InitializeAsync();
+        var address = new JobAddress(1, 1, 1);
+        await runtime.RequestRunAsync(address, -1, ResourceVector.None, true,
+            new WorkerGroupRequest(2, DesiredCount: 3, SubmissionLimit: 6));
+        projected.Clear();
+
+        await runtime.ResizeWorkerGroupAsync(address, 2);
+
+        var canceled = Assert.Single(Assert.Single(operations.WorkerCancellations));
+        var shrunk = Assert.Single(projected);
+        Assert.Equal(2, shrunk.WorkerGroup.DesiredCount);
+        Assert.Equal(WorkerPhase.Cancelling,
+            Assert.Single(shrunk.WorkerGroup.Workers, worker => worker.Receipt.Id == canceled.Id).Phase);
+        Assert.Equal(2, Assert.Single(store.Snapshot.Attempts).WorkerGroup.DesiredCount);
+
+        // The worker already being stopped stays alive until terminal evidence arrives.
+        // Increasing the target now changes no phase, receipt, or worker counters.
+        await runtime.ResizeWorkerGroupAsync(address, 3);
+        await runtime.ResizeWorkerGroupAsync(address, 3);
+
+        Assert.Equal(2, projected.Count);
+        var grown = projected.Last();
+        Assert.Equal(3, grown.WorkerGroup.DesiredCount);
+        Assert.Equal(shrunk.WorkerGroup.Workers, grown.WorkerGroup.Workers);
+        Assert.Equal(6, grown.WorkerGroup.SubmissionLimit);
+        Assert.Equal(3, grown.WorkerGroup.TotalSubmissions);
+        Assert.Equal(3, operations.WorkerStarts.Count);
+        cancellation.SetResult([new WorkerObservation(canceled.Id, BackendObservationKind.Indeterminate)]);
+    }
+
+    [Fact]
+    public async Task ResizeOfAJobWithoutAnActiveAttemptReportsAnError()
+    {
+        var operations = new FakeOperations();
+        await using var runtime = new ExecutionRuntime(
+            new ExecutionCoordinator([LocalQueue]), operations, new RecordingStateStore(),
+            _ => Task.CompletedTask);
+        await runtime.InitializeAsync();
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            runtime.ResizeWorkerGroupAsync(new JobAddress(1, 1, 1), 2));
+
+        Assert.Contains("no active execution attempt", error.Message);
+        Assert.Empty(operations.WorkerStarts);
+        Assert.Empty(operations.WorkerCancellations);
+    }
+
+    [Fact]
+    public async Task AmbiguousActivationKeepsCapacityUntilTheBackendIsKnownStopped()
+    {
+        var operations = new FakeOperations
+        {
+            StartResult = new BackendStartResult(new BackendReceipt("runner"), false),
+            ActivationException = new IndeterminateBackendStartException("runner cleanup is incomplete"),
+            CancelResult = new BackendObservation(BackendObservationKind.Indeterminate)
+        };
+        var projected = new ConcurrentQueue<ExecutionAttemptSnapshot>();
+        var queue = LocalQueue with { BackendKind = ExecutionBackendKind.Managed };
+        await using var runtime = new ExecutionRuntime(
+            new ExecutionCoordinator([queue]), operations, new RecordingStateStore(),
+            attempt =>
+            {
+                projected.Enqueue(attempt);
+                return Task.CompletedTask;
+            });
+        await runtime.InitializeAsync();
+
+        var first = await runtime.RequestRunAsync(
+            new JobAddress(1, 1, 1), -1, new ResourceVector(1, 1, 0), true);
+        var second = await runtime.RequestRunAsync(
+            new JobAddress(1, 1, 2), -1, new ResourceVector(1, 1, 0), true);
+        Assert.Equal(ExecutionPhase.Stopping, first.Phase);
+        Assert.True(first.HasAllocation);
+        Assert.Equal(ExecutionPhase.Queued, second.Phase);
+        Assert.Equal(1, operations.StartCalls);
+
+        operations.ObserveResult = new BackendObservation(BackendObservationKind.Canceled);
+        await runtime.TickAsync();
+
+        var failed = Assert.Single(projected, attempt =>
+            attempt.Id == first.Id && attempt.Phase == ExecutionPhase.Failed);
+        Assert.Contains(failed.History, entry => entry.Detail == "runner cleanup is incomplete");
+        Assert.False(failed.HasAllocation);
+    }
+
+    [Fact]
     public async Task PersistsAndProjectsBeforeStartingAnEffect()
     {
         var events = new ConcurrentQueue<string>();
@@ -192,6 +378,37 @@ public class ExecutionRuntimeTests
         await runtime.TickAsync();
 
         Assert.Equal(afterStart, projectionCount);
+    }
+
+    [Fact]
+    public async Task ObservationHealthChangesAreProjectedWithoutRepeatingUnchangedWarnings()
+    {
+        var operations = new FakeOperations();
+        var projected = new ConcurrentQueue<ExecutionAttemptSnapshot>();
+        await using var runtime = new ExecutionRuntime(
+            new ExecutionCoordinator([LocalQueue]), operations, new RecordingStateStore(),
+            attempt =>
+            {
+                projected.Enqueue(attempt);
+                return Task.CompletedTask;
+            });
+        await runtime.InitializeAsync();
+        await runtime.RequestRunAsync(new JobAddress(1, 1, 1), -1, ResourceVector.None, true);
+        projected.Clear();
+
+        operations.ObserveResult = new BackendObservation(
+            BackendObservationKind.Unreachable, "scheduler unavailable");
+        await runtime.TickAsync();
+        await runtime.TickAsync();
+        var warning = Assert.Single(projected);
+        Assert.Equal(ExecutionPhase.Running, warning.Phase);
+        Assert.Equal(ExecutionHealth.Indeterminate, warning.Health);
+        Assert.Equal("scheduler unavailable", warning.HealthDetail);
+
+        operations.ObserveResult = new BackendObservation(BackendObservationKind.Running);
+        await runtime.TickAsync();
+        Assert.Equal(2, projected.Count);
+        Assert.Equal(ExecutionHealth.Healthy, projected.Last().Health);
     }
 
     [Fact]
@@ -420,6 +637,36 @@ public class ExecutionRuntimeTests
     }
 
     [Fact]
+    public async Task ShutdownPersistsAnInflightSchedulerReceiptWithoutAdmittingMoreWork()
+    {
+        var submission = new TaskCompletionSource<BackendStartResult>();
+        var operations = new FakeOperations { StartHandler = _ => submission.Task };
+        var queue = LocalQueue with { BackendKind = ExecutionBackendKind.ExternalScheduler };
+        var store = new RecordingStateStore();
+        await using var runtime = new ExecutionRuntime(
+            new ExecutionCoordinator([queue]), operations, store, _ => Task.CompletedTask);
+        await runtime.InitializeAsync();
+        var first = await runtime.RequestRunAsync(
+            new JobAddress(1, 1, 1), -1, ResourceVector.None, true);
+        var second = await runtime.RequestRunAsync(
+            new JobAddress(1, 1, 2), -1, ResourceVector.None, true);
+
+        var shutdown = runtime.ShutdownAsync();
+        Assert.False(shutdown.IsCompleted);
+        submission.SetResult(new BackendStartResult(new BackendReceipt("scheduler-123"), false));
+        await shutdown;
+
+        Assert.Equal(1, operations.StartCalls);
+        var recovered = new ExecutionCoordinator([queue]);
+        recovered.Restore(store.Snapshot);
+        recovered.Recover();
+        var accepted = recovered.CurrentAttempt(first.Job);
+        Assert.Equal("scheduler-123", accepted.Receipt.Id);
+        Assert.Equal(ExecutionPhase.Pending, accepted.Phase);
+        Assert.Equal(ExecutionPhase.Queued, recovered.CurrentAttempt(second.Job).Phase);
+    }
+
+    [Fact]
     public async Task FinalizationWaitsForOutstandingProgressTracking()
     {
         var operations = new FakeOperations { HoldMaintenance = true };
@@ -513,9 +760,15 @@ public class ExecutionRuntimeTests
         public int FinalizeCalls { get; private set; }
         public bool HoldMaintenance { get; set; }
         public Action OnStart { get; init; }
+        public Exception? ActivationException { get; init; }
+        public Func<ExecutionAttemptSnapshot, Task<BackendStartResult>>? StartHandler { get; init; }
         public BackendStartResult StartResult { get; init; }
         public Func<ExecutionAttemptSnapshot, bool> DependenciesReadyHandler { get; init; }
         public ConcurrentQueue<JobAddress> PreparedJobs { get; } = new();
+        public ConcurrentQueue<Guid> WorkerStarts { get; } = new();
+        public ConcurrentQueue<IReadOnlyList<BackendReceipt>> WorkerCancellations { get; } = new();
+        public Func<IReadOnlyList<BackendReceipt>, Task<IReadOnlyList<WorkerObservation>>>?
+            WorkerCancellationHandler { get; init; }
         public TaskCompletionSource MaintenanceStarted { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         public BackendObservation ObserveResult { get; set; } =
@@ -546,7 +799,7 @@ public class ExecutionRuntimeTests
         {
             StartCalls++;
             OnStart?.Invoke();
-            return Task.FromResult(StartResult ?? new BackendStartResult(
+            return StartHandler?.Invoke(attempt) ?? Task.FromResult(StartResult ?? new BackendStartResult(
                 new BackendReceipt(attempt.Id.ToString()), true));
         }
 
@@ -560,6 +813,8 @@ public class ExecutionRuntimeTests
             CancellationToken cancellationToken)
         {
             ActivateCalls++;
+            if (ActivationException != null)
+                throw ActivationException;
             return Task.CompletedTask;
         }
 
@@ -584,9 +839,12 @@ public class ExecutionRuntimeTests
         public Task<BackendStartResult> StartWorkerAsync(
             ExecutionAttemptSnapshot attempt,
             Guid operationId,
-            CancellationToken cancellationToken) =>
-            Task.FromResult(new BackendStartResult(
+            CancellationToken cancellationToken)
+        {
+            WorkerStarts.Enqueue(operationId);
+            return Task.FromResult(new BackendStartResult(
                 new BackendReceipt(operationId.ToString()), false));
+        }
 
         public Task<IReadOnlyList<WorkerObservation>> ObserveWorkersAsync(
             ExecutionAttemptSnapshot attempt,
@@ -597,10 +855,13 @@ public class ExecutionRuntimeTests
         public Task<IReadOnlyList<WorkerObservation>> CancelWorkersAsync(
             ExecutionAttemptSnapshot attempt,
             IReadOnlyList<BackendReceipt> receipts,
-            CancellationToken cancellationToken) =>
-            Task.FromResult<IReadOnlyList<WorkerObservation>>(
+            CancellationToken cancellationToken)
+        {
+            WorkerCancellations.Enqueue(receipts);
+            return WorkerCancellationHandler?.Invoke(receipts) ?? Task.FromResult<IReadOnlyList<WorkerObservation>>(
                 receipts.Select(receipt => new WorkerObservation(
                     receipt.Id, BackendObservationKind.Canceled)).ToArray());
+        }
 
         public async Task TrackProgressAsync(
             ExecutionAttemptSnapshot attempt,

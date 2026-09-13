@@ -6,4 +6,28 @@
     font-size: 0.75rem;
 }
 
+.pool-size-controls {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
 
+.pool-size-controls > span:first-child {
+    margin-right: 2px;
+}
+
+.pool-size-controls ::deep fluent-button {
+    width: 24px;
+    min-width: 24px;
+    height: 24px;
+}
+
+.pool-size-controls ::deep fluent-button::part(control) {
+    padding: 0;
+}
+
+.pool-size-value {
+    min-width: 1.5em;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}

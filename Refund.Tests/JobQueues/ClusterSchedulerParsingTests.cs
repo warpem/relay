@@ -155,11 +155,12 @@ public class ClusterSchedulerParsingTests
     }
 
     [Fact]
-    public void DefaultTerminalStatusTemplate_SlurmUsesAccountingView()
+    public void DefaultTerminalStatusTemplate_SlurmObservesTheAllocationWithoutJobSteps()
     {
-        Assert.Contains(
-            "sacct",
-            ClusterSchedulerProtocol.DefaultTerminalStatusTemplate(ClusterScheduler.Slurm));
+        var template = ClusterSchedulerProtocol.DefaultTerminalStatusTemplate(ClusterScheduler.Slurm);
+
+        Assert.Contains("sacct", template);
+        Assert.Contains("--allocations", template);
     }
 
     [Theory]

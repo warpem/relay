@@ -29,6 +29,13 @@ public partial class DataManager
                 var def = originalSpace.FindFactoryDefinition(definitionId)
                     ?? throw new Exception($"Factory definition {definitionId} not found");
 
+                EnsureNoPendingExecutions(
+                    def.ExternalEdges
+                        .Select(edge => (Edge: edge, Job: originalSpace.FindJob(edge.ExternalJobId)))
+                        .Where(item => item.Job?.PortsIn.ContainsKey(item.Edge.ExternalPort) == true)
+                        .Select(item => item.Job),
+                    "The factory's external output targets");
+
                 Folder folder = null;
                 if (targetFolder != null)
                 {
@@ -332,7 +339,6 @@ public partial class DataManager
         Dictionary<int, int> queueAssignments)
     {
         var queuedJobSnapshots = new List<ReadOnlyJob>();
-        var jobsToQueue = new List<(Job Job, JobQueue Queue)>();
 
         await ExecuteWithLock(async () =>
         {
@@ -362,7 +368,7 @@ public partial class DataManager
                         j.QueueId = queueId;
                     });
 
-                    jobsToQueue.Add((job, queue));
+                    await _queueRepository.QueueJobAsync(job, queue);
                     queuedJobSnapshots.Add(job.AsReadOnly());
                 }
 
@@ -379,9 +385,6 @@ public partial class DataManager
                 throw;
             }
         });
-
-        foreach (var (job, queue) in jobsToQueue)
-            await _queueRepository.QueueJobAsync(job, queue);
 
         foreach (var job in queuedJobSnapshots)
         {

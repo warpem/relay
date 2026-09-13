@@ -98,6 +98,12 @@ public abstract class ReadOnlyJob : IIdentifiable, IAudited, IAnnotated, IViewIt
     /// This provides a unique, human-readable identifier for UI display.
     /// </summary>
     public string QualifiedName => _job.QualifiedName;
+
+    public string ExecutionWarning => _job.ExecutionWarning;
+
+    public int? PoolDesiredSize => _job.PoolDesiredSize;
+
+    public int PoolWorkersStopping => _job.PoolWorkersStopping;
     
     /// <summary>
     /// Gets the name of the directory where this job's data is stored.

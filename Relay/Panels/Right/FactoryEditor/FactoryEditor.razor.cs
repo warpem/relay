@@ -158,7 +158,7 @@ public partial class FactoryEditor : ComponentBase, IDisposable
 
         try
         {
-            await DataManager.UpdateJob(Session.User, subJob,
+            await DataManager.UpdateJobParameters(Session.User, subJob,
                 originalJob =>
                 {
                     args.prop.SetValue(originalJob, args.value);

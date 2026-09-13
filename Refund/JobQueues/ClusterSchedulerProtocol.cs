@@ -8,7 +8,7 @@ internal static class ClusterSchedulerProtocol
 {
     public static string DefaultTerminalStatusTemplate(ClusterScheduler scheduler) => scheduler switch
     {
-        ClusterScheduler.Slurm => "sacct -j {{job_id}} --noheader --parsable2 --format=State",
+        ClusterScheduler.Slurm => "sacct -j {{job_id}} --allocations --noheader --parsable2 --format=State",
         _ => null
     };
 

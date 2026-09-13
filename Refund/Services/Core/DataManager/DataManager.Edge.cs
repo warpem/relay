@@ -47,6 +47,8 @@ public partial class DataManager
                 if (toJob == null)
                     throw new Exception($"Target Job {to.Job.Id} not found.");
 
+                EnsureNoPendingExecutions([toJob], $"Job {toJob.QualifiedName}");
+
                 if (!fromJob.PortsOut.ContainsKey(from.Name))
                     throw new Exception($"Source Job {from.Job.Id} doesn't have an output port named {from.Name}.");
                 PortOut fromPort = fromJob.PortsOut[from.Name];
@@ -111,6 +113,7 @@ public partial class DataManager
             {
                 var originalEdge = ResolveEdge(edge.Space.Project.Id, edge.Space.Id, edge.Id);
 
+                EnsureNoPendingExecutions([originalEdge.Target.Job], "The edge target");
                 _dataRepository.UpdateEdge(originalEdge, updateAction);
                 updatedEdge = originalEdge.AsReadOnly();
             }
@@ -156,6 +159,7 @@ public partial class DataManager
             {
                 var originalEdge = ResolveEdge(edge.Space.Project.Id, edge.Space.Id, edge.Id);
 
+                EnsureNoPendingExecutions([originalEdge.Target.Job], "The edge target");
                 // Store the read-only version before deletion
                 deletedEdge = originalEdge.AsReadOnly();
                 sourceJob = deletedEdge.Source.Job;

@@ -41,7 +41,7 @@ public sealed class ManagedExecutionHost
         var control = new AnonymousPipeServerStream(
             PipeDirection.Out,
             HandleInheritability.Inheritable);
-        var ready = new AnonymousPipeServerStream(
+        using var ready = new AnonymousPipeServerStream(
             PipeDirection.In,
             HandleInheritability.Inheritable);
         Process process = null;
@@ -59,15 +59,13 @@ public sealed class ManagedExecutionHost
             control.DisposeLocalCopyOfClientHandle();
             ready.DisposeLocalCopyOfClientHandle();
 
-            using (ready)
+            int? processGroup;
             using (var reader = new StreamReader(ready))
             {
                 string signal = await reader.ReadLineAsync(startCancellation.Token)
                     .AsTask()
                     .WaitAsync(ReadyTimeout, startCancellation.Token);
-                if (signal != RelayRunner.ReadySignal)
-                    throw new InvalidOperationException(
-                        $"relay-runner exited before becoming ready (signal: {signal ?? "EOF"}).");
+                processGroup = RelayRunner.ParseReadySignal(signal);
             }
 
             await _gate.WaitAsync(CancellationToken.None);
@@ -79,7 +77,7 @@ public sealed class ManagedExecutionHost
                     throw new InvalidOperationException(
                         $"Attempt {attempt.Id} already has a managed execution.");
 
-                var execution = new ManagedExecution(process, control, StopTimeout);
+                var execution = new ManagedExecution(process, control, processGroup, StopTimeout);
                 _executions[attempt.Id] = execution;
                 process = null;
                 control = null;
@@ -121,8 +119,11 @@ public sealed class ManagedExecutionHost
                 if (_executions.TryRemove(attempt.Id, out var removed))
                     removed.Dispose();
             }
-            catch
+            catch (Exception cleanupFailure)
             {
+                throw new IndeterminateBackendStartException(
+                    "The managed execution could not be activated, and its payload has not yet stopped.",
+                    cleanupFailure);
             }
             throw;
         }
@@ -137,6 +138,11 @@ public sealed class ManagedExecutionHost
 
         if (!execution.HasExited)
             return new BackendObservation(BackendObservationKind.Running);
+
+        if (!execution.TryConfirmStopped())
+            return new BackendObservation(
+                BackendObservationKind.Indeterminate,
+                "relay-runner exited; its payload process group is still being contained.");
 
         _executions.TryRemove(attempt.Id, out _);
         int exitCode = execution.ExitCode;
@@ -268,28 +274,44 @@ public sealed class ManagedExecutionHost
         }
     }
 
-    private sealed class ManagedExecution : IDisposable
+    internal sealed class ManagedExecution : IDisposable
     {
         private readonly Process _process;
         private readonly StreamWriter _control;
         private readonly SemaphoreSlim _gate = new(1, 1);
         private readonly TimeSpan _stopTimeout;
+        private readonly int? _processGroup;
         private bool _activated;
         private bool _stopping;
 
         public ManagedExecution(
             Process process,
             Stream control,
+            int? processGroup,
             TimeSpan stopTimeout)
         {
             _process = process;
             _control = new StreamWriter(control) { AutoFlush = true };
             _stopTimeout = stopTimeout;
+            _processGroup = processGroup;
         }
 
         public int ProcessId => _process.Id;
         public bool HasExited => _process.HasExited;
         public int ExitCode => _process.ExitCode;
+
+        public bool TryConfirmStopped()
+        {
+            if (!_process.HasExited)
+                return false;
+            if (_processGroup == null)
+                return true;
+
+            // The runner can itself crash. Its exit alone says nothing about the
+            // separate payload group whose identity it gave us before GO.
+            SupervisedProcess.KillProcessGroup(_processGroup);
+            return SupervisedProcess.ProcessGroupIsEmpty(_processGroup.Value);
+        }
 
         public async Task ActivateAsync(CancellationToken cancellationToken)
         {
@@ -356,6 +378,14 @@ public sealed class ManagedExecutionHost
                         $"relay-runner {_process.Id} did not exit after forced termination.");
                 }
             }
+
+            var cleanup = Stopwatch.StartNew();
+            while (!TryConfirmStopped())
+            {
+                if (cleanup.Elapsed >= _stopTimeout)
+                    throw new TimeoutException("The managed payload process group has not exited.");
+                await Task.Delay(25, cancellationToken);
+            }
         }
 
         public void Dispose()
@@ -367,6 +397,7 @@ public sealed class ManagedExecutionHost
 
         private void TryKill()
         {
+            SupervisedProcess.KillProcessGroup(_processGroup);
             try
             {
                 if (!_process.HasExited)

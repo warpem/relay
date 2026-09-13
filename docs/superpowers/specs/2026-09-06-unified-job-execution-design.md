@@ -34,8 +34,9 @@ These are requirements, not implementation suggestions.
    and leader election are out of scope.
 2. **Local jobs remain in-process.** Interactive local jobs must keep working without a separate
    worker service.
-3. **Managed commands are owner-bound.** They run through a small `relay-runner` supervisor and must
-   stop when their owning Relay process dies.
+3. **Managed commands are owner-bound.** They run through a small `relay-runner` supervisor, which
+   stops the payload when its ownership channel closes. Restart interrupts the old attempt rather
+   than adopting it; section 8.2 defines the deliberately bounded cleanup contract.
 4. **External scheduler jobs are scheduler-bound.** They may outlive Relay and must be re-adopted
    after an ordinary Relay restart.
 5. **Relay-managed admission is strict FIFO.** Later small jobs do not bypass an older job that is
@@ -60,6 +61,8 @@ selection before their next run. The job definitions themselves must not be lost
 
 - A distributed workflow engine or multiple concurrent Relay writers.
 - Reconnecting to or resuming a managed payload after Relay dies.
+- Probing or killing saved managed PIDs after restart, or withholding admission until they disappear.
+  Process IDs can be reused; the old runner's ownership-channel cleanup is the contract.
 - Forcefully terminating an uncooperative in-process local task without terminating Relay.
 - Resource enforcement beyond existing mechanisms. Managed CPU and memory limits remain accounting;
   GPU visibility may be enforced through the process environment.
@@ -85,7 +88,8 @@ An execution attempt is one immutable intention to run a job. It has:
 
 - a globally unique `AttemptId`;
 - the owning job ID;
-- an immutable snapshot of parameters and relevant queue configuration;
+- frozen job parameters and input connections for the lifetime of the attempt, plus an immutable
+  snapshot of relevant queue configuration;
 - dependency and FIFO ordering information;
 - its lifecycle phase and proposed terminal outcome, where applicable;
 - its resource request and any concrete reservation, including assigned GPU IDs;
@@ -114,6 +118,13 @@ Configuration edits affect future attempts; an active attempt uses the snapshot 
 
 The old orchestration responsibilities of `QueueRepository` disappear. A simple queue catalog may
 remain for loading, validating, and saving queue definitions.
+
+Job methods continue using their materialized job and graph, including interactive local jobs.
+Rather than introduce a detached copy of that graph, parameter and input-connection edits are rejected
+while an attempt owns the definition. Clearing or deleting upstream data is also rejected while an
+active consumer depends on it. Metadata such as labels and notes remains editable.
+The materialized space definition is saved before persisting a new execution intent, so recovery
+cannot combine an admitted resource request with parameters still waiting for autosave.
 
 ### 4.4 Backend receipt
 
@@ -217,6 +228,10 @@ admission and worker resizing and derives every backend effect required by the r
 asynchronous backend operation later posts a result containing the attempt ID. Timers and pollers
 only post observations. They never mutate jobs or attempts directly.
 
+The runtime claims all planned effect keys under the coordinator gate, after committing state and
+before dispatching any effect. Otherwise a fast first effect can trigger reconciliation that dispatches
+a later effect a second time while the original dispatch list still contains it.
+
 Effects are state-derived rather than stored in a second in-memory outbox. Reconciliation may derive
 the same effect again while its phase remains unchanged; the runtime permits only one concurrent
 effect for a stable attempt/operation key. A completed effect posts its result through the same
@@ -234,6 +249,11 @@ State changes follow this order:
 If an effect can create external work, its intent is persisted before the effect begins.
 Projection is retried but is not a launch prerequisite: durable execution state remains authoritative,
 and a temporary UI-update failure cannot stall unrelated or already-admitted work.
+
+DataManager serializes admission and destructive job commands through its existing command lock.
+Execution projections update through DataRepository's write lock and then enqueue UI notifications;
+they never re-enter the DataManager command lock from the runtime gate. This makes validation and
+ownership transfer atomic without a second command gate or a provisional job status.
 
 ## 7. Scheduling and admission
 
@@ -304,11 +324,11 @@ The startup protocol closes the dangerous launch windows:
 
 1. Relay persists the attempt in `Starting` with its reservation and launch token.
 2. Relay starts `relay-runner` with a private inherited control channel.
-3. The runner creates the platform-specific process containment boundary and replies `READY` with
-   its identity.
+3. The runner creates a gated shell in the platform-specific process containment boundary and replies
+   `READY` with the confirmed process-group identity.
 4. Relay persists the runner receipt.
 5. Relay sends `GO`.
-6. The runner launches the payload inside the containment boundary.
+6. The runner releases the shell to execute the payload inside the containment boundary.
 
 If Relay exits before `GO`, the runner exits without launching the payload. If Relay exits after
 `GO`, end-of-file on the control channel makes the runner terminate the complete payload process
@@ -319,8 +339,20 @@ Platform mechanisms may strengthen the same contract, such as Linux parent-death
 Windows Job Objects. The control channel and handshake define the portable behavior; they are not a
 heartbeat protocol.
 
-On restart, any non-terminal managed attempt becomes `Interrupted`. The runner's ownership channel
-provides the cleanup contract; Relay does not try to reconnect to or adopt a prior runner.
+While the owning Relay process is alive, it retains the group identity received in the handshake.
+Runner exit alone is insufficient evidence of completion: the live owner also confirms the payload
+group is gone, containing it if the runner died first.
+
+On restart, a non-terminal managed attempt receives the `Interrupted` outcome and releases its managed
+reservation. Any external scheduler workers still follow their receipt-based cleanup contract before
+the parent becomes terminal. The new Relay process does not reconnect to the old runner, probe or kill
+its saved PID, or withhold admission waiting for it. A saved numeric process or group ID cannot prove
+ownership after restart because it may have been reused.
+
+This is an accepted boundary of the owner-bound design. The old runner responds asynchronously to
+ownership-channel EOF; restart does not establish a cleanup barrier before new admission. The contract
+does not promise instantaneous cleanup or cleanup after simultaneous loss of both owner and supervisor.
+It intentionally avoids stale-PID recovery machinery and an indefinite startup admission hold.
 
 ### 8.3 External scheduler backend
 
@@ -393,23 +425,30 @@ The coordinator:
 Pool counters shown by a job are projections from its current worker group. They are not writable job
 state.
 
-### 10.1 Future interactive resizing
+### 10.1 Interactive resizing
 
-The architecture explicitly supports changing pool capacity while a job is running:
+The backend was prepared for changing pool capacity while a job is running. The explicit UI and MCP
+command is a new application feature, not a restoration of a previously available resizing control:
 
 1. the UI sends `ResizeWorkerGroup(AttemptId, DesiredSize)`;
 2. the coordinator verifies that the attempt and group are active;
-3. it persists the new desired size and appends one history event; and
+3. it persists the new desired size without changing lifecycle phase; and
 4. ordinary reconciliation submits or retires the difference.
+
+The application exposes the command through `DataManager.ResizeJobPool`, the queue card's Workers
+controls, and MCP `resize_job_pool`. Only a running pooled attempt can be resized, and the target must
+be at least one. An increase is rejected if retained workers plus remaining submissions cannot reach
+the new target; a decrease remains available even when replacement submissions are exhausted.
 
 The job definition's pool size remains the default for future attempts. Resizing one active attempt
 does not silently edit that default. The lifetime replacement limit is separate from `DesiredSize`,
 so decreasing and later increasing a pool cannot accidentally reset or inflate its failure budget.
 
-The exact scale-down policy remains an implementation decision: either retire excess pending workers
-first and drain running workers, or explicitly cancel selected running workers for immediate shrink.
-It must be visible to the user and safe for the worker protocol; it must not emerge accidentally from
-collection ordering.
+Scale-down requests immediate cancellation of excess workers, including running workers when selected.
+It keeps workers already cancelling or stopping in the calculation and does not issue their cancellation
+again after the scheduler accepts it. Workers remain tracked until terminal evidence arrives. Scale-up
+uses the remaining lifetime submission budget; resizing never replenishes that budget. The UI and MCP
+report the active desired count separately from the job definition's default for future attempts.
 
 ## 11. Cancellation, clearing, and rerun
 
@@ -450,7 +489,8 @@ Startup recovery is deterministic:
 1. load and validate the latest complete snapshot;
 2. rebuild all derived indexes and resource totals from attempts rather than trusting cached sums;
 3. mark non-terminal in-process attempts `Interrupted`;
-4. reconcile and interrupt non-terminal managed attempts through `relay-runner` cleanup records;
+4. interrupt non-terminal managed attempts and release their reservations without acting on old
+   process receipts, as specified by the owner-bound contract in section 8.2;
 5. resume observation of external scheduler attempts from durable receipts;
 6. reconcile ambiguous external submissions conservatively by correlation token;
 7. resume cluster worker-group reconciliation; and
@@ -582,12 +622,11 @@ state.
 These do not require more architecture, but they must be resolved before implementation reaches the
 affected behavior:
 
-1. **Pool scale-down:** graceful drain versus immediate cancellation, and whether both are exposed.
-2. **Long scheduler uncertainty:** the warning/escalation UX and operator actions available while an
+1. **Long scheduler uncertainty:** the warning/escalation UX and operator actions available while an
    attempt remains indeterminate.
-3. **Queue configuration migration:** whether old queue definitions receive a one-time conversion or
+2. **Queue configuration migration:** whether old queue definitions receive a one-time conversion or
    administrators recreate them. Active execution state is not migrated either way.
-4. **Custom scheduler correlation:** whether a future adapter may safely adopt an ambiguous
+3. **Custom scheduler correlation:** whether a future adapter may safely adopt an ambiguous
    submission by querying the configured `{{ attempt_id }}` metadata.
 
 ## 18. Acceptance criteria
@@ -598,8 +637,8 @@ The design is successful when:
 - only one serialized component can change execution truth;
 - a poll can never create another copy of the current lifecycle event;
 - a transient scheduler visibility gap leaves the attempt alive and records indeterminate health;
-- managed work cannot survive loss of its owning Relay process under the supported platform
-  contract;
+- managed runners stop their payloads on ownership-channel EOF, and restart follows the bounded
+  interruption contract in section 8.2 without stale-PID adoption or cleanup;
 - cluster work is re-adopted after restart without normal-case resubmission;
 - strict FIFO admission is deterministic and covered by tests;
 - cancellation never frees resources before the relevant work is known stopped;

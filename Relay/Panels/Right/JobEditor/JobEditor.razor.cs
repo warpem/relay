@@ -272,7 +272,7 @@ public partial class JobEditor : ComponentBase, IDisposable
         }
         else
         {
-            await DataManager.UpdateJob(Session.User, _job,
+            await DataManager.UpdateJobParameters(Session.User, _job,
                                         originalJob =>
                                         {
                                             args.prop.SetValue(originalJob, args.value);

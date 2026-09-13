@@ -428,10 +428,25 @@ public class RelayMcpTools(IHttpContextAccessor contextAccessor, DataManager dat
         try { assignments = RelayMcpParameterPatch.Resolve(job.GetOriginalType(), parameters); }
         catch (ArgumentException ex) { throw new McpException(ex.Message); }
 
-        await Invoke(() => dataManager.UpdateJob(user, job, j =>
+        await Invoke(() => dataManager.UpdateJobParameters(user, job, j =>
         {
             foreach (var (prop, value) in assignments) prop.SetValue(j, value);
         }));
+        return new OkDto(true);
+    }
+
+    [McpServerTool(Name = "resize_job_pool"), Description("Set the worker count of a running pooled job (at least 1). Excess workers are canceled immediately, without waiting for their tasks to finish. Changes only the current run; the lifetime submission limit remains unchanged. Use get_job to inspect the current pool.")]
+    public async Task<OkDto> ResizeJobPool(
+        [Description("The project id.")] int projectId,
+        [Description("The space id.")] int spaceId,
+        [Description("The job id.")] int jobId,
+        [Description("Desired number of pool workers, at least 1.")] int desiredSize)
+    {
+        var user = CurrentUser();
+        Require(PermTier.Job, AccessLevel.EditRun);
+        var job = dataManager.GetUserProjects(user).FirstOrDefault(p => p.Id == projectId)?.FindSpace(spaceId)?.FindJob(jobId);
+        if (job == null) throw new McpException($"Job {jobId} not found.");
+        await Invoke(() => dataManager.ResizeJobPool(user, job, desiredSize));
         return new OkDto(true);
     }
 

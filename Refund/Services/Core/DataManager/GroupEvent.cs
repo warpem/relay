@@ -21,7 +21,6 @@ namespace Refund.Services.Core.DataManager
         /// The keys are string patterns like "P1_S2_J*" (all jobs in space 2 of project 1).
         /// Each subscriber queue is isolated so one observer cannot block another.
         /// </summary>
-        private const int SubscriberQueueCapacity = 64;
         private readonly Dictionary<string, List<GroupEventSubscriber<T>>> _groups = new();
 
         /// <summary>
@@ -44,7 +43,7 @@ namespace Refund.Services.Core.DataManager
         {
             ArgumentNullException.ThrowIfNull(action);
 
-            var subscriber = new GroupEventSubscriber<T>(groupName, action, SubscriberQueueCapacity);
+            var subscriber = new GroupEventSubscriber<T>(groupName, action);
             lock (_groups)
             {
                 if (!_groups.TryGetValue(groupName, out var subscribers))
@@ -96,7 +95,7 @@ namespace Refund.Services.Core.DataManager
         /// <param name="data">The event arguments containing the object that changed</param>
         /// <returns>A task that completes once notifications have been queued</returns>
         /// <remarks>
-        /// Each subscriber processes notifications in order on its own bounded queue. A slow
+        /// Each subscriber processes notifications in order on its own queue. A slow
         /// subscriber cannot block the publisher or other subscribers.
         /// </remarks>
         public Task InvokeHierarchy(T obj, string[] groupNames)
@@ -129,8 +128,8 @@ namespace Refund.Services.Core.DataManager
     }
 
     /// <summary>
-    /// Isolates one observer behind a bounded, ordered queue. Publishers never wait for an
-    /// observer, and an overloaded observer receives the most recent notifications.
+    /// Isolates one observer behind an ordered queue. Publishers never wait for an observer.
+    /// Notifications may describe different objects or deletions, so none can be dropped.
     /// </summary>
     internal sealed class GroupEventSubscriber<T> : IDisposable
     {
@@ -144,16 +143,14 @@ namespace Refund.Services.Core.DataManager
 
         public GroupEventSubscriber(
             string groupName,
-            Func<GroupEventArgs<T>, Task> action,
-            int capacity)
+            Func<GroupEventArgs<T>, Task> action)
         {
             _groupName = groupName;
             _action = action;
-            _queue = Channel.CreateBounded<GroupEventArgs<T>>(new BoundedChannelOptions(capacity)
+            _queue = Channel.CreateUnbounded<GroupEventArgs<T>>(new UnboundedChannelOptions
             {
                 SingleReader = true,
                 SingleWriter = false,
-                FullMode = BoundedChannelFullMode.DropOldest,
                 AllowSynchronousContinuations = false
             });
             _ = ProcessAsync();

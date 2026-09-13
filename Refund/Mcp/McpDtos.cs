@@ -22,7 +22,11 @@ public record JobDetailDto(
     string Status,
     IReadOnlyList<JobParamDto> Parameters,
     IReadOnlyList<JobPortDto> Inputs,
-    IReadOnlyList<JobPortDto> Outputs);
+    IReadOnlyList<JobPortDto> Outputs,
+    JobPoolDto? Pool = null);
+
+/// <summary>Current attempt's worker target and observations, separate from future-run parameters.</summary>
+public record JobPoolDto(int DesiredSize, int Running, int Pending, int Stopping, int Submitted, bool CanResize);
 /// <summary>A downloadable result artifact of a job at a given iteration.
 /// (Port, Name, Iteration) is the key passed to get_job_result_link.</summary>
 public record JobResultDto(string Port, string Name, string Description, int Iteration);

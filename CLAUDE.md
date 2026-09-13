@@ -23,7 +23,7 @@ Relay is a platform for cryo-EM data processing workflows with these key compone
 
 #### Job (`/Refund/DataModel/Job.cs`)
 - Core properties: `Id`, `DirectoryName`, `Alias`, `Status`, `PortsIn`, `PortsOut`
-- Status flow: Building → Waiting → Staging → Running → Finalizing → Finished
+- Projected status follows the current execution attempt; only the execution coordinator controls its lifecycle
 - Can fail or be aborted from any active state
 - Key methods: `ValidateInputs()`, `Stage()`, `GetParents()/GetChildren()`
 
@@ -58,7 +58,7 @@ Relay is a platform for cryo-EM data processing workflows with these key compone
   - `WarpJob`: Base for Warp-based processing
 - Job interfaces:
   - `ILocalJob`: Can run locally (`RunLocal()` method)
-  - `IClusterJob`: Can run on cluster (`RunFake()` for testing)
+  - `IClusterJob`: Marker for command-based execution on a managed or external scheduler queue
 - To implement a new job type:
   1. Create class inheriting from appropriate base
   2. Define input/output ports in constructor
@@ -94,12 +94,23 @@ Relay is a platform for cryo-EM data processing workflows with these key compone
 
 ### Job Queue System
 
-- `LocalQueue`: Runs jobs on local machine
-- `ClusterQueue`: Submits jobs to HPC cluster
-- Job lifecycle:
-  1. Building (configuring) → Waiting (queued)
-  2. Staging (setup) → Running → Finalizing (cleanup)
-  3. Terminal states: Finished, Failed, Aborted, Deleted
+- `ExecutionCoordinator`: Sole lifecycle authority; derives admission, reservations, and effects from durable attempts.
+- `ExecutionRuntime`: Serializes state changes, persistence, projection, and asynchronous effect results.
+- `QueueRepository`: Queue configuration and execution integration; queue membership comes from attempts.
+- `LocalQueue`: Configuration for in-process `ILocalJob` execution.
+- `ClusterQueue`: Templates and scheduler protocol; `Managed` uses a supervised host process.
+- Managed admission is strict FIFO among dependency-ready attempts. Reruns create new attempts.
+- Managed runners stop on ownership-channel EOF. Restart interrupts the old attempt and releases
+  its reservation; do not adopt, probe, or kill saved PIDs, or block admission waiting for them.
+  Numeric IDs can be reused. Instant cleanup and simultaneous owner/supervisor failure are outside
+  this deliberately bounded restart contract.
+- Terminal execution outcomes map to Finished, Failed, Aborted, or Interrupted on the job.
+- Live pool resizing uses `DataManager.ResizeJobPool` / MCP `resize_job_pool` and the queue card's
+  Workers controls. Change only the running attempt's target (minimum 1); preserve future-run
+  parameters and the lifetime submission budget. Scale-down requests immediate cancellation and
+  retains stopping workers until terminal evidence arrives.
+- See `docs/superpowers/specs/2026-09-06-unified-job-execution-design.md` for the contract and
+  `docs/execution-review-2026-09-13.md` for review findings, corrections, and accepted boundaries.
 
 ## Resource Types
 
@@ -224,37 +235,12 @@ private async Task HandlePortConnected((ReadOnlyPortOut portOut, ReadOnlyPortIn 
 
 ### Queuing a Job for Execution
 
-```csharp
-// From DataManager.Job.cs
-public async Task QueueLocalJob(ReadOnlyUser user, ReadOnlyJob job)
-{
-    await ExecuteWithLock(async () =>
-    {
-        // Find original mutable objects
-        User originalUser = _userRepository.FindUser(user.Id);
-        Job originalJob = _dataRepository.FindJob(job.Space.Project.Id, job.Space.Id, job.Id);
-        
-        // Validate transition
-        if (!originalJob.CanTransitionState(JobStatus.Waiting))
-            throw new Exception("Job cannot be started.");
-
-        // Update job state
-        _dataRepository.UpdateJob(originalUser, originalJob, j =>
-        {
-            j.Status = JobStatus.Waiting;
-            j.SubmissionDate = DateTime.Now;
-        });
-
-        // Queue the job
-        _queueRepository.QueueLocalJob(originalJob);
-    });
-
-    // Notify all subscribers about the job update
-    var eventArgs = new GroupEventArgs<ReadOnlyJob>(job);
-    await JobUpdated.Invoke(GroupName.Job(job.Space.Project.Id, job.Space.Id, job.Id), eventArgs);
-    await JobQueued.Invoke(GroupName.Job(job.Space.Project.Id, job.Space.Id, job.Id), eventArgs);
-}
-```
+Use `DataManager.QueueLocalJob(user, job)` or `QueueClusterJob(user, job, queue)`.
+Do not assign Waiting/Running/terminal statuses as a way to start or stop work. Admission and
+lifecycle commands run under DataManager's command lock; execution callbacks write through
+DataRepository's write lock and publish notifications without re-entering that command lock.
+Parameter edits use `UpdateJobParameters`; general `UpdateJob` is for metadata and internal result
+updates. Parameters, input connections, and consumed upstream files cannot change while owned.
 
 ### Secure File Handling
 

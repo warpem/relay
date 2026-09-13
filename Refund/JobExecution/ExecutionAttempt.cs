@@ -73,7 +73,8 @@ public enum WorkerPhase
     Running,
     Indeterminate,
     Cancelling,
-    Ended
+    Ended,
+    Stopping
 }
 
 public readonly record struct JobAddress(int ProjectId, int SpaceId, int JobId);

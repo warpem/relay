@@ -14,7 +14,6 @@ internal sealed class SupervisedProcess : IDisposable
     private readonly Process _process;
     private readonly Task _outputPumps;
     private readonly int? _processGroup;
-    private long _exitObservedAt;
 
     internal static string SetsidPathOverride { get; set; }
 
@@ -28,22 +27,9 @@ internal sealed class SupervisedProcess : IDisposable
     }
 
     public int ExitCode => _process.ExitCode;
+    public int? ProcessGroup => _processGroup;
 
-    public bool HasExited
-    {
-        get
-        {
-            if (!_process.HasExited)
-                return false;
-            if (_outputPumps.IsCompleted)
-                return true;
-
-            Interlocked.CompareExchange(ref _exitObservedAt, Stopwatch.GetTimestamp(), 0);
-            return Stopwatch.GetElapsedTime(Interlocked.Read(ref _exitObservedAt)) > DrainGrace;
-        }
-    }
-
-    public static SupervisedProcess Start(
+    public static SupervisedProcess Prepare(
         string scriptPath,
         string workingDirectory,
         IReadOnlyList<int> gpuIndices,
@@ -64,6 +50,11 @@ internal sealed class SupervisedProcess : IDisposable
 
         if (ownsProcessGroup)
             info.ArgumentList.Add("/bin/bash");
+        // Keep the shell alive until its group has been identified and Relay has
+        // persisted the runner receipt. EOF also makes an abandoned shell exit.
+        info.ArgumentList.Add("-c");
+        info.ArgumentList.Add("read -r start && [ \"$start\" = GO ] && exec /bin/bash \"$1\"");
+        info.ArgumentList.Add("relay-payload");
         info.ArgumentList.Add(scriptPath);
         info.Environment["CUDA_VISIBLE_DEVICES"] = string.Join(",", gpuIndices);
 
@@ -74,12 +65,11 @@ internal sealed class SupervisedProcess : IDisposable
 
         var process = new Process { StartInfo = info };
         process.Start();
-        process.StandardInput.Close();
 
         int? processGroup = ownsProcessGroup
             ? ConfirmProcessGroup(process, TimeSpan.FromSeconds(5))
             : null;
-        if (ownsProcessGroup && processGroup == null && !process.HasExited)
+        if (ownsProcessGroup && processGroup == null)
         {
             try
             {
@@ -99,9 +89,15 @@ internal sealed class SupervisedProcess : IDisposable
         return new SupervisedProcess(process, pumps, processGroup);
     }
 
+    public async Task ActivateAsync(CancellationToken cancellationToken)
+    {
+        await _process.StandardInput.WriteLineAsync("GO".AsMemory(), cancellationToken);
+        _process.StandardInput.Close();
+    }
+
     public void KillTree()
     {
-        if (_processGroup is { } group && group > 1 && Kill(-group, SigKill) == 0)
+        if (KillProcessGroup(_processGroup))
             return;
 
         try
@@ -230,7 +226,10 @@ internal sealed class SupervisedProcess : IDisposable
         }
     }
 
-    private static bool ProcessGroupIsEmpty(int processGroup)
+    internal static bool KillProcessGroup(int? processGroup) =>
+        processGroup is { } group && group > 1 && Kill(-group, SigKill) == 0;
+
+    internal static bool ProcessGroupIsEmpty(int processGroup)
     {
         if (processGroup <= 1)
             return false;
