@@ -12,7 +12,7 @@ public partial class DataManager
     public async Task<ReadOnlyFolder> CreateFolder(ReadOnlyUser user, ReadOnlyView view, string alias, ReadOnlyFolder parentFolder = null)
     {
         ReadOnlyFolder createdFolder = null;
-        await ExecuteWithLock(async () =>
+        await ExecuteSpaceChange(view.Space, async () =>
         {
             try
             {
@@ -39,11 +39,7 @@ public partial class DataManager
 
                 originalView.AddFolder(folder, parent);
 
-                parent?.UpdateLayout(originalView.Space);
-                parent?.UpdateDiagramLayout(originalView.Space);
-                originalView.UpdateDiagramLayout(originalView.Space);
-
-                TouchAndSave(originalView, originalUser);
+                TouchView(originalView, originalUser);
 
                 createdFolder = folder.AsReadOnly();
             }
@@ -64,7 +60,7 @@ public partial class DataManager
     /// </summary>
     public async Task DeleteFolder(ReadOnlyUser user, ReadOnlyView view, ReadOnlyFolder folder)
     {
-        await ExecuteWithLock(async () =>
+        await ExecuteSpaceChange(view.Space, async () =>
         {
             try
             {
@@ -75,15 +71,9 @@ public partial class DataManager
                 if (originalFolder == null)
                     throw new Exception($"Folder {folder.Id} not found");
 
-                Folder parentFolder = originalFolder.ParentFolder;
-
                 originalView.RemoveFolder(originalFolder);
 
-                parentFolder?.UpdateLayout(originalView.Space);
-                parentFolder?.UpdateDiagramLayout(originalView.Space);
-                originalView.UpdateDiagramLayout(originalView.Space);
-
-                TouchAndSave(originalView, originalUser);
+                TouchView(originalView, originalUser);
             }
             catch (Exception e)
             {
@@ -100,7 +90,7 @@ public partial class DataManager
     /// </summary>
     public async Task UpdateFolder(ReadOnlyUser user, ReadOnlyView view, ReadOnlyFolder folder, Action<Folder> updateAction)
     {
-        await ExecuteWithLock(async () =>
+        await ExecuteSpaceChange(view.Space, async () =>
         {
             try
             {
@@ -115,7 +105,7 @@ public partial class DataManager
                 originalFolder.UpdateDate = DateTime.Now;
                 originalFolder.UpdatedBy = originalUser;
 
-                TouchAndSave(originalView, originalUser);
+                TouchView(originalView, originalUser);
             }
             catch (Exception e)
             {
@@ -132,7 +122,7 @@ public partial class DataManager
     /// </summary>
     public async Task ReorderItemInFolder(ReadOnlyUser user, ReadOnlyView view, ReadOnlyFolder folder, IViewItem item, int newIndex)
     {
-        await ExecuteWithLock(async () =>
+        await ExecuteSpaceChange(view.Space, async () =>
         {
             try
             {
@@ -156,7 +146,7 @@ public partial class DataManager
 
                 originalFolder.UpdateDate = DateTime.Now;
                 originalFolder.UpdatedBy = originalUser;
-                TouchAndSave(originalView, originalUser);
+                TouchView(originalView, originalUser);
             }
             catch (Exception e)
             {
@@ -173,7 +163,7 @@ public partial class DataManager
     /// </summary>
     public async Task MoveJobToFolder(ReadOnlyUser user, ReadOnlyView view, ReadOnlyJob job, ReadOnlyFolder targetFolder)
     {
-        await ExecuteWithLock(async () =>
+        await ExecuteSpaceChange(view.Space, async () =>
         {
             try
             {
@@ -189,17 +179,9 @@ public partial class DataManager
                         throw new Exception($"Target folder {targetFolder.Id} not found");
                 }
 
-                Folder sourceFolder = originalView.Folders.FirstOrDefault(f => f.Items.Contains(originalJob));
-
                 originalView.MoveJobToFolder(originalJob, target);
 
-                sourceFolder?.UpdateLayout(originalView.Space);
-                target?.UpdateLayout(originalView.Space);
-                sourceFolder?.UpdateDiagramLayout(originalView.Space);
-                target?.UpdateDiagramLayout(originalView.Space);
-                originalView.UpdateDiagramLayout(originalView.Space);
-
-                TouchAndSave(originalView, originalUser);
+                TouchView(originalView, originalUser);
             }
             catch (Exception e)
             {
@@ -216,7 +198,7 @@ public partial class DataManager
     /// </summary>
     public async Task MoveFolderToFolder(ReadOnlyUser user, ReadOnlyView view, ReadOnlyFolder folder, ReadOnlyFolder targetFolder)
     {
-        await ExecuteWithLock(async () =>
+        await ExecuteSpaceChange(view.Space, async () =>
         {
             try
             {
@@ -226,8 +208,6 @@ public partial class DataManager
                 Folder originalFolder = originalView.FindFolder(folder.Id);
                 if (originalFolder == null)
                     throw new Exception($"Folder {folder.Id} not found");
-
-                Folder oldParent = originalFolder.ParentFolder;
 
                 Folder target = null;
                 if (targetFolder != null)
@@ -239,13 +219,7 @@ public partial class DataManager
 
                 originalView.MoveFolderToFolder(originalFolder, target);
 
-                oldParent?.UpdateLayout(originalView.Space);
-                target?.UpdateLayout(originalView.Space);
-                oldParent?.UpdateDiagramLayout(originalView.Space);
-                target?.UpdateDiagramLayout(originalView.Space);
-                originalView.UpdateDiagramLayout(originalView.Space);
-
-                TouchAndSave(originalView, originalUser);
+                TouchView(originalView, originalUser);
             }
             catch (Exception e)
             {

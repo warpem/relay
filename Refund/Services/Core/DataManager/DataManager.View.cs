@@ -29,7 +29,7 @@ public partial class DataManager
     public async Task<ReadOnlyView> CreateView(ReadOnlyUser user, ReadOnlySpace space, View template = null)
     {
         ReadOnlyView createdView = null;
-        await ExecuteWithLock(async () =>
+        await ExecuteSpaceChange(space, async () =>
         {
             try
             {
@@ -48,8 +48,6 @@ public partial class DataManager
 
         // Raise events outside of lock
         await ViewCreated.InvokeHierarchy(createdView, GroupName.ViewHierarchy(space.Project.Id, space.Id, null));
-
-        await SpaceUpdated.InvokeHierarchy(createdView.Space, GroupName.SpaceHierarchy(createdView.Space.Project.Id, createdView.Space.Id));
 
         return createdView;
     }
@@ -74,7 +72,7 @@ public partial class DataManager
     /// </remarks>
     public async Task UpdateView(ReadOnlyUser user, ReadOnlyView view, Action<View> updateAction)
     {
-        await ExecuteWithLock(async () =>
+        await ExecuteSpaceChange(view.Space, async () =>
         {
             try
             {
@@ -112,7 +110,7 @@ public partial class DataManager
     /// </remarks>
     public async Task DeleteView(ReadOnlyUser user, ReadOnlyView view)
     {
-        await ExecuteWithLock(async () =>
+        await ExecuteSpaceChange(view.Space, async () =>
         {
             try
             {
@@ -131,7 +129,6 @@ public partial class DataManager
         // Raise events outside of lock
         await ViewDeleted.InvokeHierarchy(view, GroupName.ViewHierarchy(view.Space.Project.Id, view.Space.Id, view.Id));
 
-        await SpaceUpdated.InvokeHierarchy(view.Space, GroupName.SpaceHierarchy(view.Space.Project.Id, view.Space.Id));
     }
 
     /// <summary>
@@ -153,7 +150,7 @@ public partial class DataManager
     /// </remarks>
     public async Task AddJobToView(ReadOnlyUser user, ReadOnlyView view, ReadOnlyJob job)
     {
-        await ExecuteWithLock(async () =>
+        await ExecuteSpaceChange(view.Space, async () =>
         {
             try
             {
@@ -195,7 +192,7 @@ public partial class DataManager
     /// </remarks>
     public async Task RemoveJobFromView(ReadOnlyUser user, ReadOnlyView view, ReadOnlyJob job)
     {
-        await ExecuteWithLock(async () =>
+        await ExecuteSpaceChange(view.Space, async () =>
         {
             try
             {
@@ -226,7 +223,7 @@ public partial class DataManager
     /// <param name="newIndex">The target index for the job</param>
     public async Task ReorderJobInView(ReadOnlyUser user, ReadOnlyView view, ReadOnlyJob job, int newIndex)
     {
-        await ExecuteWithLock(async () =>
+        await ExecuteSpaceChange(view.Space, async () =>
         {
             try
             {
@@ -256,7 +253,7 @@ public partial class DataManager
     /// <param name="newIndex">The target index for the item</param>
     public async Task ReorderItemInView(ReadOnlyUser user, ReadOnlyView view, IViewItem item, int newIndex)
     {
-        await ExecuteWithLock(async () =>
+        await ExecuteSpaceChange(view.Space, async () =>
         {
             try
             {

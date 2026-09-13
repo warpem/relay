@@ -25,7 +25,7 @@ public partial class DataManager
     public async Task<ReadOnlyJob> CreateJob(ReadOnlyUser user, ReadOnlyView view, string typeGuid, Job template = null, ReadOnlyFolder targetFolder = null)
     {
         ReadOnlyJob createdJob = null;
-        await ExecuteWithLock(async () =>
+        await ExecuteSpaceChange(view.Space, async () =>
         {
             try
             {
@@ -48,13 +48,7 @@ public partial class DataManager
 
                 // If a target folder was specified, move the job into it
                 if (folder != null)
-                {
                     originalView.MoveJobToFolder(newJob, folder);
-                    folder.UpdateLayout(originalSpace);
-                    folder.UpdateDiagramLayout(originalSpace);
-                }
-
-                originalView.UpdateDiagramLayout(originalSpace);
 
                 createdJob = newJob.AsReadOnly();
             }
@@ -67,7 +61,6 @@ public partial class DataManager
 
         await JobCreated.InvokeHierarchy(createdJob, GroupName.JobHierarchy(view.Space.Project.Id, view.Space.Id, null));
         await ViewUpdated.InvokeHierarchy(view, GroupName.ViewHierarchy(view.Space.Project.Id, view.Space.Id, view.Id));
-        await SpaceUpdated.InvokeHierarchy(createdJob.Space, GroupName.SpaceHierarchy(createdJob.Space.Project.Id, createdJob.Space.Id));
 
         return createdJob;
     }
@@ -87,14 +80,13 @@ public partial class DataManager
     /// </remarks>
     public async Task UpdateJob(ReadOnlyUser user, ReadOnlyJob job, Action<Job> updateAction)
     {
-        await ExecuteWithLock(async () =>
+        await ExecuteSpaceChange(job.Space, async () =>
         {
             try
             {
                 var originalUser = ResolveUser(user.Id);
                 var originalJob = ResolveJob(job.Space.Project.Id, job.Space.Id, job.Id);
 
-                // Apply the update action to the job
                 _dataRepository.UpdateJob(originalUser, originalJob, updateAction);
             }
             catch (Exception e)
@@ -130,7 +122,7 @@ public partial class DataManager
     public async Task DeleteJob(ReadOnlyUser user, ReadOnlyJob job)
     {
         Job deletedJob = null;
-        await ExecuteWithLock(async () =>
+        await ExecuteSpaceChange(job.Space, async () =>
         {
             try
             {
@@ -144,7 +136,6 @@ public partial class DataManager
                 if (!originalJob.CanTransitionState(JobStatus.Deleted))
                     throw new Exception("Job cannot be deleted.");
 
-                // Find containing folders before deletion
                 Space originalSpace = _dataRepository.FindSpace(job.Space.Project.Id, job.Space.Id);
 
                 // Guard: block deletion if this job is referenced by any factory definition's external edges
@@ -165,36 +156,8 @@ public partial class DataManager
                         "This job belongs to a factory instance and cannot be deleted directly. " +
                         "Delete the factory instance instead.");
 
-                var affectedFolders = new List<Folder>();
-                var affectedViews = new HashSet<View>();
-                if (originalSpace != null)
-                    foreach (var v in originalSpace.Views)
-                        foreach (var folder in v.Folders)
-                            if (FolderContainsJob(folder, originalJob.Id))
-                            {
-                                affectedFolders.Add(folder);
-                                affectedViews.Add(v);
-                            }
-
-                // Also track views that directly contain this job (not in a folder)
-                if (originalSpace != null)
-                    foreach (var v in originalSpace.Views)
-                        if (v.Jobs.Contains(originalJob))
-                            affectedViews.Add(v);
-
                 // Delete the job from the data model
                 _dataRepository.DeleteJob(originalUser, originalJob);
-
-                if (originalSpace != null)
-                {
-                    foreach (var folder in affectedFolders)
-                    {
-                        folder.UpdateLayout(originalSpace);
-                        folder.UpdateDiagramLayout(originalSpace);
-                    }
-                    foreach (var v in affectedViews)
-                        v.UpdateDiagramLayout(originalSpace);
-                }
             }
             catch (Exception e)
             {
@@ -208,7 +171,6 @@ public partial class DataManager
         await Task.Run(deletedJob.DeleteWorkingDirectory);
 
         await JobDeleted.InvokeHierarchy(job, GroupName.JobHierarchy(job.Space.Project.Id, job.Space.Id, job.Id));
-        await SpaceUpdated.InvokeHierarchy(job.Space, GroupName.SpaceHierarchy(job.Space.Project.Id, job.Space.Id));
     }
 
     /// <summary>
@@ -227,7 +189,7 @@ public partial class DataManager
     public async Task<ReadOnlyJob> CloneJob(ReadOnlyUser user, ReadOnlyJob job, ReadOnlyView view)
     {
         ReadOnlyJob clonedJob = null;
-        await ExecuteWithLock(async () =>
+        await ExecuteSpaceChange(view.Space, async () =>
         {
             try
             {
@@ -262,7 +224,6 @@ public partial class DataManager
         }
 
         await ViewUpdated.InvokeHierarchy(view, GroupName.ViewHierarchy(view.Space.Project.Id, view.Space.Id, view.Id));
-        await SpaceUpdated.InvokeHierarchy(clonedJob.Space, GroupName.SpaceHierarchy(clonedJob.Space.Project.Id, clonedJob.Space.Id));
 
         return clonedJob;
     }
@@ -286,7 +247,7 @@ public partial class DataManager
         var clonedReadOnlyJobs = new List<ReadOnlyJob>();
         var clonedJobIds = new HashSet<int>();
 
-        await ExecuteWithLock(async () =>
+        await ExecuteSpaceChange(view.Space, async () =>
         {
             try
             {
@@ -370,9 +331,6 @@ public partial class DataManager
         }
 
         await ViewUpdated.InvokeHierarchy(view, GroupName.ViewHierarchy(view.Space.Project.Id, view.Space.Id, view.Id));
-
-        var spaceForEvents = clonedReadOnlyJobs.First().Space;
-        await SpaceUpdated.InvokeHierarchy(spaceForEvents, GroupName.SpaceHierarchy(spaceForEvents.Project.Id, spaceForEvents.Id));
     }
 
     /// <summary>

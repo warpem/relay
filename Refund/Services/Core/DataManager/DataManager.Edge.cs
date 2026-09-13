@@ -33,7 +33,7 @@ public partial class DataManager
         ReadOnlyEdge createdEdge = null;
         ReadOnlyJob sourceJob = null;
         ReadOnlyJob targetJob = null;
-        await ExecuteWithLock(async () =>
+        await ExecuteSpaceChange(space, async () =>
         {
             try
             {
@@ -64,9 +64,6 @@ public partial class DataManager
                         $"'{to.Name}' ({toPort.ResourceType.Name}): incompatible resource types.");
 
                 Edge newEdge = _dataRepository.CreateEdge(originalSpace, fromPort, toPort);
-
-                UpdateFolderLayoutsForEdge(originalSpace, fromJob.Id, toJob.Id);
-                UpdateDiagramLayoutsForEdge(originalSpace, fromJob.Id, toJob.Id);
 
                 createdEdge = newEdge.AsReadOnly();
                 sourceJob = from.Job;
@@ -107,7 +104,7 @@ public partial class DataManager
     public async Task<ReadOnlyEdge> UpdateEdge(ReadOnlyEdge edge, Action<Edge> updateAction)
     {
         ReadOnlyEdge updatedEdge = null;
-        await ExecuteWithLock(async () =>
+        await ExecuteSpaceChange(edge.Space, async () =>
         {
             try
             {
@@ -153,7 +150,7 @@ public partial class DataManager
         ReadOnlyEdge deletedEdge = null;
         ReadOnlyJob sourceJob = null;
         ReadOnlyJob targetJob = null;
-        await ExecuteWithLock(async () =>
+        await ExecuteSpaceChange(edge.Space, async () =>
         {
             try
             {
@@ -165,38 +162,7 @@ public partial class DataManager
                 sourceJob = deletedEdge.Source.Job;
                 targetJob = deletedEdge.Target.Job;
 
-                // Capture affected folders and views before deletion
-                Space originalSpace = _dataRepository.FindSpace(edge.Space.Project.Id, edge.Space.Id);
-                var affectedFolders = new List<Folder>();
-                var affectedViews = new HashSet<View>();
-                int sourceJobId = originalEdge.Source.Job.Id;
-                int targetJobId = originalEdge.Target.Job.Id;
-                if (originalSpace != null)
-                    foreach (var v in originalSpace.Views)
-                    {
-                        bool viewHasSource = v.Jobs.Any(j => j.Id == sourceJobId);
-                        bool viewHasTarget = v.Jobs.Any(j => j.Id == targetJobId);
-                        if (viewHasSource || viewHasTarget)
-                            affectedViews.Add(v);
-
-                        foreach (var folder in v.Folders)
-                            if (FolderContainsJob(folder, sourceJobId) &&
-                                FolderContainsJob(folder, targetJobId))
-                                affectedFolders.Add(folder);
-                    }
-
                 _dataRepository.DeleteEdge(originalEdge);
-
-                if (originalSpace != null)
-                {
-                    foreach (var folder in affectedFolders)
-                    {
-                        folder.UpdateLayout(originalSpace);
-                        folder.UpdateDiagramLayout(originalSpace);
-                    }
-                    foreach (var v in affectedViews)
-                        v.UpdateDiagramLayout(originalSpace);
-                }
             }
             catch (Exception e)
             {

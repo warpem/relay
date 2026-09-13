@@ -17,7 +17,7 @@ public partial class DataManager
         ReadOnlyFactoryInstance created = null;
         var createdJobReadOnlys = new List<ReadOnlyJob>();
 
-        await ExecuteWithLock(async () =>
+        await ExecuteSpaceChange(view.Space, async () =>
         {
             try
             {
@@ -106,24 +106,12 @@ public partial class DataManager
                 // Add instance to view (AddFactoryInstance handles folder placement)
                 originalView.AddFactoryInstance(inst, folder);
 
-                if (folder != null)
-                {
-                    folder.UpdateLayout(originalSpace);
-                    folder.UpdateDiagramLayout(originalSpace);
-                }
-
-                originalView.UpdateDiagramLayout(originalSpace);
-
                 // Sub-jobs should NOT be in _RootItems (they're hidden inside the factory)
                 foreach (var realJob in blueprintIdToRealJob.Values)
                 {
                     originalView.RemoveJobFromRootItems(realJob);
                 }
 
-                // Compute sub-job diagram layout for the new instance
-                inst.UpdateDiagramLayout(originalSpace);
-
-                _dataRepository.MarkSpaceForSave(originalSpace);
                 created = inst.AsReadOnly();
             }
             catch (Exception e)
@@ -144,8 +132,6 @@ public partial class DataManager
 
         await ViewUpdated.InvokeHierarchy(view,
             GroupName.ViewHierarchy(view.Space.Project.Id, view.Space.Id, view.Id));
-        await SpaceUpdated.InvokeHierarchy(view.Space,
-            GroupName.SpaceHierarchy(view.Space.Project.Id, view.Space.Id));
 
         return created;
     }
@@ -155,7 +141,7 @@ public partial class DataManager
     /// </summary>
     public async Task UpdateFactoryInstance(ReadOnlyUser user, ReadOnlyFactoryInstance instance, Action<FactoryInstance> updateAction)
     {
-        await ExecuteWithLock(async () =>
+        await ExecuteSpaceChange(instance.Space, async () =>
         {
             try
             {
@@ -168,7 +154,6 @@ public partial class DataManager
                 originalInst.UpdateDate = DateTime.Now;
                 originalInst.UpdatedBy = originalUser;
 
-                _dataRepository.MarkSpaceForSave(originalSpace);
             }
             catch (Exception e)
             {
@@ -191,7 +176,7 @@ public partial class DataManager
     {
         var deletedJobSnapshots = new List<ReadOnlyJob>();
 
-        await ExecuteWithLock(async () =>
+        await ExecuteSpaceChange(space, async () =>
         {
             try
             {
@@ -232,7 +217,6 @@ public partial class DataManager
                     v.RemoveFactoryInstance(originalInst);
 
                 originalSpace.DeleteFactoryInstance(originalInst);
-                _dataRepository.MarkSpaceForSave(originalSpace);
             }
             catch (Exception e)
             {
@@ -249,8 +233,6 @@ public partial class DataManager
 
         await FactoryInstanceDeleted.InvokeHierarchy(instance,
             GroupName.FactoryInstanceHierarchy(space.Project.Id, space.Id, instance.Id));
-        await SpaceUpdated.InvokeHierarchy(space,
-            GroupName.SpaceHierarchy(space.Project.Id, space.Id));
     }
 
     /// <summary>
@@ -262,7 +244,7 @@ public partial class DataManager
     {
         int folderId = 0;
 
-        await ExecuteWithLock(async () =>
+        await ExecuteSpaceChange(view.Space, async () =>
         {
             try
             {
@@ -306,11 +288,7 @@ public partial class DataManager
 
                 originalSpace.DeleteFactoryInstance(originalInst);
 
-                folder.UpdateLayout(originalSpace);
-                folder.UpdateDiagramLayout(originalSpace);
-                originalView.UpdateDiagramLayout(originalSpace);
-
-                TouchAndSave(originalView, originalUser);
+                TouchView(originalView, originalUser);
             }
             catch (Exception e)
             {
@@ -460,7 +438,7 @@ public partial class DataManager
         ReadOnlyFactoryInstance cloned = null;
         var clonedJobReadOnlys = new List<ReadOnlyJob>();
 
-        await ExecuteWithLock(async () =>
+        await ExecuteSpaceChange(view.Space, async () =>
         {
             try
             {
@@ -537,9 +515,7 @@ public partial class DataManager
 
                 // Add instance to view
                 originalView.AddFactoryInstance(newInst);
-                originalView.UpdateDiagramLayout(originalSpace);
 
-                _dataRepository.MarkSpaceForSave(originalSpace);
                 cloned = newInst.AsReadOnly();
             }
             catch (Exception e)
@@ -569,7 +545,7 @@ public partial class DataManager
     /// </summary>
     public async Task AddFactoryInstanceToView(ReadOnlyUser user, ReadOnlyView view, ReadOnlyFactoryInstance instance)
     {
-        await ExecuteWithLock(async () =>
+        await ExecuteSpaceChange(view.Space, async () =>
         {
             try
             {
@@ -581,9 +557,8 @@ public partial class DataManager
                     ?? throw new Exception($"Factory instance {instance.Id} not found");
 
                 originalView.AddFactoryInstance(originalInst);
-                originalView.UpdateDiagramLayout(originalSpace);
 
-                TouchAndSave(originalView, originalUser);
+                TouchView(originalView, originalUser);
             }
             catch (Exception e)
             {
@@ -605,7 +580,7 @@ public partial class DataManager
     /// </summary>
     public async Task RemoveFactoryInstanceFromView(ReadOnlyUser user, ReadOnlyView view, ReadOnlyFactoryInstance instance)
     {
-        await ExecuteWithLock(async () =>
+        await ExecuteSpaceChange(view.Space, async () =>
         {
             try
             {
@@ -617,9 +592,8 @@ public partial class DataManager
                     ?? throw new Exception($"Factory instance {instance.Id} not found");
 
                 originalView.RemoveFactoryInstance(originalInst);
-                originalView.UpdateDiagramLayout(originalSpace);
 
-                TouchAndSave(originalView, originalUser);
+                TouchView(originalView, originalUser);
             }
             catch (Exception e)
             {
@@ -641,7 +615,7 @@ public partial class DataManager
     /// </summary>
     public async Task MoveFactoryInstanceToFolder(ReadOnlyUser user, ReadOnlyView view, ReadOnlyFactoryInstance instance, ReadOnlyFolder targetFolder)
     {
-        await ExecuteWithLock(async () =>
+        await ExecuteSpaceChange(view.Space, async () =>
         {
             try
             {
@@ -660,17 +634,9 @@ public partial class DataManager
                         throw new Exception($"Target folder {targetFolder.Id} not found");
                 }
 
-                Folder sourceFolder = originalView.Folders.FirstOrDefault(f => f.Items.Contains(originalInst));
-
                 originalView.MoveFactoryInstanceToFolder(originalInst, target);
 
-                sourceFolder?.UpdateLayout(originalSpace);
-                target?.UpdateLayout(originalSpace);
-                sourceFolder?.UpdateDiagramLayout(originalSpace);
-                target?.UpdateDiagramLayout(originalSpace);
-                originalView.UpdateDiagramLayout(originalSpace);
-
-                TouchAndSave(originalView, originalUser);
+                TouchView(originalView, originalUser);
             }
             catch (Exception e)
             {

@@ -59,27 +59,25 @@ public partial class ViewScreen : ListingScreenLogic<IViewItem>
     };
 
     private bool IsBrowseMode => Session.FactoryInstance != null;
+    private ReadOnlySpace _subscribedSpace;
 
     protected override void OnInitialized()
     {
         base.OnInitialized();
-        Session.OnViewChanged += HandleViewChanged;
-        Session.OnFolderChanged += HandleFolderChanged;
-        Session.OnFactoryInstanceChanged += HandleFactoryInstanceChanged;
+        Session.OnStateChanged += HandleNavigationChanged;
         SortingService.OnSortChanged += HandleSortChanged;
         DiagramService.OnViewModeChanged += HandleViewModeChanged;
         DiagramService.OnRelayoutRequested += HandleRelayoutRequested;
         Selection.OnSelectionChanged += HandleSelectionChanged;
     }
 
-    private async Task HandleViewChanged()
+    private async Task HandleNavigationChanged()
     {
-        await InvokeAsync(StateHasChanged);
-    }
-
-    private async Task HandleFolderChanged()
-    {
-        await InvokeAsync(StateHasChanged);
+        await InvokeAsync(() =>
+        {
+            SubscribeToEvents();
+            StateHasChanged();
+        });
     }
 
     private async Task HandleSortChanged()
@@ -98,17 +96,10 @@ public partial class ViewScreen : ListingScreenLogic<IViewItem>
         await InvokeAsync(StateHasChanged);
     }
 
-    private async Task HandleFactoryInstanceChanged()
-    {
-        await InvokeAsync(StateHasChanged);
-    }
-
     public override void Dispose()
     {
         base.Dispose();
-        Session.OnViewChanged -= HandleViewChanged;
-        Session.OnFolderChanged -= HandleFolderChanged;
-        Session.OnFactoryInstanceChanged -= HandleFactoryInstanceChanged;
+        Session.OnStateChanged -= HandleNavigationChanged;
         SortingService.OnSortChanged -= HandleSortChanged;
         DiagramService.OnViewModeChanged -= HandleViewModeChanged;
         DiagramService.OnRelayoutRequested -= HandleRelayoutRequested;
@@ -336,29 +327,18 @@ public partial class ViewScreen : ListingScreenLogic<IViewItem>
 
     protected override void SubscribeToEvents()
     {
-        base.SubscribeToEvents();
-
-        if (Session.Project == null || Session.Space == null || Session.View == null)
+        if (ReferenceEquals(_subscribedSpace, Session.Space))
             return;
 
-        _subscriptions.Add(DataManager.ViewUpdated.Add(GroupName.View(Session.Project.Id, Session.Space.Id, Session.View.Id),
-                                                       async _ => await InvokeAsync(StateHasChanged)));
+        base.SubscribeToEvents();
+        _subscribedSpace = Session.Space;
 
-        _subscriptions.Add(DataManager.ViewDeleted.Add(GroupName.View(Session.Project.Id, Session.Space.Id, Session.View.Id),
-                                                       async _ => await InvokeAsync(StateHasChanged)));
+        if (_subscribedSpace == null)
+            return;
 
-        _subscriptions.Add(DataManager.JobCreated.Add(GroupName.Job(Session.Project.Id, Session.Space.Id, null),
-                                                      async _ => await InvokeAsync(StateHasChanged)));
-
-        _subscriptions.Add(DataManager.JobDeleted.Add(GroupName.Job(Session.Project.Id, Session.Space.Id, null),
-                                                      async _ => await InvokeAsync(StateHasChanged)));
-
-        _subscriptions.Add(DataManager.FactoryInstanceCreated.Add(
-            GroupName.FactoryInstance(Session.Project.Id, Session.Space.Id, null),
-            async _ => await InvokeAsync(StateHasChanged)));
-        _subscriptions.Add(DataManager.FactoryInstanceDeleted.Add(
-            GroupName.FactoryInstance(Session.Project.Id, Session.Space.Id, null),
-            async _ => await InvokeAsync(StateHasChanged)));
+        // Space edits publish after all view, folder, and factory layouts are current.
+        _subscriptions.Add(DataManager.SpaceUpdated.Add(GroupName.Space(_subscribedSpace.Project.Id, _subscribedSpace.Id),
+                                                        async _ => await InvokeAsync(StateHasChanged)));
     }
 
     private async Task ItemDoubleClickedAsync(ReadOnlyJob job, MouseEventArgs args)

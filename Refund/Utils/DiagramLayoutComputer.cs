@@ -29,7 +29,9 @@ public static class DiagramLayoutComputer
         DiagramLayout? previous)
     {
         if (directItems.Count == 0)
-            return new DiagramLayout { ConnectivityHash = "" };
+            return previous is { ConnectivityHash: "", Nodes.Count: 0, Edges.Count: 0 }
+                ? previous
+                : new DiagramLayout();
 
         // 1. Separate items into jobs, folders, and factory instances; build lookup maps
         var jobs = new List<(int index, Job job)>();

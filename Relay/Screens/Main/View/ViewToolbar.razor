@@ -31,6 +31,17 @@
         <FluentButton Title="Switch sort direction" OnClick="ToggleSortDirection" IconEnd="@SortDirectionIcon" />
     }
 
+    @if (DiagramService.ViewMode == ViewMode.Diagram)
+    {
+        <span class="toolbar-label">Diagram</span>
+        <FluentButton Title="Zoom to fit"
+                      IconEnd="@(new Icons.Regular.Size20.ZoomFit())"
+                      OnClick="@(() => DiagramService.RequestZoomToFit())" />
+        <FluentButton Title="Reset layout"
+                      IconEnd="@(new Icons.Regular.Size20.ArrowClockwise())"
+                      OnClick="@(() => DiagramService.RequestRelayout())" />
+    }
+
     <span class="toolbar-separator"></span>
     <span class="toolbar-label">View</span>
     <FluentButton Title="List view"
@@ -41,16 +52,4 @@
                   Appearance="@(DiagramService.ViewMode == ViewMode.Diagram ? Appearance.Accent : Appearance.Stealth)"
                   IconEnd="@(new Icons.Regular.Size20.Flow())"
                   OnClick="@(() => DiagramService.SetViewMode(ViewMode.Diagram))" />
-
-    @if (DiagramService.ViewMode == ViewMode.Diagram)
-    {
-        <span class="toolbar-separator"></span>
-        <span class="toolbar-label">Diagram</span>
-        <FluentButton Title="Zoom to fit"
-                      IconEnd="@(new Icons.Regular.Size20.ZoomFit())"
-                      OnClick="@(() => DiagramService.RequestZoomToFit())" />
-        <FluentButton Title="Reset layout"
-                      IconEnd="@(new Icons.Regular.Size20.ArrowClockwise())"
-                      OnClick="@(() => DiagramService.RequestRelayout())" />
-    }
 </div>

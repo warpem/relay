@@ -119,7 +119,7 @@ public partial class DataManager
     /// </remarks>
     public async Task UpdateSpace(ReadOnlyUser user, ReadOnlySpace space, Action<Space> updateAction)
     {
-        await ExecuteWithLock(async () =>
+        await ExecuteSpaceChange(space, async () =>
         {
             try
             {
@@ -134,9 +134,6 @@ public partial class DataManager
                 throw;
             }
         });
-
-        // Raise events outside of lock
-        await SpaceUpdated.InvokeHierarchy(space, GroupName.SpaceHierarchy(space.Project.Id, space.Id));
     }
 
     /// <summary>

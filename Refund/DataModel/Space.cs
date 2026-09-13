@@ -820,30 +820,33 @@ public class Space : RelayBase
         if (reader["Favorites"] != null)
             _Favorites.AddRange(reader["Favorites"].Deserialize<int[]>().Select(id => FindJob(id)).Where(j => j != null));
 
-        // Compute layouts for folders/views/FIs that don't have one (legacy data)
-        foreach (var view in _Views)
-        {
-            foreach (var folder in view.Folders)
-            {
-                if (folder.Layout == null)
-                    folder.UpdateLayout(this);
-                if (folder.DiagramLayout == null)
-                    folder.UpdateDiagramLayout(this);
-            }
-            if (view.DiagramLayout == null)
-                view.UpdateDiagramLayout(this);
-        }
-
-        foreach (var fi in _FactoryInstances)
-        {
-            if (fi.DiagramLayout == null && fi.SubJobIds.Count > 0)
-                fi.UpdateDiagramLayout(this);
-        }
+        // Saved caches are validated against the fully loaded graph.
+        UpdateLayouts();
 
         SpaceChanged?.Invoke(this, null);
     }
 
     #endregion
+
+    /// <summary>
+    /// Refreshes derived view, folder, and factory layouts. Unchanged layout inputs
+    /// retain their cached layout and positions.
+    /// </summary>
+    public void UpdateLayouts()
+    {
+        foreach (var view in Views)
+        {
+            foreach (var folder in view.Folders)
+            {
+                folder.UpdateLayout(this);
+                folder.UpdateDiagramLayout(this);
+            }
+            view.UpdateDiagramLayout(this);
+        }
+
+        foreach (var instance in FactoryInstances)
+            instance.UpdateDiagramLayout(this);
+    }
 
     #region Cloning
 

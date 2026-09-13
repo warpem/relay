@@ -287,6 +287,10 @@ public partial class DataManager
                     Console.WriteLine($"WARNING: Removed cyclic edge {edge.Id} in {project.Alias}/{space.Id} " +
                         $"(job {edge.Source.Job.Id} -> job {edge.Target.Job.Id}). " +
                         $"Cycles in the job graph cause infinite recursion.");
+                }
+                if (removedEdges.Count > 0)
+                {
+                    space.UpdateLayouts();
                     _dataRepository.MarkSpaceForSave(space);
                 }
             }
@@ -321,11 +325,10 @@ public partial class DataManager
     private JobQueue ResolveQueue(int queueId)
         => _queueRepository.FindQueue(queueId) ?? throw new Exception($"Queue {queueId} not found");
 
-    private void TouchAndSave(View view, User user)
+    private static void TouchView(View view, User user)
     {
         view.UpdateDate = DateTime.Now;
         view.UpdatedBy = user;
-        _dataRepository.MarkSpaceForSave(view.Space);
     }
 
     #endregion
@@ -377,38 +380,27 @@ public partial class DataManager
                 $"{target} has pending execution work or active dependent jobs. Abort active jobs and wait for completion first.");
     }
 
-    private static bool FolderContainsJob(Folder folder, int jobId)
+    /// <summary>
+    /// Completes a space edit, refreshes all derived layouts from the final graph,
+    /// and publishes one space notification after releasing the command lock.
+    /// Layout computers reuse cached results when their inputs have not changed.
+    /// </summary>
+    private async Task ExecuteSpaceChange(ReadOnlySpace space, Func<Task> action)
     {
-        foreach (var item in folder.Items)
+        await ExecuteWithLock(async () =>
         {
-            if (item is Job j && j.Id == jobId) return true;
-            if (item is Folder sub && sub.GetAllJobsRecursive().Any(sj => sj.Id == jobId)) return true;
-        }
-        return false;
-    }
+            var originalSpace = ResolveSpace(space.Project.Id, space.Id);
+            await action();
+            originalSpace.UpdateLayouts();
+            _dataRepository.MarkSpaceForSave(originalSpace);
+        });
 
-    private static void UpdateFolderLayoutsForEdge(Space space, int sourceJobId, int targetJobId)
-    {
-        foreach (var view in space.Views)
-            foreach (var folder in view.Folders)
-            {
-                bool hasSource = false, hasTarget = false;
-                foreach (var item in folder.Items)
-                {
-                    if (!hasSource && item is Job j1 && j1.Id == sourceJobId) hasSource = true;
-                    else if (!hasSource && item is Folder f1 && f1.GetAllJobsRecursive().Any(sj => sj.Id == sourceJobId)) hasSource = true;
-                    if (!hasTarget && item is Job j2 && j2.Id == targetJobId) hasTarget = true;
-                    else if (!hasTarget && item is Folder f2 && f2.GetAllJobsRecursive().Any(sj => sj.Id == targetJobId)) hasTarget = true;
-                    if (hasSource && hasTarget) break;
-                }
-                if (hasSource && hasTarget)
-                    folder.UpdateLayout(space);
-            }
+        await SpaceUpdated.InvokeHierarchy(space, GroupName.SpaceHierarchy(space.Project.Id, space.Id));
     }
 
     public async Task ResetDiagramLayout(ReadOnlyView view, ReadOnlyFolder? folder)
     {
-        await ExecuteWithLock(async () =>
+        await ExecuteSpaceChange(view.Space, async () =>
         {
             View originalView = _dataRepository.FindView(view.Space.Project.Id, view.Space.Id, view.Id);
             Space originalSpace = originalView.Space;
@@ -422,8 +414,6 @@ public partial class DataManager
             {
                 originalView.ResetDiagramLayout(originalSpace);
             }
-
-            _dataRepository.MarkSpaceForSave(originalSpace);
         });
 
         await ViewUpdated.InvokeHierarchy(view, GroupName.ViewHierarchy(view.Space.Project.Id, view.Space.Id, view.Id));
@@ -431,51 +421,17 @@ public partial class DataManager
 
     public async Task ResetFactoryInstanceDiagramLayout(ReadOnlyFactoryInstance instance)
     {
-        await ExecuteWithLock(async () =>
+        await ExecuteSpaceChange(instance.Space, async () =>
         {
             var originalSpace = ResolveSpace(instance.Space.Project.Id, instance.Space.Id);
             var originalInst = originalSpace.FindFactoryInstance(instance.Id)
                 ?? throw new Exception($"Factory instance {instance.Id} not found");
 
             originalInst.ResetDiagramLayout(originalSpace);
-            _dataRepository.MarkSpaceForSave(originalSpace);
         });
 
         await FactoryInstanceUpdated.InvokeHierarchy(instance,
             GroupName.FactoryInstanceHierarchy(instance.Space.Project.Id, instance.Space.Id, instance.Id));
-    }
-
-    private static void UpdateDiagramLayoutsForEdge(Space space, int sourceJobId, int targetJobId)
-    {
-        foreach (var view in space.Views)
-        {
-            bool viewHasSource = view.Jobs.Any(j => j.Id == sourceJobId);
-            bool viewHasTarget = view.Jobs.Any(j => j.Id == targetJobId);
-            if (viewHasSource || viewHasTarget)
-                view.UpdateDiagramLayout(space);
-
-            foreach (var folder in view.Folders)
-            {
-                bool hasSource = false, hasTarget = false;
-                foreach (var item in folder.Items)
-                {
-                    if (!hasSource && item is Job j1 && j1.Id == sourceJobId) hasSource = true;
-                    else if (!hasSource && item is Folder f1 && f1.GetAllJobsRecursive().Any(sj => sj.Id == sourceJobId)) hasSource = true;
-                    if (!hasTarget && item is Job j2 && j2.Id == targetJobId) hasTarget = true;
-                    else if (!hasTarget && item is Folder f2 && f2.GetAllJobsRecursive().Any(sj => sj.Id == targetJobId)) hasTarget = true;
-                    if (hasSource && hasTarget) break;
-                }
-                if (hasSource && hasTarget)
-                    folder.UpdateDiagramLayout(space);
-            }
-        }
-
-        // Update factory instance layouts if edge involves their sub-jobs
-        foreach (var fi in space.FactoryInstances)
-        {
-            if (fi.SubJobIds.Contains(sourceJobId) || fi.SubJobIds.Contains(targetJobId))
-                fi.UpdateDiagramLayout(space);
-        }
     }
 
     #endregion
