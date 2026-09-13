@@ -38,45 +38,35 @@ public static class BakeryWrapper
     /// </summary>
     /// <param name="command">The command-line arguments to pass to Bakery.</param>
     /// <param name="workingDirectory">The working directory for the command execution. If empty, uses the current directory.</param>
-    private static void RunCommand(string command, string workingDirectory = "")
+    private static void RunCommand(string command, string workingDirectory = "") =>
+        RunCommand(new ProcessStartInfo("bakery")
+        {
+            Arguments = command,
+            WorkingDirectory = workingDirectory
+        });
+
+    internal static void RunCommand(ProcessStartInfo startInfo)
     {
         ProcessSemaphore.Wait(); // Block if maximum concurrent processes reached
         
         try
         {
-            Process process = new()
-            {
-                StartInfo = new()
-                {
-                    FileName = "bakery",
-                    WorkingDirectory = workingDirectory,
-                    Arguments = command,
-                    CreateNoWindow = true,
-                    RedirectStandardError = true
-                }
-            };
+            startInfo.UseShellExecute = false;
+            startInfo.CreateNoWindow = true;
+            startInfo.RedirectStandardError = true;
+            using var process = new Process { StartInfo = startInfo };
+            var logger = Log.ForContext("SourceContext", "Refund.Utils.BakeryWrapper");
+            logger.Information("Running bakery with: {Output}", startInfo.Arguments);
 
-            DataReceivedEventHandler Handler = (sender, args) =>
-            {
-                if(args.Data != null) 
-                    Log.ForContext("SourceContext", "Refund.Utils.BakeryWrapper").Error("Bakery process output: {Output}", args.Data);
-            };
+            process.Start();
+            string error = process.StandardError.ReadToEnd();
+            process.WaitForExit();
 
-            process.ErrorDataReceived += Handler;
-
-            try
-            {
-                Log.ForContext("SourceContext", "Refund.Utils.BakeryWrapper").Information("Running bakery with: {Output}", command);
-                
-                process.Start();
-                process.BeginErrorReadLine();
-
-                process.WaitForExit();
-            }
-            catch(Exception ex)
-            {
-                Log.ForContext("SourceContext", "Refund.Utils.BakeryWrapper").Error(ex, "Bakery command execution failed");
-            }
+            if (process.ExitCode != 0)
+                throw new InvalidOperationException(
+                    $"Bakery could not generate the visualization (exit code {process.ExitCode}).\n{error.Trim()}");
+            if (!string.IsNullOrWhiteSpace(error))
+                logger.Warning("Bakery process output: {Output}", error.Trim());
         }
         finally
         {

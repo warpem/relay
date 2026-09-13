@@ -444,7 +444,10 @@ public sealed class ExecutionRuntime : IAsyncDisposable
                 ReleaseEffect(key);
                 continue;
             }
-            _ = ExecuteEffectAndReleaseAsync(effect, key, _lifetime.Token);
+            // Preparation and result collection include synchronous filesystem/tool work.
+            // Admission must return after committing intent, without executing that work
+            // on the caller (including the Blazor circuit).
+            _ = Task.Run(() => ExecuteEffectAndReleaseAsync(effect, key, _lifetime.Token));
         }
     }
 
@@ -457,7 +460,8 @@ public sealed class ExecutionRuntime : IAsyncDisposable
         {
             try
             {
-                await ExecuteEffectAsync(effect, cancellationToken);
+                if (!_stopping)
+                    await ExecuteEffectAsync(effect, cancellationToken);
             }
             finally
             {

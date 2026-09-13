@@ -124,7 +124,8 @@
                 @if (typeof(ILocalJob).IsAssignableFrom(_job.GetOriginalType()))
                 {
                     <FluentButton Appearance="Appearance.Accent"
-                                  Disabled="HasAnyValidationErrors()"
+                                  Disabled="@(_isQueueing || HasAnyValidationErrors())"
+                                  Loading="@_isQueueing"
                                   IconStart="@(new Icons.Filled.Size20.Play())"
                                   Style="width: 100%;"
                                   OnClick="HandleLocalQueueSelected">
@@ -137,7 +138,8 @@
 
                     <ListboxButton TValue="@(ReadOnlyJobQueue)" ButtonLabel="Run"
                                    ListHeight="300"
-                                   ButtonDisabled="HasAnyValidationErrors()"
+                                   ButtonDisabled="@(_isQueueing || HasAnyValidationErrors())"
+                                   ButtonLoading="@_isQueueing"
                                    ButtonAppearance="Appearance.Accent"
                                    OnOptionSelected="HandleClusterQueueSelected"
                                    ListVerticalPosition="VerticalPosition.Top"

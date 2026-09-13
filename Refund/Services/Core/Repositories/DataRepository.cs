@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization.Metadata;
@@ -33,6 +34,8 @@ public class DataRepository : IDisposable
     
     // Synchronization
     private readonly object _saveLock = new();
+    private readonly object _persistenceLock = new();
+    private readonly Action<string, string> _writeDocument;
     
     // Auto save
     private Timer _autoSaveTimer;
@@ -51,9 +54,14 @@ public class DataRepository : IDisposable
     /// but does not load any projects or start auto-saving.
     /// </summary>
     /// <param name="projectsPath">The path to the projects file.</param>
-    public DataRepository(string projectsPath)
+    public DataRepository(string projectsPath) : this(projectsPath, WriteDocument)
+    {
+    }
+
+    internal DataRepository(string projectsPath, Action<string, string> writeDocument)
     {
         _projectsPath = projectsPath;
+        _writeDocument = writeDocument;
         
         _jsonOptions = new JsonSerializerOptions
         {
@@ -71,8 +79,12 @@ public class DataRepository : IDisposable
     /// <param name="milliseconds">The interval, in milliseconds, at which to save changes.</param>
     public void StartAutoSave(int milliseconds)
     {
-        _autoSaveInterval = milliseconds;
-        _autoSaveTimer = new Timer(SaveChanges, null, _autoSaveInterval, Timeout.Infinite);
+        lock (_persistenceLock)
+        {
+            _autoSaveTimer?.Dispose();
+            _autoSaveInterval = milliseconds;
+            _autoSaveTimer = new Timer(SaveChanges, null, _autoSaveInterval, Timeout.Infinite);
+        }
     }
 
     /// <summary>
@@ -80,7 +92,11 @@ public class DataRepository : IDisposable
     /// </summary>
     public void StopAutoSave()
     {
-        _autoSaveTimer.Dispose();
+        lock (_persistenceLock)
+        {
+            _autoSaveTimer?.Dispose();
+            _autoSaveTimer = null;
+        }
     }
 
     #endregion
@@ -128,24 +144,21 @@ public class DataRepository : IDisposable
 
     private void SaveChanges(object? state)
     {
-        lock (_saveLock)
+        // Writers stay ordered, but slow storage must not hold the model lock.
+        lock (_persistenceLock)
         {
             try
             {
-                if (_pendingUpdateProjects.Count > 0)
-                {
-                    SaveProjects();
-                    _logger.Debug("Saved {ProjectCount} projects", _pendingUpdateProjects.Count);
-                    _pendingUpdateProjects.Clear();
-                }
+                SaveProjects();
 
-                foreach (var space in _pendingUpdateSpaces)
+                Space[] spaces;
+                lock (_saveLock)
+                    spaces = _pendingUpdateSpaces.ToArray();
+                foreach (var space in spaces)
                 {
                     SaveSpace(space);
                     _logger.Debug("Saved space {SpaceName}", space.QualifiedName);
                 }
-
-                _pendingUpdateSpaces.Clear();
             }
             catch (Exception e)
             {
@@ -154,51 +167,98 @@ public class DataRepository : IDisposable
             finally
             {
                 if (!_disposed)
-                    _autoSaveTimer.Change(_autoSaveInterval, Timeout.Infinite);
+                    _autoSaveTimer?.Change(_autoSaveInterval, Timeout.Infinite);
             }
         }
     }
 
     private void SaveProjects()
     {
-        var directoryPath = Path.GetDirectoryName(_projectsPath);
-        if (!string.IsNullOrWhiteSpace(directoryPath) && !Directory.Exists(directoryPath))
-            Directory.CreateDirectory(directoryPath);
-
-        var projectsJson = new JsonObject();
-        projectsJson["Projects"] = new JsonArray(_projects.Select(p =>
+        string document;
+        Project[] changed;
+        lock (_saveLock)
         {
-            var writer = new JsonObject();
-            p.WriteToJson(writer);
-            return writer;
-        }).ToArray<JsonNode>());
+            if (_pendingUpdateProjects.Count == 0)
+                return;
+            var projectsJson = new JsonObject();
+            projectsJson["Projects"] = new JsonArray(_projects.Select(p =>
+            {
+                var writer = new JsonObject();
+                p.WriteToJson(writer);
+                return writer;
+            }).ToArray<JsonNode>());
+            document = projectsJson.ToJsonString(_jsonOptions);
+            changed = _pendingUpdateProjects.ToArray();
+            _pendingUpdateProjects.Clear();
+        }
 
-        File.WriteAllText(_projectsPath, projectsJson.ToJsonString(_jsonOptions));
+        try
+        {
+            _writeDocument(_projectsPath, document);
+        }
+        catch
+        {
+            lock (_saveLock)
+                _pendingUpdateProjects.UnionWith(changed);
+            throw;
+        }
     }
 
     private void SaveSpace(Space space)
     {
-        var directoryPath = Path.GetDirectoryName(space.FilePath);
+        string path;
+        string document;
+        lock (_saveLock)
+        {
+            if (!_pendingUpdateSpaces.Contains(space))
+                return;
+            var spaceJson = new JsonObject();
+            space.WriteToJson(spaceJson);
+            document = spaceJson.ToJsonString(_jsonOptions);
+            path = space.FilePath;
+            // Later edits re-add the space while this snapshot is being written.
+            _pendingUpdateSpaces.Remove(space);
+        }
+
+        try
+        {
+            _writeDocument(path, document);
+        }
+        catch
+        {
+            MarkSpaceForSave(space);
+            throw;
+        }
+    }
+
+    private static void WriteDocument(string path, string document)
+    {
+        var directoryPath = Path.GetDirectoryName(path);
         if (!string.IsNullOrWhiteSpace(directoryPath) && !Directory.Exists(directoryPath))
             Directory.CreateDirectory(directoryPath);
 
-        var tempPath = Path.Combine(space.RootDirectory, Path.GetRandomFileName());
-        var spaceJson = new JsonObject();
-        space.WriteToJson(spaceJson);
-        File.WriteAllText(tempPath, spaceJson.ToJsonString(_jsonOptions));
-
-        File.Move(tempPath, space.FilePath, true);
+        string tempPath = $"{path}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            // Encode once: small text-writer buffers turn a space save into many
+            // network round trips on SSHFS.
+            File.WriteAllBytes(tempPath, Encoding.UTF8.GetBytes(document));
+            File.Move(tempPath, path, true);
+        }
+        catch
+        {
+            if (File.Exists(tempPath))
+                File.Delete(tempPath);
+            throw;
+        }
     }
 
     internal void SaveSpaceImmediately(Space space)
     {
         ArgumentNullException.ThrowIfNull(space);
 
-        lock (_saveLock)
-        {
+        lock (_persistenceLock)
             SaveSpace(space);
-            _pendingUpdateSpaces.Remove(space);
-        }
     }
 
     #endregion
@@ -541,7 +601,7 @@ public class DataRepository : IDisposable
         {
             clone = space.CreateJob(original.TypeGuid, original, view);
             clone.Status = JobStatus.Building;
-            clone.Clear();
+            clone.ClearProperties();
 
             // Find unique name for the clone
             int cloneId = 1;
@@ -958,16 +1018,18 @@ public class DataRepository : IDisposable
     /// <param name="disposing">True to release both managed and unmanaged resources; false to release only unmanaged resources</param>
     protected virtual void Dispose(bool disposing)
     {
-        if (_disposed)
-            return;
-
-        if (disposing)
+        lock (_persistenceLock)
         {
-            SaveChanges(null); // Final save to persist any pending changes
-            _autoSaveTimer.Dispose();
-        }
+            if (_disposed)
+                return;
 
-        _disposed = true;
+            _disposed = true;
+            if (disposing)
+            {
+                _autoSaveTimer?.Dispose();
+                SaveChanges(null);
+            }
+        }
     }
 
     #endregion

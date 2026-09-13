@@ -17,6 +17,58 @@ public sealed class ExecutionOwnershipTests
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(5);
 
+    [Fact]
+    public async Task DataCommandsReturnTheirTaskBeforeSynchronousRepositoryWorkFinishes()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        using var release = new ManualResetEventSlim();
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var returned = new TaskCompletionSource<Task>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var caller = Task.Run(() =>
+        {
+            var command = fixture.Manager.UpdateJob(fixture.User, fixture.Target, job =>
+            {
+                started.SetResult();
+                release.Wait(TimeSpan.FromSeconds(10));
+                job.Alias = "Updated in the background";
+            });
+            returned.SetResult(command);
+        });
+        try
+        {
+            await started.Task.WaitAsync(Timeout);
+            var command = await returned.Task.WaitAsync(TimeSpan.FromSeconds(1));
+            Assert.False(command.IsCompleted);
+        }
+        finally
+        {
+            release.Set();
+            await caller.WaitAsync(Timeout);
+            await (await returned.Task).WaitAsync(Timeout);
+        }
+        Assert.Equal("Updated in the background", fixture.Target.Alias);
+    }
+
+    [Fact]
+    public async Task CloningResetsResultsWithoutTouchingTheFilesystem()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.MutableTarget.VisAvailableIteration = 7;
+        string cloneDirectory = Path.Combine(fixture.Space.RootDirectory,
+            (fixture.Space.Jobs.Max(job => job.Id) + 1).ToString());
+        Directory.CreateDirectory(cloneDirectory);
+        string existingFile = Path.Combine(cloneDirectory, "retained.txt");
+        await File.WriteAllTextAsync(existingFile, "Only execution preparation may clear this directory");
+
+        var clone = await fixture.Manager.CloneJob(fixture.User, fixture.Target, fixture.Space.Views[0]);
+
+        Assert.Equal(JobStatus.Building, clone.Status);
+        Assert.Equal(-1, clone.VisAvailableIteration);
+        Assert.Equal(7, fixture.Target.VisAvailableIteration);
+        Assert.True(File.Exists(existingFile));
+        Assert.Single(clone.GetParents());
+    }
+
     [Theory]
     [InlineData("clear")]
     [InlineData("delete")]
@@ -30,8 +82,8 @@ public sealed class ExecutionOwnershipTests
         Task? changing = null;
         try
         {
-            // QueueClusterJob reaches the held configuration gate before returning its Task.
-            // A second API call must remain behind admission's data lock until ownership exists.
+            // Admission claims the command lock before returning its Task. A second
+            // API call must remain behind it until execution ownership exists.
             queueing = fixture.QueueAsync();
             Assert.False(queueing.IsCompleted);
             changing = mutation switch
@@ -112,8 +164,6 @@ public sealed class ExecutionOwnershipTests
         }
         finally
         {
-            // Dispose performs one final save and reschedules its timer before disposing it.
-            // Keep that teardown path usable without allowing periodic saves during the test.
             data.StartAutoSave(System.Threading.Timeout.Infinite);
         }
 

@@ -9,6 +9,39 @@ public class ExecutionRuntimeTests
         new(-1, ExecutionBackendKind.Local, new ResourceVector(1, 8, 0));
 
     [Fact]
+    public async Task AdmissionReturnsWhileSynchronousPreparationIsStillBlocked()
+    {
+        using var release = new ManualResetEventSlim();
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var operations = new FakeOperations
+        {
+            OnPrepare = () =>
+            {
+                started.SetResult();
+                release.Wait(TimeSpan.FromSeconds(10));
+            }
+        };
+        await using var runtime = new ExecutionRuntime(new ExecutionCoordinator([LocalQueue]),
+            operations, new RecordingStateStore(), _ => Task.CompletedTask);
+        await runtime.InitializeAsync();
+        try
+        {
+            var request = Task.Run(() => runtime.RequestRunAsync(
+                new JobAddress(1, 1, 1), -1, ResourceVector.None, true));
+            await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            var admitted = await request.WaitAsync(TimeSpan.FromSeconds(1));
+
+            Assert.Equal(ExecutionPhase.Preparing, admitted.Phase);
+            Assert.Equal(0, operations.StartCalls);
+        }
+        finally
+        {
+            release.Set();
+        }
+    }
+
+    [Fact]
     public async Task SynchronousWorkerCompletionsDoNotDispatchStaleStarts()
     {
         var operations = new FakeOperations();
@@ -24,6 +57,7 @@ public class ExecutionRuntimeTests
             new JobAddress(1, 1, 1), -1, ResourceVector.None, true,
             new WorkerGroupRequest(2, DesiredCount: 2, SubmissionLimit: 2));
 
+        await WaitForPoolAsync(runtime, 2);
         Assert.Equal(2, operations.WorkerStarts.Count);
         Assert.Equal(2, operations.WorkerStarts.Distinct().Count());
     }
@@ -51,8 +85,10 @@ public class ExecutionRuntimeTests
         await runtime.RequestRunAsync(
             address, -1, ResourceVector.None, true,
             new WorkerGroupRequest(2, DesiredCount: 3, SubmissionLimit: 3));
+        await WaitForPoolAsync(runtime, 3);
 
         await runtime.ResizeWorkerGroupAsync(address, 2);
+        await WaitUntilAsync(() => operations.WorkerCancellations.Count == 1);
         var first = Assert.Single(operations.WorkerCancellations);
         await runtime.ResizeWorkerGroupAsync(address, 1);
         Assert.Single(operations.WorkerCancellations);
@@ -62,6 +98,8 @@ public class ExecutionRuntimeTests
         firstCancellation.SetResult(first.Select(receipt =>
             new WorkerObservation(receipt.Id, BackendObservationKind.Indeterminate)).ToArray());
 
+        await WaitUntilAsync(() => runtime.Attempts.Single().WorkerGroup.Workers.Count(worker =>
+            worker.Phase == WorkerPhase.Stopping) == 2);
         Assert.Equal(2, operations.WorkerCancellations.Count);
         Assert.Equal(2, operations.WorkerCancellations.SelectMany(receipts => receipts).Count());
         Assert.Equal(2, operations.WorkerCancellations.SelectMany(receipts => receipts)
@@ -86,9 +124,11 @@ public class ExecutionRuntimeTests
         var address = new JobAddress(1, 1, 1);
         await runtime.RequestRunAsync(address, -1, ResourceVector.None, true,
             new WorkerGroupRequest(2, DesiredCount: 2, SubmissionLimit: 2));
+        await WaitForPoolAsync(runtime, 2);
 
         await runtime.ResizeWorkerGroupAsync(address, 1);
 
+        await WaitUntilAsync(() => operations.WorkerCancellations.Count == 1);
         Assert.Single(operations.WorkerCancellations);
         Assert.Single(Assert.Single(runtime.Attempts).WorkerGroup.Workers,
             worker => worker.Phase == WorkerPhase.Cancelling);
@@ -113,10 +153,12 @@ public class ExecutionRuntimeTests
         var address = new JobAddress(1, 1, 1);
         await runtime.RequestRunAsync(address, -1, ResourceVector.None, true,
             new WorkerGroupRequest(2, DesiredCount: 3, SubmissionLimit: 6));
+        await WaitForPoolAsync(runtime, 3);
         projected.Clear();
 
         await runtime.ResizeWorkerGroupAsync(address, 2);
 
+        await WaitUntilAsync(() => operations.WorkerCancellations.Count == 1);
         var canceled = Assert.Single(Assert.Single(operations.WorkerCancellations));
         var shrunk = Assert.Single(projected);
         Assert.Equal(2, shrunk.WorkerGroup.DesiredCount);
@@ -180,6 +222,12 @@ public class ExecutionRuntimeTests
             new JobAddress(1, 1, 1), -1, new ResourceVector(1, 1, 0), true);
         var second = await runtime.RequestRunAsync(
             new JobAddress(1, 1, 2), -1, new ResourceVector(1, 1, 0), true);
+        await WaitUntilAsync(() => runtime.Attempts.Any(attempt =>
+            attempt.Id == first.Id && attempt.Phase == ExecutionPhase.Stopping));
+        await WaitUntilAsync(() => runtime.Attempts.Any(attempt =>
+            attempt.Id == second.Id && attempt.Phase == ExecutionPhase.Queued));
+        first = runtime.Attempts.Single(attempt => attempt.Id == first.Id);
+        second = runtime.Attempts.Single(attempt => attempt.Id == second.Id);
         Assert.Equal(ExecutionPhase.Stopping, first.Phase);
         Assert.True(first.HasAllocation);
         Assert.Equal(ExecutionPhase.Queued, second.Phase);
@@ -188,6 +236,8 @@ public class ExecutionRuntimeTests
         operations.ObserveResult = new BackendObservation(BackendObservationKind.Canceled);
         await runtime.TickAsync();
 
+        await WaitUntilAsync(() => projected.Any(attempt =>
+            attempt.Id == first.Id && attempt.Phase == ExecutionPhase.Failed));
         var failed = Assert.Single(projected, attempt =>
             attempt.Id == first.Id && attempt.Phase == ExecutionPhase.Failed);
         Assert.Contains(failed.History, entry => entry.Detail == "runner cleanup is incomplete");
@@ -394,6 +444,7 @@ public class ExecutionRuntimeTests
             });
         await runtime.InitializeAsync();
         await runtime.RequestRunAsync(new JobAddress(1, 1, 1), -1, ResourceVector.None, true);
+        await WaitUntilAsync(() => projected.Any(attempt => attempt.Phase == ExecutionPhase.Running));
         projected.Clear();
 
         operations.ObserveResult = new BackendObservation(
@@ -650,6 +701,8 @@ public class ExecutionRuntimeTests
             new JobAddress(1, 1, 1), -1, ResourceVector.None, true);
         var second = await runtime.RequestRunAsync(
             new JobAddress(1, 1, 2), -1, ResourceVector.None, true);
+        await WaitUntilAsync(() => operations.StartCalls == 1 &&
+            runtime.Attempts.Any(attempt => attempt.Id == second.Id && attempt.Phase == ExecutionPhase.Queued));
 
         var shutdown = runtime.ShutdownAsync();
         Assert.False(shutdown.IsCompleted);
@@ -697,6 +750,10 @@ public class ExecutionRuntimeTests
         Assert.Empty(runtime.Attempts);
         Assert.Equal(1, operations.FinalizeCalls);
     }
+
+    private static Task WaitForPoolAsync(ExecutionRuntime runtime, int count) => WaitUntilAsync(() =>
+        runtime.Attempts.Single().Phase == ExecutionPhase.Running &&
+        runtime.Attempts.Single().WorkerGroup.Workers.Count(worker => worker.Receipt != null) == count);
 
     private static async Task WaitUntilAsync(Func<bool> condition)
     {
@@ -752,6 +809,7 @@ public class ExecutionRuntimeTests
         }
 
         public bool HoldPreparation { get; set; }
+        public Action? OnPrepare { get; init; }
         public int PrepareCalls { get; private set; }
         public int StartCalls { get; private set; }
         public int ActivateCalls { get; private set; }
@@ -786,6 +844,7 @@ public class ExecutionRuntimeTests
             PrepareCalls++;
             PreparedJobs.Enqueue(attempt.Job);
             _events?.Enqueue("prepare");
+            OnPrepare?.Invoke();
             if (HoldPreparation)
                 await _preparation.Task.WaitAsync(cancellationToken);
         }

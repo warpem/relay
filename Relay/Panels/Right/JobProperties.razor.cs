@@ -280,10 +280,14 @@ public partial class JobProperties : ComponentBase, IDisposable
             EventType.WaitingStarted => "Waiting",
             EventType.StagingStarted => "Staging",
             EventType.RunningStarted => "Running",
+            EventType.FinalizingStarted => "Finalizing",
             EventType.Finished => "Finished",
             EventType.Failed => "Failed",
+            EventType.Aborting => "Aborting",
             EventType.Aborted => "Aborted",
+            EventType.Interrupted => "Interrupted",
             EventType.ClearingStarted => "Clearing",
+            EventType.ClearingFinished => "Cleared",
             EventType.Deleted => "Deleted",
             _ => eventType.ToString() // Fallback to enum name
         };

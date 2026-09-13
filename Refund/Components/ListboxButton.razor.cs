@@ -154,12 +154,12 @@ public partial class ListboxButton<TValue> : ComponentBase
     /// Closes the dropdown and triggers the OnOptionSelected event.
     /// </summary>
     /// <param name="value">The value of the selected option</param>
-    private void OnListValueChanged(TValue value)
+    private async Task OnListValueChanged(TValue value)
     {
         _isOpen = false;
         StateHasChanged();
 
-        OnOptionSelected.InvokeAsync(value);
+        await OnOptionSelected.InvokeAsync(value);
     }
 
     /// <summary>
@@ -178,7 +178,7 @@ public partial class ListboxButton<TValue> : ComponentBase
         }
         else
         {
-            OnListValueChanged(value);
+            await OnListValueChanged(value);
         }
     }
 }

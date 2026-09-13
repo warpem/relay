@@ -37,6 +37,7 @@ public partial class JobEditor : ComponentBase, IDisposable
     /// The job currently being edited.
     /// </summary>
     private ReadOnlyJob _job;
+    private bool _isQueueing;
     
     /// <summary>
     /// List of parameter groups that the user has collapsed (stored per job type).
@@ -283,40 +284,37 @@ public partial class JobEditor : ComponentBase, IDisposable
     /// <summary>
     /// Submits the job to the local queue for execution.
     /// </summary>
-    private async Task HandleLocalQueueSelected()
-    {
-        try
-        {
-            await DataManager.QueueLocalJob(Session.User, _job);
-            await Editor.SetJob(null);
-        }
-        catch(Exception ex)
-        {
-            ToastService.ShowError($"Failed to queue job: {ex.Message}");
-        }
-    }
+    private Task HandleLocalQueueSelected() => QueueJobAsync(null);
 
     /// <summary>
     /// Submits the job to a cluster queue for execution.
     /// </summary>
     /// <param name="queue">The cluster queue to submit to</param>
-    private async Task HandleClusterQueueSelected(ReadOnlyJobQueue queue)
+    private Task HandleClusterQueueSelected(ReadOnlyJobQueue queue) => QueueJobAsync(queue);
+
+    private async Task QueueJobAsync(ReadOnlyJobQueue queue)
     {
+        if (_isQueueing || _job == null)
+            return;
+
+        var job = _job;
+        var user = Session.User;
+        _isQueueing = true;
         try
         {
-            if (queue != null)
-            {
-                await DataManager.QueueClusterJob(Session.User, _job, queue);
+            await (queue == null
+                ? DataManager.QueueLocalJob(user, job)
+                : DataManager.QueueClusterJob(user, job, queue));
+            if (_job == job)
                 await Editor.SetJob(null);
-            }
-            else
-            {
-                throw new Exception($"Couldn't find queue with ID {queue.Id}");
-            }
         }
         catch (Exception ex)
         {
             ToastService.ShowError($"Failed to queue job: {ex.Message}");
+        }
+        finally
+        {
+            _isQueueing = false;
         }
     }
 

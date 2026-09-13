@@ -341,10 +341,12 @@ public partial class DataManager
     /// <returns>The result of the action</returns>
     private async Task<T> ExecuteWithLock<T>(Func<Task<T>> action)
     {
-        await _globalLock.WaitAsync();
+        // Claim commands in call order, but never run synchronous repository or
+        // filesystem work on the caller's synchronization context (e.g. Blazor).
+        await _globalLock.WaitAsync().ConfigureAwait(false);
         try
         {
-            return await action();
+            return await Task.Run(action).ConfigureAwait(false);
         }
         finally
         {
@@ -357,19 +359,11 @@ public partial class DataManager
     /// This method ensures thread safety for operations that modify data but don't return a result.
     /// </summary>
     /// <param name="action">The asynchronous function to execute while holding the lock</param>
-    private async Task ExecuteWithLock(Func<Task> action)
+    private Task ExecuteWithLock(Func<Task> action) => ExecuteWithLock(async () =>
     {
-        await _globalLock.WaitAsync();
-
-        try
-        {
-            await action();
-        }
-        finally
-        {
-            _globalLock.Release();
-        }
-    }
+        await action().ConfigureAwait(false);
+        return true;
+    });
 
     private bool HasPendingExecution(Job job) =>
         job.Status == JobStatus.Waiting ||
