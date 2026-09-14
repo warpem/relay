@@ -15,6 +15,19 @@ public partial class RefineExpandedView
     /// The M refinement job currently being viewed
     /// </summary>
     private ReadOnlyRefine _job;
+    private string _activeSpeciesTabId;
+
+    private static string SpeciesTabId(string speciesName) => $"species-{Uri.EscapeDataString(speciesName)}";
+
+    private void InitializeSpeciesTab()
+    {
+        if (_activeSpeciesTabId == null && _job?.VisAvailableIteration >= 0)
+        {
+            var firstSpecies = _job.GetPopulation(0).Species.OrderBy(s => s.Name, StringComparer.Ordinal).FirstOrDefault();
+            if (firstSpecies != null)
+                _activeSpeciesTabId = SpeciesTabId(firstSpecies.Name);
+        }
+    }
 
     /// <summary>
     /// Initializes the component and sets up event handlers
@@ -48,6 +61,8 @@ public partial class RefineExpandedView
             _job = null;
         }
         
+        _activeSpeciesTabId = null;
+        InitializeSpeciesTab();
         await InvokeAsync(StateHasChanged);
     }
 
@@ -56,6 +71,7 @@ public partial class RefineExpandedView
     /// </summary>
     private async Task HandleJobUpdated()
     {
+        InitializeSpeciesTab();
         await InvokeAsync(StateHasChanged);
     }
 

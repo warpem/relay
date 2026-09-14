@@ -7,10 +7,10 @@
 }
 else if (_job.VisAvailableIteration >= 0)
 {
-    <FluentTabs @key="_job.DirectoryPath" Class="species-tabs">
+    <FluentTabs @key="_job.DirectoryPath" Class="species-tabs" @bind-ActiveTabId="_activeSpeciesTabId">
         @foreach (var species in _job.GetPopulation(0).Species.OrderBy(s => s.Name, StringComparer.Ordinal))
         {
-            <FluentTab @key="species.Name" Id="@($"species-{Uri.EscapeDataString(species.Name)}")"
+            <FluentTab @key="species.Name" Id="@SpeciesTabId(species.Name)"
                        Label="@species.Name" DeferredLoading="true">
                 <div class="species-visualizations">
                     @if (File.Exists(species.DenoisedMapPath))
