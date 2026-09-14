@@ -4,14 +4,15 @@
 
     @if (!string.IsNullOrEmpty(Href))
     {
-        <a href="@Href" style="text-decoration: none; color: inherit;">
+        <a href="@Href" style="text-decoration: none; color: inherit;"
+           data-relay-navigation="@(OnClick.HasDelegate ? "true" : null)"
+           @onclick="HandlePrimaryClick">
             <FluentButton Id="@MainButtonId"
                           IconStart="@IconStart"
                           IconEnd="@IconEnd"
                           Loading="@Loading"
                           Disabled="@Disabled"
                           Appearance="@Appearance"
-                          OnClick="@HandlePrimaryClick"
                           Style="@($"border-top-right-radius: 0; border-bottom-right-radius: 0; {Style ?? ""}")"
                           Class="no-right-border">
                 <span style="@($"white-space: nowrap; overflow: hidden; " +

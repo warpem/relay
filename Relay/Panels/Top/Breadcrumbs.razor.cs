@@ -273,7 +273,7 @@ public partial class Breadcrumbs : IDisposable
     /// </summary>
     private async Task OnHomeButtonClick(MouseEventArgs args)
     {
-        if (MouseUtils.IsNewTabClick(args))
+        if (!MouseUtils.IsPlainLeftClick(args))
             return;
         await Session.NavigateToAsync(new());
     }
@@ -284,7 +284,7 @@ public partial class Breadcrumbs : IDisposable
     /// </summary>
     private async Task HandleBreadcrumbClick(MouseEventArgs args, NavigationRequest request)
     {
-        if (MouseUtils.IsNewTabClick(args))
+        if (!MouseUtils.IsPlainLeftClick(args))
             return;
         await Session.NavigateToAsync(request);
     }

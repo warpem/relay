@@ -330,7 +330,7 @@ public class RelaySession : IAsyncDisposable
         _hasManualThemeOverride = false; // Reset manual override flag on session start
         
         // Process initial URL to set navigation state
-        HandleLocationChanged(null, null);
+        await ApplyLocationAsync(_navigationManager.Uri);
         _initialized = true;
         
         // Notify about initial theme
@@ -549,8 +549,10 @@ public class RelaySession : IAsyncDisposable
         // Build URL from current state
         var url = BuildUrl();
 
-        // Navigate without reload
-        _navigationManager.NavigateTo(url, false);
+        // State-only changes (e.g. overlays) and clicks on the current page must
+        // not add identical history entries or discard the browser's forward history.
+        if (_navigationManager.ToAbsoluteUri(url).AbsoluteUri != _navigationManager.Uri)
+            _navigationManager.NavigateTo(url, false);
 
         // Trigger change events
         await OnStateChanged.InvokeAllAsync();
@@ -592,10 +594,15 @@ public class RelaySession : IAsyncDisposable
     /// 
     /// This enables deep linking and proper browser history integration.
     /// </remarks>
-    private void HandleLocationChanged(object sender, LocationChangedEventArgs e)
+    private async void HandleLocationChanged(object sender, LocationChangedEventArgs e)
+    {
+        await ApplyLocationAsync(e.Location);
+    }
+
+    private async Task ApplyLocationAsync(string uri)
     {
         // Parse URL and update state if navigation happened externally
-        var segments = _navigationManager.Uri.Split('/')
+        var segments = uri.Split('/')
             .Skip(3) // Skip protocol and domain
             .Where(s => !string.IsNullOrEmpty(s))
             .ToArray();
@@ -647,29 +654,30 @@ public class RelaySession : IAsyncDisposable
             bool isCorrect = CorrectState();
             CorrectUrl();
 
-            // Trigger change events synchronously since this is called from event handler
-            OnStateChanged.InvokeAllAsync().Wait();
+            // Keep the renderer free while subscribers load job data and update
+            // components. Blocking here deadlocks their async continuations.
+            await OnStateChanged.InvokeAllAsync();
 
             if (projectChanged)
-                OnProjectChanged.InvokeAllAsync().Wait();
+                await OnProjectChanged.InvokeAllAsync();
             if (spaceChanged)
-                OnSpaceChanged.InvokeAllAsync().Wait();
+                await OnSpaceChanged.InvokeAllAsync();
             if (viewChanged)
-                OnViewChanged.InvokeAllAsync().Wait();
+                await OnViewChanged.InvokeAllAsync();
             if (jobChanged)
-                OnJobChanged.InvokeAllAsync().Wait();
+                await OnJobChanged.InvokeAllAsync();
             if (folderChanged)
-                OnFolderChanged.InvokeAllAsync().Wait();
+                await OnFolderChanged.InvokeAllAsync();
             if (factoryDefinitionChanged)
-                OnFactoryDefinitionChanged.InvokeAllAsync().Wait();
+                await OnFactoryDefinitionChanged.InvokeAllAsync();
             if (factoryInstanceChanged)
-                OnFactoryInstanceChanged.InvokeAllAsync().Wait();
+                await OnFactoryInstanceChanged.InvokeAllAsync();
 
             if (projectChanged || spaceChanged || viewChanged || jobChanged || factoryDefinitionChanged)
-                OnMainChanged.InvokeAllAsync().Wait();
+                await OnMainChanged.InvokeAllAsync();
 
             if (overlayChanged)
-                OnOverlayChanged.InvokeAllAsync().Wait();
+                await OnOverlayChanged.InvokeAllAsync();
         }
     }
 
@@ -838,6 +846,8 @@ public class RelaySession : IAsyncDisposable
     /// <returns>A value task representing the asynchronous dispose operation.</returns>
     public async ValueTask DisposeAsync()
     {
+        _navigationManager.LocationChanged -= HandleLocationChanged;
+
         if (_initialized && _objectReference != null)
         {
             try 

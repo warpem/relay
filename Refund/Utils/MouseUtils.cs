@@ -17,6 +17,13 @@ namespace Refund.Utils;
 public static class MouseUtils
 {
     /// <summary>
+    /// Whether a link click should navigate in the current tab through its Blazor handler.
+    /// Modified clicks retain native browser behavior. Keep in sync with relaySession.js.
+    /// </summary>
+    public static bool IsPlainLeftClick(MouseEventArgs args)
+        => args.Button == 0 && !args.CtrlKey && !args.MetaKey && !args.ShiftKey && !args.AltKey;
+
+    /// <summary>
     /// Determines whether the appropriate modifier key for single-item selection is pressed.
     /// </summary>
     /// <param name="args">The mouse event arguments containing key state information.</param>

@@ -8,14 +8,15 @@
 @inherits FluentComponentBase
 
 <div style="display: flex; align-items: center; column-gap: 8px;">
-    <a href="/" style="@($"margin-left: {(RelaySession.LeftPanelWidth - 32) / 2}px;") text-decoration: none; color: inherit;">
+    <a href="/" data-relay-navigation="true"
+       @onclick="OnHomeButtonClick"
+       style="@($"margin-left: {(RelaySession.LeftPanelWidth - 32) / 2}px;") text-decoration: none; color: inherit;">
         <FluentButton Id="Home"
                       IconStart="@(new Icons.Regular.Size24.Home())"
                       Appearance="@((Session.Project == null && Session.CurrentOverlay == OverlayScreenType.None) ?
                                         Appearance.Accent :
                                         null)"
                       BackgroundColor="@((Session.Project == null && Session.CurrentOverlay == OverlayScreenType.None) ? null : "transparent")"
-                      OnClick="OnHomeButtonClick"
                       Title="Home">
         </FluentButton>
     </a>

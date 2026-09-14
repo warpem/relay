@@ -5,6 +5,7 @@
 @if (EnableNavigation)
 {
     <a href="@_navigationUrl" style="text-decoration: none; color: inherit;"
+       data-relay-navigation="true"
        @onclick="HandleNavigableClick" @onclick:stopPropagation="true">
         <div>
             <div id="@_id" class="job-line navigation"

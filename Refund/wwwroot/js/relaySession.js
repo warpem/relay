@@ -3,6 +3,21 @@
  * Provides browser-specific functionality for window sizing, theme detection,
  * mouse position tracking, and OS detection.
  */
+// These links navigate through their Blazor click handlers. Cancel the browser's
+// link navigation before Blazor intercepts it, but preserve native modified clicks.
+// A capture listener also handles clicks inside Fluent buttons' shadow roots.
+document.addEventListener('click', event => {
+    if (event.defaultPrevented || event.button !== 0 ||
+        event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) {
+        return;
+    }
+
+    const link = event.composedPath().find(element => element instanceof HTMLAnchorElement);
+    if (link?.dataset.relayNavigation === 'true') {
+        event.preventDefault();
+    }
+}, true);
+
 window.relaySessionInterop = {
     /**
      * Reference to the .NET object for invoking C# methods

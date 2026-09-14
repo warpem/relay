@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.FluentUI.AspNetCore.Components;
+using Refund.Utils;
 
 namespace Refund.Components;
 
@@ -124,6 +125,12 @@ public partial class ComboButton : ComponentBase
     /// <param name="args">Mouse event arguments</param>
     private async Task HandlePrimaryClick(MouseEventArgs args)
     {
+        if (Disabled || Loading)
+            return;
+
+        if (!string.IsNullOrEmpty(Href) && !MouseUtils.IsPlainLeftClick(args))
+            return;
+
         if (OnClick.HasDelegate)
             await OnMainButtonClick(args);
         else

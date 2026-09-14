@@ -201,7 +201,7 @@ public partial class JobLine : IDisposable
     /// </summary>
     private async Task HandleNavigableClick(MouseEventArgs args)
     {
-        if (MouseUtils.IsNewTabClick(args))
+        if (!MouseUtils.IsPlainLeftClick(args))
             return;
         await Session.NavigateToAsync(new NavigationRequest
         {

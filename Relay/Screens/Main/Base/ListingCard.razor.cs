@@ -91,7 +91,7 @@ public partial class ListingCard<TItem> : ComponentBase where TItem : class, IId
     /// </summary>
     private async Task OnHeaderClick(MouseEventArgs args)
     {
-        if (MouseUtils.IsNewTabClick(args))
+        if (!MouseUtils.IsPlainLeftClick(args))
             return;
         await OnNavigate.InvokeAsync(args);
     }
