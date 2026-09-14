@@ -17,6 +17,30 @@ public sealed class ExecutionOwnershipTests
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(5);
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PooledJobsAppearOnlyInTheirManagerQueueWhileBothQueuesRemainInUse(bool sharedQueue)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var workers = sharedQueue ? fixture.Queue : await fixture.Manager.CreateClusterQueue(
+            new ClusterQueue { Alias = "Worker scheduler", SchedulerType = ClusterScheduler.Slurm });
+        var runtime = Field<ExecutionRuntime>(fixture.Queues, "_runtime");
+        await runtime.RequestRunAsync(
+            new JobAddress(fixture.Space.Project.Id, fixture.Space.Id, fixture.Target.Id),
+            fixture.Queue.Id, ResourceVector.None, dependenciesReady: false,
+            new WorkerGroupRequest(workers.Id, 2, 200));
+
+        Assert.Same(fixture.Target, Assert.Single(fixture.Queue.QueuedJobs));
+        if (!sharedQueue)
+            Assert.Empty(workers.QueuedJobs);
+        Assert.Single(fixture.Manager.ClusterQueues.SelectMany(queue => queue.QueuedJobs));
+
+        foreach (int queueId in new[] { fixture.Queue.Id, workers.Id }.Distinct())
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                fixture.Queues.DeleteClusterQueueAsync((ClusterQueue)fixture.Queues.FindQueue(queueId)));
+    }
+
     [Fact]
     public async Task DataCommandsReturnTheirTaskBeforeSynchronousRepositoryWorkFinishes()
     {

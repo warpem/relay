@@ -540,9 +540,6 @@ public sealed class QueueRepository
             return Array.Empty<Job>();
 
         return _runtime.ActiveAttempts(queueId)
-            .Concat(_runtime.Attempts.Where(attempt =>
-                !attempt.Phase.IsTerminal() && attempt.WorkerGroup?.QueueId == queueId))
-            .DistinctBy(attempt => attempt.Id)
             .Select(attempt => _dataRepository.FindJob(
                 attempt.Job.ProjectId,
                 attempt.Job.SpaceId,
