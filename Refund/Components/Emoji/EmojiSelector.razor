@@ -21,7 +21,8 @@
                     style="left: @(item.X)px; top: @(item.Y)px"
                     @onclick="() => OnSelect(item.Emoji)"
                     title="@item.Emoji.Name">
-                <FluentEmoji Value="@item.Emoji.FluentEmoji"/>
+                @* FluentEmoji drops the source SVG's fill="none"; restore it so open strokes stay unfilled. *@
+                <FluentEmoji Value="@item.Emoji.FluentEmoji" fill="none"/>
             </button>
         }
     </div>

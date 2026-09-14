@@ -88,12 +88,12 @@
                         @if (_userShowAdvanced.Value)
                         {
                             <FluentEmoji Value="@(Session.ColorTheme == ColorTheme.Light ? emojiNerdFaceLight : emojiNerdFaceDark)"
-                                         Width="26"/>
+                                         Width="26" fill="none"/>
                         }
                         else
                         {
                             <FluentEmoji Value="@(Session.ColorTheme == ColorTheme.Light ? emojiBabyFaceLight : emojiBabyFaceDark)"
-                                         Width="26"/>
+                                         Width="26" fill="none"/>
                         }
                     </div>
                 </FluentSwitch>

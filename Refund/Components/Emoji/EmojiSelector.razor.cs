@@ -322,7 +322,7 @@ public partial class EmojiSelector : IAsyncDisposable
     ///         style="left: @(item.X)px; top: @(item.Y)px"
     ///         @onclick="() => OnSelect(item.Emoji)"
     ///         title="@item.Emoji.Name">
-    ///     <FluentEmoji Value="@item.Emoji.FluentEmoji"/>
+    ///     <FluentEmoji Value="@item.Emoji.FluentEmoji" fill="none"/>
     /// </button>
     /// </code>
     /// 
