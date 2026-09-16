@@ -6,6 +6,13 @@ namespace Refund.Tests.DataModel;
 public sealed class JobStatusTests
 {
     [Fact]
+    public void ClearingCanFailAndBeRetried()
+    {
+        Assert.True(new Note { Status = JobStatus.Clearing }.CanTransitionState(JobStatus.Failed));
+        Assert.True(new Note { Status = JobStatus.Failed }.CanTransitionState(JobStatus.Clearing));
+    }
+
+    [Fact]
     public void InterruptedIsTerminalAndCanBeQueuedAgain()
     {
         var job = new Note { Status = JobStatus.Interrupted };

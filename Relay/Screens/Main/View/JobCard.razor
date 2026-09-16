@@ -149,13 +149,16 @@
         <div style="overflow: hidden; height: @(contentHeight * scaleFactor)px;">
             <div style="@(scaleFactor < 1 ? $"width: {originalWidth}px; height: {contentHeight}px; transform: scale({scaleFactor}); transform-origin: top left;" : $"height: {contentHeight}px;")">
                 <div style="position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;">
-                    @if (Job.Status == JobStatus.Building)
+                    @if (Job.Status == JobStatus.Building ||
+                         Job is { Status: JobStatus.Running, IsInteractive: true, IsInteractiveFinished: false })
                     {
+                        bool isEditing = Job.Status == JobStatus.Building && JobEditor.CurrentJob == Job;
                         <div style="padding: 0.15rem 0.5rem;
                                     border-radius: 14px;
-                                    background-color: @(JobEditor.CurrentJob == Job ? "var(--accent-fill-rest)" : "transparent");
-                                    color: @(JobEditor.CurrentJob == Job ? "var(--neutral-fill-layer-rest)" : "inherit");">
-                            <span>Building</span>
+                                    text-align: center;
+                                    background-color: @(isEditing ? "var(--accent-fill-rest)" : "transparent");
+                                    color: @(isEditing ? "var(--neutral-fill-layer-rest)" : "inherit");">
+                            <span>@(Job.Status == JobStatus.Building ? "Building" : "Open job to interact")</span>
                         </div>
                     }
                     else if (Job.CardViewType != null)

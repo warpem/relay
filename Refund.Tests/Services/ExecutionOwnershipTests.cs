@@ -6,6 +6,7 @@ using Refund.DataModel.ReadOnly;
 using Refund.JobExecution;
 using Refund.JobQueues;
 using Refund.Jobs.Common.Import.ImportMap;
+using Refund.Jobs.Common.Notes.Note;
 using Refund.Jobs.Refinement.Masks.CreateMask;
 using Refund.Services.Core.DataManager;
 using Refund.Services.Core.Repositories;
@@ -16,6 +17,52 @@ namespace Refund.Tests.Services;
 public sealed class ExecutionOwnershipTests
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(5);
+
+    [Fact]
+    public async Task FailedClearReportsTheOriginalErrorAndLeavesTheJobRetryable()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var failure = new IOException("Directory not empty");
+        var job = new FailingClearJob(failure)
+        {
+            Id = 99,
+            Status = JobStatus.Finished,
+            VisAvailableIteration = 7
+        };
+        fixture.MutableTarget.Space.AddJob(job, null);
+
+        var thrown = await Assert.ThrowsAsync<IOException>(() =>
+            fixture.Manager.ClearJob(fixture.User, new TestReadOnlyJob(job)));
+
+        Assert.Same(failure, thrown);
+        Assert.Equal(JobStatus.Failed, job.Status);
+        Assert.False(job.Status.IsUnsettled());
+        Assert.True(job.CanTransitionState(JobStatus.Clearing));
+        Assert.Equal(7, job.VisAvailableIteration);
+        Assert.Equal(new[] { EventType.ClearingStarted, EventType.Failed },
+            job.Events.Select(evt => evt.Type));
+        Assert.Contains("Directory not empty", await File.ReadAllTextAsync(job.ErrorFilePath));
+    }
+
+    [Fact]
+    public async Task SuccessfulClearResetsResultsAndPreservesParameters()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var job = (CreateMask)fixture.MutableTarget;
+        job.Status = JobStatus.Finished;
+        job.NThreads = 7;
+        job.VisAvailableIteration = 3;
+        Directory.CreateDirectory(job.DirectoryPath);
+        await File.WriteAllTextAsync(Path.Combine(job.DirectoryPath, "result.mrc"), "old result");
+
+        await fixture.Manager.ClearJob(fixture.User, fixture.Target);
+
+        Assert.Equal(JobStatus.Building, job.Status);
+        Assert.Equal(7, job.NThreads);
+        Assert.Equal(-1, job.VisAvailableIteration);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(job.DirectoryPath));
+        Assert.Equal(EventType.ClearingFinished, job.Events.Last().Type);
+    }
 
     [Theory]
     [InlineData(false)]
@@ -225,6 +272,13 @@ public sealed class ExecutionOwnershipTests
         Assert.NotNull(fixture.Space.FindJob(fixture.Parent.Id));
         fixture.AssertWaitingForDependency();
     }
+
+    private sealed class FailingClearJob(IOException failure) : Note
+    {
+        public override void Clear() => throw failure;
+    }
+
+    private sealed class TestReadOnlyJob(Job job) : ReadOnlyJob(job);
 
     private static T Field<T>(object target, string name) =>
         (T)(target.GetType().GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)

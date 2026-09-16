@@ -22,7 +22,7 @@
             <div style="display: flex; column-gap: 8px; align-items: center;">
                 <div style="width: 24px; height: 24px; flex-shrink: 0;">
                     <FluentIcon Value="@job.GetStatusIcon(IconSize.Size24).WithStatusColor(job)"
-                                Title="@(job.Status.ToString())"/>
+                                Title="@job.Status.GetStatusDescription()"/>
                 </div>
 
                 <h5 class="job-name">@job.QualifiedName</h5>

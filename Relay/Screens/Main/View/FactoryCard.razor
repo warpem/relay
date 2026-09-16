@@ -23,7 +23,8 @@
     <div class="factory-header">
         @if (Mode == FactoryCardMode.Instance)
         {
-            <FluentIcon Value="@Refund.Utils.JobStatusExtensions.GetStatusIcon(AggregateStatus, Refund.Utils.IconSize.Size16).WithStatusColor(AggregateStatus)" Class="status-icon" />
+            <FluentIcon Value="@Refund.Utils.JobStatusExtensions.GetStatusIcon(AggregateStatus, Refund.Utils.IconSize.Size16).WithStatusColor(AggregateStatus)"
+                        Title="@AggregateStatus.GetStatusDescription()" Class="status-icon" />
         }
         <span class="factory-name">@DisplayName</span>
     </div>

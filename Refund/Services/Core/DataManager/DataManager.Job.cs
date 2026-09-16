@@ -341,10 +341,11 @@ public partial class DataManager
     /// <returns>A task that completes when the clear operation is finished</returns>
     /// <exception cref="Exception">Thrown if the clear operation fails</exception>
     /// <remarks>
-    /// This method transitions the job through three states:
+    /// The normal clearing sequence is:
     /// 1. Sets the job status to Clearing to indicate clearing is in progress
     /// 2. Performs the actual clearing operation asynchronously
     /// 3. Sets the job status to Building after successful clearing
+    /// On failure, the job is marked Failed and the exception is propagated to the caller.
     ///
     /// The clearing operation deletes all output files while preserving the job's parameters
     /// and configuration, allowing it to be run again from scratch.
@@ -389,6 +390,9 @@ public partial class DataManager
                     resolvedJob.AddEvent(EventType.Failed);
                     resolvedJob.Status = JobStatus.Failed;
                 } );
+
+                // UI and API callers must not report a partially cleared job as a success.
+                throw;
             }
         }
         catch (Exception e)

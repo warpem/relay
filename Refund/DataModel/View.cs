@@ -49,30 +49,30 @@ public class View : RelayBase
     /// <summary>
     /// Flat list of ALL jobs in this view (regardless of folder placement).
     /// </summary>
-    private readonly List<Job> _Jobs = new();
+    private readonly SnapshotList<Job> _Jobs = new();
 
-    public ReadOnlyCollection<Job> Jobs => _Jobs.AsReadOnly();
+    public ReadOnlyCollection<Job> Jobs => _Jobs.GetSnapshot();
 
     /// <summary>
     /// Flat list of ALL folders in this view.
     /// </summary>
-    private readonly List<Folder> _Folders = new();
+    private readonly SnapshotList<Folder> _Folders = new();
 
-    public ReadOnlyCollection<Folder> Folders => _Folders.AsReadOnly();
+    public ReadOnlyCollection<Folder> Folders => _Folders.GetSnapshot();
 
     /// <summary>
     /// Flat list of ALL factory instances in this view (regardless of folder placement).
     /// </summary>
-    private readonly List<FactoryInstance> _FactoryInstances = new();
+    private readonly SnapshotList<FactoryInstance> _FactoryInstances = new();
 
-    public ReadOnlyCollection<FactoryInstance> FactoryInstances => _FactoryInstances.AsReadOnly();
+    public ReadOnlyCollection<FactoryInstance> FactoryInstances => _FactoryInstances.GetSnapshot();
 
     /// <summary>
     /// Ordered root-level items (jobs and folders not inside any folder).
     /// </summary>
-    private readonly List<IFolderContent> _RootItems = new();
+    private readonly SnapshotList<IFolderContent> _RootItems = new();
 
-    public ReadOnlyCollection<IFolderContent> RootItems => _RootItems.AsReadOnly();
+    public ReadOnlyCollection<IFolderContent> RootItems => _RootItems.GetSnapshot();
 
     public View()
     {

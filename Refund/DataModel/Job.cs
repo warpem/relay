@@ -693,8 +693,7 @@ public abstract class Job : RelayBase, IFolderContent
     internal void DeleteWorkingDirectory()
     {
         string directoryPath = GetCanonicalDirectoryPath();
-        if (Directory.Exists(directoryPath))
-            Directory.Delete(directoryPath, true);
+        FileUtils.DeleteDirectoryWithRetry(directoryPath);
     }
 
     /// <summary>
@@ -703,8 +702,7 @@ public abstract class Job : RelayBase, IFolderContent
     internal void ResetWorkingDirectory()
     {
         string directoryPath = GetCanonicalDirectoryPath();
-        if (Directory.Exists(directoryPath))
-            Directory.Delete(directoryPath, true);
+        FileUtils.DeleteDirectoryWithRetry(directoryPath);
         Directory.CreateDirectory(directoryPath);
     }
 
@@ -1491,7 +1489,7 @@ public abstract class Job : RelayBase, IFolderContent
         (JobStatus.Aborting, JobStatus.Aborted or JobStatus.Interrupted) => true,
         (JobStatus.Aborted, JobStatus.Building or JobStatus.Staging or JobStatus.Finalizing or JobStatus.Deleted or JobStatus.Clearing) => true,
         (JobStatus.Failed, JobStatus.Building or JobStatus.Finalizing or JobStatus.Deleted or JobStatus.Clearing) => true,
-        (JobStatus.Clearing, JobStatus.Building) => true,
+        (JobStatus.Clearing, JobStatus.Building or JobStatus.Failed) => true,
         (JobStatus.Interrupted, JobStatus.Building or JobStatus.Waiting or JobStatus.Finalizing or JobStatus.Deleted or JobStatus.Clearing) => true,
         _ => false
     };

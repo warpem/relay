@@ -31,7 +31,7 @@ public static class JobStatusExtensions
                     JobStatus.Waiting => new Icons.Filled.Size16.Clock(),
                     JobStatus.Running => new Icons.Filled.Size16.Rocket(),
                     JobStatus.Staging => new Icons.Filled.Size16.ArrowExportUp(),
-                    JobStatus.Finalizing => new Icons.Filled.Size16.CheckmarkCircle(),
+                    JobStatus.Finalizing => new Icons.Regular.Size16.Search(),
                     JobStatus.Finished => new Icons.Filled.Size16.CheckmarkCircle(),
                     JobStatus.Aborting => job.IsResumable ?
                                               new Icons.Regular.Size16.HandRight() :
@@ -53,7 +53,7 @@ public static class JobStatusExtensions
                     JobStatus.Waiting => new Icons.Filled.Size20.Clock(),
                     JobStatus.Running => new Icons.Filled.Size20.Rocket(),
                     JobStatus.Staging => new Icons.Filled.Size20.ArrowExportUp(),
-                    JobStatus.Finalizing => new Icons.Filled.Size20.CheckmarkCircle(),
+                    JobStatus.Finalizing => new Icons.Regular.Size20.Search(),
                     JobStatus.Finished => new Icons.Filled.Size20.CheckmarkCircle(),
                     JobStatus.Aborting => job.IsResumable ?
                                               new Icons.Regular.Size20.HandRight() :
@@ -75,7 +75,7 @@ public static class JobStatusExtensions
                     JobStatus.Waiting => new Icons.Filled.Size24.Clock(),
                     JobStatus.Running => new Icons.Filled.Size24.Rocket(),
                     JobStatus.Staging => new Icons.Filled.Size24.ArrowExportUp(),
-                    JobStatus.Finalizing => new Icons.Filled.Size24.CheckmarkCircle(),
+                    JobStatus.Finalizing => new Icons.Regular.Size24.Search(),
                     JobStatus.Finished => new Icons.Filled.Size24.CheckmarkCircle(),
                     JobStatus.Aborting => job.IsResumable ?
                                               new Icons.Regular.Size24.HandRight() :
@@ -141,7 +141,7 @@ public static class JobStatusExtensions
                     JobStatus.Waiting => new Icons.Filled.Size16.Clock(),
                     JobStatus.Running => new Icons.Filled.Size16.Rocket(),
                     JobStatus.Staging => new Icons.Filled.Size16.ArrowExportUp(),
-                    JobStatus.Finalizing => new Icons.Filled.Size16.CheckmarkCircle(),
+                    JobStatus.Finalizing => new Icons.Regular.Size16.Search(),
                     JobStatus.Finished => new Icons.Filled.Size16.CheckmarkCircle(),
                     JobStatus.Aborting => new Icons.Regular.Size16.HandRight(),
                     JobStatus.Aborted => new Icons.Filled.Size16.RecordStop(),
@@ -158,7 +158,7 @@ public static class JobStatusExtensions
                     JobStatus.Waiting => new Icons.Filled.Size20.Clock(),
                     JobStatus.Running => new Icons.Filled.Size20.Rocket(),
                     JobStatus.Staging => new Icons.Filled.Size20.ArrowExportUp(),
-                    JobStatus.Finalizing => new Icons.Filled.Size20.CheckmarkCircle(),
+                    JobStatus.Finalizing => new Icons.Regular.Size20.Search(),
                     JobStatus.Finished => new Icons.Filled.Size20.CheckmarkCircle(),
                     JobStatus.Aborting => new Icons.Regular.Size20.HandRight(),
                     JobStatus.Aborted => new Icons.Filled.Size20.RecordStop(),
@@ -175,7 +175,7 @@ public static class JobStatusExtensions
                     JobStatus.Waiting => new Icons.Filled.Size24.Clock(),
                     JobStatus.Running => new Icons.Filled.Size24.Rocket(),
                     JobStatus.Staging => new Icons.Filled.Size24.ArrowExportUp(),
-                    JobStatus.Finalizing => new Icons.Filled.Size24.CheckmarkCircle(),
+                    JobStatus.Finalizing => new Icons.Regular.Size24.Search(),
                     JobStatus.Finished => new Icons.Filled.Size24.CheckmarkCircle(),
                     JobStatus.Aborting => new Icons.Regular.Size24.HandRight(),
                     JobStatus.Aborted => new Icons.Filled.Size24.RecordStop(),
@@ -209,6 +209,15 @@ public static class JobStatusExtensions
             _ => icon
         };
     }
+
+    /// <summary>
+    /// Describes the status for icon tooltips without changing the short status label.
+    /// </summary>
+    public static string GetStatusDescription(this JobStatus status) => status switch
+    {
+        JobStatus.Finalizing => "Finalizing: collecting results and logs",
+        _ => status.ToString()
+    };
 
     public static string GetStatusHexColor(JobStatus status) => status switch
     {

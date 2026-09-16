@@ -17,7 +17,8 @@
 
                     <div style="display: flex; flex-wrap: nowrap; align-items: center;">
                         <div style="display: flex; flex-shrink: 0; align-items: center; justify-content: center; width: @((int)IconSize)px; height: @((int)IconSize)px;">
-                            <FluentIcon Value="@Job.GetStatusIcon(IconSize).WithStatusColor(Job)"/>
+                            <FluentIcon Value="@Job.GetStatusIcon(IconSize).WithStatusColor(Job)"
+                                        Title="@Job.Status.GetStatusDescription()"/>
                         </div>
                         <div class="job-name"
                              style="font-size: @(FontSize);
@@ -102,7 +103,8 @@ else
 
                 <div style="display: flex; flex-wrap: nowrap; align-items: center;">
                     <div style="display: flex; flex-shrink: 0; align-items: center; justify-content: center; width: @((int)IconSize)px; height: @((int)IconSize)px;">
-                        <FluentIcon Value="@Job.GetStatusIcon(IconSize).WithStatusColor(Job)"/>
+                        <FluentIcon Value="@Job.GetStatusIcon(IconSize).WithStatusColor(Job)"
+                                    Title="@Job.Status.GetStatusDescription()"/>
                     </div>
                     <div class="job-name"
                          style="font-size: @(FontSize);

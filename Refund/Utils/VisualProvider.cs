@@ -70,7 +70,7 @@ public static class VisualProvider
             JobStatus.Aborted => new AbortedIcon(),
             JobStatus.Failed => new FailedIcon(),
             JobStatus.Building => new BuildingIcon(),
-            JobStatus.Finalizing => new Icons.Regular.Size16.CircleHint(), // Temporary icon until a specific one is created
+            JobStatus.Finalizing => new Icons.Regular.Size16.Search().WithStatusColor(status),
             JobStatus.Aborting => new Icons.Regular.Size16.CircleHint(),   // Temporary icon until a specific one is created
             JobStatus.Deleted => new Icons.Regular.Size16.CircleHint(),    // Temporary icon until a specific one is created
             JobStatus.Clearing => new ClearingIcon(),

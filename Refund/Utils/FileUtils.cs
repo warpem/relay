@@ -2,6 +2,39 @@ namespace Refund.Utils;
 
 public static class FileUtils
 {
+    /// <summary>
+    /// Deletes a directory recursively, allowing transient I/O conflicts to settle.
+    /// Each attempt enumerates the remaining contents again. Persistent failures
+    /// are propagated after a bounded retry period; permission errors fail immediately.
+    /// </summary>
+    internal static void DeleteDirectoryWithRetry(string path) =>
+        DeleteDirectoryWithRetry(path, Directory.Delete, Thread.Sleep);
+
+    internal static void DeleteDirectoryWithRetry(
+        string path, Action<string, bool> deleteDirectory, Action<TimeSpan> delay)
+    {
+        const int maxAttempts = 6;
+
+        for (int attempt = 0; ; attempt++)
+        {
+            try
+            {
+                deleteDirectory(path, true);
+                return;
+            }
+            catch (DirectoryNotFoundException) when (!Directory.Exists(path))
+            {
+                // Already removed, including by a concurrent cleanup.
+                return;
+            }
+            catch (IOException) when (attempt < maxAttempts - 1)
+            {
+                // Wait 100, 200, 400, 800, then 1600 ms (3.1 seconds total).
+                delay(TimeSpan.FromMilliseconds(100 * (1 << attempt)));
+            }
+        }
+    }
+
     public static void CopyDirectoryContents(string sourceDir, string destDir, IEnumerable<string> excludedFiles = null, IEnumerable<string> excludeFolders = null)
     {
         if (excludedFiles == null)

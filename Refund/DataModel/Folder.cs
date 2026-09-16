@@ -52,12 +52,12 @@ public class Folder : RelayBase, IFolderContent
     /// </summary>
     public Folder ParentFolder { get; set; }
 
-    private readonly List<IFolderContent> _Items = new();
+    private readonly SnapshotList<IFolderContent> _Items = new();
 
     /// <summary>
-    /// Ordered list of children — mix of Job and Folder references.
+    /// Ordered snapshot of children — mix of Job, Folder and FactoryInstance references.
     /// </summary>
-    public ReadOnlyCollection<IFolderContent> Items => _Items.AsReadOnly();
+    public ReadOnlyCollection<IFolderContent> Items => _Items.GetSnapshot();
 
     public FolderLayout? Layout { get; set; }
 
