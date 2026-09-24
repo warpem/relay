@@ -115,6 +115,8 @@ public class ExtractParticles : WarpJobGpu, IClusterJob
     private ParticleSet GetParticleSetResource(int iter)
     {
         var result = PortsIn[PortInParticleSet].GetSingleResource<ParticleSet>();
+        if (result == null)
+            return null;
         
         string particlesStarPath = Path.Combine(DirectoryPath, "particles.star");
         string tomogramsStarPath = Path.Combine(DirectoryPath, "particles_tomograms.star");
@@ -122,6 +124,7 @@ public class ExtractParticles : WarpJobGpu, IClusterJob
 
         result.HasData = true;
         result.ParticlesSingleStarPath = particlesStarPath;
+        result.ItemCount = null;
         result.ParticlesMultiStarDirectory = string.Empty;
         result.ToMultiStarPath = null;
         result.TomogramsStarPath = tomogramsStarPath;

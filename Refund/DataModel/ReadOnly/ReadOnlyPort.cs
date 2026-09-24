@@ -151,4 +151,6 @@ public sealed class ReadOnlyPortOut : ReadOnlyPort
     /// A value of -1 (default) typically means the latest available iteration.</param>
     /// <returns>The resource produced by this output port.</returns>
     public Resource GetResource(int iteration = -1) => _portOut.GetResource(iteration);
+
+    public long? ItemCount => _portOut.ItemCount;
 }

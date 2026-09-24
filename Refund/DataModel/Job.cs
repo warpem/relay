@@ -367,6 +367,15 @@ public abstract class Job : RelayBase, IFolderContent
     public bool HasBeenCleaned { get; set; } = false;
 
     /// <summary>
+    /// Counts collected from output files during finalization, keyed by output port name.
+    /// Missing entries are unknown, including expensive counts for jobs saved before counting
+    /// was introduced. Clearing or cloning a job discards these results.
+    /// </summary>
+    [Clearable]
+    [RelayProperty]
+    public Dictionary<string, long> OutputItemCounts { get; set; } = new();
+
+    /// <summary>
     /// Number of processes to use when running this job.
     /// Default is 1, but can be overridden by job implementations that support parallelism.
     /// </summary>
@@ -760,6 +769,13 @@ public abstract class Job : RelayBase, IFolderContent
     {
         // Default implementation does nothing, subclasses should override as needed
     }
+
+    /// <summary>
+    /// Collects output counts once execution has finished. File I/O happens here, outside
+    /// the persistence lock, rather than when constructing or displaying resources.
+    /// </summary>
+    public virtual Dictionary<string, long> CountOutputItems(CancellationToken cancellationToken = default) =>
+        ResourceItemCounter.CountOutputs(this, cancellationToken);
 
     /// <summary>
     /// Gets the path to the log file for a specific iteration.

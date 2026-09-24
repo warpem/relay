@@ -65,6 +65,10 @@
                                 <div style="display: flex; align-items: center; column-gap: 3px;">
                                     <div>
                                         J@($"{edge.Source.Job.Id}")→@(edge.Source.Alias)
+                                        @if (edge.Source.ItemCount is { } itemCount)
+                                        {
+                                            <span class="port-item-count">(@itemCount.ToString("N0"))</span>
+                                        }
                                     </div>
                                     @if (!IsDisabled)
                                     {
@@ -83,7 +87,13 @@
                                     var capturedConn = conn;
                                     var capturedPortName = portIn.Name;
                                     <div style="display: flex; align-items: center; column-gap: 3px;">
-                                        <div>Sub-job @conn.sourceJobId→@conn.sourcePortName</div>
+                                        <div>
+                                            Sub-job @conn.sourceJobId→@conn.sourcePortName
+                                            @if (GetInternalSourcePort?.Invoke(conn.sourceJobId, conn.sourcePortName)?.ItemCount is { } itemCount)
+                                            {
+                                                <span class="port-item-count">(@itemCount.ToString("N0"))</span>
+                                            }
+                                        </div>
                                         @if (!IsDisabled)
                                         {
                                             <FluentButton BackgroundColor="transparent"
@@ -102,7 +112,13 @@
                                     var capturedConn = conn;
                                     var capturedPortName = portIn.Name;
                                     <div style="display: flex; align-items: center; column-gap: 3px;">
-                                        <div style="opacity: 0.7;">Ext. J@(conn.externalJobId)→@(conn.externalPort)</div>
+                                        <div style="opacity: 0.7;">
+                                            Ext. J@(conn.externalJobId)→@(conn.externalPort)
+                                            @if (GetExternalSourcePort?.Invoke(conn.externalJobId, conn.externalPort)?.ItemCount is { } itemCount)
+                                            {
+                                                <span class="port-item-count">(@itemCount.ToString("N0"))</span>
+                                            }
+                                        </div>
                                         @if (!IsDisabled)
                                         {
                                             <FluentButton BackgroundColor="transparent"

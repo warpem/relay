@@ -35,6 +35,10 @@
     padding-right: 2px;
 }
 
+.port-item-count {
+    margin-left: 0.25em;
+}
+
 .port-dots-container {
     position: absolute;
     right: -8px;

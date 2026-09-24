@@ -138,6 +138,8 @@ public class SelectTomograms : WarpJob, ILocalJob
             Directory.CreateDirectory(Path.Combine(DirectoryPath, TiltSeries.ReconstructionDenoisedDirName));
 
         var processedItems = new List<TiltSeries>();
+        // Replace the staged input list even when every tomogram was deselected.
+        File.WriteAllText(ResProcessedItemsJson, "[]");
 
         var pixelSize = inputTomogramSet.PixelSize;
 
@@ -223,6 +225,7 @@ public class SelectTomograms : WarpJob, ILocalJob
         tomogramSet.TiltSeriesSet = GetTiltSeriesSetResource(iter);
 
         // Update processed items to our filtered list
+        tomogramSet.ItemCount = null;
         tomogramSet.ProcessedItemsJson = ResProcessedItemsJson;
         tomogramSet.FailedItemsJson = ResFailedItemsJson;
 
@@ -279,9 +282,11 @@ public class SelectTomograms : WarpJob, ILocalJob
 
         // Point DataDirectory and metadata to our job root (tomostar + xml files are copied there)
         tiltSeriesSet.DataSet.DataDirectory = DirectoryPath;
+        tiltSeriesSet.DataSet.ItemCount = null;
         tiltSeriesSet.LatestMetadataDirectory = DirectoryPath;
 
         // Update processed items to our filtered list
+        tiltSeriesSet.ItemCount = null;
         tiltSeriesSet.ProcessedItemsJson = ResProcessedItemsJson;
         tiltSeriesSet.FailedItemsJson = ResFailedItemsJson;
 

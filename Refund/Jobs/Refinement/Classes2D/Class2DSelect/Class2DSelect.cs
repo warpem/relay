@@ -234,9 +234,12 @@ public class Class2DSelect : Job, ILocalJob
     /// </remarks>
     private Resource GetSelectedParticlesResource(int iter)
     {
-        ParticleSet result = PortsIn["Particles"].Edges[0].Source.GetResource() as ParticleSet;
+        ParticleSet result = PortsIn["Particles"].GetSingleResource<ParticleSet>();
+        if (result == null)
+            return null;
 
         result.ParticlesSingleStarPath = ResSelectedDataStarFile;
+        result.ItemCount = null;
 
         return result;
     }
@@ -252,7 +255,8 @@ public class Class2DSelect : Job, ILocalJob
     /// </remarks>
     private Resource GetSelectedTemplatesResource(int iter) => new TemplateSet(ResSelectedModelStarFile, 
                                                                                ResSelectedClassesFile,
-                                                                               VisSelectedClassStats);
+                                                                               VisSelectedClassStats,
+                                                                               SelectedClasses.LongLength);
 
     /// <summary>
     /// Creates a ParticleSet resource for the unselected particles output port
@@ -265,9 +269,12 @@ public class Class2DSelect : Job, ILocalJob
     /// </remarks>
     private Resource GetUnselectedParticlesResource(int iter)
     {
-        ParticleSet result = PortsIn["Particles"].Edges[0].Source.GetResource() as ParticleSet;
+        ParticleSet result = PortsIn["Particles"].GetSingleResource<ParticleSet>();
+        if (result == null)
+            return null;
 
         result.ParticlesSingleStarPath = ResUnselectedDataStarFile;
+        result.ItemCount = null;
 
         return result;
     }
@@ -283,7 +290,8 @@ public class Class2DSelect : Job, ILocalJob
     /// </remarks>
     private Resource GetUnselectedTemplatesResource(int iter) => new TemplateSet(ResUnselectedModelStarFile, 
                                                                                  ResUnselectedClassesFile,
-                                                                                 VisUnselectedClassStats);
+                                                                                 VisUnselectedClassStats,
+                                                                                 UnselectedClasses.LongLength);
 
     #endregion
     

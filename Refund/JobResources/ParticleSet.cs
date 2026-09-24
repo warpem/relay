@@ -107,7 +107,11 @@ public class ParticleSet : Resource, ICountableResource
     /// </summary>
     public bool HasCtf { get; set; }
     
-    public int ParticleCount { get; set; }
+    public int ParticleCount
+    {
+        get => checked((int)(ItemCount ?? 0));
+        set => ItemCount = value;
+    }
 
     public int Count => ParticleCount;
     

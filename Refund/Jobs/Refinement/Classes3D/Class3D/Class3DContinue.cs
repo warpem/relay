@@ -106,6 +106,7 @@ public class Class3DContinue : Class3D
 
         // Update the path to point to the classified particles
         result.ParticlesSingleStarPath = ResDataStarFile(iter);
+        result.ItemCount = null;
 
         // Set flags indicating that these particles have class assignments, scale factors, and orientation angles
         result.HasClasses = true;

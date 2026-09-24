@@ -452,6 +452,7 @@ public class MotionAndCTF2D : WarpJobGpu, IClusterJob
         result.ThumbnailDirectory = WarpHelper.PathCombine(DirectoryPath, Movie.ThumbnailsDirName);
         result.ToThumbnailPath = (name) => WarpHelper.PathCombine(DirectoryPath, Movie.ToThumbnailsPath(name));
 
+        result.ItemCount = SuccessfulItemCount;
         result.ProcessedItemsJson = ResProcessedItemsJson;
         result.FailedItemsJson = ResFailedItemsJson;
         

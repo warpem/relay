@@ -72,6 +72,7 @@ public class BoxNetInference2D : WarpJobGpu, IClusterJob
     {
         return new ParticleSet()
         {
+            PickedInMicrographs = PortsIn["Micrographs"].GetSingleResource<MicrographSet>(),
             ParticlesMultiStarDirectory = Path.Combine(DirectoryPath, Movie.MatchingDirName),
             ToMultiStarPath = path => Path.Combine(DirectoryPath, 
                                                    Movie.MatchingDirName, 

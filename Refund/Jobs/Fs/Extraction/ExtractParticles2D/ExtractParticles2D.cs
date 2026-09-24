@@ -157,6 +157,7 @@ public class ExtractParticles2D : WarpJobGpu, IClusterJob
             result = PortsIn["Particles"].Edges.First().Source.GetResource() as ParticleSet;
 
         result.ParticlesSingleStarPath = ResParticlesStar("");
+        result.ItemCount = null;
 
         return result;
     }

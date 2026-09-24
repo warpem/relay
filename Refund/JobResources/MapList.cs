@@ -30,6 +30,7 @@ namespace Refund.JobResources
         {
             Maps = maps.ToList().AsReadOnly();
             Model = model;
+            ItemCount = Maps.Count;
         }
 
         /// <summary>

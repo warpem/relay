@@ -588,9 +588,12 @@ public class Class2D : RelionJob, IClusterJob
         if (iter < 0)
             iter = VisAvailableIteration;
         
-        ParticleSet result = PortsIn["Particles"].Edges.First().Source.GetResource() as ParticleSet;
+        ParticleSet result = PortsIn["Particles"].GetSingleResource<ParticleSet>();
+        if (result == null)
+            return null;
 
         result.ParticlesSingleStarPath = ResDataStarFile(iter);
+        result.ItemCount = null;
         result.HasClasses = true;
         result.HasScale = true;
 
@@ -608,7 +611,8 @@ public class Class2D : RelionJob, IClusterJob
     /// </remarks>
     private Resource GetTemplatesResource(int iter) => new TemplateSet(ResModelStarFile(VisAvailableIteration),
                                                                        ResClassesFile(VisAvailableIteration),
-                                                                       VisClassStats(VisAvailableIteration));
+                                                                       VisClassStats(VisAvailableIteration),
+                                                                       NClasses);
 
     /// <summary>
     /// Gets the command name to run RELION for 2D classification

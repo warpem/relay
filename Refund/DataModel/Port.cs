@@ -233,5 +233,35 @@ public class PortOut : Port
     /// </summary>
     /// <param name="iteration">The iteration to get the resource for. -1 represents the final iteration.</param>
     /// <returns>The resource produced by this output port, or null if the resource delegate is not set</returns>
-    public Resource GetResource(int iteration = -1) => ResourceDelegate?.Invoke(iteration);
+    public Resource GetResource(int iteration = -1)
+    {
+        var resource = GetResourceDescription(iteration);
+        if (resource != null && iteration < 0 && Job.OutputItemCounts.TryGetValue(Name, out long count))
+            resource.ItemCount = count;
+        return resource;
+    }
+
+    // Finalization must inspect fresh descriptions without a previous run's saved counts.
+    internal Resource GetResourceDescription(int iteration = -1) => ResourceDelegate?.Invoke(iteration);
+
+    /// <summary>
+    /// Item count for labels, without reading the output files. Unconfigured jobs and
+    /// factory blueprints may not yet be able to construct a resource description.
+    /// </summary>
+    public long? ItemCount
+    {
+        get
+        {
+            if (Job.OutputItemCounts.TryGetValue(Name, out long count))
+                return count;
+            try
+            {
+                return GetResourceDescription()?.ItemCount;
+            }
+            catch (InvalidOperationException) { return null; }
+            catch (NotImplementedException) { return null; }
+            catch (NullReferenceException) { return null; }
+            catch (KeyNotFoundException) { return null; }
+        }
+    }
 }

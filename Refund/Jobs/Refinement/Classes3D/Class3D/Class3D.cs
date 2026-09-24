@@ -854,10 +854,13 @@ public class Class3D : RelionJob, IClusterJob, IPooledJob, IPoolStatus
             iter = VisAvailableIteration;
 
         // Start with input particles and update with classification results
-        ParticleSet result = PortsIn[PortInParticles].Edges.First().Source.GetResource() as ParticleSet;
+        ParticleSet result = PortsIn[PortInParticles].GetSingleResource<ParticleSet>();
+        if (result == null)
+            return null;
 
         // Update the path to point to the classified particles
         result.ParticlesSingleStarPath = ResDataStarFile(iter);
+        result.ItemCount = null;
 
         // Set flags indicating that these particles have class assignments, scale factors, and orientation angles
         result.HasClasses = true;

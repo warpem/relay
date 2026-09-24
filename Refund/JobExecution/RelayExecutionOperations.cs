@@ -34,6 +34,9 @@ public sealed class RelayExecutionOperations : IExecutionOperations
         var job = FindJob(attempt);
         try
         {
+            if (attempt.Purpose == ExecutionPurpose.Run)
+                await _updateJob(job, updatedJob => updatedJob.OutputItemCounts = new());
+
             if (attempt.BackendKind == ExecutionBackendKind.Local)
                 await PrepareLocalAsync(job, cancellationToken);
             else
@@ -130,6 +133,7 @@ public sealed class RelayExecutionOperations : IExecutionOperations
             await job.WriteToLifecycleLog("Finalizing job");
             job.FinalizeRun((updatedJob, action) =>
                 _updateJob(updatedJob, action).GetAwaiter().GetResult());
+            await SaveOutputItemCountsAsync(job, cancellationToken);
             await job.WriteToLifecycleLog("Job finalization finished");
             return;
         }
@@ -142,6 +146,9 @@ public sealed class RelayExecutionOperations : IExecutionOperations
             await _updateJob(job, _ => results());
         }
 
+        if (outcome == ExecutionOutcome.Succeeded)
+            await SaveOutputItemCountsAsync(job, cancellationToken);
+
         await job.WriteToLifecycleLog(outcome switch
         {
             ExecutionOutcome.Succeeded => "Job completed",
@@ -149,6 +156,14 @@ public sealed class RelayExecutionOperations : IExecutionOperations
             ExecutionOutcome.Interrupted => "Job interrupted",
             _ => "Job failed"
         });
+    }
+
+    private async Task SaveOutputItemCountsAsync(Job job, CancellationToken cancellationToken)
+    {
+        // Parsing can scan very large STAR files; keep that work outside the repository update lock.
+        var counts = job.CountOutputItems(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        await _updateJob(job, updatedJob => updatedJob.OutputItemCounts = counts);
     }
 
     public async Task<BackendStartResult> StartWorkerAsync(

@@ -192,6 +192,7 @@ public class ReconstructTomograms : WarpJobGpu, IClusterJob
 
         var tomogramSet = new TomogramSet
         {
+            ItemCount = SuccessfulItemCount,
             // Link to the source tilt series
             TiltSeriesSet = tiltSeriesSet,
             

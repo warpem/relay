@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Components;
 using Microsoft.FluentUI.AspNetCore.Components;
 using Refund.DataModel.ReadOnly;
+using Refund.Services.Core.DataManager;
 using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons;
 
 namespace Relay.Panels.Right.JobEditor;
@@ -20,8 +21,13 @@ namespace Relay.Panels.Right.JobEditor;
 /// Can be used in both editable (JobEditor) and read-only (JobProperties) contexts
 /// by setting the IsDisabled property.
 /// </remarks>
-public partial class JobPortDisplay : ComponentBase
+public partial class JobPortDisplay : ComponentBase, IDisposable
 {
+    [Inject]
+    private DataManager DataManager { get; set; }
+
+    private readonly Dictionary<string, GroupEventSubscription> _sourceSubscriptions = new();
+
     /// <summary>
     /// Gets or sets the job whose ports should be displayed.
     /// </summary>
@@ -59,6 +65,9 @@ public partial class JobPortDisplay : ComponentBase
     /// </summary>
     [Parameter]
     public Func<string, List<(int sourceJobId, string sourcePortName)>> GetInternalConnections { get; set; }
+
+    [Parameter]
+    public Func<int, string, ReadOnlyPortOut> GetInternalSourcePort { get; set; }
 
     /// <summary>
     /// Whether to show exposure toggle buttons on input ports (builder mode).
@@ -105,6 +114,9 @@ public partial class JobPortDisplay : ComponentBase
     [Parameter]
     public Func<string, List<(int externalJobId, string externalPort)>> GetExternalConnections { get; set; }
 
+    [Parameter]
+    public Func<int, string, ReadOnlyPortOut> GetExternalSourcePort { get; set; }
+
     /// <summary>
     /// Callback invoked when an external connection should be removed (builder mode).
     /// Parameters: (portName, externalJobId, externalPort).
@@ -118,6 +130,44 @@ public partial class JobPortDisplay : ComponentBase
     private Icon iconDeleteEdge = new Icons.Filled.Size16.Delete();
     private Icon iconExposedFilled = new Icons.Filled.Size16.ArrowCircleUpRight();
     private Icon iconExposedRegular = new Icons.Regular.Size16.ArrowCircleUpRight();
+
+    protected override void OnParametersSet()
+    {
+        var sources = Job.PortsIn.Values
+            .SelectMany(port => port.Edges.Select(edge => edge.Source.Job))
+            .ToList();
+
+        foreach (var port in Job.PortsIn.Values)
+        {
+            if (GetInternalConnections != null && GetInternalSourcePort != null)
+                sources.AddRange(GetInternalConnections(port.Name)
+                    .Select(connection => GetInternalSourcePort(connection.sourceJobId, connection.sourcePortName)?.Job));
+            if (GetExternalConnections != null && GetExternalSourcePort != null)
+                sources.AddRange(GetExternalConnections(port.Name)
+                    .Select(connection => GetExternalSourcePort(connection.externalJobId, connection.externalPort)?.Job));
+        }
+
+        var groups = sources.Where(source => source?.Space?.Project != null)
+            .Select(source => GroupName.Job(source.Space.Project.Id, source.Space.Id, source.Id))
+            .ToHashSet();
+
+        foreach (var group in _sourceSubscriptions.Keys.Where(group => !groups.Contains(group)).ToList())
+        {
+            _sourceSubscriptions[group].Unsubscribe();
+            _sourceSubscriptions.Remove(group);
+        }
+
+        foreach (var group in groups.Where(group => !_sourceSubscriptions.ContainsKey(group)))
+            _sourceSubscriptions[group] = DataManager.JobUpdated.Add(group,
+                async _ => await InvokeAsync(StateHasChanged));
+    }
+
+    public void Dispose()
+    {
+        foreach (var subscription in _sourceSubscriptions.Values)
+            subscription.Unsubscribe();
+        _sourceSubscriptions.Clear();
+    }
 
     /// <summary>
     /// Gets a user-friendly text representation of a port's connection requirements.

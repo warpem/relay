@@ -407,6 +407,12 @@ public partial class JobEditor : ComponentBase, IDisposable
             .ToList();
     }
 
+    private ReadOnlyPortOut GetExternalSourcePort(int jobId, string portName) =>
+        Session.Space?.FindJob(jobId)?.PortsOut.GetValueOrDefault(portName);
+
+    private ReadOnlyPortOut GetInternalSourcePort(int jobId, string portName) =>
+        Session.FactoryDefinition?.SubJobs.FirstOrDefault(job => job.Id == jobId)?.PortsOut.GetValueOrDefault(portName);
+
     /// <summary>
     /// Returns internal edge connections targeting a specific port on the current sub-job.
     /// </summary>

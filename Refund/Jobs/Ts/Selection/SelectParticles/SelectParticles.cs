@@ -208,6 +208,9 @@ public class SelectParticles : WarpJob, ILocalJob
         var tomogramSet = PortsIn[PortInTomogramSet].GetSingleResource<TomogramSet>();
 
         var result = PortsIn[PortInParticleSet].GetSingleResource<ParticleSet>();
+        if (result == null)
+            return null;
+        result.ItemCount = null;
 
         // Imported position sets have no tomograms of their own to point at, so attach the ones
         // curation ran against - downstream expanded views read them off the set.

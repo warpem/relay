@@ -295,8 +295,11 @@ public class InitialReference : RelionJob, IClusterJob
             iter = VisAvailableIteration;
 
         ParticleSet result = PortsIn[PortInParticles].GetSingleResource<ParticleSet>(iter);
+        if (result == null)
+            return null;
 
         result.ParticlesSingleStarPath = ResDataStarFile(iter);
+        result.ItemCount = null;
         result.HasClasses = true;
         result.HasScale = true;
         result.HasAngles = true;

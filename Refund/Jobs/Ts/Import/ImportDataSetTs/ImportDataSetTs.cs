@@ -173,6 +173,7 @@ public class ImportDataSetTs : WarpJob, IClusterJob
 
         return new DataSetTs()
         {
+            ItemCount = SuccessfulItemCount,
             Micrographs = alignedMicrographs,
             DataDirectory = DirectoryPath,
             TomogramDimensions = TomogramDimensions

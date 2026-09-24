@@ -158,6 +158,7 @@ public class ExpandSymmetry : RelionJob, IClusterJob
             return null;
 
         result.ParticlesSingleStarPath = ResExpandedStarFile;
+        result.ItemCount = null;
 
         if (!string.IsNullOrEmpty(result.OptimisationSetStarPath))
             result.OptimisationSetStarPath = ResOptimisationSetStarFile;
@@ -260,20 +261,4 @@ public class ExpandSymmetry : RelionJob, IClusterJob
         return null;
     }
 
-    public override Action TrackProgressResults()
-    {
-        JobTools.EnsureResultsDirectory(RelayResultsDirectoryPath);
-
-        // Record the expanded particle count once RELION has written the output, so the output
-        // resource reports the right number. Called on completion (and while running); guarded to
-        // run its work only once. The optimisation set is written earlier, in Stage().
-        if (ExpandedParticleCount > 0 || !File.Exists(ResExpandedStarFile))
-            return null;
-
-        int count = Star.IsMultiTable(ResExpandedStarFile)
-            ? new Star(ResExpandedStarFile, "particles").RowCount
-            : new Star(ResExpandedStarFile).RowCount;
-
-        return () => ExpandedParticleCount = count;
-    }
 }

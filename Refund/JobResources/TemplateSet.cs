@@ -33,11 +33,13 @@ namespace Refund.JobResources
         /// <param name="modelStarPath">Path to the template model metadata in STAR format</param>
         /// <param name="templateMrcPath">Path to the template volume(s) in MRC format</param>
         /// <param name="visClassStats">Path to visualization of class statistics for the templates</param>
-        public TemplateSet(string modelStarPath, string templateMrcPath, string visClassStats)
+        /// <param name="itemCount">Number of templates, when known from job settings or results</param>
+        public TemplateSet(string modelStarPath, string templateMrcPath, string visClassStats, long? itemCount = null)
         {
             ModelStarPath = modelStarPath;
             TemplateMrcPath = templateMrcPath;
             VisClassStats = visClassStats;
+            ItemCount = itemCount;
         }
     }
 }

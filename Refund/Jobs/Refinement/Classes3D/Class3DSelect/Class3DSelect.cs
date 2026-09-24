@@ -251,8 +251,11 @@ public class Class3DSelect : Job, ILocalJob
     private Resource GetSelectedParticlesResource(int iter)
     {
         ParticleSet result = PortsIn["Particles"].GetSingleResource<ParticleSet>(SelectedIteration);
+        if (result == null)
+            return null;
 
         result.ParticlesSingleStarPath = ResSelectedDataStarFile;
+        result.ItemCount = null;
         result.OptimisationSetStarPath = ResSelectedOptimisationSetStarFile;
 
         return result;

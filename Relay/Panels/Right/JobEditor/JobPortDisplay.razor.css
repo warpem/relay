@@ -22,6 +22,11 @@
     align-items: center;
 }
 
+.port-item-count {
+    margin-left: 0.25em;
+    white-space: nowrap;
+}
+
 .delete-edge-button {
     padding: 0px !important;
     padding-left: 0 !important;

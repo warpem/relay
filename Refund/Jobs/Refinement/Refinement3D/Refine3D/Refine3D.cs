@@ -750,8 +750,11 @@ public class Refine3D : RelionJob, IClusterJob, IPooledJob, IPoolStatus
         bool isFinal = iter == VisAvailableIteration && HasRunToCompletion;
 
         var result = PortsIn[PortInParticles].GetSingleResource<ParticleSet>();
+        if (result == null)
+            return null;
 
         result.ParticlesSingleStarPath = isFinal ? ResFinalDataStarFile : ResDataStarFile(iter);
+        result.ItemCount = null;
         result.ParticlesMultiStarDirectory = string.Empty;
         result.ToMultiStarPath = null;
         result.HasAngles = true;

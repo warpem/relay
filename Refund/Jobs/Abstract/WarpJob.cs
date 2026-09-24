@@ -37,6 +37,11 @@ public abstract class WarpJob : Job, IItemProgress
     [Clearable]
     public int? NItemsTotal { get; set; }
 
+    /// <summary>Successfully produced items; Warp progress includes failed attempts.</summary>
+    protected long? SuccessfulItemCount => NItemsProcessed is { } processed
+        ? Math.Max(0L, (long)processed - (NItemsFailed ?? 0))
+        : null;
+
     protected WarpJob()
     {
         MemoryPerWorker = DefaultMemoryPerWorker;

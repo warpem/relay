@@ -161,6 +161,7 @@ public class AlignEtomo : WarpJobGpu, IClusterJob
 
         return new TiltSeriesSet()
         {
+            ItemCount = SuccessfulItemCount,
             DataSet = previousDataSet,
             HasMetadata = true,
             LatestMetadataDirectory = DirectoryPath,

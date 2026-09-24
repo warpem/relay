@@ -8,6 +8,12 @@
 public abstract class Resource
 {
     /// <summary>
+    /// Number of scientific items represented by this resource, when known.
+    /// Null means unknown or not applicable. Reading this metadata never scans data files.
+    /// </summary>
+    public virtual long? ItemCount { get; set; }
+
+    /// <summary>
     /// Creates a new Resource instance.
     /// </summary>
     public Resource()

@@ -116,6 +116,7 @@ public class ThresholdStatistics : LocalJob, ILocalJob
             return null;
 
         result.ParticlesSingleStarPath = ResFilteredStarFile;
+        result.ItemCount = null;
 
         if (!string.IsNullOrEmpty(result.OptimisationSetStarPath))
             result.OptimisationSetStarPath = ResOptimisationSetStarFile;

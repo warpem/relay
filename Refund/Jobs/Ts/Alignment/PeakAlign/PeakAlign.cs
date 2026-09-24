@@ -109,6 +109,7 @@ public class PeakAlign : WarpJobGpu, IClusterJob
         resource.HasMetadata = true;
         resource.LatestMetadataDirectory = DirectoryPath;
 
+        resource.ItemCount = SuccessfulItemCount;
         resource.ProcessedItemsJson = ResProcessedItemsJson;
         resource.FailedItemsJson = ResFailedItemsJson;
 
