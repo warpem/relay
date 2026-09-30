@@ -435,10 +435,14 @@ public sealed class QueueRepository
         int? desiredSize = attempt.Phase.IsTerminal() ? null : attempt.WorkerGroup?.DesiredCount;
         int stopping = attempt.WorkerGroup?.Workers.Count(worker =>
             worker.Phase is WorkerPhase.Cancelling or WorkerPhase.Stopping) ?? 0;
-        if (job.PoolDesiredSize != desiredSize || job.PoolWorkersStopping != stopping)
+        int unknown = attempt.WorkerGroup?.Workers.Count(worker =>
+            worker.Phase == WorkerPhase.Indeterminate) ?? 0;
+        if (job.PoolDesiredSize != desiredSize || job.PoolWorkersStopping != stopping ||
+            job.PoolWorkersUnknown != unknown)
         {
             job.PoolDesiredSize = desiredSize;
             job.PoolWorkersStopping = stopping;
+            job.PoolWorkersUnknown = unknown;
             changed = true;
         }
         string warning = attempt.Health == ExecutionHealth.Healthy ? null : attempt.HealthDetail;
@@ -498,6 +502,8 @@ public sealed class QueueRepository
         if (job.PoolDesiredSize != (attempt.Phase.IsTerminal() ? null : attempt.WorkerGroup?.DesiredCount) ||
             job.PoolWorkersStopping != (attempt.WorkerGroup?.Workers.Count(worker =>
                 worker.Phase is WorkerPhase.Cancelling or WorkerPhase.Stopping) ?? 0) ||
+            job.PoolWorkersUnknown != (attempt.WorkerGroup?.Workers.Count(worker =>
+                worker.Phase == WorkerPhase.Indeterminate) ?? 0) ||
             job.ExecutionWarning != (attempt.Health == ExecutionHealth.Healthy ? null : attempt.HealthDetail) ||
             job.QueueId != attempt.QueueId || job.ClusterJobId != attempt.Receipt?.Id ||
             job.Status != status)

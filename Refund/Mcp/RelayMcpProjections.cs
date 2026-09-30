@@ -85,8 +85,8 @@ public static class RelayMcpProjections
     public static JobPoolDto? ToPoolDto(ReadOnlyJob job) =>
         job is IPoolStatus pool && job.PoolDesiredSize is { } desired
             ? new JobPoolDto(desired, pool.PoolWorkersRunning,
-                Math.Max(0, pool.PoolWorkersAlive - pool.PoolWorkersRunning - job.PoolWorkersStopping),
-                job.PoolWorkersStopping, pool.PoolWorkersSubmitted, job.Status == JobStatus.Running)
+                Math.Max(0, pool.PoolWorkersAlive - pool.PoolWorkersRunning - job.PoolWorkersStopping - job.PoolWorkersUnknown),
+                job.PoolWorkersStopping, pool.PoolWorkersSubmitted, job.Status == JobStatus.Running, job.PoolWorkersUnknown)
             : null;
 
     /// <summary>

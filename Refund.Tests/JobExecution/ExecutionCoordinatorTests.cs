@@ -664,8 +664,12 @@ public class ExecutionCoordinatorTests
         Assert.Single(cleanup, effect => effect is FinalizeExecution);
     }
 
-    [Fact]
-    public void UntraceableWorkerPreventsSuccessfulParentCompletion()
+    [Theory]
+    [InlineData(BackendObservationKind.Succeeded, ExecutionOutcome.Succeeded, ExecutionPhase.Succeeded)]
+    [InlineData(BackendObservationKind.Failed, ExecutionOutcome.Failed, ExecutionPhase.Failed)]
+    [InlineData(BackendObservationKind.Canceled, ExecutionOutcome.Canceled, ExecutionPhase.Canceled)]
+    public void UntraceableWorkerPreservesParentOutcome(
+        BackendObservationKind observation, ExecutionOutcome outcome, ExecutionPhase phase)
     {
         var workerQueue = new ExecutionQueuePolicy(2, ExecutionBackendKind.ExternalScheduler);
         var coordinator = new ExecutionCoordinator([LocalQueue, workerQueue]);
@@ -680,25 +684,26 @@ public class ExecutionCoordinatorTests
             attempt.Id, workerStart.OperationId, "submission timed out");
 
         coordinator.Observe(attempt.Id, new BackendObservation(BackendObservationKind.Running));
-        Assert.Equal(ExecutionHealth.Indeterminate, attempt.Health);
-        Assert.Contains("worker submission", attempt.HealthDetail);
+        Assert.Equal(ExecutionHealth.Healthy, attempt.Health);
+        Assert.Null(attempt.HealthDetail);
+        Assert.Equal(WorkerPhase.Indeterminate, Assert.Single(attempt.WorkerGroup.Workers).Phase);
 
-        coordinator.Observe(attempt.Id, new BackendObservation(BackendObservationKind.Succeeded));
+        coordinator.Observe(attempt.Id, new BackendObservation(observation, "manager result"));
         var completion = coordinator.PlanEffects();
         var finalization = Assert.IsType<FinalizeExecution>(Assert.Single(completion));
 
-        Assert.Equal(ExecutionOutcome.Interrupted, finalization.Outcome);
-        Assert.Equal(ExecutionHealth.Indeterminate, attempt.Health);
-        Assert.Contains("cannot prove", attempt.HealthDetail);
+        Assert.Equal(outcome, finalization.Outcome);
+        Assert.Equal(ExecutionHealth.Healthy, attempt.Health);
+        Assert.Null(attempt.HealthDetail);
 
         coordinator.FinalizationCompleted(attempt.Id);
 
-        Assert.Equal(ExecutionPhase.Interrupted, attempt.Phase);
-        Assert.Contains(attempt.History, entry => entry.Detail == attempt.HealthDetail);
+        Assert.Equal(phase, attempt.Phase);
+        Assert.Equal("manager result", attempt.History.Last(entry => entry.Phase == ExecutionPhase.Finalizing).Detail);
     }
 
     [Fact]
-    public void UnknownWorkerStartAfterParentCompletionInterruptsTheParent()
+    public void UnknownWorkerStartAfterParentCompletionPreservesSuccess()
     {
         var workerQueue = new ExecutionQueuePolicy(2, ExecutionBackendKind.ExternalScheduler);
         var coordinator = new ExecutionCoordinator([LocalQueue, workerQueue]);
@@ -717,9 +722,9 @@ public class ExecutionCoordinatorTests
         var effects = coordinator.PlanEffects();
 
         var finalization = Assert.IsType<FinalizeExecution>(Assert.Single(effects));
-        Assert.Equal(ExecutionOutcome.Interrupted, finalization.Outcome);
+        Assert.Equal(ExecutionOutcome.Succeeded, finalization.Outcome);
         coordinator.FinalizationCompleted(attempt.Id);
-        Assert.Equal(ExecutionPhase.Interrupted, attempt.Phase);
+        Assert.Equal(ExecutionPhase.Succeeded, attempt.Phase);
     }
 
     [Fact]
@@ -742,13 +747,68 @@ public class ExecutionCoordinatorTests
         var copy = Assert.Single(restored.Attempts);
 
         Assert.Equal(WorkerPhase.Indeterminate, Assert.Single(copy.WorkerGroup.Workers).Phase);
-        Assert.Equal(ExecutionHealth.Indeterminate, copy.Health);
+        Assert.Equal(ExecutionHealth.Healthy, copy.Health);
 
         restored.Observe(copy.Id, new BackendObservation(BackendObservationKind.Succeeded));
         var completion = restored.PlanEffects();
         Assert.Equal(
-            ExecutionOutcome.Interrupted,
+            ExecutionOutcome.Succeeded,
             Assert.IsType<FinalizeExecution>(Assert.Single(completion)).Outcome);
+    }
+
+    [Theory]
+    [InlineData(BackendObservationKind.Succeeded, ExecutionOutcome.Succeeded)]
+    [InlineData(BackendObservationKind.Failed, ExecutionOutcome.Failed)]
+    [InlineData(BackendObservationKind.Canceled, ExecutionOutcome.Canceled)]
+    public void RecoveryDuringFinalizationPreservesParentOutcome(
+        BackendObservationKind observation, ExecutionOutcome outcome)
+    {
+        var queue = new ExecutionQueuePolicy(1, ExecutionBackendKind.ExternalScheduler);
+        var original = new ExecutionCoordinator([queue]);
+        var attempt = original.RequestRun(Job(1), 1, ResourceVector.None, true,
+            new WorkerGroupRequest(1, 1, 1));
+        original.PreparationCompleted(attempt.Id);
+        original.PlanEffects();
+        original.StartCompleted(attempt.Id, new BackendReceipt("manager"), true);
+        Assert.Single(original.PlanEffects().OfType<StartWorker>());
+        original.Observe(attempt.Id, new BackendObservation(observation));
+        Assert.DoesNotContain(original.PlanEffects(), effect => effect is FinalizeExecution);
+
+        var restored = new ExecutionCoordinator([queue]);
+        restored.Restore(original.CreateSnapshot());
+        restored.Recover();
+
+        var finalization = Assert.Single(restored.PlanEffects().OfType<FinalizeExecution>());
+        Assert.Equal(outcome, finalization.Outcome);
+        Assert.Equal(1, Assert.Single(restored.Attempts).WorkerGroup.TotalSubmissions);
+    }
+
+    [Fact]
+    public void RecoveryClearsLegacyWorkerWarningWithoutClearingManagerWarnings()
+    {
+        var queue = new ExecutionQueuePolicy(1, ExecutionBackendKind.ExternalScheduler);
+        var original = new ExecutionCoordinator([queue]);
+        var attempt = original.RequestRun(Job(1), 1, ResourceVector.None, true,
+            new WorkerGroupRequest(1, 1, 1));
+        var snapshot = original.CreateSnapshot();
+        foreach (string warning in new[] {
+                     "A worker submission has an unknown outcome and no scheduler receipt; " +
+                     "Relay cannot prove that all worker processes stopped.",
+                     "scheduler unavailable" })
+        {
+            var restored = new ExecutionCoordinator([queue]);
+            restored.Restore(snapshot with
+            {
+                Attempts = [attempt.CreateSnapshot() with
+                {
+                    Health = ExecutionHealth.Indeterminate,
+                    HealthDetail = warning
+                }]
+            });
+            restored.Recover();
+            var copy = Assert.Single(restored.Attempts);
+            Assert.Equal(warning == "scheduler unavailable" ? warning : null, copy.HealthDetail);
+        }
     }
 
     [Fact]

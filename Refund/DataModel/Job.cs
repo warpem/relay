@@ -216,6 +216,11 @@ public abstract class Job : RelayBase, IFolderContent
     [Clearable]
     [RelayProperty]
     public int PoolWorkersStopping { get; set; }
+
+    /// <summary>Worker submissions with no scheduler receipt; counted against the pool target.</summary>
+    [Clearable]
+    [RelayProperty]
+    public int PoolWorkersUnknown { get; set; }
     
     [Clearable]
     [RelayProperty]

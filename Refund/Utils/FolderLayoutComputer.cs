@@ -19,11 +19,9 @@ public static class FolderLayoutComputer
         if (directItems.Count == 0)
             return new FolderLayout { ConnectivityHash = hash };
 
-        // Map each direct item to a node key: "J{id}" for jobs, "F{id}" for folders
-        // Also map recursive job IDs inside sub-folders back to the sub-folder's node
+        // Map jobs to direct-item nodes, collapsing descendants into their folder or factory.
         var jobToNodeId = new Dictionary<int, int>(); // job.Id -> item index in directItems
         var nodeIsFolder = new Dictionary<int, bool>(); // item index -> isFolder
-        var indexToKey = new Dictionary<int, string>(); // item index -> "J5" or "F3"
 
         for (int i = 0; i < directItems.Count; i++)
         {
@@ -32,12 +30,10 @@ public static class FolderLayoutComputer
             {
                 jobToNodeId[job.Id] = i;
                 nodeIsFolder[i] = false;
-                indexToKey[i] = $"J{job.Id}";
             }
             else if (item is Folder subFolder)
             {
                 nodeIsFolder[i] = true;
-                indexToKey[i] = $"F{subFolder.Id}";
                 // Map all recursive jobs inside this sub-folder to this node
                 foreach (var subJob in subFolder.GetAllJobsRecursive())
                     jobToNodeId[subJob.Id] = i;
@@ -45,7 +41,6 @@ public static class FolderLayoutComputer
             else if (item is FactoryInstance fi)
             {
                 nodeIsFolder[i] = false;
-                indexToKey[i] = $"FI{fi.Id}";
                 // Map all sub-job IDs to this node so edges resolve correctly
                 foreach (var sjId in fi.SubJobIds)
                     jobToNodeId[sjId] = i;
@@ -93,35 +88,9 @@ public static class FolderLayoutComputer
         foreach (var (sourceNode, targetNode) in edgePairList)
             portHelper.AddEdge(graph, layoutNodes[sourceNode], layoutNodes[targetNode]);
 
-        // Incremental layout: use previous positions as hints
-        if (previous is { Nodes.Count: > 0 })
-        {
-            var prevPositions = new Dictionary<string, FolderLayoutNode>();
-            foreach (var pn in previous.Nodes)
-                prevPositions[pn.IsFolder ? $"F{pn.ItemId}" : $"J{pn.ItemId}"] = pn;
-
-            // Set position hints for all nodes that exist in previous layout.
-            // New nodes (not in previous) remain unhinted and are placed by the algorithm.
-            bool anyHinted = false;
-            for (int i = 0; i < directItems.Count; i++)
-            {
-                var key = indexToKey[i];
-                if (prevPositions.TryGetValue(key, out var prevNode))
-                {
-                    layoutNodes[i].X = prevNode.X;
-                    layoutNodes[i].Y = prevNode.Y;
-                    anyHinted = true;
-                }
-            }
-
-            if (anyHinted)
-                graph.Options.Interactive = true;
-        }
-
-        // Run layout, then relax strained nodes to fix suboptimal incremental placement
+        // The cache already preserves unchanged layouts. Once connectivity changes,
+        // old positions must not constrain dependency layers or crossing minimization.
         LayeredLayoutEngine.Layout(graph);
-        if (graph.Options.Interactive)
-            LayeredLayoutEngine.RelaxLayout(graph, strainThreshold: 3.0, maxIterations: 2);
 
         // Extract results
         var result = new FolderLayout
@@ -296,7 +265,8 @@ public static class FolderLayoutComputer
             edgePairs.Add($"{srcKey}->{tgtKey}");
         }
 
-        var raw = string.Join(",", itemKeys) + "|" + string.Join(",", edgePairs);
+        // Invalidate saved layouts produced with the old position-preserving algorithm.
+        var raw = "topology-v2|" + string.Join(",", itemKeys) + "|" + string.Join(",", edgePairs);
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(raw));
         return Convert.ToHexString(bytes)[..16];
     }
@@ -309,7 +279,9 @@ public static class FolderLayoutComputer
     {
         var subJobs = definition.SubJobs;
         if (subJobs.Count == 0)
-            return new FolderLayout { ConnectivityHash = "" };
+            return previousLayout is { ConnectivityHash: "", Nodes.Count: 0, Edges.Count: 0 }
+                ? previousLayout
+                : new FolderLayout();
 
         // Build sub-job lookup by actual ID
         var subJobById = new Dictionary<int, ReadOnlyJob>();
@@ -332,7 +304,8 @@ public static class FolderLayoutComputer
         // Compute connectivity hash
         var itemKeys = subJobById.Keys.OrderBy(k => k).Select(k => $"SJ{k}").ToList();
         var edgeDescs = edgePairs.Select(e => $"SJ{e.srcId}->SJ{e.tgtId}").OrderBy(s => s).ToList();
-        var raw = string.Join(",", itemKeys) + "|" + string.Join(",", edgeDescs);
+        // Invalidate saved layouts produced with the old position-preserving algorithm.
+        var raw = "topology-v2|" + string.Join(",", itemKeys) + "|" + string.Join(",", edgeDescs);
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(raw)))[..16];
 
         var previous = previousLayout;
@@ -359,27 +332,8 @@ public static class FolderLayoutComputer
         foreach (var (srcId, tgtId) in edgeList)
             portHelper.AddEdge(graph, layoutNodes[srcId], layoutNodes[tgtId]);
 
-        // Incremental layout hints
-        if (previous is { Nodes.Count: > 0 })
-        {
-            var prevPositions = previous.Nodes.ToDictionary(n => n.ItemId);
-            bool anyHinted = false;
-            foreach (var (id, _) in subJobById)
-            {
-                if (prevPositions.TryGetValue(id, out var prevNode))
-                {
-                    layoutNodes[id].X = prevNode.X;
-                    layoutNodes[id].Y = prevNode.Y;
-                    anyHinted = true;
-                }
-            }
-            if (anyHinted)
-                graph.Options.Interactive = true;
-        }
-
+        // Recompute from current connectivity rather than preserving obsolete layers.
         LayeredLayoutEngine.Layout(graph);
-        if (graph.Options.Interactive)
-            LayeredLayoutEngine.RelaxLayout(graph, strainThreshold: 3.0, maxIterations: 2);
 
         // Extract results
         var result = new FolderLayout

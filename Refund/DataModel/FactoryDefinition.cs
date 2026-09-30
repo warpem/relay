@@ -51,6 +51,13 @@ public class FactoryDefinition : RelayBase
     [System.Text.Json.Serialization.JsonIgnore]
     public FolderLayout? CardLayout { get; set; }
 
+    public void UpdateLayouts()
+    {
+        var definition = AsReadOnly();
+        DiagramLayout = Utils.DiagramLayoutComputer.ComputeLayoutForDefinition(definition);
+        CardLayout = Utils.FolderLayoutComputer.ComputeCardLayoutForDefinition(definition, CardLayout);
+    }
+
     public ReadOnlyFactoryDefinition AsReadOnly()
     {
         return ReadOnlyCache.GetValue(this, d => new ReadOnlyFactoryDefinition(d));

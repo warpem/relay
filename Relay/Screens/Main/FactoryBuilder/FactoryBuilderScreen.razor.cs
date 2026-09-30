@@ -59,10 +59,6 @@ public partial class FactoryBuilderScreen : ComponentBase, IDisposable
         Session.OnFactoryDefinitionChanged += HandleDefinitionChanged;
         DiagramService.OnRelayoutRequested += HandleRelayoutRequested;
         SubscribeToEvents();
-
-        // Compute initial layout if definition has sub-jobs but no layout
-        if (Definition != null && Definition.SubJobs.Count > 0 && Definition.DiagramLayout == null)
-            await RecomputeLayout();
     }
 
     private void SubscribeToEvents()
@@ -72,27 +68,7 @@ public partial class FactoryBuilderScreen : ComponentBase, IDisposable
         {
             _subscriptions.Add(DataManager.FactoryDefinitionUpdated.Add(
                 GroupName.FactoryDefinition(Session.Project.Id, Session.Space.Id, Definition.Id),
-                async _ =>
-                {
-                    // Recompute layout if connectivity changed (e.g. edge added/removed from editor).
-                    // The layout computers return the same object if the hash matches, so check
-                    // for identity to avoid an infinite update loop.
-                    if (Definition != null)
-                    {
-                        var newLayout = DiagramLayoutComputer.ComputeLayoutForDefinition(Definition);
-                        if (newLayout != Definition.DiagramLayout)
-                        {
-                            var newCardLayout = FolderLayoutComputer.ComputeCardLayoutForDefinition(Definition, Definition.CardLayout);
-                            await DataManager.UpdateFactoryDefinition(Session.User, Session.Space, Definition, def =>
-                            {
-                                def.DiagramLayout = newLayout;
-                                def.CardLayout = newCardLayout;
-                            });
-                            return; // The update above will fire another event that triggers StateHasChanged
-                        }
-                    }
-                    await InvokeAsync(StateHasChanged);
-                }));
+                async _ => await InvokeAsync(StateHasChanged)));
         }
     }
 
@@ -132,8 +108,6 @@ public partial class FactoryBuilderScreen : ComponentBase, IDisposable
                     }
                 }
             });
-
-            await RecomputeLayout();
         }
         catch (Exception exc)
         {
@@ -160,8 +134,6 @@ public partial class FactoryBuilderScreen : ComponentBase, IDisposable
                         $"{template.Id}.{args.portIn.Name}"));
                 }
             });
-
-            await RecomputeLayout();
         }
         catch (Exception exc)
         {
@@ -193,8 +165,6 @@ public partial class FactoryBuilderScreen : ComponentBase, IDisposable
                     $"{args.portOut.Job.Id}.{args.portOut.Name}",
                     $"{args.portIn.Job.Id}.{args.portIn.Name}"));
             });
-
-            await RecomputeLayout();
         }
         catch (Exception exc)
         {
@@ -399,7 +369,6 @@ public partial class FactoryBuilderScreen : ComponentBase, IDisposable
                 def.QueueAssignments.Remove(subJobId);
             });
 
-            await RecomputeLayout();
             Selection.Clear();
         }
         catch (Exception exc)
@@ -428,12 +397,10 @@ public partial class FactoryBuilderScreen : ComponentBase, IDisposable
 
         try
         {
-            var layout = DiagramLayoutComputer.ComputeLayoutForDefinition(Definition);
-            var cardLayout = FolderLayoutComputer.ComputeCardLayoutForDefinition(Definition, Definition.CardLayout);
             await DataManager.UpdateFactoryDefinition(Session.User, Session.Space, Definition, def =>
             {
-                def.DiagramLayout = layout;
-                def.CardLayout = cardLayout;
+                def.DiagramLayout = null;
+                def.CardLayout = null;
             });
         }
         catch (Exception exc)

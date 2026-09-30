@@ -24,6 +24,7 @@ public partial class DataManager
                 var def = originalSpace.CreateFactoryDefinition();
                 def.Alias = $"Factory {def.Id}";
 
+                def.UpdateLayouts();
                 _dataRepository.MarkSpaceForSave(originalSpace);
                 created = def.AsReadOnly();
             }
@@ -95,6 +96,7 @@ public partial class DataManager
                         "Cannot edit a factory definition that has existing instances. Clone the definition to create a modified version.");
 
                 updateAction(originalDef);
+                originalDef.UpdateLayouts();
                 _dataRepository.MarkSpaceForSave(originalSpace);
             }
             catch (Exception e)
@@ -203,6 +205,7 @@ public partial class DataManager
 
                 newDef.Alias = $"Clone of {originalDef.Alias}";
 
+                newDef.UpdateLayouts();
                 _dataRepository.MarkSpaceForSave(originalSpace);
                 cloned = newDef.AsReadOnly();
             }
@@ -307,6 +310,7 @@ public partial class DataManager
                     }
                 }
 
+                def.UpdateLayouts();
                 _dataRepository.MarkSpaceForSave(originalSpace);
                 created = def.AsReadOnly();
             }

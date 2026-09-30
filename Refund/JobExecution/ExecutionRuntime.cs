@@ -12,7 +12,7 @@ public sealed class ExecutionRuntime : IAsyncDisposable
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly SemaphoreSlim _tickGate = new(1, 1);
     private readonly ConcurrentDictionary<EffectKey, TaskCompletionSource> _runningEffects = new();
-    private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _preparations = new();
+    private readonly ConcurrentDictionary<Guid, PreparationCancellation> _preparations = new();
     private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _maintenanceGates = new();
     private readonly Dictionary<Guid, ProjectionFingerprint> _projected = new();
     private readonly CancellationTokenSource _lifetime = new();
@@ -528,7 +528,7 @@ public sealed class ExecutionRuntime : IAsyncDisposable
         if (attempt == null)
             return;
 
-        using var preparation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        using var preparation = new PreparationCancellation(cancellationToken);
         if (!_preparations.TryAdd(attemptId, preparation))
             return;
 
@@ -855,6 +855,7 @@ public sealed class ExecutionRuntime : IAsyncDisposable
         int WorkersAlive,
         int WorkersRunning,
         int WorkersStopping,
+        int WorkersUnknown,
         int WorkerSubmissions)
     {
         public static ProjectionFingerprint For(ExecutionAttemptSnapshot attempt) => new(
@@ -867,6 +868,7 @@ public sealed class ExecutionRuntime : IAsyncDisposable
             attempt.WorkerGroup?.Workers.Count(worker => worker.Phase == WorkerPhase.Running) ?? 0,
             attempt.WorkerGroup?.Workers.Count(worker =>
                 worker.Phase is WorkerPhase.Cancelling or WorkerPhase.Stopping) ?? 0,
+            attempt.WorkerGroup?.Workers.Count(worker => worker.Phase == WorkerPhase.Indeterminate) ?? 0,
             attempt.WorkerGroup?.TotalSubmissions ?? 0);
     }
 }

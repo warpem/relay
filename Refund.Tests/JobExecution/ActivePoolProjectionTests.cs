@@ -41,6 +41,36 @@ public sealed class ActivePoolProjectionTests
         Assert.Single(job.Events, item => item.Type == EventType.RunningStarted);
     }
 
+    [Fact]
+    public void UnconfirmedSubmissionsArePoolStatusRatherThanExecutionWarnings()
+    {
+        JobRegistry.EnsurePopulated();
+        var coordinator = new ExecutionCoordinator([
+            new ExecutionQueuePolicy(4, ExecutionBackendKind.ExternalScheduler)
+        ]);
+        var attempt = coordinator.RequestRun(new JobAddress(1, 1, 1), 4,
+            ResourceVector.None, true, new WorkerGroupRequest(4, 3, 300));
+        coordinator.PreparationCompleted(attempt.Id);
+        coordinator.PlanEffects();
+        coordinator.StartCompleted(attempt.Id, new BackendReceipt("manager"), true);
+        var starts = coordinator.PlanEffects().OfType<StartWorker>().ToArray();
+        coordinator.WorkerStarted(attempt.Id, starts[0].OperationId, new BackendReceipt("worker"), true);
+        coordinator.WorkerStarted(attempt.Id, starts[2].OperationId, new BackendReceipt("pending"), false);
+        var job = new ClassificationJob { UseWorkerPool = true, NWorkers = 3 };
+        QueueRepository.ApplyProjection(job, attempt.CreateSnapshot());
+
+        coordinator.WorkerStartIndeterminate(attempt.Id, starts[1].OperationId, "submission timed out");
+        Assert.True(QueueRepository.ApplyProjection(job, attempt.CreateSnapshot()));
+        Assert.False(QueueRepository.ApplyProjection(job, attempt.CreateSnapshot()));
+
+        Assert.Null(job.ExecutionWarning);
+        Assert.Equal(new JobPoolDto(3, 1, 1, 0, 3, true, Unknown: 1),
+            RelayMcpProjections.ToDetailDto(job.AsReadOnly()).Pool);
+        Assert.Empty(coordinator.PlanEffects()); // Unconfirmed workers still count against the target.
+        job.ClearProperties();
+        Assert.Equal(0, job.PoolWorkersUnknown);
+    }
+
     [Theory]
     [InlineData(ExecutionPhase.Stopping, true)]
     [InlineData(ExecutionPhase.Finalizing, true)]

@@ -829,11 +829,14 @@ public class Space : RelayBase
     #endregion
 
     /// <summary>
-    /// Refreshes derived view, folder, and factory layouts. Unchanged layout inputs
+    /// Refreshes derived view, folder, factory instance, and factory definition layouts. Unchanged layout inputs
     /// retain their cached layout and positions.
     /// </summary>
     public void UpdateLayouts()
     {
+        foreach (var definition in FactoryDefinitions)
+            definition.UpdateLayouts();
+
         foreach (var view in Views)
         {
             foreach (var folder in view.Folders)

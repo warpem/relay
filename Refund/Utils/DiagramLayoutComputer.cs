@@ -39,7 +39,6 @@ public static class DiagramLayoutComputer
         var factoryInstances = new List<(int index, FactoryInstance fi)>();
         var directJobIds = new HashSet<int>(); // only direct jobs, not inside sub-folders
         var subJobToFactory = new Dictionary<int, (int index, FactoryInstance fi)>();
-        var indexToKey = new Dictionary<int, string>();
 
         for (int i = 0; i < directItems.Count; i++)
         {
@@ -48,17 +47,14 @@ public static class DiagramLayoutComputer
             {
                 jobs.Add((i, job));
                 directJobIds.Add(job.Id);
-                indexToKey[i] = $"J{job.Id}";
             }
             else if (item is Folder folder)
             {
                 folders.Add((i, folder));
-                indexToKey[i] = $"F{folder.Id}";
             }
             else if (item is FactoryInstance fi)
             {
                 factoryInstances.Add((i, fi));
-                indexToKey[i] = $"FI{fi.Id}";
                 foreach (var sjId in fi.SubJobIds)
                     subJobToFactory[sjId] = (i, fi);
             }
@@ -266,36 +262,9 @@ public static class DiagramLayoutComputer
             }
         }
 
-        // 6. Incremental layout: use previous positions as hints
-        if (previous is { Nodes.Count: > 0 })
-        {
-            var prevPositions = new Dictionary<string, DiagramLayoutNode>();
-            foreach (var pn in previous.Nodes)
-            {
-                var key = pn.IsFactoryInstance ? $"FI{pn.ItemId}" : (pn.IsFolder ? $"F{pn.ItemId}" : $"J{pn.ItemId}");
-                prevPositions[key] = pn;
-            }
-
-            bool anyHinted = false;
-            for (int i = 0; i < directItems.Count; i++)
-            {
-                var key = indexToKey[i];
-                if (prevPositions.TryGetValue(key, out var prevNode))
-                {
-                    layoutNodes[i].X = prevNode.X;
-                    layoutNodes[i].Y = prevNode.Y;
-                    anyHinted = true;
-                }
-            }
-
-            if (anyHinted)
-                graph.Options.Interactive = true;
-        }
-
-        // 7. Run layout
+        // The cache preserves unchanged layouts. Changed inputs require fresh
+        // dependency layers and crossing minimization, without old position hints.
         LayeredLayoutEngine.Layout(graph);
-        if (graph.Options.Interactive)
-            LayeredLayoutEngine.RelaxLayout(graph, strainThreshold: 3.0, maxIterations: 2);
 
         // 8. Extract results
         var result = new DiagramLayout
@@ -676,7 +645,8 @@ public static class DiagramLayoutComputer
         }
         dimDescs.Sort(StringComparer.Ordinal);
 
-        var raw = string.Join(",", itemKeys) +
+        // Invalidate saved layouts produced with the old position-preserving algorithm.
+        var raw = "topology-v2|" + string.Join(",", itemKeys) +
                   "|" + string.Join(",", edgeDescs) +
                   "|" + string.Join(",", dimDescs);
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(raw));
@@ -745,13 +715,15 @@ public static class DiagramLayoutComputer
     /// <summary>
     /// Computes a DiagramLayout for a factory definition's sub-jobs and internal edges.
     /// Uses blueprint sub-job IDs (1-based, local to definition) as ItemId in layout nodes.
-    /// Supports incremental layout from the definition's existing DiagramLayout if present.
+    /// Reuses the cached layout only while its inputs are unchanged.
     /// </summary>
     public static DiagramLayout ComputeLayoutForDefinition(ReadOnlyFactoryDefinition definition)
     {
         var subJobs = definition.SubJobs;
         if (subJobs.Count == 0)
-            return new DiagramLayout { ConnectivityHash = "" };
+            return definition.DiagramLayout is { ConnectivityHash: "", Nodes.Count: 0, Edges.Count: 0 } empty
+                ? empty
+                : new DiagramLayout();
 
         // 1. Build sub-job lookup by actual blueprint ID (stored on Job.Id)
         var subJobById = new Dictionary<int, ReadOnlyJob>();
@@ -879,32 +851,9 @@ public static class DiagramLayoutComputer
             }
         }
 
-        // 6. Incremental layout: use previous positions as hints
-        if (previous is { Nodes.Count: > 0 })
-        {
-            var prevPositions = new Dictionary<int, DiagramLayoutNode>();
-            foreach (var pn in previous.Nodes)
-                prevPositions[pn.ItemId] = pn;
-
-            bool anyHinted = false;
-            foreach (var (blueprintId, _) in subJobById)
-            {
-                if (prevPositions.TryGetValue(blueprintId, out var prevNode))
-                {
-                    layoutNodes[blueprintId].X = prevNode.X;
-                    layoutNodes[blueprintId].Y = prevNode.Y;
-                    anyHinted = true;
-                }
-            }
-
-            if (anyHinted)
-                graph.Options.Interactive = true;
-        }
-
-        // 7. Run layout
+        // The cache preserves unchanged layouts. Changed inputs require fresh
+        // dependency layers and crossing minimization, without old position hints.
         LayeredLayoutEngine.Layout(graph);
-        if (graph.Options.Interactive)
-            LayeredLayoutEngine.RelaxLayout(graph, strainThreshold: 3.0, maxIterations: 2);
 
         // 8. Extract results
         var result = new DiagramLayout
@@ -1138,7 +1087,8 @@ public static class DiagramLayoutComputer
             .OrderBy(d => d, StringComparer.Ordinal)
             .ToList();
 
-        var raw = string.Join(",", itemKeys) +
+        // Invalidate saved layouts produced with the old position-preserving algorithm.
+        var raw = "topology-v2|" + string.Join(",", itemKeys) +
                   "|" + string.Join(",", edgeDescs) +
                   "|" + string.Join(",", dimDescs);
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(raw));

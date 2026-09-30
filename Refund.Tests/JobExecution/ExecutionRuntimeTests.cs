@@ -63,6 +63,55 @@ public class ExecutionRuntimeTests
     }
 
     [Fact]
+    public async Task UnconfirmedWorkerIsProjectedAndSuccessfulParentUnblocksDependentJob()
+    {
+        var submission = new TaskCompletionSource<BackendStartResult>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var parent = new JobAddress(1, 1, 1);
+        var child = new JobAddress(1, 1, 2);
+        var projected = new ConcurrentQueue<ExecutionAttemptSnapshot>();
+        var operations = new FakeOperations
+        {
+            WorkerStartHandler = _ => submission.Task,
+            DependenciesReadyHandler = _ => projected.Any(attempt =>
+                attempt.Job == parent && attempt.Phase == ExecutionPhase.Succeeded)
+        };
+        var workerQueue = new ExecutionQueuePolicy(2, ExecutionBackendKind.ExternalScheduler);
+        await using var runtime = new ExecutionRuntime(
+            new ExecutionCoordinator([LocalQueue, workerQueue]), operations, new RecordingStateStore(),
+            attempt =>
+            {
+                projected.Enqueue(attempt);
+                return Task.CompletedTask;
+            });
+        await runtime.InitializeAsync();
+        await runtime.RequestRunAsync(parent, -1, ResourceVector.None, true,
+            new WorkerGroupRequest(2, 1, 1));
+        await runtime.RequestRunAsync(child, -1, ResourceVector.None, false);
+        await WaitUntilAsync(() => operations.WorkerStarts.Count == 1);
+        await WaitUntilAsync(() => projected.Any(attempt => attempt.Job == parent &&
+            attempt.WorkerGroup?.Workers.Any(worker => worker.Phase == WorkerPhase.Starting) == true));
+        projected.Clear();
+
+        submission.SetException(new IndeterminateBackendStartException("submission timed out"));
+        await WaitUntilAsync(() => projected.Any(attempt => attempt.Job == parent &&
+            attempt.WorkerGroup?.Workers.Any(worker => worker.Phase == WorkerPhase.Indeterminate) == true));
+        Assert.All(projected.Where(attempt => attempt.Job == parent), attempt =>
+        {
+            Assert.Equal(ExecutionHealth.Healthy, attempt.Health);
+            Assert.Null(attempt.HealthDetail);
+        });
+
+        operations.ObserveResult = new BackendObservation(BackendObservationKind.Succeeded);
+        await runtime.TickAsync();
+        await WaitUntilAsync(() => projected.Any(attempt =>
+            attempt.Job == parent && attempt.Phase == ExecutionPhase.Succeeded));
+        await runtime.TickAsync();
+        await WaitUntilAsync(() => operations.PreparedJobs.Contains(child));
+        Assert.Single(operations.WorkerStarts);
+    }
+
+    [Fact]
     public async Task FurtherWorkerCancellationsDispatchAsSoonAsThePreviousBatchSettles()
     {
         var firstCancellation = new TaskCompletionSource<IReadOnlyList<WorkerObservation>>();
@@ -824,6 +873,7 @@ public class ExecutionRuntimeTests
         public Func<ExecutionAttemptSnapshot, bool> DependenciesReadyHandler { get; init; }
         public ConcurrentQueue<JobAddress> PreparedJobs { get; } = new();
         public ConcurrentQueue<Guid> WorkerStarts { get; } = new();
+        public Func<Guid, Task<BackendStartResult>>? WorkerStartHandler { get; init; }
         public ConcurrentQueue<IReadOnlyList<BackendReceipt>> WorkerCancellations { get; } = new();
         public Func<IReadOnlyList<BackendReceipt>, Task<IReadOnlyList<WorkerObservation>>>?
             WorkerCancellationHandler { get; init; }
@@ -901,7 +951,7 @@ public class ExecutionRuntimeTests
             CancellationToken cancellationToken)
         {
             WorkerStarts.Enqueue(operationId);
-            return Task.FromResult(new BackendStartResult(
+            return WorkerStartHandler?.Invoke(operationId) ?? Task.FromResult(new BackendStartResult(
                 new BackendReceipt(operationId.ToString()), false));
         }
 

@@ -118,10 +118,14 @@
             </span>
             <span style="display: flex; flex-wrap: wrap; column-gap: 5px; row-gap: 2px; align-items: center;">
                 <span style="white-space: nowrap;">Pool: @pool.PoolWorkersRunning running,</span>
-                <span style="white-space: nowrap;">@Math.Max(0, pool.PoolWorkersAlive - pool.PoolWorkersRunning - Job.PoolWorkersStopping) pending</span>
+                <span style="white-space: nowrap;">@Math.Max(0, pool.PoolWorkersAlive - pool.PoolWorkersRunning - Job.PoolWorkersStopping - Job.PoolWorkersUnknown) pending</span>
                 @if (Job.PoolWorkersStopping > 0)
                 {
                     <span style="white-space: nowrap;">@Job.PoolWorkersStopping stopping</span>
+                }
+                @if (Job.PoolWorkersUnknown > 0)
+                {
+                    <span style="white-space: nowrap;" title="These worker submissions have no scheduler receipt. They count toward the pool size, but do not prevent the job from completing.">@Job.PoolWorkersUnknown unconfirmed</span>
                 }
                 <FluentBadge>@pool.PoolWorkersSubmitted submitted</FluentBadge>
             </span>

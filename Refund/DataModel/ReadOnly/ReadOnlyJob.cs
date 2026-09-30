@@ -104,6 +104,8 @@ public abstract class ReadOnlyJob : IIdentifiable, IAudited, IAnnotated, IViewIt
     public int? PoolDesiredSize => _job.PoolDesiredSize;
 
     public int PoolWorkersStopping => _job.PoolWorkersStopping;
+
+    public int PoolWorkersUnknown => _job.PoolWorkersUnknown;
     
     /// <summary>
     /// Gets the name of the directory where this job's data is stored.

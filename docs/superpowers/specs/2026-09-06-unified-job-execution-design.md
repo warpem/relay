@@ -425,8 +425,11 @@ The coordinator:
 - replaces workers that have positively reached a terminal state;
 - does not treat one missing or failed status query as worker death;
 - persists desired size, receipts, observations, and submission count in the main runtime snapshot;
-  and
-- drains or cancels every worker before the parent attempt becomes terminal.
+- drains or cancels every worker with a scheduler receipt before the parent attempt becomes terminal;
+- counts submissions without receipts against the pool target and lifetime submission limit, shows
+  them as unconfirmed pool capacity, and never resubmits the same operation; and
+- preserves the manager's outcome when a worker submission is unconfirmed. The pool protocol owns
+  orphan-worker shutdown; missing receipts are not evidence that the manager's results are invalid.
 
 Pool counters shown by a job are projections from its current worker group. They are not writable job
 state.
@@ -552,8 +555,8 @@ The implementation and tests must enforce these invariants:
 10. A permanent preparation or configuration error cannot retry forever.
 11. Cancellation is idempotent and never reports completion before the backend-specific stop
     condition is met.
-12. A parent cannot report success or cancellation when a worker submission remains untraceable;
-    the parent becomes `Interrupted` instead.
+12. Unconfirmed worker submissions do not override the manager's outcome or execution health.
+    Workers with known receipts still require terminal evidence before parent finalization.
 13. An exception while processing one attempt or queue cannot stop scheduling unrelated work.
 14. Rerun never reuses an attempt ID, backend receipt, reservation, or worker group.
 15. Restart recovery makes no claim stronger than the evidence available for that backend.

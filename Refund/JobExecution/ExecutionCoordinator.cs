@@ -7,7 +7,8 @@ namespace Refund.JobExecution;
 /// </summary>
 public sealed class ExecutionCoordinator
 {
-    private const string UntraceableWorkerDetail =
+    // Recognize warnings persisted by versions that treated worker uncertainty as parent failure.
+    private const string LegacyUntraceableWorkerDetail =
         "A worker submission has an unknown outcome and no scheduler receipt; " +
         "Relay cannot prove that all worker processes stopped.";
 
@@ -454,20 +455,11 @@ public sealed class ExecutionCoordinator
             detail = attempt.History.LastOrDefault(entry => entry.Phase == ExecutionPhase.Cancelling)?.Detail
                      ?? detail;
 
-        bool hasUntraceableWorker = attempt.WorkerGroup?.Workers.Any(worker =>
-            worker.Phase == WorkerPhase.Indeterminate) == true;
-        if (hasUntraceableWorker)
-        {
-            outcome = ExecutionOutcome.Interrupted;
-            detail = UntraceableWorkerDetail;
-        }
-
+        // The manager determines the job's outcome. Missing worker receipts affect pool
+        // accounting, not the validity of completed results. Known workers still drain below.
         Release(attempt);
         attempt.PendingOutcome = outcome;
-        attempt.Health = hasUntraceableWorker
-            ? ExecutionHealth.Indeterminate
-            : ExecutionHealth.Healthy;
-        attempt.HealthDetail = hasUntraceableWorker ? detail : null;
+        MarkObservationHealthy(attempt);
         attempt.TransitionTo(ExecutionPhase.Finalizing, Now(), detail);
     }
 
@@ -524,10 +516,6 @@ public sealed class ExecutionCoordinator
         worker.Phase = attempt.Phase == ExecutionPhase.Finalizing
             ? WorkerPhase.Ended
             : WorkerPhase.Indeterminate;
-        attempt.Health = ExecutionHealth.Indeterminate;
-        attempt.HealthDetail = detail;
-        if (attempt.Phase == ExecutionPhase.Finalizing)
-            attempt.PendingOutcome = ExecutionOutcome.Interrupted;
     }
 
     public void ObserveWorkers(
@@ -755,23 +743,12 @@ public sealed class ExecutionCoordinator
         if (attempt.WorkerGroup == null)
             return;
 
-        bool untraceable = false;
         foreach (var worker in attempt.WorkerGroup.Workers.Where(worker =>
                      worker.Receipt == null && worker.Phase is WorkerPhase.Starting or WorkerPhase.Cancelling))
-        {
             worker.Phase = WorkerPhase.Indeterminate;
-            untraceable = true;
-        }
 
-        untraceable |= attempt.WorkerGroup.Workers.Any(worker =>
-            worker.Phase == WorkerPhase.Indeterminate);
-        if (!untraceable)
-            return;
-
-        attempt.Health = ExecutionHealth.Indeterminate;
-        attempt.HealthDetail = UntraceableWorkerDetail;
-        if (attempt.Phase == ExecutionPhase.Finalizing)
-            attempt.PendingOutcome = ExecutionOutcome.Interrupted;
+        if (attempt.HealthDetail == LegacyUntraceableWorkerDetail)
+            MarkObservationHealthy(attempt);
     }
 
     private void ReconcileQueue(int queueId)
@@ -860,10 +837,8 @@ public sealed class ExecutionCoordinator
 
     private static void MarkObservationHealthy(ExecutionAttempt attempt)
     {
-        bool untraceable = attempt.WorkerGroup?.Workers.Any(worker =>
-            worker.Phase == WorkerPhase.Indeterminate) == true;
-        attempt.Health = untraceable ? ExecutionHealth.Indeterminate : ExecutionHealth.Healthy;
-        attempt.HealthDetail = untraceable ? UntraceableWorkerDetail : null;
+        attempt.Health = ExecutionHealth.Healthy;
+        attempt.HealthDetail = null;
     }
 
     private bool TryGetCurrent(Guid attemptId, out ExecutionAttempt attempt)
