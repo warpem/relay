@@ -304,8 +304,9 @@ public class InitialReference : RelionJob, IClusterJob
         result.HasScale = true;
         result.HasAngles = true;
 
-        if (result.IsTomo)
-            result.OptimisationSetStarPath = ResOptimizationSetStarFile(iter);
+        result.OptimisationSetStarPath = result.DataDimensionality == ParticleType.Tiltseries
+            ? ResOptimizationSetStarFile(iter)
+            : null;
 
         return result;
     }
@@ -359,7 +360,7 @@ public class InitialReference : RelionJob, IClusterJob
 
         var particleSet = PortsIn["Particles"].GetSingleResource<ParticleSet>();
 
-        if (particleSet.IsTomo)
+        if (particleSet.DataDimensionality == ParticleType.Tiltseries)
             result.Add("ios", Space.GetRelativePath(particleSet.OptimisationSetStarPath));
         else
             result.Add("i", Space.GetRelativePath(particleSet.ParticlesSingleStarPath));

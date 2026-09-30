@@ -256,7 +256,9 @@ public class Class3DSelect : Job, ILocalJob
 
         result.ParticlesSingleStarPath = ResSelectedDataStarFile;
         result.ItemCount = null;
-        result.OptimisationSetStarPath = ResSelectedOptimisationSetStarFile;
+        result.OptimisationSetStarPath = result.DataDimensionality == ParticleType.Tiltseries
+            ? ResSelectedOptimisationSetStarFile
+            : null;
 
         return result;
     }
@@ -463,7 +465,7 @@ public class Class3DSelect : Job, ILocalJob
                 
                 #region Tomo optimization set
                 {
-                    if (resourceParticles.IsTomo)
+                    if (resourceParticles.DataDimensionality == ParticleType.Tiltseries)
                     {
                         logger.WriteLine("Adapting optimisation_set.star...");
 

@@ -867,8 +867,9 @@ public class Class3D : RelionJob, IClusterJob, IPooledJob, IPoolStatus
         result.HasScale = true;
         result.HasAngles = true;
 
-        if (result.IsTomo)
-            result.OptimisationSetStarPath = ResOptimizationSetStarFile(iter);
+        result.OptimisationSetStarPath = result.DataDimensionality == ParticleType.Tiltseries
+            ? ResOptimizationSetStarFile(iter)
+            : null;
 
         return result;
     }
@@ -1009,12 +1010,12 @@ public class Class3D : RelionJob, IClusterJob, IPooledJob, IPoolStatus
         if (!particleSet.HasData)
             throw new Exception("Input particles do not have associated particle stacks.");
 
-        if (particleSet.IsTomo)
+        if (particleSet.DataDimensionality == ParticleType.Tiltseries)
         {
             if (!string.IsNullOrWhiteSpace(particleSet.OptimisationSetStarPath))
                 result.Add("ios", Space.GetRelativePath(particleSet.OptimisationSetStarPath));
             else
-                throw new Exception("Input particles are from a tomography project, " +
+                throw new Exception("Input particles are tilt-series stacks, " +
                                     "but do not have an associated optimisation set.");
         }
         else

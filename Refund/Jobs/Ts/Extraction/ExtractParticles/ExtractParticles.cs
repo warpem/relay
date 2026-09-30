@@ -127,8 +127,9 @@ public class ExtractParticles : WarpJobGpu, IClusterJob
         result.ItemCount = null;
         result.ParticlesMultiStarDirectory = string.Empty;
         result.ToMultiStarPath = null;
-        result.TomogramsStarPath = tomogramsStarPath;
-        result.OptimisationSetStarPath = optimisationSetStarPath;
+        // Warp only writes tomograms and optimisation-set STAR files for 2D tilt stacks.
+        result.TomogramsStarPath = OutputType == ExportType.Tiltseries ? tomogramsStarPath : null;
+        result.OptimisationSetStarPath = OutputType == ExportType.Tiltseries ? optimisationSetStarPath : null;
 
         result.DataDimensionality = OutputType == ExportType.Tiltseries ?
                                         ParticleType.Tiltseries :

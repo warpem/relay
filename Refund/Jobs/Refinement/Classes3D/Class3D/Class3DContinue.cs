@@ -113,8 +113,9 @@ public class Class3DContinue : Class3D
         result.HasScale = true;
         result.HasAngles = true;
 
-        if (result.IsTomo)
-            result.OptimisationSetStarPath = ResOptimizationSetStarFile(iter);
+        result.OptimisationSetStarPath = result.DataDimensionality == ParticleType.Tiltseries
+            ? ResOptimizationSetStarFile(iter)
+            : null;
 
         return result;
     }

@@ -760,10 +760,9 @@ public class Refine3D : RelionJob, IClusterJob, IPooledJob, IPoolStatus
         result.HasAngles = true;
         result.HasScale = true;
 
-        if (result.IsTomo)
-        {
-            result.OptimisationSetStarPath = isFinal ? ResFinalOptimisationSetStarFile : ResOptimisationSetStarFile(iter);
-        }
+        result.OptimisationSetStarPath = result.DataDimensionality == ParticleType.Tiltseries
+            ? (isFinal ? ResFinalOptimisationSetStarFile : ResOptimisationSetStarFile(iter))
+            : null;
 
         return result;
     }
@@ -815,7 +814,7 @@ public class Refine3D : RelionJob, IClusterJob, IPooledJob, IPoolStatus
         ParticleSet particleSet = PortsIn["Particles"].GetSingleResource<ParticleSet>();
         Map reference = PortsIn["Reference"].GetSingleResource<MapList>().Maps.First();
 
-        if (particleSet.IsTomo)
+        if (particleSet.DataDimensionality == ParticleType.Tiltseries)
             result.Add("ios", Space.GetRelativePath(particleSet.OptimisationSetStarPath));
         else
             result.Add("i", Space.GetRelativePath(particleSet.ParticlesSingleStarPath));
