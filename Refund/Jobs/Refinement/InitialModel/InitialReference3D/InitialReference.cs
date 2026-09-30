@@ -294,7 +294,7 @@ public class InitialReference : RelionJob, IClusterJob
         if (iter == -1)
             iter = VisAvailableIteration;
 
-        ParticleSet result = PortsIn[PortInParticles].GetSingleResource<ParticleSet>(iter);
+        ParticleSet result = ParticleInputs.Describe(PortsIn[PortInParticles]);
         if (result == null)
             return null;
 
@@ -358,7 +358,7 @@ public class InitialReference : RelionJob, IClusterJob
         result.TryAdd("oversampling", "1");
         result.TryAdd("pipeline_control", DirectoryName);
 
-        var particleSet = PortsIn["Particles"].GetSingleResource<ParticleSet>();
+        var particleSet = ParticleInputs.Describe(PortsIn["Particles"]);
 
         if (particleSet.DataDimensionality == ParticleType.Tiltseries)
             result.Add("ios", Space.GetRelativePath(particleSet.OptimisationSetStarPath));

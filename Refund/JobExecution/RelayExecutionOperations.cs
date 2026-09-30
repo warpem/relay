@@ -43,7 +43,7 @@ public sealed class RelayExecutionOperations : IExecutionOperations
             {
                 var queue = Queue(attempt.BackendConfiguration);
                 queue.ValidateSubmissionConfiguration();
-                await queue.PrepareAndWriteScript(job, attempt.Id);
+                await queue.PrepareAndWriteScript(job, attempt.Id, cancellationToken: cancellationToken);
             }
 
             cancellationToken.ThrowIfCancellationRequested();
@@ -260,7 +260,7 @@ public sealed class RelayExecutionOperations : IExecutionOperations
         Directory.CreateDirectory(job.RelayResultsDirectoryPath);
         await job.WriteToLifecycleLog("Preparation started");
         cancellationToken.ThrowIfCancellationRequested();
-        job.Stage();
+        job.Stage(cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
     }
 

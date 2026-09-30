@@ -588,7 +588,7 @@ public class Class2D : RelionJob, IClusterJob
         if (iter < 0)
             iter = VisAvailableIteration;
         
-        ParticleSet result = PortsIn["Particles"].GetSingleResource<ParticleSet>();
+        ParticleSet result = ParticleInputs.Describe(PortsIn["Particles"]);
         if (result == null)
             return null;
 
@@ -671,7 +671,7 @@ public class Class2D : RelionJob, IClusterJob
         result.TryAdd("pipeline_control", DirectoryName); // Enable pipeline control
         
         // Set input particles file path
-        var particles = PortsIn["Particles"].Edges.First().Source.GetResource() as ParticleSet;
+        var particles = ParticleInputs.Describe(PortsIn["Particles"]);
         result["i"] = Space.GetRelativePath(particles.ParticlesSingleStarPath);
         
         // Set output prefix path

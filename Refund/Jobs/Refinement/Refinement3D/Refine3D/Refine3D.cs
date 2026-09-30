@@ -749,7 +749,7 @@ public class Refine3D : RelionJob, IClusterJob, IPooledJob, IPoolStatus
 
         bool isFinal = iter == VisAvailableIteration && HasRunToCompletion;
 
-        var result = PortsIn[PortInParticles].GetSingleResource<ParticleSet>();
+        var result = ParticleInputs.Describe(PortsIn[PortInParticles]);
         if (result == null)
             return null;
 
@@ -811,7 +811,7 @@ public class Refine3D : RelionJob, IClusterJob, IPooledJob, IPoolStatus
         result["healpix_order"] = Math.Max(1, HealpixOrder - 1).ToString(CultureInfo.InvariantCulture);
 
         // add CLI options based on input resources
-        ParticleSet particleSet = PortsIn["Particles"].GetSingleResource<ParticleSet>();
+        ParticleSet particleSet = ParticleInputs.Describe(PortsIn["Particles"]);
         Map reference = PortsIn["Reference"].GetSingleResource<MapList>().Maps.First();
 
         if (particleSet.DataDimensionality == ParticleType.Tiltseries)

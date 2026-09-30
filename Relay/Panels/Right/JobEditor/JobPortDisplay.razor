@@ -16,7 +16,10 @@
             var totalConnections = realEdgeCount + internalCount + externalCount;
             var isActive = portIn.IsActive() || internalCount > 0 || externalCount > 0;
             var opacity = isActive ? "1.0" : "0.4";
+            var resourceErrors = GetResourceErrors(portIn);
             var portErrors = IsDisabled ? new List<string>() : GetPortErrors(portIn.Name);
+            var summaryErrors = portErrors.Where(error => !resourceErrors.Values.SelectMany(messages => messages)
+                .Any(message => error.EndsWith(": " + message, StringComparison.Ordinal))).ToList();
             var isExposed = ShowExposureToggle && (IsPortExposed?.Invoke(_portIn) == true);
             var hasConnections = totalConnections > 0;
 
@@ -39,7 +42,7 @@
                         }
                         else
                         {
-                            <FluentLabel Typo="Typography.H6" Style="@(portErrors.Any() ? "color: var(--error-normal);" : "")">
+                            <FluentLabel Typo="Typography.H6" Style="@((portErrors.Any() || resourceErrors.Any()) ? "color: var(--error-normal);" : "")">
                                 <span>@portIn.Alias (@totalConnections / @GetPortRequirementText(portIn))</span>
                             </FluentLabel>
                         }
@@ -69,6 +72,7 @@
                                         {
                                             <span class="port-item-count">(@itemCount.ToString("N0"))</span>
                                         }
+                                        @ResourceErrors(resourceErrors, $"r:{edge.Source.Job.Id}:{edge.Source.Name}")
                                     </div>
                                     @if (!IsDisabled)
                                     {
@@ -93,6 +97,7 @@
                                             {
                                                 <span class="port-item-count">(@itemCount.ToString("N0"))</span>
                                             }
+                                            @ResourceErrors(resourceErrors, $"i:{conn.sourceJobId}:{conn.sourcePortName}")
                                         </div>
                                         @if (!IsDisabled)
                                         {
@@ -118,6 +123,7 @@
                                             {
                                                 <span class="port-item-count">(@itemCount.ToString("N0"))</span>
                                             }
+                                            @ResourceErrors(resourceErrors, $"e:{conn.externalJobId}:{conn.externalPort}")
                                         </div>
                                         @if (!IsDisabled)
                                         {
@@ -133,10 +139,10 @@
                         </div>
                     }
 
-                    @if (portErrors.Any())
+                    @if (summaryErrors.Any())
                     {
                         <ul style="color: var(--error-normal); margin: 0; padding-left: 16px; font-size: 12px;">
-                            @foreach (var error in portErrors)
+                            @foreach (var error in summaryErrors)
                             {
                                 <li>@error</li>
                             }

@@ -209,7 +209,10 @@ public class Class3DContinue : Class3D
         foreach (var filePath in Directory.EnumerateFiles(predecessor.DirectoryPath, "*", SearchOption.AllDirectories))
         {
             var relativePath = Path.GetRelativePath(predecessor.DirectoryPath, filePath);
-            if (IsPoolArtifact(relativePath))
+            // Merged inputs can be multi-GB. The optimiser and inherited resource
+            // descriptions retain their original paths; copying them serves no purpose.
+            if (relativePath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)[0] == "inputs"
+                || IsPoolArtifact(relativePath))
                 continue;
             var destPath = Path.Combine(DirectoryPath, relativePath);
             Directory.CreateDirectory(Path.GetDirectoryName(destPath));

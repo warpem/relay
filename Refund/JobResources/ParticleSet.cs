@@ -9,6 +9,8 @@ namespace Refund.JobResources;
 /// </summary>
 public class ParticleSet : Resource, ICountableResource
 {
+    public ParticleSet Copy() => (ParticleSet)MemberwiseClone();
+
     /// <summary>
     /// Indicates whether image or volume data exist for this particle set, i.e. if it's not just a set of positions.
     /// </summary>

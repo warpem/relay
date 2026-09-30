@@ -185,6 +185,7 @@ public class ImportParticles : Job, ILocalJob
         var result = new ParticleSet()
         {
             ParticlesSingleStarPath = ImportedParticlesPath,
+            HasData = true,
             HasShifts = HasShifts,
             HasPositions = HasPositions,
             HasAngles = HasAngles,

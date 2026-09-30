@@ -32,6 +32,7 @@
             <JobPortDisplay Job="@_job"
                             IsDisabled="@IsFactoryInstanceSubJob"
                             GetPortErrors="@GetPortErrors"
+                            OnSourceUpdated="@(() => _job == null ? Task.CompletedTask : HandleJobUpdated(_job))"
                             OnEdgeRemoved="@HandlePortEdgeRemoved"
                             GetInternalConnections="@(IsBuilderMode ? GetInternalConnectionsForPort : null)"
                             GetInternalSourcePort="@(IsBuilderMode ? GetInternalSourcePort : null)"

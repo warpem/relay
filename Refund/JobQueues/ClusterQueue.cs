@@ -94,12 +94,13 @@ public sealed class ClusterQueue : JobQueue
     internal async Task<string> PrepareAndWriteScript(
         Job job,
         Guid attemptId,
-        Dictionary<string, string> customValues = null)
+        Dictionary<string, string> customValues = null,
+        CancellationToken cancellationToken = default)
     {
         job.ResetWorkingDirectory();
         Directory.CreateDirectory(job.RelayResultsDirectoryPath);
         await job.WriteToLifecycleLog("Preparation started");
-        job.Stage();
+        job.Stage(cancellationToken);
 
         string scriptPath = Path.Combine(job.DirectoryPath, "submit.sh");
         var command = new StringBuilder();

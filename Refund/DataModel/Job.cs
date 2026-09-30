@@ -604,6 +604,12 @@ public abstract class Job : RelayBase, IFolderContent
                 AddPortValidationError(errors, port.Name, $"Cannot have more than {port.MaxItems} connection{(port.MaxItems == 1 ? "" : "s")}");
         }
         
+        foreach (var port in PortsIn.Values.Where(ParticleInputs.NeedsMerge))
+        {
+            var sources = ParticleInputs.Sources(port);
+            foreach (var issue in ParticleInputs.Validate(sources))
+                AddPortValidationError(errors, port.Name, $"{sources[issue.SourceIndex].Label}: {issue.Message}");
+        }
         return errors;
     }
 
@@ -650,6 +656,15 @@ public abstract class Job : RelayBase, IFolderContent
     /// Prepares the job for execution by setting up working directories, input files, etc.
     /// This is called before the job is submitted to a queue.
     /// </summary>
+    public void Stage(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ParticleInputs.Stage(this, cancellationToken);
+        Stage();
+        cancellationToken.ThrowIfCancellationRequested();
+    }
+
+    /// <summary>Job-specific preparation, after shared inputs have been staged.</summary>
     public virtual void Stage()
     {
         // Default implementation does nothing, subclasses should override as needed

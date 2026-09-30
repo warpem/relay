@@ -854,7 +854,7 @@ public class Class3D : RelionJob, IClusterJob, IPooledJob, IPoolStatus
             iter = VisAvailableIteration;
 
         // Start with input particles and update with classification results
-        ParticleSet result = PortsIn[PortInParticles].GetSingleResource<ParticleSet>();
+        ParticleSet result = ParticleInputs.Describe(PortsIn[PortInParticles]);
         if (result == null)
             return null;
 
@@ -1005,7 +1005,7 @@ public class Class3D : RelionJob, IClusterJob, IPooledJob, IPoolStatus
             result.TryAdd("sigma_ang", (AngularSearchRange / 3).ToString("F3", CultureInfo.InvariantCulture));
 
         // Set input files
-        var particleSet = PortsIn[PortInParticles].GetSingleResource<ParticleSet>();
+        var particleSet = ParticleInputs.Describe(PortsIn[PortInParticles]);
         
         if (!particleSet.HasData)
             throw new Exception("Input particles do not have associated particle stacks.");

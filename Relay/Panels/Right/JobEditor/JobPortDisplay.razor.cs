@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Components;
 using Microsoft.FluentUI.AspNetCore.Components;
 using Refund.DataModel.ReadOnly;
+using Refund.JobResources;
+using Refund.Utils;
 using Refund.Services.Core.DataManager;
 using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons;
 
@@ -125,8 +127,48 @@ public partial class JobPortDisplay : ComponentBase, IDisposable
     public EventCallback<(string portName, int externalJobId, string externalPort)> OnExternalEdgeRemoved { get; set; }
 
     /// <summary>
-    /// Icon for the delete edge button.
+    /// Revalidate the editor when a connected producer changes its resource metadata.
     /// </summary>
+    [Parameter]
+    public EventCallback OnSourceUpdated { get; set; }
+
+    private Dictionary<string, List<string>> GetResourceErrors(ReadOnlyPortIn port)
+    {
+        var result = new Dictionary<string, List<string>>();
+        if (IsDisabled || !port.IsActive() || port.ResourceType != typeof(ParticleSet) || port.MaxItems <= 1)
+            return result;
+        var sources = new List<(string Key, ReadOnlyPortOut Port)>();
+        sources.AddRange(port.Edges.Select(e => ($"r:{e.Source.Job.Id}:{e.Source.Name}", e.Source)));
+        if (GetInternalConnections != null && GetInternalSourcePort != null)
+            sources.AddRange(GetInternalConnections(port.Name).Select(c =>
+                ($"i:{c.sourceJobId}:{c.sourcePortName}", GetInternalSourcePort(c.sourceJobId, c.sourcePortName))));
+        if (GetExternalConnections != null && GetExternalSourcePort != null)
+            sources.AddRange(GetExternalConnections(port.Name).Select(c =>
+                ($"e:{c.externalJobId}:{c.externalPort}", GetExternalSourcePort(c.externalJobId, c.externalPort))));
+        var descriptions = sources.Select(s => ($"J{s.Port?.Job.Id} → {s.Port?.Alias}", ParticleInputs.GetDescription(s.Port))).ToList();
+        foreach (var issue in ParticleInputs.Validate(descriptions))
+        {
+            string key = sources[issue.SourceIndex].Key;
+            if (!result.TryGetValue(key, out var errors)) result[key] = errors = [];
+            errors.Add(issue.Message);
+        }
+        return result;
+    }
+
+    private static RenderFragment ResourceErrors(Dictionary<string, List<string>> errors, string key) => builder =>
+    {
+        if (!errors.TryGetValue(key, out var messages)) return;
+        builder.OpenElement(0, "ul");
+        builder.AddAttribute(1, "style", "color: var(--error-normal); margin: 0; padding-left: 16px; font-size: 12px;");
+        foreach (string message in messages.Distinct())
+        {
+            builder.OpenElement(2, "li");
+            builder.AddContent(3, message);
+            builder.CloseElement();
+        }
+        builder.CloseElement();
+    };
+
     private Icon iconDeleteEdge = new Icons.Filled.Size16.Delete();
     private Icon iconExposedFilled = new Icons.Filled.Size16.ArrowCircleUpRight();
     private Icon iconExposedRegular = new Icons.Regular.Size16.ArrowCircleUpRight();
@@ -159,7 +201,11 @@ public partial class JobPortDisplay : ComponentBase, IDisposable
 
         foreach (var group in groups.Where(group => !_sourceSubscriptions.ContainsKey(group)))
             _sourceSubscriptions[group] = DataManager.JobUpdated.Add(group,
-                async _ => await InvokeAsync(StateHasChanged));
+                async _ => await InvokeAsync(async () =>
+                {
+                    await OnSourceUpdated.InvokeAsync();
+                    StateHasChanged();
+                }));
     }
 
     public void Dispose()

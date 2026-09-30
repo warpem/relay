@@ -156,7 +156,12 @@ public class PortIn : Port
     /// </summary>
     /// <typeparam name="T">The resource type to get</typeparam>
     /// <returns>The resource of type T, or null if there is none</returns>
-    public T GetSingleResource<T>(int iteration = -1) where T : Resource => Edges.FirstOrDefault()?.Source.GetResource(iteration) as T;
+    public T GetSingleResource<T>(int iteration = -1) where T : Resource
+    {
+        if (typeof(T) == typeof(Refund.JobResources.ParticleSet) && Edges.Count > 1)
+            throw new InvalidOperationException($"Port '{Alias}' has multiple particle inputs; use ParticleInputs.Describe to resolve the merged input.");
+        return Edges.FirstOrDefault()?.Source.GetResource(iteration) as T;
+    }
     
     /// <summary>
     /// Determines if this port is currently active based on the job's state.
