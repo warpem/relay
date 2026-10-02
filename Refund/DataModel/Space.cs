@@ -845,6 +845,7 @@ public class Space : RelayBase
                 folder.UpdateDiagramLayout(this);
             }
             view.UpdateDiagramLayout(this);
+            view.UpdateCardLayout(this);
         }
 
         foreach (var instance in FactoryInstances)

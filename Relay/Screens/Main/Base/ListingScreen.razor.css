@@ -14,13 +14,13 @@
 .items-grid {
     display: flex;
     gap: 1.5rem;
-    flex-wrap: wrap-reverse;
+    flex-wrap: wrap;
     justify-content: flex-start;
-    align-items: flex-end;
+    align-items: flex-start;
     user-select: none;
 }
 
-.items-grid.items-grid-forward {
-    flex-wrap: wrap;
-    align-items: flex-start;
+.items-grid.items-grid-reverse {
+    flex-wrap: wrap-reverse;
+    align-items: flex-end;
 }

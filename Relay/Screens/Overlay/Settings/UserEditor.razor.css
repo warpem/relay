@@ -15,4 +15,10 @@ fluent-text-field.user-field::part(root) {
     margin-top: 0.5rem;
     margin-bottom: 1rem;
     align-items: center;
+    flex-wrap: wrap;
+}
+
+.user-grid-scroll {
+    max-width: 100%;
+    overflow-x: auto;
 }

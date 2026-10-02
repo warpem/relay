@@ -1,0 +1,19 @@
+@using Relay.Emoji
+
+<span class="hero-icon @Class" style="width: @(Size)px; height: @(Size)px;" aria-hidden="true">
+    @{
+        var emoji = EmojiLibrary.FindByGlyph(Value)?.FluentEmoji;
+    }
+    @if (emoji != null)
+    {
+        <FluentEmoji Value="@emoji" Width="@Size.ToString()" fill="none"/>
+    }
+    else if (IsImageSource(Value))
+    {
+        <img src="@Value" alt="" width="@Size" height="@Size" draggable="false"/>
+    }
+    else if (!string.IsNullOrWhiteSpace(Value) && Value.Length <= MaxGlyphLength)
+    {
+        <span class="hero-glyph" style="font-size: @(Size * 4 / 5)px;">@Value</span>
+    }
+</span>

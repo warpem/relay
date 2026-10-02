@@ -1,0 +1,18 @@
+.hero-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    overflow: hidden;
+    line-height: 1;
+}
+
+.hero-icon img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.hero-glyph {
+    line-height: 1;
+}

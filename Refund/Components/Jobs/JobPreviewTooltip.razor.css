@@ -1,0 +1,18 @@
+.job-preview-host {
+    position: absolute;
+    width: 0;
+    height: 0;
+    overflow: visible;
+    pointer-events: none;
+}
+
+.job-preview {
+    padding: 5px 9px 5px 5px;
+    pointer-events: none;
+}
+
+/* Previews always look like the card itself, regardless of selection dimming elsewhere */
+.job-preview ::deep .card-common {
+    opacity: 1 !important;
+    outline: 1px solid var(--neutral-stroke-rest);
+}

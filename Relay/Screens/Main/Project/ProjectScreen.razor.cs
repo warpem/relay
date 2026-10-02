@@ -11,6 +11,11 @@ public partial class ProjectScreen : ListingScreenLogic<ReadOnlySpace>
 {
     protected override SelectionKey GetSelectionKey(ReadOnlySpace item) => SelectionKey.ForSpace(item.Id);
 
+    /// <summary>
+    /// Project the current subscriptions are bound to.
+    /// </summary>
+    private int? _subscribedProjectId;
+
     protected override void OnInitialized()
     {
         base.OnInitialized();
@@ -19,7 +24,18 @@ public partial class ProjectScreen : ListingScreenLogic<ReadOnlySpace>
 
     private async Task HandleProjectChanged()
     {
-        await InvokeAsync(StateHasChanged);
+        await InvokeAsync(() =>
+        {
+            // The same screen instance is reused when navigating between projects
+            if (_subscribedProjectId != Session.Project?.Id)
+            {
+                SubscribeToEvents();
+                _lastSelectedKey = null;
+                _lastContextMenuTime = null;
+            }
+
+            StateHasChanged();
+        });
     }
 
     public override void Dispose()
@@ -27,11 +43,12 @@ public partial class ProjectScreen : ListingScreenLogic<ReadOnlySpace>
         base.Dispose();
         Session.OnProjectChanged -= HandleProjectChanged;
     }
-    
+
     protected override string GetTitle() => "Spaces";
     protected override string GetCreateButtonText() => "Create or reconnect space";
-    
-    protected override IEnumerable<ReadOnlySpace> GetItems() => Session.Project?.Spaces ?? Enumerable.Empty<ReadOnlySpace>();
+
+    protected override IEnumerable<ReadOnlySpace> GetItems() =>
+        Session.Project?.Spaces.NewestFirst() ?? Enumerable.Empty<ReadOnlySpace>();
 
     protected override Task ShowCreateDialogAsync() => CreateSpaceDialog.Show(DialogService, this, OnCreateDialogClosedAsync);
 
@@ -57,7 +74,9 @@ public partial class ProjectScreen : ListingScreenLogic<ReadOnlySpace>
     protected override void SubscribeToEvents()
     {
         base.SubscribeToEvents();
-        
+
+        _subscribedProjectId = Session.Project?.Id;
+
         if (Session.Project == null)
             return;
 

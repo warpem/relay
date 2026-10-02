@@ -73,6 +73,40 @@ public partial class JobCard : ComponentBase, IDisposable
     [Parameter] public double DiagramHeight { get; set; }
 
     /// <summary>
+    /// When true, the card is shown outside its view (e.g. Home activity): it looks the same, but dragging
+    /// and port connection are disabled and the job editor's port-compatibility dimming doesn't apply.
+    /// </summary>
+    [Parameter] public bool OverviewMode { get; set; }
+
+    /// <summary>
+    /// Selection key identifying this card. Defaults to the unscoped key used inside a view;
+    /// screens that mix spaces pass a scoped key from <see cref="Refund.DataModel.SelectionKey.ForJob(ReadOnlyJob)"/>.
+    /// </summary>
+    [Parameter] public SelectionKey? SelectionKey { get; set; }
+
+    /// <summary>
+    /// The effective selection key for this card.
+    /// </summary>
+    private SelectionKey CardKey => SelectionKey ?? Refund.DataModel.SelectionKey.ForJob(Job.Id);
+
+    /// <summary>
+    /// DOM ID of the card root, also the context menu anchor. Scoped keys produce IDs that stay
+    /// unique when cards from several spaces share a page.
+    /// </summary>
+    [Parameter] public string DomIdSuffix { get; set; } = "";
+
+    private string CardDomId => (CardKey.IsScoped
+        ? $"card-p{CardKey.ProjectId}-s{CardKey.SpaceId}-j{_job.Id}"
+        : $"card-{_job.Id}") + DomIdSuffix;
+
+    /// <summary>
+    /// Prefix for port element IDs, unique per card in the same way as <see cref="CardDomId"/>.
+    /// </summary>
+    private string PortDomIdPrefix => (CardKey.IsScoped
+        ? $"p{CardKey.ProjectId}-s{CardKey.SpaceId}-j{Job.Id}"
+        : $"j{Job.Id}") + DomIdSuffix;
+
+    /// <summary>
     /// Subscriptions to data manager events for this job.
     /// </summary>
     private readonly List<GroupEventSubscription> _subscriptions = new();
@@ -107,6 +141,11 @@ public partial class JobCard : ComponentBase, IDisposable
     /// </summary>
     private List<string> _relationChild = new();
     
+    /// <summary>
+    /// Last rendered (selected, any job selected) state in overview mode.
+    /// </summary>
+    private (bool Selected, bool JobSelected)? _overviewSelectionState;
+
     /// <summary>
     /// List of context menu actions available for this job.
     /// </summary>
@@ -159,8 +198,8 @@ public partial class JobCard : ComponentBase, IDisposable
             _relationParent.Clear();
             _relationChild.Clear();
 
-            if (Selection.SelectedItems.Any() && !Selection.IsSelected(SelectionKey.ForJob(Job.Id)))
-                foreach (var selectedJob in Selection.IdsOfType(ItemType.Job).Select(id => DataManager.FindJob(Job.Space.Project.Id, Job.Space.Id, id)))
+            if (Selection.SelectedItems.Any() && !Selection.IsSelected(CardKey))
+                foreach (var selectedJob in Selection.ResolveSelectedJobs(Job.Space).Where(j => j.Space == Job.Space))
                 {
                     if (selectedJob.GetParents().Contains(Job))
                         _relationParent.Add($"J{selectedJob.Id}");
@@ -170,6 +209,19 @@ public partial class JobCard : ComponentBase, IDisposable
                 }
 
             bool anythingChanged = false;
+
+            // In a view the screen re-renders its cards on selection changes; overview hosts don't,
+            // so overview cards refresh their own outline and dimming
+            if (OverviewMode)
+            {
+                var state = (Selection.IsSelected(CardKey), Selection.SelectedItems.Any(k => k.Type == ItemType.Job));
+                if (state != _overviewSelectionState)
+                {
+                    _overviewSelectionState = state;
+                    anythingChanged = true;
+                }
+            }
+
             if (oldRelationParent.Count != _relationParent.Count ||
                 oldRelationChild.Count != _relationChild.Count ||
                 oldRelationParent.Except(_relationParent).Any() ||
@@ -210,6 +262,25 @@ public partial class JobCard : ComponentBase, IDisposable
     }
 
     /// <summary>
+    /// When the context menu last closed, used to recognize clicks on its items.
+    /// </summary>
+    private DateTime _contextMenuClosedAt = DateTime.MinValue;
+
+    /// <summary>
+    /// Forwards card clicks. In overview mode, clicks on the context menu (rendered inside the card)
+    /// are dropped so choosing an action doesn't change the selection; listing screens filter these
+    /// themselves.
+    /// </summary>
+    private async Task HandleClick(MouseEventArgs args)
+    {
+        if (OverviewMode &&
+            (_contextMenuActions != null || (DateTime.UtcNow - _contextMenuClosedAt).TotalMilliseconds < 300))
+            return;
+
+        await OnClick.InvokeAsync(args);
+    }
+
+    /// <summary>
     /// Handles mouse-up events to detect middle-click for open-in-new-tab.
     /// </summary>
     private async Task HandleMouseUp(MouseEventArgs args)
@@ -247,6 +318,9 @@ public partial class JobCard : ComponentBase, IDisposable
     /// <param name="port">The port that was clicked</param>
     private async Task HandlePortClick(MouseEventArgs eventArgs, ReadOnlyJob job, ReadOnlyPortOut port)
     {
+        if (OverviewMode)
+            return;
+
         _showTooltips = false;
 
         await OnPortClick.InvokeAsync(new PortClickArgs
@@ -266,20 +340,17 @@ public partial class JobCard : ComponentBase, IDisposable
     {
         if (value)
         {
-            if (Selection.IsSelected(SelectionKey.ForJob(_job.Id)))
+            if (Selection.IsSelected(CardKey))
             {
                 // Card is already selected — build actions for entire selection
-                var selectedJobs = Selection.IdsOfType(ItemType.Job)
-                    .Select(id => DataManager.FindJob(_job.Space.Project.Id, _job.Space.Id, id))
-                    .Where(j => j != null)
-                    .ToList();
+                var selectedJobs = Selection.ResolveSelectedJobs(_job.Space);
                 _contextMenuActions = MenuActions.GetJobActions(selectedJobs);
                 _contextMenuHeader = $"{selectedJobs.Count} jobs selected";
             }
             else
             {
                 // Card is not selected — make it the sole selection
-                await Selection.Replace([SelectionKey.ForJob(_job.Id)]);
+                await Selection.Replace([CardKey]);
                 _contextMenuActions = MenuActions.GetJobActions([_job]);
                 _contextMenuHeader = _job.QualifiedName;
             }
@@ -295,7 +366,10 @@ public partial class JobCard : ComponentBase, IDisposable
             }
         }
         else
+        {
             _contextMenuActions = null;
+            _contextMenuClosedAt = DateTime.UtcNow;
+        }
     }
     
     private async Task HandleRightClick(MouseEventArgs args)
@@ -306,18 +380,15 @@ public partial class JobCard : ComponentBase, IDisposable
         string header;
         List<MenuAction> actions;
 
-        if (Selection.IsSelected(SelectionKey.ForJob(_job.Id)))
+        if (Selection.IsSelected(CardKey))
         {
-            var selectedJobs = Selection.IdsOfType(ItemType.Job)
-                .Select(id => DataManager.FindJob(_job.Space.Project.Id, _job.Space.Id, id))
-                .Where(j => j != null)
-                .ToList();
+            var selectedJobs = Selection.ResolveSelectedJobs(_job.Space);
             actions = MenuActions.GetJobActions(selectedJobs);
             header = $"{selectedJobs.Count} jobs selected";
         }
         else
         {
-            await Selection.Replace([SelectionKey.ForJob(_job.Id)]);
+            await Selection.Replace([CardKey]);
             actions = MenuActions.GetJobActions([_job]);
             header = _job.QualifiedName;
         }
@@ -338,14 +409,12 @@ public partial class JobCard : ComponentBase, IDisposable
 
     private void HandleDragStart(DragEventArgs args)
     {
-        if (DiagramMode)
+        if (DiagramMode || OverviewMode)
             return;
 
-        if (Selection.IsSelected(SelectionKey.ForJob(_job.Id)) && Selection.SelectedItems.Count > 1)
+        if (Selection.IsSelected(CardKey) && Selection.SelectedItems.Count > 1)
         {
-            var items = Selection.IdsOfType(ItemType.Job)
-                .Select(id => DataManager.FindJob(_job.Space.Project.Id, _job.Space.Id, id))
-                .Where(j => j != null)
+            var items = Selection.ResolveSelectedJobs(_job.Space)
                 .Cast<IViewItem>()
                 .ToList();
             DragDrop.StartDrag(items);
@@ -361,7 +430,7 @@ public partial class JobCard : ComponentBase, IDisposable
 
     private void HandleDragEnd(DragEventArgs args)
     {
-        if (DiagramMode)
+        if (DiagramMode || OverviewMode)
             return;
 
         _isDragging = false;

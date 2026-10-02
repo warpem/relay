@@ -1,55 +1,88 @@
 .listing-card {
     display: flex;
     flex-direction: column;
-    justify-content: space-between;
+    position: relative;
+    min-width: 0;
+    height: 312px;
+}
+
+.listing-card:focus-within {
+    z-index: 1;
+}
+
+.listing-card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     padding: 8px;
-    width: 500px;
-    min-height: 192px;
+    min-width: 0;
+    flex-shrink: 0;
+    border-radius: 4px 4px 0 0;
+    color: inherit;
+    text-decoration: none;
+    cursor: pointer;
 }
 
-.item-heading {
-    display: inline-block;
-    vertical-align: top;
-}
-
-.item-heading .details {
-    line-height: 0.875rem;
-}
-
-.created {
-    font-weight: 400;
-    font-size: 0.75rem;
-    color: var(--neutral-fill-strong-rest);
-}
-
-.item-header {
-    gap: 0.5rem;
-}
-
-.item-header:hover {
+.listing-card-header:hover,
+.listing-card-header:focus-visible {
     background-color: var(--neutral-layer-2);
 }
 
-.jobs-section {
-    display: flex;
-    flex-wrap: nowrap;
-    flex-grow: 0;
-    align-items: start;
-    justify-content: space-between;
-    column-gap: 0;
-}
-
-.job-list {
+.listing-card-identity {
     display: flex;
     flex-direction: column;
-    padding-top: 20px;
-    gap: 1px;
+    flex: 1;
+    min-width: 0;
 }
 
-.empty-state {
+.listing-card-name {
+    font-size: 16px;
+    line-height: 22px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.listing-card-meta {
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--neutral-foreground-hint);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.listing-card-chevron {
     display: flex;
-    justify-content: center;
+    flex-shrink: 0;
+    opacity: 0.5;
+}
+
+.listing-card-header:hover .listing-card-chevron,
+.listing-card-header:focus-visible .listing-card-chevron {
+    opacity: 1;
+}
+
+.listing-card-body {
+    flex: 1 1 auto;
+    padding: 2px 8px 8px;
+    min-width: 0;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    scrollbar-width: thin;
+}
+
+.listing-card-footer {
+    display: flex;
     align-items: center;
-    height: 100px;
-    width: 100%;
+    gap: 6px;
+    min-height: 28px;
+    padding: 5px 8px;
+    min-width: 0;
+    flex-shrink: 0;
+    border-top: 1px solid var(--neutral-stroke-divider-rest);
+    font-size: 12px;
+    line-height: 18px;
 }

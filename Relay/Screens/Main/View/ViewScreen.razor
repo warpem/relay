@@ -97,7 +97,7 @@
                         z-index: 1000;">
                 <FluentMenu Open="@_cardContextMenuOpen"
                              OpenChanged="@(v => { if (!v) CloseCardContextMenu(); })">
-                    <span style="font-size: 0.75rem; padding: 0 1rem; opacity: 0.5; max-width: 200px;">
+                    <span class="menu-context-title" title="@_cardContextMenuHeader">
                         @_cardContextMenuHeader
                     </span>
                     <FluentDivider />

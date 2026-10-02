@@ -33,15 +33,23 @@ public partial class MenuActionService
     /// </remarks>
     public List<MenuAction> GetJobActions(IEnumerable<ReadOnlyJob> jobs)
     {
+        // Actions must retain their original targets if the live selection changes while awaiting.
+        jobs = jobs.ToArray();
         List<MenuAction> result = new();
 
-        // View context is required for job actions (move, clone, add to view, etc.)
         // In the factory builder, actions are handled separately by the builder screen.
-        if (_session.View == null)
+        if (_session.CurrentMain == MainScreenType.FactoryBuilder || !jobs.Any())
             return result;
 
-        // In factory instance browse mode, only Run, Abort, Clear are allowed
-        bool isBrowseMode = _session.FactoryInstance != null;
+        // Factory sub-jobs support execution and parameter editing, but not structural actions.
+        bool isBrowseMode = _session.FactoryInstance != null || jobs.Any(j => j.FactoryInstanceId.HasValue);
+
+        // Jobs can be selected outside a view (e.g. Home activity), possibly from several spaces.
+        // Actions on the current view need all jobs in it; actions on other views need a common space.
+        var currentView = _session.View;
+        var commonSpace = jobs.Select(j => j.Space).Distinct().Count() == 1 ? jobs.First().Space : null;
+        var currentViewJobs = currentView?.Jobs.ToHashSet();
+        bool inCurrentView = currentViewJobs != null && jobs.All(currentViewJobs.Contains);
 
         #region Run
 
@@ -149,7 +157,8 @@ public partial class MenuActionService
 
         #region Edit
 
-        if (jobs.Count() == 1 && jobs.First().Status == JobStatus.Building)
+        if (jobs.Count() == 1 && jobs.First().Status == JobStatus.Building &&
+            (inCurrentView || jobs.First().Space.Views.Any(v => v.Jobs.Contains(jobs.First()))))
         {
             var actionEdit = new MenuAction()
             {
@@ -163,7 +172,13 @@ public partial class MenuActionService
                 IconLarge = new Icons.Regular.Size20.Edit()
             };
 
-            actionEdit.Action = async () => await _jobEditor.SetJob(jobs.First());
+            actionEdit.Action = async () =>
+            {
+                var job = jobs.First();
+                if (!inCurrentView || _session.FactoryInstance?.Id != job.FactoryInstanceId)
+                    await _session.NavigateToAsync(JobNavigation.ForJob(job, currentView));
+                await _jobEditor.SetJob(job);
+            };
 
             result.Add(actionEdit);
         }
@@ -219,7 +234,7 @@ public partial class MenuActionService
 
         #endregion
 
-        // In factory instance browse mode, skip all actions except Run, Abort, Clear
+        // Keep factory sub-job structure under control of the factory definition.
         if (!isBrowseMode)
         {
 
@@ -295,7 +310,7 @@ public partial class MenuActionService
 
         #region Create factory from selection
 
-        if (jobs.Any())
+        if (inCurrentView)
         {
             var actionCreateFactory = new MenuAction()
             {
@@ -393,18 +408,19 @@ public partial class MenuActionService
             }
 
             // Clone into current view
-            result.Add(new MenuAction()
-            {
-                Name = cloneLabel,
-                DisabledBecause = "",
-                NeedsConfirmation = false,
-                Appearance = null,
-                TextColor = null,
-                BorderColor = null,
-                IconSmall = new Icons.Regular.Size16.Copy(),
-                IconLarge = new Icons.Regular.Size20.Copy(),
-                Action = makeCloneAction(_session.View)
-            });
+            if (inCurrentView)
+                result.Add(new MenuAction()
+                {
+                    Name = cloneLabel,
+                    DisabledBecause = "",
+                    NeedsConfirmation = false,
+                    Appearance = null,
+                    TextColor = null,
+                    BorderColor = null,
+                    IconSmall = new Icons.Regular.Size16.Copy(),
+                    IconLarge = new Icons.Regular.Size20.Copy(),
+                    Action = makeCloneAction(currentView)
+                });
 
             // Clone into another view (sub-menu)
             var actionCloneToView = new MenuAction()
@@ -416,10 +432,15 @@ public partial class MenuActionService
                 IconLarge = new Icons.Regular.Size20.Copy()
             };
 
-            var availableViews = jobs.First().Space.Views.Reverse()
-                .Where(v => v != _session.View);
+            var availableViews = commonSpace?.Views.Reverse()
+                .Where(v => v != currentView) ?? [];
 
-            if (!availableViews.Any())
+            if (commonSpace == null)
+            {
+                actionCloneToView.DisabledBecause = "Can't clone because the jobs are in different spaces";
+                actionCloneToView.IsDisabled = true;
+            }
+            else if (!availableViews.Any())
             {
                 actionCloneToView.DisabledBecause = "No other views available";
                 actionCloneToView.IsDisabled = true;
@@ -443,7 +464,8 @@ public partial class MenuActionService
 
         #region Clone and connect to self
 
-        if (jobs.Count() == 1 &&
+        if (inCurrentView &&
+            jobs.Count() == 1 &&
             jobs.First().PortsOut.Any() &&
             jobs.First().PortsIn.Any())
         {
@@ -651,11 +673,15 @@ public partial class MenuActionService
                 actionAddToView.DisabledBecause = "Use folder actions to add folders to another view";
                 actionAddToView.IsDisabled = true;
             }
+            else if (commonSpace == null)
+            {
+                actionAddToView.DisabledBecause = "Can't add to a view because the jobs are in different spaces";
+                actionAddToView.IsDisabled = true;
+            }
             else
             {
-                var availableViews = jobs.First()
-                                         .Space.Views.Reverse().Where(v => v != _session.View &&
-                                                                 jobs.All(j => !v.Jobs.Contains(j)));
+                var availableViews = commonSpace.Views.Reverse().Where(v => v != currentView &&
+                                                                            jobs.All(j => !v.Jobs.Contains(j)));
 
                 if (!availableViews.Any())
                 {
@@ -694,6 +720,8 @@ public partial class MenuActionService
 
         #region Move to view
 
+        // Moving and removing act on the current view
+        if (inCurrentView)
         {
             var actionMoveToView = new MenuAction()
             {
@@ -715,7 +743,6 @@ public partial class MenuActionService
             }
             else
             {
-                var currentView = _session.View;
                 bool hasCurrentViewEntry = false;
 
                 // Current view entry: intra-view folder movement
@@ -812,6 +839,7 @@ public partial class MenuActionService
 
         #region Remove from view
 
+        if (inCurrentView)
         {
             var actionRemoveFromView = new MenuAction()
             {
@@ -825,8 +853,6 @@ public partial class MenuActionService
                 IconSmall = new Icons.Regular.Size16.LinkDismiss().WithColor("var(--error)"),
                 IconLarge = new Icons.Regular.Size20.LinkDismiss().WithColor("var(--error)")
             };
-
-            var currentView = _session.View;
 
             if (!jobs.All(j => j.Space.Views.Any(v => v != currentView && v.Jobs.Contains(j))))
             {

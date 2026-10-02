@@ -1,5 +1,7 @@
 .job-name {
-    margin: 0
+    margin: 0;
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 /* Timeline styles */

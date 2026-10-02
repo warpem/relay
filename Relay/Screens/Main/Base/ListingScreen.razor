@@ -11,8 +11,10 @@
      @onclick="@(() => Selection.Clear())"
      @oncontextmenu:preventDefault="OnContextMenu.HasDelegate"
      @oncontextmenu="@(async (args) => await OnContextMenu.InvokeAsync(args))">
-     
+
     <div class="listing-screen">
+        @BeforeItems
+
         @if (!string.IsNullOrWhiteSpace(Title) || !string.IsNullOrWhiteSpace(CreateButtonText))
         {
             <div class="header">
@@ -28,7 +30,7 @@
             </div>
         }
 
-        <div class="@(ReverseGrid ? "items-grid" : "items-grid items-grid-forward")" >
+        <div class="@(ReverseGrid ? "items-grid items-grid-reverse" : "items-grid")" >
             @foreach (var item in Items)
             {
                 @ItemTemplate(item)

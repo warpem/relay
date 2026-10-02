@@ -145,11 +145,6 @@ public partial class ListboxButton<TValue> : ComponentBase
     [Parameter] public RenderFragment<(TValue Value, string Text)> OptionTemplate { get; set; }
 
     /// <summary>
-    /// Unique identifier for the component instance, used for DOM element identification.
-    /// </summary>
-    private string _id = Guid.NewGuid().ToString();
-
-    /// <summary>
     /// Handles selection of an option from the dropdown list.
     /// Closes the dropdown and triggers the OnOptionSelected event.
     /// </summary>

@@ -1,32 +1,75 @@
-.view-heading {
-    display: inline-block;
-    vertical-align: top;
+.view-graph-container {
+    display: flex;
+    align-items: center;
+    min-height: 64px;
+    padding: 2px 0;
 }
 
-.title {
-    font-size: 1rem;
-    font-weight: 900;
+.view-graph {
+    position: relative;
+    max-width: 100%;
 }
 
-.view-heading .details {
-    line-height: 0.875rem;
+.view-graph svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+    pointer-events: none;
 }
 
-.owner {
-    font-weight: 600;
-    font-size: 0.75rem;
+.view-graph-node {
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    outline-offset: 1px;
 }
 
-.created {
-    font-weight: 400;
-    font-size: 0.75rem;
-    color: var(--neutral-fill-strong-rest);
+.view-graph-node::before {
+    content: "";
+    display: block;
+    width: var(--dot-size);
+    height: var(--dot-size);
+    border-radius: 50%;
+    background: var(--dot-color);
 }
 
-.view-header {
-    gap: 0.5rem;
+.view-graph-node:hover::before,
+.view-graph-node:focus-visible::before {
+    outline: 2px solid var(--neutral-foreground-rest);
+    outline-offset: 1px;
 }
 
-.view-header:hover {
-    background-color: var(--neutral-layer-2);
+.view-status-totals {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 12px;
+    font-size: 12px;
+    color: var(--neutral-foreground-hint);
+    min-height: 18px;
+}
+
+.view-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+}
+
+.status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+}
+
+.view-empty {
+    font-size: 12px;
+    color: var(--neutral-foreground-hint);
+    padding: 12px 0;
 }

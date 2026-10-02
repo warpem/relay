@@ -29,6 +29,12 @@ html, body {
     row-gap: 1rem;
 }
 
+.right-panel h5,
+.right-panel h6 {
+    overflow-wrap: anywhere;
+    min-width: 0;
+}
+
 .property-item {
     display: flex;
     flex-direction: column;
@@ -45,6 +51,8 @@ html, body {
     font-weight: 400;
     font-size: 0.75rem;
     flex-shrink: 0;
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 .tab-h100 {
@@ -59,4 +67,14 @@ html, body {
     min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
+}
+.menu-context-title {
+    display: block;
+    max-width: 250px;
+    padding: 0 1rem;
+    font-size: 0.75rem;
+    opacity: 0.5;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }

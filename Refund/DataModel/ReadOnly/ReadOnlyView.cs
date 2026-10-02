@@ -99,6 +99,12 @@ public sealed class ReadOnlyView : IIdentifiable, IAudited, IAnnotated, IJobCont
     public DiagramLayout? DiagramLayout => _view.DiagramLayout;
 
     /// <summary>
+    /// Gets the compact card minimap of all jobs in this view (flattened across folders), if computed.
+    /// Only connectivity changes replace it; status changes keep the same instance and coordinates.
+    /// </summary>
+    public FolderLayout? CardLayout => _view.CardLayout;
+
+    /// <summary>
     /// Gets a read-only collection of jobs displayed in this view.
     /// A view can display a subset of jobs from its containing space.
     /// </summary>

@@ -81,11 +81,6 @@ public partial class FilteredListbox<TValue>
     [Parameter] public EventCallback<(MouseEventArgs Args, TValue Value)> OnOptionClicked { get; set; }
     
     /// <summary>
-    /// Unique identifier for the component instance, used for DOM element identification.
-    /// </summary>
-    private string _id = Guid.NewGuid().ToString()[..16];
-
-    /// <summary>
     /// Determines whether an option should be displayed based on the current filter text.
     /// </summary>
     /// <param name="text">The display text of the option</param>

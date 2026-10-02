@@ -219,7 +219,7 @@ public partial class Breadcrumbs : IDisposable
         Projects = DataManager.GetUserProjects(Session.User).Reverse().ToDictionary(p => p.Id, p => p.QualifiedName);
         Spaces = Session.Project?.Spaces.Reverse().ToDictionary(s => s.Id, s => s.QualifiedName);
         Views = Session.Space?.Views.Reverse().ToDictionary(v => v.Id, v => v.QualifiedName);
-        Jobs = Session.View?.Jobs.Reverse().ToDictionary(j => j, j => j.QualifiedName);
+        Jobs = Session.View?.Jobs.Reverse().ToDictionary(j => j, j => $"{j.QualifiedName} {j.TypeName}");
         FactoryDefinitions = Session.Space?.FactoryDefinitions
             .ToDictionary(d => d.Id, d => d.QualifiedName) ?? new();
         FactoryInstances = Session.View?.FactoryInstances

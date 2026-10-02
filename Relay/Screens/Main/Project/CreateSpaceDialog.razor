@@ -5,10 +5,6 @@
     <DataAnnotationsValidator />
 
     <FluentDialogBody>
-        @foreach (var message in FormContext.GetValidationMessages())
-        {
-            <span>@message</span>
-        }
         <div class="form-content">
             <div style="width: 100%; display: flex; align-items: center; justify-content: center;">
                 <EmojiSelectionButton @bind-Glyph="Model.HeroImage"

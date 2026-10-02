@@ -134,7 +134,7 @@
     <FluentPopover Style="width: 250px;" AnchorId="buttonDelete" @bind-Open="IsDeleteConfirmationVisible" AutoFocus="true">
         <Body>
         <h4 style="margin-bottom: 0.25rem">Are you sure?</h4>
-        <div style="margin-bottom: 10px;">
+        <div class="delete-item-list">
             @if (SelectedItems.Any())
             {
                 @foreach (var item in SelectedItems)

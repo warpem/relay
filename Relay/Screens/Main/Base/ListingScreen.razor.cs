@@ -54,11 +54,36 @@ public partial class ListingScreen<TItem> where TItem : class, IIdentifiable, IA
     public EventCallback<MouseEventArgs> OnContextMenu { get; set; }
 
     /// <summary>
-    /// When true, items grid uses wrap-reverse (bottom-to-top). Default is true.
-    /// When false, items grid uses normal wrap (top-to-bottom).
+    /// Optional content rendered above the title row (e.g., an activity strip).
     /// </summary>
     [Parameter]
-    public bool ReverseGrid { get; set; } = true;
+    public RenderFragment BeforeItems { get; set; }
+
+    /// <summary>
+    /// When true, items grid uses wrap-reverse (bottom-to-top).
+    /// Default is false: items flow top-to-bottom in the order supplied, so callers
+    /// order them explicitly (listings use <see cref="ListingOrder.NewestFirst{T}"/>).
+    /// </summary>
+    [Parameter]
+    public bool ReverseGrid { get; set; }
+}
+
+/// <summary>
+/// Shared ordering for listing screens and card child lists.
+/// </summary>
+public static class ListingOrder
+{
+    /// <summary>
+    /// Creation timestamp of an item, or <see cref="DateTime.MinValue"/> if unknown.
+    /// </summary>
+    public static DateTime GetCreated(IAudited item)
+        => item.GetMostRecentEvent(EventType.Created)?.Timestamp ?? DateTime.MinValue;
+
+    /// <summary>
+    /// Orders items newest-to-oldest by creation time, breaking ties by descending ID.
+    /// </summary>
+    public static IOrderedEnumerable<T> NewestFirst<T>(this IEnumerable<T> items) where T : IIdentifiable, IAudited
+        => items.OrderByDescending(i => GetCreated(i)).ThenByDescending(i => i.Id);
 }
 
 /// <summary>
@@ -186,6 +211,21 @@ public abstract class ListingScreenLogic<TItem> : ComponentBase, IDisposable
     protected const int CONTEXT_MENU_CLICK_THRESHOLD_MS = 1000;
 
     /// <summary>
+    /// Consumes a pending context-menu marker. Returns true if the current click arrived within
+    /// the threshold and should be ignored. The marker is cleared either way, so at most one
+    /// click is suppressed and later unrelated clicks are processed normally.
+    /// </summary>
+    protected static bool ConsumeContextMenuClick(ref DateTime? lastContextMenuTime)
+    {
+        if (lastContextMenuTime == null)
+            return false;
+
+        var elapsed = DateTime.Now - lastContextMenuTime.Value;
+        lastContextMenuTime = null;
+        return elapsed.TotalMilliseconds < CONTEXT_MENU_CLICK_THRESHOLD_MS;
+    }
+
+    /// <summary>
     /// Handles item click events with selection logic.
     /// Supports single selection, ctrl/cmd+click for multi-select, 
     /// and shift+click for range selection.
@@ -210,13 +250,9 @@ public abstract class ListingScreenLogic<TItem> : ComponentBase, IDisposable
         
         // Skip processing if this click happens shortly after a context menu was shown
         // This prevents delayed clicks from context menu interactions being processed
-        if (_lastContextMenuTime != null && 
-            (DateTime.Now - _lastContextMenuTime.Value).TotalMilliseconds > CONTEXT_MENU_CLICK_THRESHOLD_MS)
-        {
-            _lastContextMenuTime = null;
+        if (ConsumeContextMenuClick(ref _lastContextMenuTime))
             return;
-        }
-        
+
         var key = GetSelectionKey(item);
 
         if (MouseUtils.ModifierSelectSingle(args, Session.ClientOs))

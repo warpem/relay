@@ -1,0 +1,22 @@
+.job-overlay-header {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    min-width: 0;
+    height: 40px;
+    padding: 8px 40px 0 calc(0.75rem + 40px);
+    flex-shrink: 0;
+}
+
+.job-overlay-header h4 {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin: 0;
+}
+
+.job-overlay-header ::deep fluent-button {
+    flex-shrink: 0;
+}

@@ -225,14 +225,23 @@ public partial class SingleAxisScatter : IAsyncDisposable
         // Unsubscribe from highlight sync
         HighlightService.HighlightChanged -= OnExternalHighlightChanged;
 
-        if (_module != null)
+        try
         {
-            await _module.InvokeVoidAsync("disposeScatterPlot", CanvasId);
-            await _module.DisposeAsync();
+            if (_module != null)
+            {
+                await _module.InvokeVoidAsync("disposeScatterPlot", CanvasId);
+                await _module.DisposeAsync();
+            }
         }
-
-        _dotNetRef?.Dispose();
-        _tooltipSubscription.Dispose();
+        catch (JSDisconnectedException)
+        {
+            // Navigation can dispose the circuit after the browser has already gone away.
+        }
+        finally
+        {
+            _dotNetRef?.Dispose();
+            _tooltipSubscription.Dispose();
+        }
     }
 
     #endregion

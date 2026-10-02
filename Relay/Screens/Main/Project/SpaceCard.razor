@@ -2,25 +2,73 @@
 @using Refund.Services
 @using Refund.Services.Core.DataManager
 @using Refund.Services.Core.Session
+@using Refund.Components.Jobs
 @using Relay.Screens.Main.Base
 
 @inject MenuActionService MenuActions
 
 @inherits ListingCardLogic<ReadOnlySpace>
 
+@{
+    var jobs = Item.Jobs;
+    var views = Item.Views.NewestFirst().ToList();
+}
+
 <ListingCard TItem="ReadOnlySpace"
              Item="@Item"
+             Width="420px"
              IsSelected="@IsSelected"
              OnClick="@OnClick"
              OnNavigate="@HeaderClick"
              NavigationUrl="@NavigationUrl"
              GetContextMenuActions="GetContextMenuActions">
     <ExtraDetails>
-        @if (Item.Jobs.Any())
-        {
-            <span class="detail-text">
-                @Item.Jobs.Count @(Item.Jobs.Count == 1 ? "job" : "jobs")
-            </span>
-        }
+        @Plural(views.Count, "view") · @Plural(jobs.Count, "job")
     </ExtraDetails>
+    <BodyContent>
+        @if (jobs.Count == 0)
+        {
+            <div class="empty-text">No jobs yet</div>
+        }
+        else
+        {
+            <div class="space-jobs" @ondblclick:stopPropagation="true">
+                @foreach (var job in jobs.NewestFirst().Take(MaxJobRows))
+                {
+                    <JobLine @key="job.Id"
+                             Job="job"
+                             ShowStatus="true"
+                             NameWidth="auto"/>
+                }
+            </div>
+        }
+    </BodyContent>
+    <FooterContent>
+        @if (views.Count == 0)
+        {
+            <span class="empty-text">No views yet</span>
+        }
+        else
+        {
+            <div class="view-shortcuts">
+                @foreach (var view in views.Take(MaxViewShortcuts))
+                {
+                    <a @key="view.Id"
+                       class="view-shortcut"
+                       href="@GetViewUrl(view)"
+                       title="@view.QualifiedName"
+                       data-relay-navigation="true"
+                       @onclick="@(args => HandleViewClick(view, args))"
+                       @onclick:stopPropagation="true"
+                       @ondblclick:stopPropagation="true">
+                        <b>V@(view.Id)</b> @view.Alias
+                    </a>
+                }
+                @if (views.Count > MaxViewShortcuts)
+                {
+                    <span class="meta">+@(views.Count - MaxViewShortcuts) more</span>
+                }
+            </div>
+        }
+    </FooterContent>
 </ListingCard>

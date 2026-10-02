@@ -45,7 +45,10 @@ public class CardSelectionService : IDisposable
         {
             case MainScreenType.Home:
                 _subscriptions.Add(_dataManager.ProjectDeleted.Add(GroupName.Project(null),
-                    async args => await Remove(SelectionKey.ForProject(args.Object.Id))));
+                    async args => await RemoveProject(args.Object.Id)));
+                // Home shows jobs from every accessible space, selected through scoped keys
+                _subscriptions.Add(_dataManager.JobDeleted.Add(GroupName.Job(null, null, null),
+                    async args => await Remove(SelectionKey.ForJob(args.Object))));
                 break;
 
             case MainScreenType.Project:
@@ -85,6 +88,17 @@ public class CardSelectionService : IDisposable
     private async Task HandleFactoryContextChanged()
     {
         await Clear();
+    }
+
+    /// <summary>
+    /// Removes a deleted project and any scoped job keys that point into it.
+    /// </summary>
+    private async Task RemoveProject(int projectId)
+    {
+        int removed = _selected.RemoveAll(k => (k.Type == ItemType.Project && k.Id == projectId) ||
+                                               (k.IsScoped && k.ProjectId == projectId));
+        if (removed > 0)
+            await OnSelectionChanged.InvokeAllAsync();
     }
 
     public async Task AddRange(IEnumerable<SelectionKey> keys)
@@ -134,8 +148,44 @@ public class CardSelectionService : IDisposable
     /// <summary>
     /// Gets all selected IDs of a specific item type.
     /// </summary>
+    /// <remarks>
+    /// IDs of scoped job keys are only unique within their space; use <see cref="ResolveSelectedJobs"/> for jobs.
+    /// </remarks>
     public IEnumerable<int> IdsOfType(ItemType type) =>
         _selected.Where(k => k.Type == type).Select(k => k.Id);
+
+    /// <summary>
+    /// Resolves the selected job keys to jobs, in selection order.
+    /// </summary>
+    /// <param name="contextSpace">
+    /// Space used for unscoped (legacy) job keys. Defaults to the session's current space.
+    /// </param>
+    /// <returns>Existing selected jobs; keys that no longer resolve are skipped.</returns>
+    public List<ReadOnlyJob> ResolveSelectedJobs(ReadOnlySpace contextSpace = null) =>
+        ResolveJobs(_selected, key => _dataManager.FindJob(key.ProjectId.Value, key.SpaceId.Value, key.Id),
+                    contextSpace ?? _session.Space);
+
+    /// <summary>
+    /// Resolves job keys to distinct existing jobs, preserving order. Scoped keys go through
+    /// <paramref name="findScoped"/>; unscoped keys are looked up in <paramref name="contextSpace"/>
+    /// and skipped when there is no context space.
+    /// </summary>
+    public static List<ReadOnlyJob> ResolveJobs(IEnumerable<SelectionKey> keys,
+                                                Func<SelectionKey, ReadOnlyJob> findScoped,
+                                                ReadOnlySpace contextSpace)
+    {
+        var result = new List<ReadOnlyJob>();
+        var seen = new HashSet<ReadOnlyJob>();
+
+        foreach (var key in keys.Where(k => k.Type == ItemType.Job))
+        {
+            var job = key.IsScoped ? findScoped(key) : contextSpace?.FindJob(key.Id);
+            if (job != null && seen.Add(job))
+                result.Add(job);
+        }
+
+        return result;
+    }
 
     public void Dispose()
     {

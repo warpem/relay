@@ -19,26 +19,45 @@ public partial class SpaceScreen : ListingScreenLogic<ReadOnlyView>
     private IEnumerable<ReadOnlyFactoryDefinition> FactoryDefinitions =>
         Session.Space?.FactoryDefinitions ?? Enumerable.Empty<ReadOnlyFactoryDefinition>();
 
+    /// <summary>
+    /// Project and space the current subscriptions are bound to.
+    /// Space IDs are only unique within a project, so both are tracked.
+    /// </summary>
+    private (int? ProjectId, int? SpaceId) _subscribedSpace;
+
     protected override void OnInitialized()
     {
         base.OnInitialized();
-        Session.OnSpaceChanged += HandleSpaceChanged;
+        Session.OnStateChanged += HandleSessionStateChanged;
     }
 
-    private async Task HandleSpaceChanged()
+    private async Task HandleSessionStateChanged()
     {
-        await InvokeAsync(StateHasChanged);
+        await InvokeAsync(() =>
+        {
+            // The same screen instance is reused when navigating between spaces
+            if (_subscribedSpace == (Session.Project?.Id, Session.Space?.Id))
+                return;
+
+            SubscribeToEvents();
+            _lastSelectedKey = null;
+            _lastFdSelectedKey = null;
+            _lastContextMenuTime = null;
+            _lastFdContextMenuTime = null;
+            StateHasChanged();
+        });
     }
 
     public override void Dispose()
     {
         base.Dispose();
-        Session.OnSpaceChanged -= HandleSpaceChanged;
+        Session.OnStateChanged -= HandleSessionStateChanged;
     }
 
     protected override string GetTitle() => "Views";
     protected override string GetCreateButtonText() => "Create new view";
-    protected override IEnumerable<ReadOnlyView> GetItems() => Session.Space?.Views ?? Enumerable.Empty<ReadOnlyView>();
+    protected override IEnumerable<ReadOnlyView> GetItems() =>
+        Session.Space?.Views.NewestFirst() ?? Enumerable.Empty<ReadOnlyView>();
 
     protected override Task ShowCreateDialogAsync()
     {
@@ -81,14 +100,10 @@ public partial class SpaceScreen : ListingScreenLogic<ReadOnlyView>
         if (args.Button != 0)
             return;
 
-        // Skip processing if this click happens after a context menu was recently shown.
+        // Skip processing if this click happens shortly after a context menu was shown.
         // This prevents delayed clicks from context menu interactions being processed.
-        if (_lastFdContextMenuTime != null &&
-            (DateTime.Now - _lastFdContextMenuTime.Value).TotalMilliseconds > CONTEXT_MENU_CLICK_THRESHOLD_MS)
-        {
-            _lastFdContextMenuTime = null;
+        if (ConsumeContextMenuClick(ref _lastFdContextMenuTime))
             return;
-        }
 
         var key = SelectionKey.ForFactoryDefinition(def.Id);
 
@@ -154,6 +169,8 @@ public partial class SpaceScreen : ListingScreenLogic<ReadOnlyView>
     protected override void SubscribeToEvents()
     {
         base.SubscribeToEvents();
+
+        _subscribedSpace = (Session.Project?.Id, Session.Space?.Id);
 
         if (Session.Project == null || Session.Space == null)
             return;

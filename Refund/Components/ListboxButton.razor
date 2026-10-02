@@ -17,7 +17,7 @@
              Style="@ButtonStyle"
              IsOpen="@_isOpen">
     <ChildContent>
-        @ButtonLabel
+        <span title="@ButtonLabel">@ButtonLabel</span>
     </ChildContent>
     <MenuContent>
         @if (IsFiltered)
@@ -33,18 +33,12 @@
         }
         else
         {
-            <style>
-                .listbox-height-@(_id) div {
-                    max-height: @(ListHeight)px;
-                }
-            </style>
-
-            <div class="filtered-list-container listbox-height-@(_id)" style="@($"max-width: {ListWidth}px;")">
+            <div class="filtered-list-container" style="width: @(ListWidth)px; max-width: 100%; max-height: @(ListHeight)px; overflow-y: auto;">
                 <FluentListbox TOption="@((TValue Value, string Text))"
                                Items="@Options"
                                Multiple="false"
                                Disabled="@ButtonDisabled"
-                               Width="@($"{ListWidth}px")"
+                               Width="100%"
                                SelectedOptionChanged="@(v => OnListValueChanged(v.Value))">
                     <OptionTemplate Context="item">
                         @if (HrefSelector != null)
@@ -60,7 +54,7 @@
                                 }
                                 else
                                 {
-                                    <span class="option-span">@item.Text</span>
+                                    <span class="option-span" title="@item.Text">@item.Text</span>
                                 }
                             </a>
                         }
@@ -72,7 +66,7 @@
                             }
                             else
                             {
-                                <span class="option-span">@item.Text</span>
+                                <span class="option-span" title="@item.Text">@item.Text</span>
                             }
                         }
                     </OptionTemplate>

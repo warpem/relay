@@ -13,3 +13,16 @@
     background-repeat: no-repeat;
     background-position: center;
 }
+.job-option {
+    min-width: 0;
+    max-width: 280px;
+}
+
+.job-option-alias {
+    margin-left: 20px;
+    font-size: 11px;
+    opacity: 0.75;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}

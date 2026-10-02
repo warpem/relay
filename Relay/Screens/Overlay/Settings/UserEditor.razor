@@ -31,7 +31,8 @@
         </ConfirmButton>
     </div>
     
-    <FluentDataGrid Items="@DataManager.Users.AsQueryable()" RowSize="DataGridRowSize.Medium" MultiLine="true">
+    <div class="user-grid-scroll">
+    <FluentDataGrid Items="@DataManager.Users.AsQueryable()" RowSize="DataGridRowSize.Medium" MultiLine="true" Style="min-width: 900px;">
         
         <TemplateColumn Title="ID" Width="90px" Sortable="true" SortBy="@(GridSort<ReadOnlyUser>.ByAscending(x => x.Id))">
             <div style="height: 32px; align-content: center; margin-left: 5px;">
@@ -122,6 +123,7 @@
             </div>
         </TemplateColumn>
     </FluentDataGrid>
+    </div>
 }
 else
 {

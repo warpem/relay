@@ -8,6 +8,9 @@
                CreateButtonText="@GetCreateButtonText()"
                Items="@GetItems()"
                OnCreateClick="@ShowCreateDialogAsync">
+    <BeforeItems>
+        <HomeActivity />
+    </BeforeItems>
     <ItemTemplate>
         <ProjectCard @key="context.QualifiedName"
                      Item="context"

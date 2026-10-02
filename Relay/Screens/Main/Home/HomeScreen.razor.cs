@@ -1,8 +1,10 @@
+using Microsoft.AspNetCore.Components.Web;
 using Microsoft.FluentUI.AspNetCore.Components;
 using Refund.DataModel;
 using Refund.DataModel.ReadOnly;
 using Refund.Services.Core.DataManager;
 using Refund.Services.Core.Session;
+using Refund.Utils;
 using Relay.Screens.Main.Base;
 
 namespace Relay.Screens.Main.Home;
@@ -14,7 +16,18 @@ public partial class HomeScreen : ListingScreenLogic<ReadOnlyProject>
     protected override string GetTitle() => "Projects";
     protected override string GetCreateButtonText() => "Create new project";
     
-    protected override IEnumerable<ReadOnlyProject> GetItems() => DataManager.GetUserProjects(Session.User);
+    protected override IEnumerable<ReadOnlyProject> GetItems() =>
+        DataManager.GetUserProjects(Session.User).NewestFirst();
+
+    protected override async Task HandleItemClicked(ReadOnlyProject item, MouseEventArgs args)
+    {
+        // Activity job cards share this screen's selection; don't mix projects into a job selection
+        if (args.Button == 0 && args.Type != "contextmenu" &&
+            (MouseUtils.ModifierSelectSingle(args, Session.ClientOs) || MouseUtils.ModifierSelectRange(args, Session.ClientOs)))
+            await Selection.RemoveRange(Selection.SelectedItems.Where(k => k.Type != ItemType.Project));
+
+        await base.HandleItemClicked(item, args);
+    }
 
     protected override Task ShowCreateDialogAsync() => CreateProjectDialog.Show(DialogService, this, OnCreateDialogClosedAsync);
 
@@ -34,6 +47,22 @@ public partial class HomeScreen : ListingScreenLogic<ReadOnlyProject>
         {
             ProjectId = item.Id
         });
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+
+        // Activity job cards change the selection without going through this screen's handlers
+        Selection.OnSelectionChanged += HandleSelectionChanged;
+    }
+
+    private Task HandleSelectionChanged() => InvokeAsync(StateHasChanged);
+
+    public override void Dispose()
+    {
+        Selection.OnSelectionChanged -= HandleSelectionChanged;
+        base.Dispose();
+    }
 
     protected override void SubscribeToEvents()
     {

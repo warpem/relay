@@ -202,7 +202,7 @@ public partial class CreateSpaceDialog : IDialogContentComponent<CreateSpaceDial
                                                                {
                                                                    Title = "Create new space",
                                                                    Modal = true,
-                                                                   Width = "1050px",
+                                                                   Width = "min(1050px, calc(100vw - 32px))",
                                                                    PreventScroll = true,
                                                                    ShowDismiss = true,
                                                                    OnDialogResult = dialogService.CreateDialogCallback(callbackReceiver, callbackHandler)

@@ -47,6 +47,11 @@ public class View : RelayBase
     public DiagramLayout? DiagramLayout { get; set; }
 
     /// <summary>
+    /// Compact minimap of all jobs in this view, flattened across folders and factory instances.
+    /// </summary>
+    public FolderLayout? CardLayout { get; set; }
+
+    /// <summary>
     /// Flat list of ALL jobs in this view (regardless of folder placement).
     /// </summary>
     private readonly SnapshotList<Job> _Jobs = new();
@@ -365,6 +370,11 @@ public class View : RelayBase
         DiagramLayout = DiagramLayoutComputer.ComputeLayout(this, space, null);
     }
 
+    public void UpdateCardLayout(Space space)
+    {
+        CardLayout = ViewCardLayoutComputer.ComputeLayout(this, space, CardLayout);
+    }
+
     #region Serialization
 
     public override void WriteToJson(JsonNode writer)
@@ -471,6 +481,62 @@ public class View : RelayBase
             layoutNode["Edges"] = edgesArray;
 
             writer["DiagramLayout"] = layoutNode;
+        }
+
+        if (CardLayout != null)
+        {
+            var cardLayoutNode = new JsonObject
+            {
+                ["GraphWidth"] = CardLayout.GraphWidth,
+                ["GraphHeight"] = CardLayout.GraphHeight,
+                ["ConnectivityHash"] = CardLayout.ConnectivityHash
+            };
+
+            var cardNodesArray = new JsonArray();
+            foreach (var node in CardLayout.Nodes)
+            {
+                cardNodesArray.Add(new JsonObject
+                {
+                    ["ItemId"] = node.ItemId,
+                    ["IsFolder"] = node.IsFolder,
+                    ["X"] = node.X,
+                    ["Y"] = node.Y,
+                    ["Width"] = node.Width,
+                    ["Height"] = node.Height
+                });
+            }
+            cardLayoutNode["Nodes"] = cardNodesArray;
+
+            var cardEdgesArray = new JsonArray();
+            foreach (var edge in CardLayout.Edges)
+            {
+                var edgeNode = new JsonObject
+                {
+                    ["SourceX"] = edge.SourceX,
+                    ["SourceY"] = edge.SourceY,
+                    ["TargetX"] = edge.TargetX,
+                    ["TargetY"] = edge.TargetY
+                };
+
+                if (edge.BendPoints is { Count: > 0 })
+                {
+                    var bpArray = new JsonArray();
+                    foreach (var bp in edge.BendPoints)
+                    {
+                        bpArray.Add(new JsonObject
+                        {
+                            ["X"] = bp.X,
+                            ["Y"] = bp.Y
+                        });
+                    }
+                    edgeNode["BendPoints"] = bpArray;
+                }
+
+                cardEdgesArray.Add(edgeNode);
+            }
+            cardLayoutNode["Edges"] = cardEdgesArray;
+
+            writer["CardLayout"] = cardLayoutNode;
         }
     }
 
@@ -627,6 +693,57 @@ public class View : RelayBase
             }
 
             DiagramLayout = diagramLayout;
+        }
+
+        // Deserialize CardLayout; Space.UpdateLayouts validates it against the loaded graph
+        if (reader["CardLayout"] is JsonObject cardLayoutJson)
+        {
+            var cardLayout = new FolderLayout
+            {
+                GraphWidth = cardLayoutJson["GraphWidth"]?.GetValue<double>() ?? 0,
+                GraphHeight = cardLayoutJson["GraphHeight"]?.GetValue<double>() ?? 0,
+                ConnectivityHash = cardLayoutJson["ConnectivityHash"]?.GetValue<string>() ?? ""
+            };
+
+            if (cardLayoutJson["Nodes"] is JsonArray cardNodesJson)
+            {
+                foreach (var nj in cardNodesJson)
+                {
+                    cardLayout.Nodes.Add(new FolderLayoutNode
+                    {
+                        ItemId = nj["ItemId"]?.GetValue<int>() ?? 0,
+                        IsFolder = nj["IsFolder"]?.GetValue<bool>() ?? false,
+                        X = nj["X"]?.GetValue<double>() ?? 0,
+                        Y = nj["Y"]?.GetValue<double>() ?? 0,
+                        Width = nj["Width"]?.GetValue<double>() ?? 0,
+                        Height = nj["Height"]?.GetValue<double>() ?? 0
+                    });
+                }
+            }
+
+            if (cardLayoutJson["Edges"] is JsonArray cardEdgesJson)
+            {
+                foreach (var ej in cardEdgesJson)
+                {
+                    var bendPoints = new List<(double X, double Y)>();
+                    if (ej["BendPoints"] is JsonArray bpJson)
+                    {
+                        foreach (var bp in bpJson)
+                            bendPoints.Add((bp["X"]?.GetValue<double>() ?? 0, bp["Y"]?.GetValue<double>() ?? 0));
+                    }
+
+                    cardLayout.Edges.Add(new FolderLayoutEdge
+                    {
+                        SourceX = ej["SourceX"]?.GetValue<double>() ?? 0,
+                        SourceY = ej["SourceY"]?.GetValue<double>() ?? 0,
+                        TargetX = ej["TargetX"]?.GetValue<double>() ?? 0,
+                        TargetY = ej["TargetY"]?.GetValue<double>() ?? 0,
+                        BendPoints = bendPoints
+                    });
+                }
+            }
+
+            CardLayout = cardLayout;
         }
 
         // Silently ignore legacy layout keys (MainLayout, WorkbenchLayout)

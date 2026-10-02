@@ -1,4 +1,5 @@
 .folder-column {
+    position: relative;
     overflow-y: auto;
     border-right: 1px solid #ccc;
     flex: 0 0 250px; /* Fixed width, do not shrink or grow */

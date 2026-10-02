@@ -2,7 +2,7 @@
 @inherits FluentComponentBase
 @typeparam TValue
 
-<div class="filtered-list-container" style="@($"max-width: {ListWidth}px;")">
+<div class="filtered-list-container" style="width: @(ListWidth)px; max-width: 100%;">
     <FluentTextField @bind-Value="_filterText"
                      Placeholder="@FilterPlaceholder"
                      Style="margin-bottom: 0px; border-radius: 0; width: 100%;"
@@ -13,19 +13,13 @@
         <FluentIcon Value="@(new Icons.Regular.Size16.Search())" Slot="end" />
     </FluentTextField>
 
-    <style>
-        .listbox-height-@(_id) div {
-            max-height: @(ListHeight)px;
-        }
-    </style>
-    
-    <div class="listbox-height-@(_id)">
+    <div class="listbox-options" style="max-height: @(ListHeight)px; overflow-y: auto;">
         <FluentListbox TOption="@((TValue Value, string Text))" 
                        Items="@(Options.Where(opt => ShouldShowOption(opt.Text)))"
                        SelectedOptionChanged="@(v => OnValueChanged(v.Value))"
                        Multiple="false"
                        Disabled="@Disabled"
-                       Width="@($"{ListWidth}px")"
+                       Width="100%"
                        Autofocus="false"
                        Style="border-radius: 0;">
             <OptionTemplate Context="item">
@@ -42,7 +36,7 @@
                         }
                         else
                         {
-                            <span class="option-span">@item.Text</span>
+                            <span class="option-span" title="@item.Text">@item.Text</span>
                         }
                     </a>
                 }
@@ -54,7 +48,7 @@
                     }
                     else
                     {
-                        <span class="option-span">@item.Text</span>
+                        <span class="option-span" title="@item.Text">@item.Text</span>
                     }
                 }
             </OptionTemplate>

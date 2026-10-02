@@ -1,0 +1,91 @@
+@using Refund.DataModel
+@using Refund.Services
+@using Refund.Utils
+@using Relay.Screens.Main.View
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+
+<section class="home-activity" aria-labelledby="home-activity-heading">
+    <div class="activity-header">
+        <h4 id="home-activity-heading">Recent activity</h4>
+
+        <div class="activity-scopes" role="group" aria-label="Activity scope">
+            <FluentButton Appearance="@(_scope == ActivityScope.Mine ? Appearance.Accent : Appearance.Neutral)"
+                          aria-pressed="@(_scope == ActivityScope.Mine ? "true" : "false")"
+                          StopPropagation="true"
+                          OnClick="@(() => SetScopeAsync(ActivityScope.Mine))">
+                My activity
+            </FluentButton>
+            <FluentButton Appearance="@(_scope == ActivityScope.Shared ? Appearance.Accent : Appearance.Neutral)"
+                          aria-pressed="@(_scope == ActivityScope.Shared ? "true" : "false")"
+                          StopPropagation="true"
+                          OnClick="@(() => SetScopeAsync(ActivityScope.Shared))">
+                Shared activity
+            </FluentButton>
+        </div>
+
+        @if (_hasNewer)
+        {
+            <FluentButton Appearance="Appearance.Stealth"
+                          IconStart="@(new Icons.Regular.Size20.ArrowClockwise())"
+                          Title="Show newer activity"
+                          aria-label="Show newer activity"
+                          StopPropagation="true"
+                          OnClick="RefreshAsync" />
+        }
+
+        @if (_items.Count > 0)
+        {
+            <div class="activity-nav">
+                <FluentButton Appearance="Appearance.Stealth"
+                              IconStart="@(new Icons.Regular.Size20.ArrowLeft())"
+                              Title="Previous"
+                              aria-label="Scroll to previous activity"
+                              Disabled="@(!_canScrollBack)"
+                              StopPropagation="true"
+                              OnClick="@(() => ScrollAsync(-1))" />
+                <FluentButton Appearance="Appearance.Stealth"
+                              IconStart="@(new Icons.Regular.Size20.ArrowRight())"
+                              Title="Next"
+                              aria-label="Scroll to next activity"
+                              Disabled="@(!_canScrollForward)"
+                              StopPropagation="true"
+                              OnClick="@(() => ScrollAsync(1))" />
+            </div>
+        }
+    </div>
+
+    @if (_items.Count == 0)
+    {
+        <div class="activity-empty">
+            @(_scope == ActivityScope.Mine
+                  ? "Jobs you create or run will appear here."
+                  : "Jobs others create or run in your projects will appear here.")
+        </div>
+    }
+    else
+    {
+        <div class="activity-row" @ref="_row">
+            @foreach (var activity in _items.Take(_renderCount))
+            {
+                var item = activity;
+                var space = item.Job.Space;
+                if (space?.Project == null)
+                    continue;
+
+                <div @key="item.Key"
+                     id="@GetItemDomId(item.Key)"
+                     class="activity-item"
+                     style="width: @(VisualProvider.GetWidth(item.Job.CardSquareCount.X))px;">
+                    <ActivityBreadcrumb Job="@item.Job" />
+
+                    <JobCard Job="@item.Job"
+                             SelectionKey="@item.Key"
+                             OverviewMode="true"
+                             OnClick="@(args => HandleCardClick(item, args))"
+                             OnDoubleClick="@(args => HandleCardDoubleClick(item, args))"
+                             OnMiddleClick="@(args => HandleCardMiddleClick(item, args))" />
+                </div>
+            }
+        </div>
+    }
+</section>

@@ -9,8 +9,9 @@ using Refund.Utils;
 namespace Relay.Screens.Main.Base;
 
 /// <summary>
-/// Generic card component used to display items in listing screens.
-/// Provides a consistent card UI with header, details section, job list, and context menu.
+/// Generic card shell used to display items in listing screens.
+/// Renders a navigable header (hero icon, name, metadata line), then optional body and footer
+/// slots supplied by the typed card, plus the context menu.
 /// This is the presentation component that pairs with ListingCardLogic.
 /// </summary>
 /// <typeparam name="TItem">The type of item to display in the card.</typeparam>
@@ -41,23 +42,29 @@ public partial class ListingCard<TItem> : ComponentBase where TItem : class, IId
     public EventCallback<MouseEventArgs> OnNavigate { get; set; }
     
     /// <summary>
-    /// Content to display in the card header.
-    /// </summary>
-    [Parameter]
-    public RenderFragment HeaderContent { get; set; }
-    
-    /// <summary>
-    /// Additional details to display in the card body.
+    /// Metadata line under the name in the header (e.g., "3 views · 12 jobs").
     /// </summary>
     [Parameter]
     public RenderFragment ExtraDetails { get; set; }
-    
+
     /// <summary>
-    /// Custom content for displaying jobs associated with this item.
+    /// Card body below the header. Clicks select the card unless the content stops propagation.
     /// </summary>
     [Parameter]
-    public RenderFragment JobList { get; set; }
-    
+    public RenderFragment BodyContent { get; set; }
+
+    /// <summary>
+    /// Compact footer row separated from the body by a divider.
+    /// </summary>
+    [Parameter]
+    public RenderFragment FooterContent { get; set; }
+
+    /// <summary>
+    /// Card width as a CSS length. The card never exceeds its container.
+    /// </summary>
+    [Parameter]
+    public string Width { get; set; } = "356px";
+
     /// <summary>
     /// Function to generate context menu actions for this card.
     /// </summary>
@@ -65,7 +72,7 @@ public partial class ListingCard<TItem> : ComponentBase where TItem : class, IId
     public Func<Task<List<MenuAction>>> GetContextMenuActions { get; set; }
 
     /// <summary>
-    /// URL for the card header link. When set, the header renders as an anchor tag.
+    /// URL for the card header link.
     /// </summary>
     [Parameter]
     public string NavigationUrl { get; set; }
@@ -76,10 +83,27 @@ public partial class ListingCard<TItem> : ComponentBase where TItem : class, IId
     public IReadOnlyList<ReadOnlyJob> Jobs => Item.Jobs;
 
     /// <summary>
-    /// Unique ID for the card header element.
+    /// DOM key qualified by the entity's ancestors, since IDs are only unique within their parent
+    /// and must not collide with other card types (e.g., job cards use "card-{id}").
     /// </summary>
-    private string _id => $"item-heading-{Item.Id}";
-    
+    private string EntityKey => Item switch
+    {
+        ReadOnlyProject p => $"p{p.Id}",
+        ReadOnlySpace s => $"p{s.Project?.Id}-s{s.Id}",
+        ReadOnlyView v => $"p{v.Space?.Project?.Id}-s{v.Space?.Id}-v{v.Id}",
+        _ => $"{typeof(TItem).Name.ToLowerInvariant()}-{Item.Id}"
+    };
+
+    /// <summary>
+    /// ID of the card root, used as the context menu anchor.
+    /// </summary>
+    private string CardId => $"listing-card-{EntityKey}";
+
+    /// <summary>
+    /// ID of the header link, used as the notes tooltip anchor so body content can host its own hovers.
+    /// </summary>
+    private string HeaderId => $"listing-card-header-{EntityKey}";
+
     /// <summary>
     /// Current context menu actions for this card.
     /// </summary>

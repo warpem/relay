@@ -1,17 +1,61 @@
-﻿@using Refund.DataModel.ReadOnly
+@using Refund.DataModel.ReadOnly
 @using Refund.Services
 @using Refund.Services.Core.Session
-@using Relay.Emoji
+@using Relay.Components.HeroIcon
 @using Relay.Screens.Main.Base
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
 @inject MenuActionService MenuActions
 
 @inherits ListingCardLogic<ReadOnlyProject>
 
+@{
+    var spaces = Item.Spaces.NewestFirst().ToList();
+    int jobCount = spaces.Sum(s => s.Jobs.Count);
+    int viewCount = spaces.Sum(s => s.Views.Count);
+}
+
 <ListingCard TItem="ReadOnlyProject"
              Item="@Item"
+             Width="420px"
              IsSelected="@IsSelected"
              OnClick="@OnClick"
              OnNavigate="@HeaderClick"
              NavigationUrl="@NavigationUrl"
              GetContextMenuActions="GetContextMenuActions">
+    <ExtraDetails>
+        @Plural(spaces.Count, "space") · @Plural(jobCount, "job") · @Plural(viewCount, "view")
+    </ExtraDetails>
+    <BodyContent>
+        @if (spaces.Count == 0)
+        {
+            <div class="empty-text">No spaces yet</div>
+        }
+        else
+        {
+            <div class="space-rows">
+                @foreach (var space in spaces.Take(MaxSpaceRows))
+                {
+                    <a @key="space.Id"
+                       class="space-row"
+                       href="@GetSpaceUrl(space)"
+                       data-relay-navigation="true"
+                       @onclick="@(args => HandleSpaceClick(space, args))"
+                       @onclick:stopPropagation="true"
+                       @ondblclick:stopPropagation="true">
+                        <HeroIcon Value="@space.HeroImage" Size="20"/>
+                        <span class="space-name"><b>S@(space.Id)</b> @space.Alias</span>
+                        <span class="meta">@Plural(space.Jobs.Count, "job") · @Plural(space.Views.Count, "view")</span>
+                    </a>
+                }
+                @if (spaces.Count > MaxSpaceRows)
+                {
+                    <div class="meta more">+@(spaces.Count - MaxSpaceRows) more</div>
+                }
+            </div>
+        }
+    </BodyContent>
+    <FooterContent>
+        <FluentIcon Value="@(new Icons.Regular.Size16.Person())" Color="Color.Neutral"/>
+        <span class="members" title="@GetMembersTooltip()">@GetMembersSummary()</span>
+    </FooterContent>
 </ListingCard>

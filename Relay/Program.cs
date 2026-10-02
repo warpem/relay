@@ -167,6 +167,7 @@ builder.Services.AddScoped<JobSortingService>();            // Manages job sort 
 builder.Services.AddScoped<ViewDragDropService>();          // Manages drag-and-drop state in ViewScreen
 builder.Services.AddScoped<GlobalTooltipService>();        // Manages Relay's own tooltips (to get functionality unavailable in FluentUI's tooltips)
 builder.Services.AddScoped<DiagramViewService>();          // Manages diagram view mode and zoom/pan state
+builder.Services.AddSingleton<Refund.Components.Jobs.IJobPreviewRenderer, JobCardPreviewRenderer>(); // Renders job previews (JobLine, ViewCard) as full job cards
 
 // Configure cookie authentication
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)

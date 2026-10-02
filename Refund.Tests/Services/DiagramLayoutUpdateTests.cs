@@ -1,12 +1,15 @@
 using System.Reflection;
 using System.Text.Json.Nodes;
+using NavigationManager = Microsoft.AspNetCore.Components.NavigationManager;
 using Refund.Configuration;
 using Refund.DataModel;
 using Refund.DataModel.ReadOnly;
 using Refund.Jobs.Common.Import.ImportMap;
 using Refund.Jobs.Refinement.Masks.CreateMask;
+using Refund.Services;
 using Refund.Services.Core.DataManager;
 using Refund.Services.Core.Repositories;
+using Refund.Services.Core.Session;
 using Warp.Tools;
 
 namespace Refund.Tests.Services;
@@ -240,6 +243,97 @@ public sealed class DiagramLayoutUpdateTests
         Assert.Equal(job.Id, node.ItemId);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StartupLoadingRecreatesMissingLayouts(bool removeAllLayouts)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var source = await fixture.CreateJobAsync(new ImportMap());
+        var target = await fixture.CreateJobAsync(new CreateMask());
+        await fixture.ConnectAsync(source, target);
+        var parent = await fixture.Manager.CreateFolder(fixture.User, fixture.View, "Parent");
+        var child = await fixture.Manager.CreateFolder(fixture.User, fixture.View, "Child");
+        await fixture.Manager.MoveFolderToFolder(fixture.User, fixture.View, child, parent);
+        await fixture.Manager.MoveJobToFolder(fixture.User, fixture.View, source, child);
+        await fixture.Manager.MoveJobToFolder(fixture.User, fixture.View, target, child);
+        var instance = await fixture.CreateFactoryAsync(parent);
+        var emptyView = await fixture.Manager.CreateView(fixture.User, fixture.Space);
+        var space = fixture.Repository.FindSpace(fixture.Space.Project.Id, fixture.Space.Id);
+        var saved = space.ToJson();
+        var savedView = saved["Views"]![0]!;
+
+        // Simulate a deployed space predating view-card graphs, including a saved diagram position.
+        savedView["DiagramLayout"]!["Nodes"]![0]!["X"] = 1234.0;
+        if (removeAllLayouts)
+            RemoveLayouts(saved);
+        else
+            foreach (var view in saved["Views"]!.AsArray())
+                view!.AsObject().Remove("CardLayout");
+
+        // Exercise the same repository -> project -> space loading path used by DataManager startup.
+        // Use separate files so the live fixture's autosave cannot replace the legacy document.
+        string spacePath = Path.Combine(space.RootDirectory, "startup-space.json");
+        string projectsPath = Path.Combine(space.RootDirectory, "startup-projects.json");
+        var project = space.Project.ToJson();
+        project["Spaces"] = new JsonArray(JsonValue.Create(spacePath));
+        await File.WriteAllTextAsync(spacePath, saved.ToJsonString());
+        await File.WriteAllTextAsync(projectsPath, new JsonObject
+        {
+            ["Projects"] = new JsonArray(project)
+        }.ToJsonString());
+        var users = fixture.Manager.Users.Select(user =>
+            Field<UserRepository>(fixture.Manager, "_userRepository").FindUser(user.Id)).ToList().AsReadOnly();
+        using var repository = new DataRepository(projectsPath);
+
+        repository.LoadAll(users);
+
+        var loaded = repository.FindSpace(space.Project.Id, space.Id);
+        var loadedView = loaded.Views.Single(view => view.Id == fixture.View.Id);
+        Assert.Equal(4, loadedView.CardLayout!.Nodes.Count);
+        Assert.Equal(2, loadedView.CardLayout.Edges.Count);
+        Assert.True(Assert.Single(loadedView.DiagramLayout!.Nodes).IsFolder);
+        if (!removeAllLayouts)
+            Assert.Equal(1234.0, loadedView.DiagramLayout.Nodes[0].X);
+
+        var loadedChild = loadedView.Folders.Single(folder => folder.Id == child.Id);
+        Assert.Equal(2, loadedChild.Layout!.Nodes.Count);
+        Assert.Single(loadedChild.Layout.Edges);
+        Assert.Equal(2, loadedChild.DiagramLayout!.Nodes.Count);
+        Assert.Single(loadedChild.DiagramLayout.Edges);
+        Assert.All(loadedView.Folders, folder =>
+        {
+            Assert.NotNull(folder.Layout);
+            Assert.NotNull(folder.DiagramLayout);
+        });
+        var loadedInstance = loaded.FactoryInstances.Single(factory => factory.Id == instance.Id);
+        Assert.Equal(2, loadedInstance.DiagramLayout!.Nodes.Count);
+        Assert.Single(loadedInstance.DiagramLayout.Edges);
+        var definition = Assert.Single(loaded.FactoryDefinitions);
+        Assert.Equal(2, definition.CardLayout!.Nodes.Count);
+        Assert.Single(definition.CardLayout.Edges);
+        Assert.Equal(2, definition.DiagramLayout!.Nodes.Count);
+        Assert.Single(definition.DiagramLayout.Edges);
+        var loadedEmpty = loaded.Views.Single(view => view.Id == emptyView.Id);
+        Assert.Empty(loadedEmpty.CardLayout!.Nodes);
+        Assert.Empty(loadedEmpty.DiagramLayout!.Nodes);
+
+        static void RemoveLayouts(JsonNode? node)
+        {
+            if (node is JsonObject obj)
+            {
+                obj.Remove("Layout");
+                obj.Remove("DiagramLayout");
+                obj.Remove("CardLayout");
+                foreach (var child in obj.ToArray())
+                    RemoveLayouts(child.Value);
+            }
+            else if (node is JsonArray array)
+                foreach (var child in array)
+                    RemoveLayouts(child);
+        }
+    }
+
     [Fact]
     public async Task DefinitionEditsRefreshBothLayoutsBeforeNotifyingWithoutABuilder()
     {
@@ -328,8 +422,92 @@ public sealed class DiagramLayoutUpdateTests
         Assert.Empty(otherView.DiagramLayout.Edges);
     }
 
+    [Fact]
+    public async Task ViewCardLayoutFollowsFlatMembershipAndConnections()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var source = await fixture.CreateJobAsync(new ImportMap());
+        var target = await fixture.CreateJobAsync(new CreateMask());
+        var parent = await fixture.Manager.CreateFolder(fixture.User, fixture.View, "Parent");
+        var child = await fixture.Manager.CreateFolder(fixture.User, fixture.View, "Child");
+        await fixture.Manager.MoveFolderToFolder(fixture.User, fixture.View, child, parent);
+        await fixture.Manager.MoveJobToFolder(fixture.User, fixture.View, target, child);
+        var unconnected = fixture.View.CardLayout!;
+        Assert.Equal(2, unconnected.Nodes.Count);
+
+        var edge = await fixture.ConnectAsync(source, target);
+        var connected = fixture.View.CardLayout!;
+        Assert.NotSame(unconnected, connected);
+        Assert.Single(connected.Edges);
+
+        await fixture.Manager.UpdateJob(fixture.User, target, mutable => mutable.Alias = "Renamed");
+        await fixture.Manager.MoveJobToFolder(fixture.User, fixture.View, source, parent);
+        Assert.Same(connected, fixture.View.CardLayout);
+
+        await fixture.Manager.DeleteEdge(edge);
+        Assert.Empty(fixture.View.CardLayout!.Edges);
+
+        await fixture.Manager.RemoveJobFromView(fixture.User, fixture.View, source);
+        Assert.Equal(target.Id, Assert.Single(fixture.View.CardLayout!.Nodes).ItemId);
+        await fixture.Manager.RemoveJobFromView(fixture.User, fixture.View, target);
+        Assert.Empty(fixture.View.CardLayout!.Nodes);
+    }
+
+    [Fact]
+    public async Task ViewCardLayoutIncludesFactorySubJobsWithoutIdCollisions()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var instance = await fixture.CreateFactoryAsync();
+
+        Assert.Equal(instance.SubJobIds.Order(),
+            fixture.View.CardLayout!.Nodes.Select(node => node.ItemId).Order());
+        Assert.Single(fixture.View.CardLayout.Edges);
+        Assert.True(Assert.Single(fixture.View.DiagramLayout!.Nodes).IsFactoryInstance);
+    }
+
+    [Theory]
+    [InlineData(0)] // Home activity
+    [InlineData(1)] // Containing view, outside the factory
+    [InlineData(2)] // Already browsing the factory
+    public async Task FactorySubJobEditOpensInItsFactoryContext(int initialContext)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var folder = await fixture.Manager.CreateFolder(fixture.User, fixture.View, "Factory folder");
+        var instance = await fixture.CreateFactoryAsync(folder);
+        var job = instance.SubJobs.First();
+        await using var session = new RelaySession(new TestNavigationManager(), null!, null!, fixture.Manager);
+        if (initialContext == 1)
+            await session.NavigateToAsync(new NavigationRequest
+            {
+                ProjectId = fixture.Space.Project.Id, SpaceId = fixture.Space.Id, ViewId = fixture.View.Id
+            });
+        else if (initialContext == 2)
+            await session.NavigateToAsync(JobNavigation.ForJob(job, fixture.View));
+        using var editor = new JobEditorService(fixture.Manager, session);
+        var menus = new MenuActionService(fixture.Manager, session, editor, null!, null!, null!, null!, null!);
+
+        var edit = Assert.Single(menus.GetJobActions([job]), action => action.Name == "Edit job");
+        await edit.Action();
+
+        Assert.Same(job, editor.CurrentJob);
+        Assert.Equal(fixture.View.Id, session.ViewId);
+        Assert.Equal(folder.Id, session.FolderId);
+        Assert.Equal(instance.Id, session.FactoryInstanceId);
+    }
+
     private static T Field<T>(object target, string name) =>
         (T)target.GetType().GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(target)!;
+
+    private sealed class TestNavigationManager : NavigationManager
+    {
+        public TestNavigationManager() => Initialize("https://relay.test/", "https://relay.test/");
+
+        protected override void NavigateToCore(string uri, bool forceLoad)
+        {
+            Uri = ToAbsoluteUri(uri).AbsoluteUri;
+            NotifyLocationChanged(isInterceptedLink: false);
+        }
+    }
 
     private sealed class Fixture : IAsyncDisposable
     {

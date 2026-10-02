@@ -1,0 +1,23 @@
+@using Refund.Services.Core.Session
+
+@{
+    var space = Job.Space;
+    var navigation = JobNavigation.ForJob(Job);
+    var view = space.Views.FirstOrDefault(v => v.Id == navigation.ViewId);
+    var breadcrumb = $"{space.Project.QualifiedName} › {space.QualifiedName}" +
+                     (view == null ? "" : $" › {view.QualifiedName}");
+}
+
+<div class="activity-breadcrumb" title="@breadcrumb">
+    <a href="@RelaySession.BuildUrl(new() { ProjectId = space.Project.Id })"
+       title="@space.Project.QualifiedName" @onclick:stopPropagation="true">@space.Project.QualifiedName</a>
+    <span aria-hidden="true">›</span>
+    <a href="@RelaySession.BuildUrl(new() { ProjectId = space.Project.Id, SpaceId = space.Id })"
+       title="@space.QualifiedName" @onclick:stopPropagation="true">@space.QualifiedName</a>
+    @if (view != null)
+    {
+        <span aria-hidden="true">›</span>
+        <a href="@RelaySession.BuildUrl(new() { ProjectId = space.Project.Id, SpaceId = space.Id, ViewId = view.Id })"
+           title="@view.QualifiedName" @onclick:stopPropagation="true">@view.QualifiedName</a>
+    }
+</div>

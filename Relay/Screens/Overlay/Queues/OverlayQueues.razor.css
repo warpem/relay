@@ -50,3 +50,8 @@
 .no-select {
     user-select: none; /* Standard syntax */
 }
+.bottom-fade,
+.right-fade,
+.right-fade-button {
+    pointer-events: none;
+}

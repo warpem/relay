@@ -14,7 +14,7 @@ namespace Refund.Components.Jobs;
 /// Reusable component for displaying job information in a compact line format.
 /// Provides job status, navigation, and preview functionality.
 /// </summary>
-public partial class JobLine : IDisposable
+public partial class JobLine : IDisposable, IHandleEvent
 {
     /// <summary>
     /// The read-only job to display. Required.
@@ -111,27 +111,20 @@ public partial class JobLine : IDisposable
     private GroupEventSubscription _subscription;
     
     /// <summary>
-    /// Tracks if the preview tooltip is currently open.
+    /// Open state of the job card preview; the card is only rendered while it's open.
     /// </summary>
-    private bool _isPreviewOpen;
-    
-    /// <summary>
-    /// Manages callbacks for the tooltip display.
-    /// </summary>
-    private readonly TooltipSubscription _tooltipSubscription = new();
-    
-    /// <summary>
-    /// Parameters to pass to the preview component.
-    /// </summary>
-    private readonly Dictionary<string, object> _previewParams = new();
+    private readonly HoverPreview<ReadOnlyJob> _preview;
 
     /// <summary>
-    /// CSS scaling to apply to the preview image.
-    /// Scales the preview appropriately for failed jobs or jobs with visualizations.
+    /// Keeps the preview card's DOM IDs distinct from the job's own card and other lines' previews.
     /// </summary>
-    private string PreviewScaling => (_job.Status != JobStatus.Failed && _job.VisAvailableIteration >= 0) ? 
-                                         $"transform: scale({96.0 / VisualProvider.JabCardContentSquareSideLength});" : 
-                                         "";
+    private string PreviewDomIdSuffix => $"-preview-{_id}";
+
+    public JobLine()
+    {
+        _preview = new(() => InvokeAsync(StateHasChanged),
+                       job => ShowPreview && job == _job && job.Space?.Jobs.Contains(job) != false);
+    }
 
     /// <summary>
     /// Sets up or updates the job subscription when the job parameter changes.
@@ -143,7 +136,7 @@ public partial class JobLine : IDisposable
             _subscription?.Unsubscribe();
 
             _job = Job;
-            _previewParams["Job"] = _job;
+            _preview.Reset();
 
             if (_job != null && _job.Space != null)
             {
@@ -159,6 +152,9 @@ public partial class JobLine : IDisposable
                     });
             }
         }
+
+        if (!ShowPreview)
+            _preview.Reset();
     }
 
     /// <summary>
@@ -228,22 +224,30 @@ public partial class JobLine : IDisposable
     }
 
     /// <summary>
-    /// Handles mouse enter event to show the preview tooltip.
+    /// Handles mouse enter event to show the preview tooltip after a short delay.
     /// </summary>
-    private async Task HandleMouseEnter()
-    {
-        if (ShowPreview && _tooltipSubscription.OpenCallback != null)
-            await _tooltipSubscription.OpenCallback();
-    }
+    private Task HandleMouseEnter() => ShowPreview ? _preview.ShowAsync(_job, immediate: false) : Task.CompletedTask;
 
     /// <summary>
     /// Handles mouse leave event to hide the preview tooltip.
     /// </summary>
-    private async Task HandleMouseLeave()
-    {
-        if (ShowPreview && _tooltipSubscription.CloseCallback != null)
-            await _tooltipSubscription.CloseCallback();
-    }
+    private Task HandleMouseLeave() => _preview.HideAsync();
+
+    /// <summary>
+    /// Shows the preview tooltip immediately when the line receives keyboard focus.
+    /// </summary>
+    private Task HandleFocus() => ShowPreview ? _preview.ShowAsync(_job, immediate: true) : Task.CompletedTask;
+
+    /// <summary>
+    /// Closes the preview tooltip on Escape.
+    /// </summary>
+    private Task HandleKeyDown(KeyboardEventArgs args) => args.Key == "Escape" ? _preview.HideAsync() : Task.CompletedTask;
+
+    /// <summary>
+    /// Handles DOM events without the automatic re-render: the preview re-renders the line itself
+    /// when it opens or closes, so moving the pointer across many lines doesn't re-render them.
+    /// </summary>
+    Task IHandleEvent.HandleEventAsync(EventCallbackWorkItem callback, object arg) => callback.InvokeAsync(arg);
 
     /// <summary>
     /// Cleans up subscriptions when the component is disposed.
@@ -251,6 +255,6 @@ public partial class JobLine : IDisposable
     public void Dispose()
     {
         _subscription?.Unsubscribe();
-        _tooltipSubscription?.Dispose();
+        _preview.Dispose();
     }
 }

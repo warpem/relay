@@ -19,7 +19,14 @@ else
     @switch (Session.CurrentMain)
     {
         case MainScreenType.Home:
-            @if (Selection.SelectedItems.Any())
+            @* Jobs selected in Home activity can come from any accessible space *@
+            var homeJobs = Selection.ResolveSelectedJobs();
+            @if (homeJobs.Any())
+            {
+                <JobProperties @key="@("JobProperties")"
+                               Jobs="homeJobs" />
+            }
+            else if (Selection.SelectedItems.Any(k => k.Type == ItemType.Project))
             {
                 <ProjectProperties @key="@("ProjectProperties")"
                                    Projects="DataManager.GetUserProjects(Session.User).
@@ -102,7 +109,7 @@ else
                 else
                 {
                     <JobProperties @key="@("JobProperties")"
-                                   Jobs="Session.Space.Jobs.Where(j => Selection.IsSelected(SelectionKey.ForJob(j.Id)))"/>
+                                   Jobs="Session.Space.Jobs.Where(j => Selection.IsSelected(SelectionKey.ForJob(j.Id))).ToList()"/>
                 }
             }
             else if (Session.FactoryInstance != null)

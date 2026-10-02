@@ -1,9 +1,57 @@
-﻿.project-avatar {
-    border-radius: 4px;
+.space-rows {
+    display: flex;
+    flex-direction: column;
 }
 
-.owner {
-    font-weight: 600;
-    font-size: 0.75rem;
-    margin-left: 0.5rem;
+.space-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 28px;
+    min-width: 0;
+    font-size: 12px;
+    line-height: 18px;
+    color: inherit;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.space-row:hover {
+    background-color: var(--neutral-layer-2);
+}
+
+.space-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--accent-fill-rest);
+}
+
+.space-row:hover .space-name {
+    text-decoration: underline;
+}
+
+.meta {
+    font-size: 12px;
+    color: var(--neutral-foreground-hint);
+    white-space: nowrap;
+}
+
+.more {
+    padding-left: 26px;
+    line-height: 20px;
+}
+
+.empty-text {
+    font-size: 12px;
+    color: var(--neutral-foreground-hint);
+}
+
+.members {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }

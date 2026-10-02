@@ -1,18 +1,16 @@
 @using Refund.Services.Core.Session
 @using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
 
-<div style="display: flex; 
-            align-items: center; 
-            justify-content: space-between; 
-            width: 100%; 
-            height: 100%;">
+<div class="top-bar">
     
-    <Breadcrumbs/>
+    <div class="breadcrumb-scroll">
+        <Breadcrumbs/>
+    </div>
 
-    <div style="display: flex; align-items: center; gap: 1rem;">
-        <div style="display: flex; align-items: center; gap: 0.3rem;">
+    <div class="top-bar-actions">
+        <div class="current-user">
             <FluentIcon Value="@(new Icons.Regular.Size20.Person())" />
-            <span>@Session.User.Name</span>
+            <span title="@Session.User.Name">@Session.User.Name</span>
         </div>
 
         <FluentButton Id="Theme"

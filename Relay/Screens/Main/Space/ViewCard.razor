@@ -1,6 +1,9 @@
+@using Refund.DataModel
 @using Refund.DataModel.ReadOnly
 @using Refund.Services
+@using Refund.Utils
 @using Relay.Screens.Main.Base
+@using Refund.Components.Jobs
 
 @inject MenuActionService MenuActions
 
@@ -8,17 +11,69 @@
 
 <ListingCard TItem="ReadOnlyView"
              Item="@Item"
+             Width="480px"
              IsSelected="@IsSelected"
              OnClick="@OnClick"
              OnNavigate="@HeaderClick"
              NavigationUrl="@NavigationUrl"
              GetContextMenuActions="GetContextMenuActions">
     <ExtraDetails>
-        @if (Item.Jobs.Any())
-        {
-            <span class="detail-text">
-                @Item.Jobs.Count @(Item.Jobs.Count == 1 ? "job" : "jobs")
-            </span>
-        }
+        <span>@Item.Jobs.Count @(Item.Jobs.Count == 1 ? "job" : "jobs")</span>
     </ExtraDetails>
+    <BodyContent>
+        @if (Item.CardLayout is { Nodes.Count: > 0 } layout)
+        {
+            var size = GetGraphSize(layout);
+            var jobs = Item.Jobs.DistinctBy(j => j.Id).ToDictionary(j => j.Id);
+            <div class="view-graph-container">
+                <div class="view-graph" style="width: @(F(size.Width))px; aspect-ratio: @F(size.Width) / @F(size.Height);">
+                    <svg viewBox="-8 -8 @F(layout.GraphWidth + 16) @F(layout.GraphHeight + 16)" aria-hidden="true">
+                        @foreach (var edge in layout.Edges)
+                        {
+                            <path d="@GetEdgePath(edge)" fill="none" stroke="var(--neutral-foreground-rest)" stroke-width="1" opacity="0.4" />
+                        }
+                    </svg>
+                    @foreach (var node in layout.Nodes)
+                    {
+                        if (!jobs.TryGetValue(node.ItemId, out var job))
+                            continue;
+                        var anchor = GetNodeId(job);
+                        <a @key="job.Id" id="@anchor" class="view-graph-node"
+                              href="@GetJobUrl(job)" data-relay-navigation="true"
+                              aria-label="@($"Open {job.QualifiedName}, {job.TypeName}, {job.Status}")"
+                              style="left: @F(100 * (node.X + node.Width / 2 + 8) / (layout.GraphWidth + 16))%; top: @F(100 * (node.Y + node.Height / 2 + 8) / (layout.GraphHeight + 16))%; --dot-size: @(F(Math.Max(8, 10 * size.Scale)))px; --dot-color: @Refund.Utils.JobStatusExtensions.GetStatusHexColor(job.Status);"
+                              @onclick="args => OpenJob(job, args)" @onclick:stopPropagation="true"
+                              @ondblclick:stopPropagation="true"
+                              @onmouseenter="() => _preview.ShowAsync(job, false)" @onmouseleave="_preview.HideAsync"
+                              @onfocus="() => _preview.ShowAsync(job, true)" @onblur="_preview.HideAsync"
+                              @onkeydown="HandleNodeKeyDown">
+                        </a>
+                    }
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="view-empty">No jobs yet</div>
+        }
+    </BodyContent>
+    <FooterContent>
+        <div class="view-status-totals">
+            @foreach (var group in Item.Jobs.GroupBy(j => j.Status).OrderBy(g => StatusOrder(g.Key)))
+            {
+                <span class="view-status" title="@group.Key.GetStatusDescription()">
+                    <span class="status-dot" style="background-color: @Refund.Utils.JobStatusExtensions.GetStatusHexColor(group.Key);"></span>
+                    @group.Count() @group.Key.ToString().ToLowerInvariant()
+                </span>
+            }
+        </div>
+    </FooterContent>
 </ListingCard>
+
+@if (_preview.Current is { } previewJob)
+{
+    <JobPreviewTooltip Job="@previewJob"
+                       Anchor="@GetNodeId(previewJob)"
+                       DomIdSuffix="@($"-preview-v{Item.Id}")"
+                       OnDismissed="_preview.HideAsync" />
+}

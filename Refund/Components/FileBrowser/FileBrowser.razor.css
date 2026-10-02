@@ -1,7 +1,10 @@
 .file-browser {
     display: flex;
     flex-direction: column;
-    width: 1000px;
+    width: min(1000px, calc(100vw - 80px));
+    max-width: 100%;
+    min-width: 0;
+    max-height: calc(100dvh - 160px);
 }
 
 .address-bar {
@@ -26,6 +29,14 @@
     overflow-x: auto;
     flex: 1;
     min-width: 0;
+    min-height: 0;
+}
+
+.delete-item-list {
+    margin-bottom: 10px;
+    overflow-wrap: anywhere;
+    max-height: 240px;
+    overflow-y: auto;
 }
 
 .bottom-toolbar {

@@ -22,7 +22,7 @@ else
                 <div style="width: 16px; height: 16px; display: flex;">
                     <FluentIcon Value="@(IsSelected(item) ? IconFolderSelected : IconFolder)"/>
                 </div>
-                <span class="item-label">@item.Name</span>
+                <span class="item-label" title="@item.Name">@item.Name</span>
             </div>
         }
 
@@ -34,7 +34,7 @@ else
                 <div style="width: 16px; height: 16px; display: flex;">
                     <FluentIcon Value="@(IsSelected(item) ? IconFileSelected : IconFile)"/>
                 </div>
-                <span class="item-label">@item.Name</span>
+                <span class="item-label" title="@item.Name">@item.Name</span>
             </div>
         }
     </div>

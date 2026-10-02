@@ -63,3 +63,6 @@
     --type-ramp-base-line-height: 10pt;
     --design-unit: 3.5;
 }
+.job-editor-heading {
+    overflow-wrap: anywhere;
+}

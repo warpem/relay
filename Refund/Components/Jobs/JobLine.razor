@@ -6,7 +6,8 @@
 {
     <a href="@_navigationUrl" style="text-decoration: none; color: inherit;"
        data-relay-navigation="true"
-       @onclick="HandleNavigableClick" @onclick:stopPropagation="true">
+       @onclick="HandleNavigableClick" @onclick:stopPropagation="true"
+       @onfocus="HandleFocus" @onblur="_preview.HideAsync" @onkeydown="HandleKeyDown">
         <div>
             <div id="@_id" class="job-line navigation"
                  @onmouseenter="HandleMouseEnter"
@@ -64,28 +65,13 @@
                 }
             </div>
 
-            @if (ShowPreview)
+            @if (_preview.Current != null)
             {
-                <FluentTooltip Anchor="@_id"
-                               Position="@PreviewPosition"
-                               Class="minimal-padding"
-                               MaxWidth="10000px">
-                    <DynamicTooltipContent Subscription="_tooltipSubscription">
-                        <div style="width: @(_job.CardSquareCount.X * 96)px; height: @(_job.CardSquareCount.Y * 96)px;">
-                            @if (Job.CardViewType != null)
-                            {
-                                <div style="width: 100%;
-                                    height: 100%;
-                                    display: flex;
-                                    align-items: center;
-                                    justify-content: center;
-                                    @PreviewScaling">
-                                    <DynamicComponent Type="@Job.CardViewType" Parameters="_previewParams"/>
-                                </div>
-                            }
-                        </div>
-                    </DynamicTooltipContent>
-                </FluentTooltip>
+                <JobPreviewTooltip Job="@_preview.Current"
+                                   Anchor="@_id"
+                                   Position="@PreviewPosition"
+                                   DomIdSuffix="@PreviewDomIdSuffix"
+                                   OnDismissed="_preview.HideAsync"/>
             }
         </div>
     </a>
@@ -150,28 +136,13 @@ else
             }
         </div>
 
-        @if (ShowPreview)
+        @if (_preview.Current != null)
         {
-            <FluentTooltip Anchor="@_id"
-                           Position="@PreviewPosition"
-                           Class="minimal-padding"
-                           MaxWidth="10000px">
-                <DynamicTooltipContent Subscription="_tooltipSubscription">
-                    <div style="width: @(_job.CardSquareCount.X * 96)px; height: @(_job.CardSquareCount.Y * 96)px;">
-                        @if (Job.CardViewType != null)
-                        {
-                            <div style="width: 100%;
-                                height: 100%;
-                                display: flex;
-                                align-items: center;
-                                justify-content: center;
-                                @PreviewScaling">
-                                <DynamicComponent Type="@Job.CardViewType" Parameters="_previewParams"/>
-                            </div>
-                        }
-                    </div>
-                </DynamicTooltipContent>
-            </FluentTooltip>
+            <JobPreviewTooltip Job="@_preview.Current"
+                               Anchor="@_id"
+                               Position="@PreviewPosition"
+                               DomIdSuffix="@PreviewDomIdSuffix"
+                               OnDismissed="_preview.HideAsync"/>
         }
     </div>
 }

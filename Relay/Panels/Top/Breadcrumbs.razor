@@ -7,7 +7,7 @@
 @inject ViewDragDropService DragDrop
 @inherits FluentComponentBase
 
-<div style="display: flex; align-items: center; column-gap: 8px;">
+<div style="display: inline-flex; width: max-content; align-items: center; column-gap: 8px;">
     <a href="/" data-relay-navigation="true"
        @onclick="OnHomeButtonClick"
        style="@($"margin-left: {(RelaySession.LeftPanelWidth - 32) / 2}px;") text-decoration: none; color: inherit;">
@@ -123,7 +123,7 @@
                     <ListboxButton @key="@("JobsListbox")"
                                    TValue="@(ReadOnlyJob)"
                                    ButtonLabel="@Session.Job.QualifiedName"
-                                   ListWidth="200"
+                                   ListWidth="300"
                                    ListHeight="300"
                                    ButtonMinWidth="100"
                                    ButtonAppearance="Appearance.Accent"
@@ -133,10 +133,16 @@
                                    OnOptionSelected="OnJobValueChange"
                                    Options="@(Jobs.Select(p => (p.Key, p.Value)))">
                         <OptionTemplate>
+                            <div class="job-option" title="@context.Value.QualifiedName">
                             <JobLine Job="context.Value"
                                      EnableNavigation="false"
                                      ShowStatus="false"
-                                     NameWidth="196px"/>
+                                     NameWidth="auto"/>
+                            @if (!string.IsNullOrWhiteSpace(context.Value.Alias))
+                            {
+                                <div class="job-option-alias">@context.Value.Alias</div>
+                            }
+                            </div>
                         </OptionTemplate>
                     </ListboxButton>
                 }
