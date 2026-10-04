@@ -442,7 +442,7 @@ public static class BakeryWrapper
     /// <summary>
     /// Creates a job card visualization for motion correction and CTF estimation results.
     /// </summary>
-    /// <param name="motionTracksJsonFile">Path to the motion tracks JSON file.</param>
+    /// <param name="motionTracksJsonFile">Path to the motion tracks JSON file, or null when no motion model exists.</param>
     /// <param name="motionCorrectedImageMrcFile">Path to the motion-corrected micrograph MRC file.</param>
     /// <param name="frameSeriesProcessingXmlFile">Path to the frame series processing XML file containing CTF information.</param>
     /// <param name="outputImageFile">Path where the output job card image will be saved.</param>
@@ -458,7 +458,7 @@ public static class BakeryWrapper
     )
     {
         var command = "motion-and-ctf-job-card " +
-                      $"--motion-tracks-json-file {motionTracksJsonFile} " +
+                      (motionTracksJsonFile == null ? "" : $"--motion-tracks-json-file {motionTracksJsonFile} ") +
                       $"--motion-corrected-image-file {motionCorrectedImageMrcFile} " +
                       $"--frame-series-xml-file {frameSeriesProcessingXmlFile} " +
                       $"--output-file {outputImageFile}";

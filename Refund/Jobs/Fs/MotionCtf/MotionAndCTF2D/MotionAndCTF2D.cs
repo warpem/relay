@@ -503,7 +503,7 @@ public class MotionAndCTF2D : WarpJobGpu, IClusterJob
 
             Movie m = new Movie(Path.Combine(DirectoryPath, processedItems[0].Path));
 
-            BakeryWrapper.MotionAndCTF2DJobCard(m.MotionTracksPath, m.AveragePath, m.XMLPath, VisCard(0));
+            BakeryWrapper.MotionAndCTF2DJobCard(m.HasGlobalMovement ? m.MotionTracksPath : null, m.AveragePath, m.XMLPath, VisCard(0));
 
             return () =>
             {

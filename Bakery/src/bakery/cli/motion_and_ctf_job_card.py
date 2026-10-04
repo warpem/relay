@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Optional
 
 import einops
 import matplotlib.axes
@@ -19,7 +20,7 @@ from bakery.ctf_utils import draw_ctf_fit_quality_panel
 
 @cli.command(no_args_is_help=True)
 def motion_and_ctf_job_card(
-    motion_tracks_json_file: Path = typer.Option(...),
+    motion_tracks_json_file: Optional[Path] = typer.Option(None),
     motion_corrected_image_file: Path = typer.Option(...),
     frame_series_xml_file: Path = typer.Option(...),
     output_file: Path = typer.Option(...),
@@ -42,7 +43,7 @@ def motion_and_ctf_job_card(
 def draw_motion_correction_panel(
     ax: matplotlib.axes.Axes,
     motion_corrected_image_file: Path,
-    motion_tracks_json_file: Path
+    motion_tracks_json_file: Optional[Path] = None
 ):
     # read image with pixel size
     with mrcfile.open(motion_corrected_image_file) as mrc:
@@ -59,6 +60,11 @@ def draw_motion_correction_panel(
 
     # draw image with maintained aspect ratio, normalized to [0, 1]
     ax.imshow(image_processed, cmap="gray", origin="lower", vmin=0, vmax=1, aspect='equal', interpolation='sinc')
+
+    # Single-frame inputs have an average and CTF fit, but no motion model.
+    ax.axis('off')
+    if motion_tracks_json_file is None:
+        return
 
     # read motion grid data
     motion_grid = parse_motion_grid_from_json(motion_tracks_json_file)
@@ -100,6 +106,4 @@ def draw_motion_correction_panel(
                 linewidth=0.5,
                 solid_capstyle='round'
             )
-    ax.axis('off')
-
 
