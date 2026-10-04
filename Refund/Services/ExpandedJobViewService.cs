@@ -1,5 +1,3 @@
-using System.Collections.Concurrent;
-using System.Collections.ObjectModel;
 using Microsoft.Extensions.Logging;
 using Refund.DataModel.ReadOnly;
 using Refund.Services.Core.DataManager;
@@ -28,6 +26,11 @@ public class ExpandedJobViewService : IDisposable
     private readonly RelaySession _session;
     private readonly ILogger<ExpandedJobViewService> _logger;
     private readonly List<GroupEventSubscription> _subscriptions = new();
+    private readonly Func<string, Task<string>> _readTextAsync;
+    private ReadOnlyJob _selectedJob;
+    private long _version;
+    private bool _disposed;
+    private SemaphoreSlim _refreshGate = new(1, 1);
 
     /// <summary>
     /// Gets the currently selected job from the session.
@@ -46,13 +49,17 @@ public class ExpandedJobViewService : IDisposable
     /// <param name="session">The session service that tracks the current application state</param>
     /// <param name="logger">The logger for this service</param>
     public ExpandedJobViewService(DataManager dataManager, RelaySession session, ILogger<ExpandedJobViewService> logger)
+        : this(dataManager, session, logger, path => File.ReadAllTextAsync(path)) { }
+
+    internal ExpandedJobViewService(DataManager dataManager, RelaySession session,
+        ILogger<ExpandedJobViewService> logger, Func<string, Task<string>> readTextAsync)
     {
         _dataManager = dataManager;
         _session = session;
         _logger = logger;
-
+        _readTextAsync = readTextAsync;
         _session.OnJobChanged += HandleSessionJobChanged;
-        HandleSessionJobChanged();
+        _ = HandleSessionJobChanged();
     }
 
     /// <summary>
@@ -70,37 +77,43 @@ public class ExpandedJobViewService : IDisposable
     /// </remarks>
     private async Task HandleSessionJobChanged()
     {
-        _subscriptions.UnsubscribeAndClear();
-        
-        _currentIteration = -1;
-        _availableIterations.Clear();
-        _iterationMetadata.Clear();
-        _cachedLogs.Clear();
-        _currentErrors = string.Empty;
-        _currentStaging = string.Empty;
-
-        if (_job != null)
+        ReadOnlyJob job;
+        long version;
+        lock (_stateLock)
         {
-            // Subscribe to job updates
-            _subscriptions.Add(_dataManager.JobUpdated.Add(GroupName.Job(_job.Space.Project.Id, _job.Space.Id, _job.Id),
-                                                           async args => await HandleJobUpdated(args.Object)));
+            if (_disposed) return;
+            ClearSubscriptions();
+            job = _selectedJob = _job;
+            version = ++_version;
+            // A new job must not wait for an old job's outstanding disk reads.
+            _refreshGate = new SemaphoreSlim(1, 1);
+            _currentIteration = -1;
+            _availableIterations.Clear();
+            _iterationMetadata.Clear();
+            _cachedLogs.Clear();
+            _currentErrors = _currentStaging = string.Empty;
+            _hasNewLogs = _hasNewErrors = _hasNewStaging = false;
 
-            // Initial load
-            await RefreshIterationsAsync();
-            await RefreshLogsAsync();
-        
-            await OnJobChanged.InvokeAllAsync(_job);
-            
-            // Set initial iteration to the highest available
-            if (_availableIterations.Any())
-                await SetIterationAsync(_availableIterations.Max());
+            if (job != null)
+                _subscriptions.Add(_dataManager.JobUpdated.Add(GroupName.SpecificJob(job),
+                    args => HandleJobUpdated(args.Object, version)));
         }
-        else
+
+        if (job != null)
         {
-            await OnJobChanged.InvokeAllAsync(null);
+            RefreshIterations(job, version);
+            if (!await RefreshLogsAsync(job, version)) return;
         }
+        await NotifyCurrent(job, version, OnJobChanged, job);
+        int iteration;
+        lock (_stateLock)
+        {
+            if (!IsCurrent(job, version)) return;
+            iteration = _availableIterations.Count > 0 ? _availableIterations.Max() : -1;
+        }
+        await SetIterationAsync(iteration, job, version);
     }
-    
+
     private int _currentIteration = -1;
     
     /// <summary>
@@ -109,7 +122,7 @@ public class ExpandedJobViewService : IDisposable
     /// <remarks>
     /// A value of -1 indicates that no iteration is selected.
     /// </remarks>
-    public int CurrentIteration => _currentIteration;
+    public int CurrentIteration { get { lock (_stateLock) return _currentIteration; } }
     
     /// <summary>
     /// Gets the current visualization iteration, which is the minimum of the selected iteration
@@ -122,7 +135,7 @@ public class ExpandedJobViewService : IDisposable
 
     // Available iterations are those that have either logs or results
     private readonly List<int> _availableIterations = new();
-    private readonly object _iterationsLock = new object();
+    private readonly object _stateLock = new object();
     
     /// <summary>
     /// Gets a read-only list of iterations that have logs, results, or visualizations available.
@@ -135,7 +148,7 @@ public class ExpandedJobViewService : IDisposable
     {
         get
         {
-            lock (_iterationsLock)
+            lock (_stateLock)
                 return _availableIterations.ToList();
         }
     }
@@ -157,7 +170,7 @@ public class ExpandedJobViewService : IDisposable
     {
         get
         {
-            lock (_iterationsLock)
+            lock (_stateLock)
                 return _iterationMetadata.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
         }
     }
@@ -167,35 +180,35 @@ public class ExpandedJobViewService : IDisposable
     /// <summary>
     /// Gets a value indicating whether the log panel is currently expanded.
     /// </summary>
-    public bool IsLogPanelExpanded => _isLogPanelExpanded;
+    public bool IsLogPanelExpanded { get { lock (_stateLock) return _isLogPanelExpanded; } }
 
     private LogSection _currentSection = LogSection.Staging;
     
     /// <summary>
     /// Gets the currently selected log section (Staging, Output, or Errors).
     /// </summary>
-    public LogSection CurrentSection => _currentSection;
+    public LogSection CurrentSection { get { lock (_stateLock) return _currentSection; } }
 
     private bool _hasNewLogs = false;
     
     /// <summary>
     /// Gets a value indicating whether there are new logs that haven't been viewed yet.
     /// </summary>
-    public bool HasNewLogs => _hasNewLogs;
+    public bool HasNewLogs { get { lock (_stateLock) return _hasNewLogs; } }
 
     private bool _hasNewErrors = false;
     
     /// <summary>
     /// Gets a value indicating whether there are new error logs that haven't been viewed yet.
     /// </summary>
-    public bool HasNewErrors => _hasNewErrors;
+    public bool HasNewErrors { get { lock (_stateLock) return _hasNewErrors; } }
 
     private bool _hasNewStaging = false;
     
     /// <summary>
     /// Gets a value indicating whether there are new staging logs that haven't been viewed yet.
     /// </summary>
-    public bool HasNewStaging => _hasNewStaging;
+    public bool HasNewStaging { get { lock (_stateLock) return _hasNewStaging; } }
 
     // Events
     /// <summary>
@@ -239,21 +252,21 @@ public class ExpandedJobViewService : IDisposable
     /// <remarks>
     /// This cache stores the log content for each iteration to avoid reading from disk unnecessarily.
     /// </remarks>
-    private readonly ConcurrentDictionary<int, string> _cachedLogs = new();
+    private readonly Dictionary<int, string> _cachedLogs = new();
     
     private string _currentErrors = string.Empty;
     
     /// <summary>
     /// Gets the current error log content for the selected job.
     /// </summary>
-    public string CurrentErrors => _currentErrors;
+    public string CurrentErrors { get { lock (_stateLock) return _currentErrors; } }
 
     private string _currentStaging = string.Empty;
     
     /// <summary>
     /// Gets the current staging log content for the selected job.
     /// </summary>
-    public string CurrentStaging => _currentStaging;
+    public string CurrentStaging { get { lock (_stateLock) return _currentStaging; } }
 
     /// <summary>
     /// Sets the currently selected iteration.
@@ -264,19 +277,26 @@ public class ExpandedJobViewService : IDisposable
     /// This method validates that the selected iteration is available before changing the selection.
     /// When the iteration changes, it refreshes the logs for the new iteration and notifies subscribers.
     /// </remarks>
-    public async Task SetIterationAsync(int iteration)
+    public Task SetIterationAsync(int iteration)
     {
-        if (_job == null ||
-            iteration == _currentIteration ||
-            iteration < -1 || 
-            !_availableIterations.Contains(iteration))
-            return;
-            
-        _currentIteration = iteration;
-        await RefreshLogsAsync();
-        
-        _logger.LogDebug("Iteration changed to {Iteration} for job {JobId}", iteration, _job?.Id);
-        await OnIterationChanged.InvokeAllAsync(iteration);
+        ReadOnlyJob job;
+        long version;
+        lock (_stateLock) { job = _selectedJob; version = _version; }
+        return SetIterationAsync(iteration, job, version);
+    }
+
+    private async Task SetIterationAsync(int iteration, ReadOnlyJob job, long version)
+    {
+        lock (_stateLock)
+        {
+            if (job == null || !IsCurrent(job, version) || iteration == _currentIteration ||
+                iteration < -1 || (iteration != -1 && !_availableIterations.Contains(iteration))) return;
+            _currentIteration = iteration;
+        }
+        if (!await RefreshLogsAsync(job, version)) return;
+        lock (_stateLock)
+            if (_currentIteration != iteration) return;
+        await NotifyCurrent(job, version, OnIterationChanged, iteration);
     }
 
     /// <summary>
@@ -290,20 +310,17 @@ public class ExpandedJobViewService : IDisposable
     /// </remarks>
     public async Task OpenLogPanel(LogSection section)
     {
-        _currentSection = section;
-        if (!_isLogPanelExpanded)
+        bool changed;
+        lock (_stateLock)
         {
+            _currentSection = section;
+            changed = !_isLogPanelExpanded;
             _isLogPanelExpanded = true;
-            await OnLogPanelStateChanged.InvokeAllAsync();
+            if (section == LogSection.Staging) _hasNewStaging = false;
+            else if (section == LogSection.Output) _hasNewLogs = false;
+            else if (section == LogSection.Errors) _hasNewErrors = false;
         }
-    
-        // Clear new indicators for this section
-        if (section == LogSection.Staging)
-            _hasNewStaging = false;
-        else if (section == LogSection.Output)
-            _hasNewLogs = false;
-        else if (section == LogSection.Errors)
-            _hasNewErrors = false;
+        if (changed) await OnLogPanelStateChanged.InvokeAllAsync();
     }
 
     /// <summary>
@@ -315,11 +332,13 @@ public class ExpandedJobViewService : IDisposable
     /// </remarks>
     public async Task CloseLogPanel()
     {
-        if (_isLogPanelExpanded)
+        bool changed;
+        lock (_stateLock)
         {
+            changed = _isLogPanelExpanded;
             _isLogPanelExpanded = false;
-            await OnLogPanelStateChanged.InvokeAllAsync();
         }
+        if (changed) await OnLogPanelStateChanged.InvokeAllAsync();
     }
 
     /// <summary>
@@ -338,54 +357,57 @@ public class ExpandedJobViewService : IDisposable
     /// 4. Sets flags to indicate new logs are available (if the log panel isn't showing them)
     /// 5. Notifies subscribers of the job update
     /// </remarks>
-    private async Task HandleJobUpdated(ReadOnlyJob job)
+    private async Task HandleJobUpdated(ReadOnlyJob job, long version)
     {
         try
         {
-            bool showingLastIteration = _availableIterations.Count == 0 ||
-                                        CurrentIteration == _availableIterations.Max();
-
-            // Store previous log content to detect changes
-            string previousErrors = _currentErrors;
-            string previousStaging = _currentStaging;
-            var previousIterationCount = _availableIterations.Count;
-            string previousCurrentIterationLog = CurrentIteration >= 0 ? GetLogsForIteration(CurrentIteration) : string.Empty;
-
-            await RefreshIterationsAsync();
-            await RefreshLogsAsync();
-
-            if (showingLastIteration && _availableIterations.Any())
-                await SetIterationAsync(_availableIterations.Max());
-
-            // If current iteration is no longer available, switch to the highest available
-            if (!_availableIterations.Contains(CurrentIteration))
-                await SetIterationAsync(_availableIterations.Any() ? _availableIterations.Max() : -1);
-
-            // Only set new flags if logs actually changed and panel is not showing them
-            bool errorsChanged = _currentErrors != previousErrors;
-            bool stagingChanged = _currentStaging != previousStaging;
-            bool newIterationsAvailable = _availableIterations.Count > previousIterationCount;
-            bool currentIterationLogChanged = CurrentIteration >= 0 && GetLogsForIteration(CurrentIteration) != previousCurrentIterationLog;
-
-            if (stagingChanged &&
-                (!_isLogPanelExpanded || _currentSection != LogSection.Staging))
-                _hasNewStaging = true;
-            if ((newIterationsAvailable || currentIterationLogChanged) &&
-                (!_isLogPanelExpanded || _currentSection != LogSection.Output))
-                _hasNewLogs = true;
-            if (errorsChanged &&
-                (!_isLogPanelExpanded || _currentSection != LogSection.Errors))
-                _hasNewErrors = true;
-
-            _logger.LogDebug("Job updated event raised for job {JobId}", _job?.Id);
-            await OnJobUpdated.InvokeAllAsync();
+            bool showingLastIteration;
+            string previousErrors, previousStaging, previousLog;
+            int previousIterationCount;
+            lock (_stateLock)
+            {
+                if (!IsCurrent(job, version)) return;
+                showingLastIteration = _availableIterations.Count == 0 || _currentIteration == _availableIterations.Max();
+                previousErrors = _currentErrors;
+                previousStaging = _currentStaging;
+                previousIterationCount = _availableIterations.Count;
+                previousLog = GetLogsForIteration(_currentIteration);
+            }
+            RefreshIterations(job, version);
+            int iteration;
+            bool iterationChanged;
+            lock (_stateLock)
+            {
+                if (!IsCurrent(job, version)) return;
+                iteration = showingLastIteration || !_availableIterations.Contains(_currentIteration)
+                    ? (_availableIterations.Count > 0 ? _availableIterations.Max() : -1)
+                    : _currentIteration;
+                iterationChanged = iteration != _currentIteration;
+                _currentIteration = iteration;
+            }
+            if (!await RefreshLogsAsync(job, version)) return;
+            lock (_stateLock)
+            {
+                if (!IsCurrent(job, version)) return;
+                if (_currentStaging != previousStaging && (!_isLogPanelExpanded || _currentSection != LogSection.Staging))
+                    _hasNewStaging = true;
+                if ((_availableIterations.Count > previousIterationCount || GetLogsForIteration(_currentIteration) != previousLog) &&
+                    (!_isLogPanelExpanded || _currentSection != LogSection.Output))
+                    _hasNewLogs = true;
+                if (_currentErrors != previousErrors && (!_isLogPanelExpanded || _currentSection != LogSection.Errors))
+                    _hasNewErrors = true;
+                iterationChanged &= _currentIteration == iteration;
+            }
+            if (iterationChanged)
+                await NotifyCurrent(job, version, OnIterationChanged, iteration);
+            await NotifyCurrent(job, version, OnJobUpdated);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error handling job update for job {JobId}", _job?.Id);
+            _logger.LogError(ex, "Error handling job update for job {JobId}", job?.Id);
         }
     }
-    
+
     /// <summary>
     /// Refreshes the list of available iterations and their metadata.
     /// </summary>
@@ -400,20 +422,20 @@ public class ExpandedJobViewService : IDisposable
     /// and their corresponding metadata. The method uses thread-safe operations to update the
     /// shared collections, as they may be accessed from different threads.
     /// </remarks>
-    private async Task RefreshIterationsAsync()
+    private void RefreshIterations(ReadOnlyJob job, long version)
     {
-        if (_job == null)
+        if (job == null || !IsCurrent(job, version))
             return;
             
         var newIterations = new List<int>();
         var newMetadata = new Dictionary<int, (bool hasLogs, bool hasResults, bool hasVis)>();
 
         // Build new collections without holding the lock
-        for (int i = 0; i <= Math.Max(_job.LogsAvailableIteration, _job.VisAvailableIteration); i++)
+        for (int i = 0; i <= Math.Max(job.LogsAvailableIteration, job.VisAvailableIteration); i++)
         {
-            bool hasLogs = i <= _job.LogsAvailableIteration;
-            bool hasResults = _job.HasResultFilesForIteration(i);
-            bool hasVis = i <= _job.VisAvailableIteration;
+            bool hasLogs = i <= job.LogsAvailableIteration;
+            bool hasResults = job.HasResultFilesForIteration(i);
+            bool hasVis = i <= job.VisAvailableIteration;
             
             if (hasLogs || hasResults || hasVis)
             {
@@ -425,8 +447,9 @@ public class ExpandedJobViewService : IDisposable
         newIterations.Sort();
 
         // Update collections under lock
-        lock (_iterationsLock)
+        lock (_stateLock)
         {
+            if (!IsCurrent(job, version)) return;
             _availableIterations.Clear();
             _availableIterations.AddRange(newIterations);
             
@@ -451,97 +474,102 @@ public class ExpandedJobViewService : IDisposable
     /// The method uses a caching strategy to avoid re-reading older iteration logs
     /// from disk unnecessarily, as these logs don't change once written.
     /// </remarks>
-    private async Task RefreshLogsAsync()
+    private async Task<bool> RefreshLogsAsync(ReadOnlyJob job, long version)
     {
-        if (_job == null)
-            return;
-
-        // Phase 1: Update all caches from disk before firing any events.
-        // This ensures that even if an event handler throws, subsequent handlers
-        // and renders will see the latest data.
+        SemaphoreSlim gate;
+        lock (_stateLock)
+        {
+            if (job == null || !IsCurrent(job, version)) return false;
+            gate = _refreshGate;
+        }
+        await gate.WaitAsync();
+        string errors, staging;
         try
         {
-            // Handle error log
-            if (Directory.Exists(_job.DirectoryPath))
+            int[] iterations;
+            lock (_stateLock)
             {
-                string errorPath = _job.ErrorFilePath;
-                _currentErrors = File.Exists(errorPath)
-                    ? await File.ReadAllTextAsync(errorPath)
-                    : string.Empty;
+                if (!IsCurrent(job, version)) return false;
+                int max = _availableIterations.Count > 0 ? _availableIterations.Max() : -1;
+                iterations = _availableIterations.Where(i => i == _currentIteration || i >= max - 1 || !_cachedLogs.ContainsKey(i)).ToArray();
+                errors = _currentErrors;
+                staging = _currentStaging;
             }
-            else
+            // Read using the captured job, then publish one complete snapshot only if
+            // this selection is still current. No shared cache is written across awaits.
+            var logs = new Dictionary<int, string>();
+            try
             {
-                _currentErrors = string.Empty;
-            }
-
-            // Handle staging log
-            if (Directory.Exists(_job.DirectoryPath))
-            {
-                string stagingPath = _job.LifecycleFilePath;
-                if (File.Exists(stagingPath))
+                errors = File.Exists(job.ErrorFilePath) ? await _readTextAsync(job.ErrorFilePath) : string.Empty;
+                staging = File.Exists(job.LifecycleFilePath)
+                    ? ProcessStagingContent(await _readTextAsync(job.LifecycleFilePath)) : string.Empty;
+                foreach (int iteration in iterations)
                 {
-                    string rawStagingContent = await File.ReadAllTextAsync(stagingPath);
-                    _currentStaging = ProcessStagingContent(rawStagingContent);
-                }
-                else
-                {
-                    _currentStaging = string.Empty;
+                    if (!IsCurrent(job, version)) return false;
+                    string path = job.LogFilePath(iteration);
+                    if (File.Exists(path)) logs[iteration] = await _readTextAsync(path);
                 }
             }
-            else
+            catch (Exception ex)
             {
-                _currentStaging = string.Empty;
+                _logger.LogError(ex, "Error reading log files from disk for job {JobId}", job.Id);
             }
-
-            // Update log cache for all available iterations
-            List<int> iterationsToProcess;
-            lock (_iterationsLock)
+            lock (_stateLock)
             {
-                iterationsToProcess = _availableIterations.ToList();
-            }
-
-            foreach (int iteration in iterationsToProcess)
-            {
-                if (_job == null) break; // Job could have been cleared while processing
-
-                string logPath = _job.LogFilePath(iteration);
-                if (File.Exists(logPath))
-                {
-                    int maxIteration;
-                    lock (_iterationsLock)
-                    {
-                        maxIteration = _availableIterations.Any() ? _availableIterations.Max() : -1;
-                    }
-
-                    // For current and last two iterations, always re-read from disk
-                    // This ensures we have the most up-to-date logs for iterations that might still be active
-                    if (iteration == _currentIteration ||
-                        iteration == maxIteration ||
-                        iteration == maxIteration - 1 ||
-                        !_cachedLogs.ContainsKey(iteration))
-
-                        _cachedLogs[iteration] = await File.ReadAllTextAsync(logPath);
-                }
+                if (!IsCurrent(job, version)) return false;
+                _currentErrors = errors;
+                _currentStaging = staging;
+                foreach (var entry in logs) _cachedLogs[entry.Key] = entry.Value;
             }
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error reading log files from disk for job {JobId}", _job?.Id);
-        }
+        finally { gate.Release(); }
 
-        // Phase 2: Notify subscribers. Each event is fired independently so that
-        // a failure in one handler doesn't prevent the others from running.
-
-        try { await OnErrorsUpdated.InvokeAllAsync(_currentErrors); }
-        catch (Exception ex) { _logger.LogError(ex, "Error notifying error log subscribers for job {JobId}", _job?.Id); }
-
-        try { await OnStagingUpdated.InvokeAllAsync(_currentStaging); }
-        catch (Exception ex) { _logger.LogError(ex, "Error notifying staging log subscribers for job {JobId}", _job?.Id); }
-
-        try { await OnLogsUpdated.InvokeAllAsync(); }
-        catch (Exception ex) { _logger.LogError(ex, "Error notifying output log subscribers for job {JobId}", _job?.Id); }
+        // Observers may navigate or request another iteration; never call them while
+        // holding the refresh gate or the state lock.
+        await NotifyLogObservers(job, version, OnErrorsUpdated, errors);
+        await NotifyLogObservers(job, version, OnStagingUpdated, staging);
+        await NotifyLogObservers(job, version, OnLogsUpdated);
+        return IsCurrent(job, version);
     }
-    
+
+    private bool IsCurrent(ReadOnlyJob job, long version)
+    {
+        lock (_stateLock)
+            return !_disposed && _version == version && _selectedJob == job && _job == job;
+    }
+
+    private async Task NotifyCurrent<T>(ReadOnlyJob job, long version, Func<T, Task> handlers, T value)
+    {
+        if (handlers == null) return;
+        foreach (Func<T, Task> handler in handlers.GetInvocationList())
+        {
+            if (!IsCurrent(job, version)) return;
+            await handler(value);
+        }
+    }
+
+    private async Task NotifyCurrent(ReadOnlyJob job, long version, Func<Task> handlers)
+    {
+        if (handlers == null) return;
+        foreach (Func<Task> handler in handlers.GetInvocationList())
+        {
+            if (!IsCurrent(job, version)) return;
+            await handler();
+        }
+    }
+
+    private async Task NotifyLogObservers<T>(ReadOnlyJob job, long version, Func<T, Task> handlers, T value)
+    {
+        try { await NotifyCurrent(job, version, handlers, value); }
+        catch (Exception ex) { _logger.LogError(ex, "Error notifying log subscribers for job {JobId}", job.Id); }
+    }
+
+    private async Task NotifyLogObservers(ReadOnlyJob job, long version, Func<Task> handlers)
+    {
+        try { await NotifyCurrent(job, version, handlers); }
+        catch (Exception ex) { _logger.LogError(ex, "Error notifying log subscribers for job {JobId}", job.Id); }
+    }
+
     /// <summary>
     /// Processes staging content to handle carriage return (\r) symbols.
     /// For each line that contains \r, only the content after the last \r is displayed.
@@ -585,40 +613,24 @@ public class ExpandedJobViewService : IDisposable
     /// </remarks>
     public string GetLogsForIteration(int iteration)
     {
-        if (_cachedLogs.TryGetValue(iteration, out var logs))
-            return logs;
-        return string.Empty;
+        lock (_stateLock)
+            return _cachedLogs.TryGetValue(iteration, out var logs) ? logs : string.Empty;
     }
-    
+
     /// <summary>
     /// Toggles the expanded/collapsed state of the log panel.
     /// </summary>
     /// <returns>A task representing the asynchronous operation</returns>
     public async Task ToggleLogPanelExpanded()
     {
-        await SetLogPanelExpanded(!_isLogPanelExpanded);
+        lock (_stateLock)
+        {
+            _isLogPanelExpanded = !_isLogPanelExpanded;
+            _hasNewLogs = _hasNewStaging = false;
+        }
+        await OnLogPanelStateChanged.InvokeAllAsync();
     }
 
-    /// <summary>
-    /// Sets the expanded/collapsed state of the log panel.
-    /// </summary>
-    /// <param name="expanded">True to expand the panel, false to collapse it</param>
-    /// <returns>A task representing the asynchronous operation</returns>
-    /// <remarks>
-    /// When expanding the panel, this method also resets the "new logs" indicator
-    /// to avoid showing a notification for logs that are now visible.
-    /// </remarks>
-    private async Task SetLogPanelExpanded(bool expanded)
-    {
-        if (_isLogPanelExpanded != expanded)
-        {
-            _isLogPanelExpanded = expanded;
-            _hasNewLogs = false; // Reset new logs indicator when opening
-            _hasNewStaging = false; // Reset new staging indicator when opening
-            await OnLogPanelStateChanged.InvokeAllAsync();
-        }
-    }
-    
     /// <summary>
     /// Performs application-defined tasks associated with freeing, releasing, or resetting unmanaged resources.
     /// </summary>
@@ -627,9 +639,20 @@ public class ExpandedJobViewService : IDisposable
     /// </remarks>
     public void Dispose()
     {
-        foreach(var sub in _subscriptions)
-            sub.Unsubscribe();
+        _session.OnJobChanged -= HandleSessionJobChanged;
+        lock (_stateLock)
+        {
+            _disposed = true;
+            ++_version;
+            ClearSubscriptions();
+        }
+    }
+
+    private void ClearSubscriptions()
+    {
+        var subscriptions = _subscriptions.ToArray();
         _subscriptions.Clear();
+        foreach (var subscription in subscriptions) subscription.Unsubscribe();
     }
 }
 

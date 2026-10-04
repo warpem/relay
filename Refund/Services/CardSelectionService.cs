@@ -16,8 +16,14 @@ public class CardSelectionService : IDisposable
     private DataManager _dataManager;
 
     private readonly List<SelectionKey> _selected = new();
+    private readonly object _selectionLock = new();
+    private long _version;
+    private bool _disposed;
 
-    public ReadOnlyCollection<SelectionKey> SelectedItems => new(_selected);
+    public ReadOnlyCollection<SelectionKey> SelectedItems
+    {
+        get { lock (_selectionLock) return Array.AsReadOnly(_selected.ToArray()); }
+    }
 
     private readonly List<GroupEventSubscription> _subscriptions = new();
 
@@ -37,40 +43,43 @@ public class CardSelectionService : IDisposable
 
     private void ResubscribeToMainScreen()
     {
-        foreach (var sub in _subscriptions)
-            sub.Unsubscribe();
-        _subscriptions.Clear();
-
-        switch (_session.CurrentMain)
+        lock (_selectionLock)
         {
-            case MainScreenType.Home:
-                _subscriptions.Add(_dataManager.ProjectDeleted.Add(GroupName.Project(null),
-                    async args => await RemoveProject(args.Object.Id)));
-                // Home shows jobs from every accessible space, selected through scoped keys
-                _subscriptions.Add(_dataManager.JobDeleted.Add(GroupName.Job(null, null, null),
-                    async args => await Remove(SelectionKey.ForJob(args.Object))));
-                break;
+            if (_disposed) return;
+            ClearSubscriptions();
+            var version = ++_version;
 
-            case MainScreenType.Project:
-                _subscriptions.Add(_dataManager.SpaceDeleted.Add(GroupName.Space(_session.Project.Id, null),
-                    async args => await Remove(SelectionKey.ForSpace(args.Object.Id))));
-                break;
+            switch (_session.CurrentMain)
+            {
+                case MainScreenType.Home:
+                    _subscriptions.Add(_dataManager.ProjectDeleted.Add(GroupName.Project(null),
+                        async args => await RemoveProject(args.Object.Id, version)));
+                    // Home shows jobs from every accessible space, selected through scoped keys
+                    _subscriptions.Add(_dataManager.JobDeleted.Add(GroupName.Job(null, null, null),
+                        async args => await Remove(SelectionKey.ForJob(args.Object), version)));
+                    break;
 
-            case MainScreenType.Space:
-                _subscriptions.Add(_dataManager.ViewDeleted.Add(GroupName.View(_session.Project.Id, _session.Space.Id, null),
-                    async args => await Remove(SelectionKey.ForView(args.Object.Id))));
-                _subscriptions.Add(_dataManager.FactoryDefinitionDeleted.Add(
-                    GroupName.FactoryDefinition(_session.Project.Id, _session.Space.Id, null),
-                    async args => await Remove(SelectionKey.ForFactoryDefinition(args.Object.Id))));
-                break;
+                case MainScreenType.Project:
+                    _subscriptions.Add(_dataManager.SpaceDeleted.Add(GroupName.Space(_session.Project.Id, null),
+                        async args => await Remove(SelectionKey.ForSpace(args.Object.Id), version)));
+                    break;
 
-            case MainScreenType.View:
-                _subscriptions.Add(_dataManager.JobDeleted.Add(GroupName.Job(_session.Project.Id, _session.Space.Id, null),
-                    async args => await Remove(SelectionKey.ForJob(args.Object.Id))));
-                _subscriptions.Add(_dataManager.FactoryInstanceDeleted.Add(
-                    GroupName.FactoryInstance(_session.Project.Id, _session.Space.Id, null),
-                    async args => await Remove(SelectionKey.ForFactoryInstance(args.Object.Id))));
-                break;
+                case MainScreenType.Space:
+                    _subscriptions.Add(_dataManager.ViewDeleted.Add(GroupName.View(_session.Project.Id, _session.Space.Id, null),
+                        async args => await Remove(SelectionKey.ForView(args.Object.Id), version)));
+                    _subscriptions.Add(_dataManager.FactoryDefinitionDeleted.Add(
+                        GroupName.FactoryDefinition(_session.Project.Id, _session.Space.Id, null),
+                        async args => await Remove(SelectionKey.ForFactoryDefinition(args.Object.Id), version)));
+                    break;
+
+                case MainScreenType.View:
+                    _subscriptions.Add(_dataManager.JobDeleted.Add(GroupName.Job(_session.Project.Id, _session.Space.Id, null),
+                        async args => await Remove(SelectionKey.ForJob(args.Object.Id), version)));
+                    _subscriptions.Add(_dataManager.FactoryInstanceDeleted.Add(
+                        GroupName.FactoryInstance(_session.Project.Id, _session.Space.Id, null),
+                        async args => await Remove(SelectionKey.ForFactoryInstance(args.Object.Id), version)));
+                    break;
+            }
         }
     }
 
@@ -93,57 +102,88 @@ public class CardSelectionService : IDisposable
     /// <summary>
     /// Removes a deleted project and any scoped job keys that point into it.
     /// </summary>
-    private async Task RemoveProject(int projectId)
+    private async Task RemoveProject(int projectId, long version)
     {
-        int removed = _selected.RemoveAll(k => (k.Type == ItemType.Project && k.Id == projectId) ||
-                                               (k.IsScoped && k.ProjectId == projectId));
+        int removed;
+        lock (_selectionLock)
+        {
+            if (_disposed || version != _version) return;
+            removed = _selected.RemoveAll(k => (k.Type == ItemType.Project && k.Id == projectId) ||
+                                              (k.IsScoped && k.ProjectId == projectId));
+        }
         if (removed > 0)
             await OnSelectionChanged.InvokeAllAsync();
     }
 
     public async Task AddRange(IEnumerable<SelectionKey> keys)
     {
-        var toAdd = keys.Distinct().Where(k => !_selected.Contains(k)).ToList();
-        if (toAdd.Count > 0)
+        var candidates = keys.Distinct().ToArray();
+        bool changed;
+        lock (_selectionLock)
         {
+            var toAdd = candidates.Where(k => !_selected.Contains(k)).ToArray();
+            changed = toAdd.Length > 0;
             _selected.AddRange(toAdd);
-            await OnSelectionChanged.InvokeAllAsync();
         }
+        if (changed)
+            await OnSelectionChanged.InvokeAllAsync();
     }
 
-    public async Task Remove(SelectionKey key)
+    public Task Remove(SelectionKey key) => Remove(key, null);
+
+    private async Task Remove(SelectionKey key, long? version)
     {
-        if (_selected.Remove(key))
+        bool removed;
+        lock (_selectionLock)
+        {
+            if (_disposed || (version.HasValue && version != _version)) return;
+            removed = _selected.Remove(key);
+        }
+        if (removed)
             await OnSelectionChanged.InvokeAllAsync();
     }
 
     public async Task RemoveRange(IEnumerable<SelectionKey> keys)
     {
         var set = keys.ToHashSet();
-        int removed = _selected.RemoveAll(k => set.Contains(k));
+        int removed;
+        lock (_selectionLock)
+            removed = _selected.RemoveAll(set.Contains);
         if (removed > 0)
             await OnSelectionChanged.InvokeAllAsync();
     }
 
     public async Task Replace(IEnumerable<SelectionKey> keys)
     {
-        await Clear();
-        await AddRange(keys);
+        var replacement = keys.Distinct().ToArray();
+        bool changed;
+        lock (_selectionLock)
+        {
+            changed = !_selected.SequenceEqual(replacement);
+            _selected.Clear();
+            _selected.AddRange(replacement);
+        }
+        if (changed)
+            await OnSelectionChanged.InvokeAllAsync();
     }
 
     public async Task Clear()
     {
-        if (_selected.Count > 0)
+        bool changed;
+        lock (_selectionLock)
         {
+            changed = _selected.Count > 0;
             _selected.Clear();
-            await OnSelectionChanged.InvokeAllAsync();
         }
+        if (changed)
+            await OnSelectionChanged.InvokeAllAsync();
     }
 
-    /// <summary>
-    /// Checks whether the item with the given key is selected.
-    /// </summary>
-    public bool IsSelected(SelectionKey key) => _selected.Contains(key);
+    /// <summary>Checks whether the item with the given key is selected.</summary>
+    public bool IsSelected(SelectionKey key)
+    {
+        lock (_selectionLock) return _selected.Contains(key);
+    }
 
     /// <summary>
     /// Gets all selected IDs of a specific item type.
@@ -151,8 +191,10 @@ public class CardSelectionService : IDisposable
     /// <remarks>
     /// IDs of scoped job keys are only unique within their space; use <see cref="ResolveSelectedJobs"/> for jobs.
     /// </remarks>
-    public IEnumerable<int> IdsOfType(ItemType type) =>
-        _selected.Where(k => k.Type == type).Select(k => k.Id);
+    public IEnumerable<int> IdsOfType(ItemType type)
+    {
+        lock (_selectionLock) return _selected.Where(k => k.Type == type).Select(k => k.Id).ToArray();
+    }
 
     /// <summary>
     /// Resolves the selected job keys to jobs, in selection order.
@@ -162,7 +204,7 @@ public class CardSelectionService : IDisposable
     /// </param>
     /// <returns>Existing selected jobs; keys that no longer resolve are skipped.</returns>
     public List<ReadOnlyJob> ResolveSelectedJobs(ReadOnlySpace contextSpace = null) =>
-        ResolveJobs(_selected, key => _dataManager.FindJob(key.ProjectId.Value, key.SpaceId.Value, key.Id),
+        ResolveJobs(SelectedItems, key => _dataManager.FindJob(key.ProjectId.Value, key.SpaceId.Value, key.Id),
                     contextSpace ?? _session.Space);
 
     /// <summary>
@@ -193,7 +235,19 @@ public class CardSelectionService : IDisposable
         _session.OnFolderChanged -= HandleFolderChanged;
         _session.OnFactoryDefinitionChanged -= HandleFactoryContextChanged;
         _session.OnFactoryInstanceChanged -= HandleFactoryContextChanged;
-        foreach (var sub in _subscriptions)
-            sub.Unsubscribe();
+        lock (_selectionLock)
+        {
+            _disposed = true;
+            ++_version;
+            ClearSubscriptions();
+        }
+    }
+
+    private void ClearSubscriptions()
+    {
+        var subscriptions = _subscriptions.ToArray();
+        _subscriptions.Clear();
+        foreach (var subscription in subscriptions)
+            subscription.Unsubscribe();
     }
 }

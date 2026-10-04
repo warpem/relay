@@ -154,8 +154,9 @@ public partial class JobEditor : ComponentBase, IDisposable
     /// Handles job change events from the editor service.
     /// </summary>
     /// <param name="job">The new job being edited</param>
-    private async Task HandleJobChanged(ReadOnlyJob job)
+    private Task HandleJobChanged(ReadOnlyJob job) => InvokeAsync(async () =>
     {
+        if (Editor.CurrentJob != job) return;
         if (_job != job)
         {
             _job = job;
@@ -166,8 +167,10 @@ public partial class JobEditor : ComponentBase, IDisposable
 
             if (_job != null)
             {
-                await GetUserSettings();
+                await GetUserSettings(job);
+                if (_job != job || Editor.CurrentJob != job) return;
                 await HandleJobUpdated(job);
+                if (_job != job || Editor.CurrentJob != job) return;
 
                 // In builder mode, subscribe to definition updates so the editor
                 // refreshes when internal edges change (e.g. from "Connect to" menu)
@@ -179,7 +182,7 @@ public partial class JobEditor : ComponentBase, IDisposable
                 }
             }
         }
-    }
+    });
 
     private GroupEventSubscription _definitionSubscription;
 
@@ -190,8 +193,9 @@ public partial class JobEditor : ComponentBase, IDisposable
     /// <remarks>
     /// Re-validates job parameters after updates and clears validation errors for hidden fields.
     /// </remarks>
-    private async Task HandleJobUpdated(ReadOnlyJob job)
+    private Task HandleJobUpdated(ReadOnlyJob job) => InvokeAsync(() =>
     {
+        if (job == null || _job != job || Editor.CurrentJob != job) return;
         _validationErrors = _job.ValidateInputs();
         _portValidationErrors = _job.ValidatePortInputs();
 
@@ -218,8 +222,8 @@ public partial class JobEditor : ComponentBase, IDisposable
             _validationErrors.Remove(propName);
         }
 
-        await InvokeAsync(StateHasChanged);
-    }
+        StateHasChanged();
+    });
 
     /// <summary>
     /// Updates the job's alias when it's changed in the UI.
@@ -305,8 +309,7 @@ public partial class JobEditor : ComponentBase, IDisposable
             await (queue == null
                 ? DataManager.QueueLocalJob(user, job)
                 : DataManager.QueueClusterJob(user, job, queue));
-            if (_job == job)
-                await Editor.SetJob(null);
+            await Editor.ClearJob(job);
         }
         catch (Exception ex)
         {
@@ -700,15 +703,18 @@ public partial class JobEditor : ComponentBase, IDisposable
     /// <summary>
     /// Loads user preferences for the current job type from local storage.
     /// </summary>
-    private async Task GetUserSettings()
+    private async Task GetUserSettings(ReadOnlyJob job)
     {
-        _userFavorites = await LocalStorage.GetItemAsync<List<string>>(_job.GetOriginalType() + ".favorites") ?? [];
-
-        _userCollapsedGroups = await LocalStorage.GetItemAsync<List<string>>(_job.GetOriginalType() + ".collapsed") ?? [];
-
-        _userShowAdvanced = await LocalStorage.GetItemAsync<bool?>(_job.GetOriginalType() + ".showAdvanced") ?? false;
+        var type = job.GetOriginalType();
+        var favorites = await LocalStorage.GetItemAsync<List<string>>(type + ".favorites") ?? [];
+        var collapsed = await LocalStorage.GetItemAsync<List<string>>(type + ".collapsed") ?? [];
+        var advanced = await LocalStorage.GetItemAsync<bool?>(type + ".showAdvanced") ?? false;
+        if (_job != job || Editor.CurrentJob != job) return;
+        _userFavorites = favorites;
+        _userCollapsedGroups = collapsed;
+        _userShowAdvanced = advanced;
     }
-    
+
     /// <summary>
     /// Adds a parameter to the user's favorites list.
     /// </summary>

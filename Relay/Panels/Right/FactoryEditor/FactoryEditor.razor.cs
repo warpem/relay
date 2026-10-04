@@ -73,22 +73,24 @@ public partial class FactoryEditor : ComponentBase, IDisposable
     /// Handles instance change events from the editor service.
     /// </summary>
     /// <param name="instance">The new factory instance being edited</param>
-    private async Task HandleInstanceChanged(ReadOnlyFactoryInstance instance)
+    private Task HandleInstanceChanged(ReadOnlyFactoryInstance instance) => InvokeAsync(() =>
     {
+        if (Editor.CurrentInstance != instance) return;
         _instance = instance;
         _showQueueWizard = false;
-        await InvokeAsync(StateHasChanged);
-    }
+        StateHasChanged();
+    });
 
     /// <summary>
     /// Handles instance update events from the editor service.
     /// </summary>
     /// <param name="instance">The updated factory instance</param>
-    private async Task HandleInstanceUpdated(ReadOnlyFactoryInstance instance)
+    private Task HandleInstanceUpdated(ReadOnlyFactoryInstance instance) => InvokeAsync(() =>
     {
+        if (Editor.CurrentInstance != instance) return;
         _instance = instance;
-        await InvokeAsync(StateHasChanged);
-    }
+        StateHasChanged();
+    });
 
     /// <summary>
     /// Groups exposed properties by their sub-job blueprint ID.

@@ -220,12 +220,13 @@ public partial class ViewScreen : ListingScreenLogic<IViewItem>
         {
             if (SortingService.Criterion != JobSortCriterion.Custom)
                 return false;
-            if (Selection.SelectedItems.Count != 1)
+            var selected = Selection.SelectedItems;
+            if (selected.Count != 1)
                 return false;
             var items = GetCurrentLevelItems();
             if (items == null)
                 return false;
-            return IndexOfSelectedItem(items, Selection.SelectedItems[0]) > 0;
+            return IndexOfSelectedItem(items, selected[0]) > 0;
         }
     }
 
@@ -235,21 +236,24 @@ public partial class ViewScreen : ListingScreenLogic<IViewItem>
         {
             if (SortingService.Criterion != JobSortCriterion.Custom)
                 return false;
-            if (Selection.SelectedItems.Count != 1)
+            var selected = Selection.SelectedItems;
+            if (selected.Count != 1)
                 return false;
             var items = GetCurrentLevelItems();
             if (items == null)
                 return false;
-            int index = IndexOfSelectedItem(items, Selection.SelectedItems[0]);
+            int index = IndexOfSelectedItem(items, selected[0]);
             return index >= 0 && index < items.Count - 1;
         }
     }
 
     private async Task HandleMoveLeft()
     {
+        var selected = Selection.SelectedItems;
+        if (selected.Count != 1) return;
         var items = GetCurrentLevelItems();
         if (items == null) return;
-        int index = IndexOfSelectedItem(items, Selection.SelectedItems[0]);
+        int index = IndexOfSelectedItem(items, selected[0]);
         if (index <= 0) return;
         var item = items[index];
 
@@ -261,9 +265,11 @@ public partial class ViewScreen : ListingScreenLogic<IViewItem>
 
     private async Task HandleMoveRight()
     {
+        var selected = Selection.SelectedItems;
+        if (selected.Count != 1) return;
         var items = GetCurrentLevelItems();
         if (items == null) return;
-        int index = IndexOfSelectedItem(items, Selection.SelectedItems[0]);
+        int index = IndexOfSelectedItem(items, selected[0]);
         if (index < 0 || index >= items.Count - 1) return;
         var item = items[index];
 

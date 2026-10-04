@@ -2,7 +2,6 @@ using Refund.DataModel;
 using Refund.DataModel.ReadOnly;
 using Refund.Services.Core.DataManager;
 using Refund.Services.Core.Session;
-using Refund.Utils;
 
 namespace Refund.Services;
 
@@ -22,17 +21,20 @@ public class FactoryEditorService : IDisposable
     private readonly JobEditorService _jobEditor;
     private readonly List<GroupEventSubscription> _subscriptions = new();
 
+    private readonly object _subscriptionLock = new();
+    private long _version;
+    private bool _disposed;
     private ReadOnlyFactoryInstance _instance;
 
     /// <summary>
     /// Gets the factory instance currently being edited.
     /// </summary>
-    public ReadOnlyFactoryInstance CurrentInstance => _instance;
+    public ReadOnlyFactoryInstance CurrentInstance { get { lock (_subscriptionLock) return _instance; } }
 
     /// <summary>
     /// Gets a value indicating whether the service is actively editing a factory instance.
     /// </summary>
-    public bool IsActive => _instance != null;
+    public bool IsActive => CurrentInstance != null;
 
     /// <summary>
     /// Event raised when the factory instance being edited changes (a different instance is selected).
@@ -56,19 +58,19 @@ public class FactoryEditorService : IDisposable
 
     private async Task HandleJobEditorChanged(ReadOnlyJob job)
     {
-        if (job != null && _instance != null)
+        if (job != null && _jobEditor.CurrentJob == job && CurrentInstance != null)
             await SetInstance(null);
     }
 
     private async Task HandleSpaceChanged()
     {
-        if (_instance != null)
+        if (CurrentInstance != null)
             await SetInstance(null);
     }
 
     private async Task HandleFactoryDefinitionChanged()
     {
-        if (_instance != null)
+        if (CurrentInstance != null)
             await SetInstance(null);
     }
 
@@ -76,49 +78,69 @@ public class FactoryEditorService : IDisposable
     /// Sets the factory instance to be edited.
     /// </summary>
     /// <param name="instance">The factory instance to edit, or null to clear</param>
-    public async Task SetInstance(ReadOnlyFactoryInstance instance)
+    public Task SetInstance(ReadOnlyFactoryInstance instance) => SetInstance(instance, null);
+
+    private async Task SetInstance(ReadOnlyFactoryInstance instance, long? expectedVersion)
     {
-        foreach (var sub in _subscriptions)
-            sub.Unsubscribe();
-        _subscriptions.Clear();
-
-        _instance = instance;
-
-        if (instance != null)
+        long version;
+        lock (_subscriptionLock)
         {
-            if (_jobEditor.IsActive)
-                await _jobEditor.SetJob(null);
+            if (_disposed || (expectedVersion.HasValue && expectedVersion != _version)) return;
+            ClearSubscriptions();
+            _instance = instance;
+            version = ++_version;
 
-            await _session.SetRightPanelCollapsed(false);
-
-            _subscriptions.Add(_dataManager.FactoryInstanceUpdated.Add(
-                GroupName.FactoryInstance(instance.Space.Project.Id, instance.Space.Id, instance.Id),
-                async args => await OnInstanceUpdated.InvokeAllAsync(args.Object)));
-
-            _subscriptions.Add(_dataManager.FactoryInstanceDeleted.Add(
-                GroupName.FactoryInstance(instance.Space.Project.Id, instance.Space.Id, instance.Id),
-                async _ => await SetInstance(null)));
-
-            // Sub-job status changes affect the instance's aggregate status.
-            // Close the editor if no sub-jobs remain in Building status.
-            _subscriptions.Add(_dataManager.JobUpdated.Add(
-                GroupName.Job(instance.Space.Project.Id, instance.Space.Id, null),
-                async args =>
-                {
-                    if (instance.SubJobIds.Contains(args.Object.Id))
+            if (instance != null)
+            {
+                var group = GroupName.FactoryInstance(instance.Space.Project.Id, instance.Space.Id, instance.Id);
+                _subscriptions.Add(_dataManager.FactoryInstanceUpdated.Add(group,
+                    args => Notify(version, OnInstanceUpdated, args.Object)));
+                _subscriptions.Add(_dataManager.FactoryInstanceDeleted.Add(group,
+                    _ => SetInstance(null, version)));
+                _subscriptions.Add(_dataManager.JobUpdated.Add(
+                    GroupName.Job(instance.Space.Project.Id, instance.Space.Id, null), async args =>
                     {
-                        if (!instance.SubJobs.Any(j => j.Status == DataModel.JobStatus.Building))
-                        {
-                            await SetInstance(null);
-                            return;
-                        }
-
-                        await OnInstanceUpdated.InvokeAllAsync(instance);
-                    }
-                }));
+                        if (!IsCurrent(version) || !instance.SubJobIds.Contains(args.Object.Id)) return;
+                        if (!instance.SubJobs.Any(j => j.Status == JobStatus.Building))
+                            await SetInstance(null, version);
+                        else
+                            await Notify(version, OnInstanceUpdated, instance);
+                    }));
+            }
         }
 
-        await OnInstanceChanged.InvokeAllAsync(instance);
+        if (instance != null && IsCurrent(version))
+        {
+            var job = _jobEditor.CurrentJob;
+            if (job != null)
+                await _jobEditor.ClearJob(job);
+            if (IsCurrent(version))
+                await _session.SetRightPanelCollapsed(false);
+        }
+        await Notify(version, OnInstanceChanged, instance);
+    }
+
+    private bool IsCurrent(long version)
+    {
+        lock (_subscriptionLock) return !_disposed && version == _version;
+    }
+
+    private async Task Notify(long version, Func<ReadOnlyFactoryInstance, Task> handlers, ReadOnlyFactoryInstance instance)
+    {
+        if (handlers == null) return;
+        foreach (Func<ReadOnlyFactoryInstance, Task> handler in handlers.GetInvocationList())
+        {
+            if (!IsCurrent(version)) return;
+            await handler(instance);
+        }
+    }
+
+    private void ClearSubscriptions()
+    {
+        var subscriptions = _subscriptions.ToArray();
+        _subscriptions.Clear();
+        foreach (var subscription in subscriptions)
+            subscription.Unsubscribe();
     }
 
     public void Dispose()
@@ -126,7 +148,12 @@ public class FactoryEditorService : IDisposable
         _session.OnSpaceChanged -= HandleSpaceChanged;
         _session.OnFactoryDefinitionChanged -= HandleFactoryDefinitionChanged;
         _jobEditor.OnJobChanged -= HandleJobEditorChanged;
-        foreach (var sub in _subscriptions)
-            sub.Unsubscribe();
+        lock (_subscriptionLock)
+        {
+            _disposed = true;
+            ++_version;
+            _instance = null;
+            ClearSubscriptions();
+        }
     }
 }

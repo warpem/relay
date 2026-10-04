@@ -6,6 +6,11 @@
 @using Relay.Panels.Right.JobEditor
 @using Relay.Panels.Right.FactoryEditor
 
+@{
+    var selectedItems = Selection.SelectedItems;
+    var selectedKeys = selectedItems.ToHashSet();
+}
+
 @if (JobEditor.IsActive)
 {
     <JobEditor />
@@ -26,11 +31,11 @@ else
                 <JobProperties @key="@("JobProperties")"
                                Jobs="homeJobs" />
             }
-            else if (Selection.SelectedItems.Any(k => k.Type == ItemType.Project))
+            else if (selectedItems.Any(k => k.Type == ItemType.Project))
             {
                 <ProjectProperties @key="@("ProjectProperties")"
                                    Projects="DataManager.GetUserProjects(Session.User).
-                                   Where(p => Selection.IsSelected(SelectionKey.ForProject(p.Id)))"/>
+                                   Where(p => selectedKeys.Contains(SelectionKey.ForProject(p.Id)))"/>
             }
             else
             {
@@ -40,10 +45,10 @@ else
             break;
 
         case MainScreenType.Project:
-            @if (Selection.SelectedItems.Any())
+            @if (selectedItems.Any())
             {
                 <SpaceProperties @key="@("SpaceProperties")"
-                                 Spaces="Session.Project.Spaces.Where(s => Selection.IsSelected(SelectionKey.ForSpace(s.Id)))"/>
+                                 Spaces="Session.Project.Spaces.Where(s => selectedKeys.Contains(SelectionKey.ForSpace(s.Id)))"/>
             }
             else
             {
@@ -54,10 +59,10 @@ else
             break;
 
         case MainScreenType.Space:
-            @if (Selection.IdsOfType(ItemType.FactoryDefinition).Any())
+            @if (selectedItems.Where(k => k.Type == ItemType.FactoryDefinition).Select(k => k.Id).Any())
             {
-                var selectedDefIds = Selection.IdsOfType(ItemType.FactoryDefinition).ToHashSet();
-                var selectedDefs = Session.Space?.FactoryDefinitions.Where(d => selectedDefIds.Contains(d.Id));
+                var selectedDefIds = selectedItems.Where(k => k.Type == ItemType.FactoryDefinition).Select(k => k.Id).ToHashSet();
+                var selectedDefs = Session.Space?.FactoryDefinitions.Where(d => selectedDefIds.Contains(d.Id)).ToList();
                 @if (selectedDefs?.Any() == true)
                 {
                     <FactoryDefinitionProperties @key="@("FactoryDefinitionProperties")"
@@ -65,10 +70,10 @@ else
                                                   IsLocked="selectedDefs.Count() == 1 && Session.Space?.FactoryInstances.Any(i => i.DefinitionId == selectedDefs.First().Id) == true" />
                 }
             }
-            else if (Selection.SelectedItems.Any())
+            else if (selectedItems.Any())
             {
                 <ViewProperties @key="@("ViewProperties")"
-                                Views="Session.Space.Views.Where(v => Selection.IsSelected(SelectionKey.ForView(v.Id)))"/>
+                                Views="Session.Space.Views.Where(v => selectedKeys.Contains(SelectionKey.ForView(v.Id)))"/>
             }
             else
             {
@@ -84,9 +89,9 @@ else
                 <JobProperties @key="@("JobProperties")"
                                Jobs="@([Session.Job])" />
             }
-            else if (Selection.SelectedItems.Any())
+            else if (selectedItems.Any())
             {
-                var selectedFolderIds = Selection.IdsOfType(ItemType.Folder).ToList();
+                var selectedFolderIds = selectedItems.Where(k => k.Type == ItemType.Folder).Select(k => k.Id).ToList();
                 @if (selectedFolderIds.Any())
                 {
                     var folder = Session.View?.FindFolder(selectedFolderIds[0]);
@@ -96,9 +101,9 @@ else
                                           Folder="folder" />
                     }
                 }
-                else if (Selection.IdsOfType(ItemType.FactoryInstance).Any())
+                else if (selectedItems.Where(k => k.Type == ItemType.FactoryInstance).Select(k => k.Id).Any())
                 {
-                    var fiId = Selection.IdsOfType(ItemType.FactoryInstance).First();
+                    var fiId = selectedItems.Where(k => k.Type == ItemType.FactoryInstance).Select(k => k.Id).First();
                     var fi = Session.View?.FindFactoryInstance(fiId);
                     @if (fi != null)
                     {
@@ -109,7 +114,7 @@ else
                 else
                 {
                     <JobProperties @key="@("JobProperties")"
-                                   Jobs="Session.Space.Jobs.Where(j => Selection.IsSelected(SelectionKey.ForJob(j.Id))).ToList()"/>
+                                   Jobs="Session.Space.Jobs.Where(j => selectedKeys.Contains(SelectionKey.ForJob(j.Id))).ToList()"/>
                 }
             }
             else if (Session.FactoryInstance != null)
