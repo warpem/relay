@@ -19,6 +19,66 @@ public sealed class ExecutionOwnershipTests
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(5);
 
     [Fact]
+    public async Task ParentCanClearWhileChildIsClearingButDuplicateClearIsRejected()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        using var release = new ManualResetEventSlim();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var child = new BlockingClearJob(entered, release) { Id = 99, Status = JobStatus.Finished };
+        fixture.MutableTarget.Space.AddJob(child, null);
+        var readOnlyChild = new TestReadOnlyJob(child);
+        // Supply a wrapper for this test-only subclass without registering a production job type.
+        var wrappers = (System.Runtime.CompilerServices.ConditionalWeakTable<Job, ReadOnlyJob>)typeof(Job)
+            .GetField("ReadOnlyCache", BindingFlags.Static | BindingFlags.NonPublic)!.GetValue(null)!;
+        wrappers.Add(child, readOnlyChild);
+        await fixture.Manager.CreateEdge(fixture.Space,
+            fixture.Parent.PortsOut[ImportMap.PortOutMap], readOnlyChild.PortsIn[CreateMask.PortInMap]);
+        await fixture.Manager.UpdateJob(fixture.User, fixture.Parent, job => job.Status = JobStatus.Finished);
+        var clearing = fixture.Manager.ClearJob(fixture.User, readOnlyChild);
+        try
+        {
+            await entered.Task.WaitAsync(Timeout);
+            Assert.Equal(JobStatus.Clearing, child.Status);
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                fixture.Manager.ClearJob(fixture.User, readOnlyChild));
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                fixture.Manager.DeleteJob(fixture.User, fixture.Parent));
+
+            await fixture.Manager.ClearJob(fixture.User, fixture.Parent).WaitAsync(Timeout);
+
+            Assert.Equal(JobStatus.Building, fixture.Parent.Status);
+            Assert.Equal(JobStatus.Clearing, child.Status);
+            Assert.False(clearing.IsCompleted);
+        }
+        finally
+        {
+            release.Set();
+            await clearing.WaitAsync(Timeout);
+        }
+
+        Assert.Equal(JobStatus.Building, fixture.Parent.Status);
+        Assert.Equal(JobStatus.Building, child.Status);
+    }
+
+    [Theory]
+    [InlineData(JobStatus.Waiting)]
+    [InlineData(JobStatus.Staging)]
+    [InlineData(JobStatus.Running)]
+    [InlineData(JobStatus.Finalizing)]
+    [InlineData(JobStatus.Aborting)]
+    public async Task ParentClearStillRejectsExecutingDependents(JobStatus status)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.MutableTarget.Status = status;
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            fixture.Manager.ClearJob(fixture.User, fixture.Parent));
+
+        Assert.Equal(status, fixture.Target.Status);
+        Assert.DoesNotContain(fixture.MutableTarget.Space.FindJob(fixture.Parent.Id).Events, evt => evt.Type == EventType.ClearingStarted);
+    }
+
+    [Fact]
     public async Task FailedClearReportsTheOriginalErrorAndLeavesTheJobRetryable()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -271,6 +331,16 @@ public sealed class ExecutionOwnershipTests
         Assert.Single(fixture.Target.PortsIn[CreateMask.PortInMap].Edges);
         Assert.NotNull(fixture.Space.FindJob(fixture.Parent.Id));
         fixture.AssertWaitingForDependency();
+    }
+
+    private sealed class BlockingClearJob(TaskCompletionSource entered, ManualResetEventSlim release) : CreateMask
+    {
+        public override void Clear()
+        {
+            entered.TrySetResult();
+            if (!release.Wait(TimeSpan.FromSeconds(10)))
+                throw new TimeoutException("Test did not release the clear operation.");
+        }
     }
 
     private sealed class FailingClearJob(IOException failure) : Note

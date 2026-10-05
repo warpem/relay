@@ -9,8 +9,6 @@ using Refund.Components.TomogramViewer;
 using Refund.DataModel.ReadOnly;
 using Refund.JobResources;
 using Refund.Services;
-using Refund.Services.Core.DataManager;
-using Refund.Services.Core.Session;
 using Refund.Utils;
 using Warp;
 using Warp.Headers;
@@ -23,8 +21,6 @@ public partial class TemplateMatchExpandedView : IAsyncDisposable
 {
     #region Dependencies
 
-    [Inject] private RelaySession Session { get; set; }
-    [Inject] private DataManager DataManager { get; set; }
     [Inject] private ExpandedJobViewService ExpandedViewService { get; set; }
     [Inject] private IToastService ToastService { get; set; }
     [Inject] private ILogger<TemplateMatchExpandedView> Logger { get; set; }
@@ -75,6 +71,7 @@ public partial class TemplateMatchExpandedView : IAsyncDisposable
     
     // Cancellation support
     private CancellationTokenSource _loadingCts;
+    private readonly SemaphoreSlim _dataLoadGate = new(1, 1);
     
     // Tomogram dimensions
     private int3 _tomoDims;
@@ -133,6 +130,14 @@ public partial class TemplateMatchExpandedView : IAsyncDisposable
 
     private async Task HandleJobChanged(ReadOnlyJob job)
     {
+        _loadingCts?.Cancel();
+        await _dataLoadGate.WaitAsync();
+        try { await ChangeJob(job); }
+        finally { _dataLoadGate.Release(); }
+    }
+
+    private async Task ChangeJob(ReadOnlyJob job)
+    {
         // Cancel any existing loading operation
         _loadingCts?.Cancel();
         _loadingCts?.Dispose();
@@ -147,6 +152,7 @@ public partial class TemplateMatchExpandedView : IAsyncDisposable
             _selectedTomogramPath = null;
             _selectedParticleStarPath = null;
             _allTomogramParticles = [];
+            _particles = [];
             _isLoadingAllParticles = false;
             _templateVolumePath = null;
 
@@ -168,23 +174,9 @@ public partial class TemplateMatchExpandedView : IAsyncDisposable
             // Get the tomogram resource from the job's input port
             _tomogramSet = _job.PortsIn[TemplateMatch.PortInTomogramSet].GetSingleResource<TomogramSet>();
             
-            // Get the position set resource from the output port
-            _particleSet = _job.PortsOut[TemplateMatch.PortOutParticleSet].GetResource() as ParticleSet;
-            
-            // Get template path for visualization
-            if (_particleSet?.CorrespondingMaps?.Maps.Any() == true)
-            {
-                var path = _particleSet.CorrespondingMaps
-                                                  .Maps
-                                                  .First()
-                                                  .GetAverageOrSimilar();
-                if (File.Exists(path))
-                    _templateVolumePath = path;
-            }
-
             RebuildViewerSpecies();
 
-            await LoadData();
+            await LoadDataCore();
         }
         else
         {
@@ -214,17 +206,33 @@ public partial class TemplateMatchExpandedView : IAsyncDisposable
 
     private async Task LoadData()
     {
+        // Queue refreshes instead of dropping the final update while a load is active.
+        await _dataLoadGate.WaitAsync();
+        try { await LoadDataCore(); }
+        finally { _dataLoadGate.Release(); }
+    }
+
+    private async Task LoadDataCore()
+    {
         if (_job == null || _tomogramSet == null)
             return;
 
         try
         {
+            // Automatic handedness selection changes both STAR paths and the template.
+            // Resource descriptions capture these paths, so rebuild them on each update.
+            _particleSet = _job.PortsOut[TemplateMatch.PortOutParticleSet].GetResource() as ParticleSet;
+            string templatePath = _particleSet?.CorrespondingMaps?.Maps.FirstOrDefault()?.GetAverageOrSimilar();
+            _templateVolumePath = File.Exists(templatePath) ? templatePath : null;
+
             // Load the list of processed tomograms from the JSON file
             if (File.Exists(_job.ResProcessedItemsJson))
             {
                 var json = await File.ReadAllTextAsync(_job.ResProcessedItemsJson);
                 _processedTomograms = JsonSerializer.Deserialize<List<WarpTools.MiniJsonTsItem>>(json);
             }
+            else
+                _processedTomograms = [];
 
             var thumbnails = new List<ThumbnailData>();
 
@@ -240,7 +248,11 @@ public partial class TemplateMatchExpandedView : IAsyncDisposable
                 });
             }
 
+            string selectedImage = _selectedTomogramThumbnail?.ImagePath;
             _allTomogramThumbnails = thumbnails;
+            _selectedTomogramThumbnail = thumbnails.FirstOrDefault(t => t.ImagePath == selectedImage);
+            if (_selectedTomogramThumbnail == null)
+                _selectedTomogramPath = null;
 
             // Start loading all particles for histograms
             await LoadAllParticles();
@@ -257,11 +269,12 @@ public partial class TemplateMatchExpandedView : IAsyncDisposable
     private async Task LoadAllParticles()
     {
         if (_job == null || _tomogramSet == null || _particleSet == null || _processedTomograms.Count == 0)
+        {
+            _allTomogramParticles = [];
+            RefreshSelectedParticles();
+            CalculateHistogramData();
             return;
-
-        // Prevent concurrent loading operations
-        if (_isLoadingAllParticles)
-            return;
+        }
 
         // Create new cancellation token for this operation
         _loadingCts?.Cancel();
@@ -297,6 +310,7 @@ public partial class TemplateMatchExpandedView : IAsyncDisposable
             
             token.ThrowIfCancellationRequested();
             
+            RefreshSelectedParticles();
             CalculateHistogramData(token);
             
             _isLoadingAllParticles = false;
@@ -387,7 +401,17 @@ public partial class TemplateMatchExpandedView : IAsyncDisposable
     private void CalculateHistogramData(CancellationToken ct = default)
     {
         if (_allTomogramParticles.Count == 0)
+        {
+            _histogramBinsScore = [];
+            _histogramBinsCoordX = [];
+            _histogramBinsCoordY = [];
+            _histogramBinsCoordZ = [];
+            _histogramBinsAngleX = [];
+            _histogramBinsAngleY = [];
+            _scoreRange = (0, 1);
+            UpdateSelectedTomogramHistograms();
             return;
+        }
         
         ct.ThrowIfCancellationRequested();
         
@@ -432,9 +456,7 @@ public partial class TemplateMatchExpandedView : IAsyncDisposable
         
         ct.ThrowIfCancellationRequested();
         
-        // If tomogram selected, update its histograms
-        if (_particles.Count > 0)
-            UpdateSelectedTomogramHistograms();
+        UpdateSelectedTomogramHistograms();
     }
     
     private void UpdateSelectedTomogramHistograms()
@@ -561,15 +583,8 @@ public partial class TemplateMatchExpandedView : IAsyncDisposable
             }
         }
         
-        // Get particles for the selected tomogram from our already loaded data
-        _particles = [];
-        var tomogramData = _allTomogramParticles.FirstOrDefault(t => t.TomogramName == tomogramName);
-        if (tomogramData != default)
-        {
-            _particles = tomogramData.Particles;
-            UpdateSelectedTomogramHistograms();
-        }
-        RebuildViewerSpecies();
+        RefreshSelectedParticles();
+        UpdateSelectedTomogramHistograms();
 
         if (scrollToItem && _tomogramThumbnailPanel != null)
             await _tomogramThumbnailPanel.SetSelectedThumbnailAsync(_selectedTomogramThumbnail);
@@ -580,6 +595,16 @@ public partial class TemplateMatchExpandedView : IAsyncDisposable
             await _tabs.GoToTabAsync(DetailsTabId);
             
         await InvokeAsync(StateHasChanged);
+    }
+
+    private void RefreshSelectedParticles()
+    {
+        string name = _selectedTomogramThumbnail == null
+            ? null
+            : _processedTomograms[_selectedTomogramThumbnail.Index].Path;
+        _selectedParticleStarPath = name == null ? null : _particleSet?.ToMultiStarPath(name);
+        _particles = _allTomogramParticles.FirstOrDefault(t => t.TomogramName == name).Particles ?? [];
+        RebuildViewerSpecies();
     }
 
     #endregion

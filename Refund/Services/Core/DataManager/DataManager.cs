@@ -370,12 +370,16 @@ public partial class DataManager
 
     private bool HasPendingExecution(Job job) =>
         job.Status == JobStatus.Waiting ||
-        job.Status.IsUnsettled() ||
+        (job.Status.IsUnsettled() && job.Status != JobStatus.Clearing) ||
         _queueRepository.HasExecutionAttempt(job);
 
-    private void EnsureNoPendingExecutions(IEnumerable<Job> jobs, string target)
+    private void EnsureNoPendingExecutions(IEnumerable<Job> jobs, string target, bool allowClearingDependents = false)
     {
-        if (jobs.Any(job => HasPendingExecution(job) || job.GetChildren().Any(HasPendingExecution)))
+        // Clearing owns the target's files, but does not consume its parents' outputs.
+        // Other mutations (such as deleting a space) must still wait for clears to finish.
+        if (jobs.Any(job => job.Status == JobStatus.Clearing || HasPendingExecution(job) ||
+                            job.GetChildren().Any(child => HasPendingExecution(child) ||
+                                (!allowClearingDependents && child.Status == JobStatus.Clearing))))
             throw new InvalidOperationException(
                 $"{target} has pending execution work or active dependent jobs. Abort active jobs and wait for completion first.");
     }

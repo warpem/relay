@@ -46,6 +46,10 @@ public class TemplateMatch : WarpJobGpu, IClusterJob
     public const string PortInMapList = "Template";
     public const string PortOutTomogramSet = "Tomograms";
     public const string PortOutParticleSet = "Positions";
+
+    [RelayProperty]
+    [Clearable]
+    public string VisTemplateName { get; set; }
     
     #region Parameters
 
@@ -291,8 +295,12 @@ public class TemplateMatch : WarpJobGpu, IClusterJob
         if (tomogramSet == null)
             throw new InvalidOperationException("Tomogram set input not found.");
 
-        // Get template name for pattern matching
-        string templateName = GetTemplateName();
+        // A handedness trial is not a result selection. Both sets of trial files
+        // exist, so use Warp's explicit decision rather than guessing from filenames.
+        bool? templateFlip = GetEffectiveTemplateFlip();
+        if (!templateFlip.HasValue)
+            return null;
+        string templateName = GetTemplateName(templateFlip.Value);
 
         // Format for matching output STAR files
         var result = new ParticleSet
@@ -311,19 +319,15 @@ public class TemplateMatch : WarpJobGpu, IClusterJob
 
         // Hook up template map if available
         Map templateMap = null;
-        if (PortsIn[PortInMapList].IsConnected)
+        if (templateFlip.Value || TemplateEmdb is > 0)
+        {
+            templateMap = new Map(averageVolumePath: Path.Combine(DirectoryPath, "template", $"{templateName}.mrc"));
+        }
+        else if (PortsIn[PortInMapList].IsConnected)
         {
             var mapList = PortsIn[PortInMapList].GetSingleResource<MapList>();
             if (mapList != null && mapList.Maps.Any())
                 templateMap = mapList.Maps.First();
-        }
-        else if (TemplateEmdb is > 0)
-        {
-            templateMap = new Map(half1VolumePath: null, 
-                                  half2VolumePath: null, 
-                                  averageVolumePath:Path.Combine(DirectoryPath, 
-                                                                 "template", 
-                                                                 $"{GetTemplateName()}.mrc"));
         }
         
         if (templateMap != null)
@@ -333,9 +337,36 @@ public class TemplateMatch : WarpJobGpu, IClusterJob
     }
 
     /// <summary>
-    /// Gets the name of the template based on input settings
+    /// Resolves the selected hand without changing the submitted parameters.
     /// </summary>
-    private string GetTemplateName()
+    private bool? GetEffectiveTemplateFlip()
+    {
+        if (CheckHandN is not > 0)
+            return TemplateFlip;
+        if (IsBlueprint)
+            return null;
+
+        // These decision lines are emitted by WarpTools after comparing both hands,
+        // before the full run. Reading them also supports already-completed jobs.
+        if (!File.Exists(PathStdOut))
+            return null;
+        bool? selected = null;
+        foreach (string line in File.ReadLines(PathStdOut))
+        {
+            switch (line.Trim())
+            {
+                case "Flipped template has higher peak values, using it for further processing":
+                    selected = true;
+                    break;
+                case "Original template has higher peak values, using it for further processing":
+                    selected = false;
+                    break;
+            }
+        }
+        return selected;
+    }
+
+    private string GetTemplateName(bool templateFlip)
     {
         if (PortsIn[PortInMapList].IsConnected)
         {
@@ -346,7 +377,7 @@ public class TemplateMatch : WarpJobGpu, IClusterJob
                 string baseName = Path.GetFileNameWithoutExtension(templatePath);
                 
                 // If flipping is enabled, append _flipx
-                if (TemplateFlip)
+                if (templateFlip)
                     return $"{baseName}_flipx";
                 
                 return baseName;
@@ -357,7 +388,7 @@ public class TemplateMatch : WarpJobGpu, IClusterJob
             string emdbId = TemplateEmdb.Value.ToString("D4");
             
             // If flipping is enabled, append _flipx
-            if (TemplateFlip)
+            if (templateFlip)
                 return $"emd_{emdbId}_flipx";
                 
             return $"emd_{emdbId}";
@@ -445,44 +476,40 @@ public class TemplateMatch : WarpJobGpu, IClusterJob
         optionsWarp.Save(Path.Combine(DirectoryPath, "processing.settings"));
     }
     
-    public override Action TrackProgressResults()
+    public override Action TrackProgressResults() => TrackProgressResults(BakeryWrapper.TsTemplateMatchJobCard);
+
+    internal Action TrackProgressResults(Action<string, string, string, float, string> renderCard)
     {
         var baseUpdate = base.TrackProgressResults();
-        
-        if (VisAvailableIteration < 0 && !File.Exists(VisCard(0)) && NItemsProcessed > 0)
+
+        ParticleSet particleSet = GetParticleSetResource(0);
+        string templatePath = particleSet?.CorrespondingMaps?.Maps.FirstOrDefault()?.GetAverageOrSimilar();
+        if (templatePath == null)
+            return baseUpdate;
+        string templateName = Path.GetFileNameWithoutExtension(templatePath);
+
+        if (VisAvailableIteration >= 0 && VisTemplateName == templateName && File.Exists(VisCard(0)))
+            return baseUpdate;
+        if (!File.Exists(ResProcessedItemsJson))
+            return baseUpdate;
+
+        var processedItems = JsonSerializer.Deserialize<List<WarpTools.MiniJsonTsItem>>(File.ReadAllText(ResProcessedItemsJson));
+        if (processedItems is not { Count: > 0 })
+            return baseUpdate;
+
+        TomogramSet tomogramSet = GetTomogramSetResource(0);
+        string tomogramPath = tomogramSet.ToTomogramPath(processedItems[0].Path);
+        string particlePath = particleSet.ToMultiStarPath(processedItems[0].Path);
+        if (!File.Exists(tomogramPath) || !File.Exists(particlePath) || !File.Exists(templatePath))
+            return baseUpdate;
+
+        Directory.CreateDirectory(RelayResultsDirectoryPath);
+        renderCard(tomogramPath, particlePath, templatePath, (float)TemplateDiameter, VisCard(0));
+        return () =>
         {
-            var processedItems = JsonSerializer.Deserialize<List<WarpTools.MiniJsonTsItem>>(File.ReadAllText(ResProcessedItemsJson));
-
-            if (processedItems.Count == 0)
-                return null;
-
-            ParticleSet particleSet = GetParticleSetResource(0);
-            TomogramSet tomogramSet = GetTomogramSetResource(0);
-
-            string templatePath = null;
-            if (PortsIn[PortInMapList].IsConnected)
-            {
-                MapList mapList = PortsIn[PortInMapList].GetSingleResource<MapList>();
-                templatePath = mapList.Maps.First().AverageVolumePath;
-            }
-            else if (TemplateEmdb is > 0)
-            {
-                templatePath = Path.Combine(DirectoryPath, "template", $"{GetTemplateName()}.mrc");
-            }
-
-            BakeryWrapper.TsTemplateMatchJobCard(tomogramSet.ToTomogramPath(processedItems[0].Path),
-                                                 particleSet.ToMultiStarPath(processedItems[0].Path),
-                                                 templatePath,
-                                                 (float)TemplateDiameter,
-                                                 VisCard(0));
-            
-            return () =>
-            {
-                baseUpdate?.Invoke();
-                VisAvailableIteration = 0;
-            };
-        }
-
-        return baseUpdate;
+            baseUpdate?.Invoke();
+            VisAvailableIteration = 0;
+            VisTemplateName = templateName;
+        };
     }
 }

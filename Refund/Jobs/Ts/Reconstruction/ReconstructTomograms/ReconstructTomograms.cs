@@ -281,30 +281,44 @@ public class ReconstructTomograms : WarpJobGpu, IClusterJob
         optionsWarp.Save(Path.Combine(DirectoryPath, "processing.settings"));
     }
     
-    public override Action TrackProgressResults()
+    public override Action TrackProgressResults() => TrackProgressResults(BakeryWrapper.TsReconstructJobCard);
+
+    internal Action TrackProgressResults(Action<string, string, string> renderCard)
     {
         var baseUpdate = base.TrackProgressResults();
-        
-        if (VisAvailableIteration < 0 && !File.Exists(VisCard(0)) && NItemsProcessed > 1)
+
+        if (VisAvailableIteration >= 0)
+            return baseUpdate;
+
+        if (!File.Exists(VisCard(0)))
         {
+            // Console progress can be unavailable or lag behind the result files.
+            // Decide whether a card can be rendered from the actual reconstruction output.
+            if (!File.Exists(ResProcessedItemsJson))
+                return baseUpdate;
+
             var processedItems = JsonSerializer.Deserialize<List<WarpTools.MiniJsonTsItem>>(File.ReadAllText(ResProcessedItemsJson));
 
-            if (processedItems.Count == 0)
-                return null;
+            if (processedItems is not { Count: > 0 })
+                return baseUpdate;
 
             TomogramSet tomogramSet = GetTomogramResource(0);
+            string first = tomogramSet.ToTomogramThumbnailPath(processedItems[0].Path);
+            string second = processedItems.Count > 1
+                ? tomogramSet.ToTomogramThumbnailPath(processedItems[1].Path)
+                : first;
 
-            BakeryWrapper.TsReconstructJobCard(tomogramSet.ToTomogramThumbnailPath(processedItems[0].Path), 
-                                               tomogramSet.ToTomogramThumbnailPath(processedItems[1].Path), 
-                                               VisCard(0));
+            if (!File.Exists(first) || !File.Exists(second))
+                return baseUpdate;
 
-            return () =>
-            {
-                baseUpdate?.Invoke();
-                VisAvailableIteration = 0;
-            };
+            Directory.CreateDirectory(RelayResultsDirectoryPath);
+            renderCard(first, second, VisCard(0));
         }
 
-        return baseUpdate;
+        return () =>
+        {
+            baseUpdate?.Invoke();
+            VisAvailableIteration = 0;
+        };
     }
 }
