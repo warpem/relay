@@ -38,6 +38,7 @@ public class JobTaxonomyTests
         ["PeakAlign"]              = "Tilt-series.Alignment.Peak alignment",
         ["StackTilts"]             = "Tilt-series.Alignment.Stack tilts",
         ["ImportAlignments"]       = "Tilt-series.Alignment.Import alignments",
+        ["SkipAlignment"]          = "Tilt-series.Alignment.Skip alignment",
         ["Ctf"]                    = "Tilt-series.CTF.CTF",
         ["ReconstructTomograms"]   = "Tilt-series.Reconstruction.Tomograms",
         ["ReconstructMap"]         = "Tilt-series.Reconstruction.Map",
