@@ -335,18 +335,23 @@
 
     @if (!DiagramMode)
     {
-        <FluentMenu Anchor="@CardDomId" Trigger="MouseButton.Right"
-                    Anchored="false" OpenChanged="HandleContextMenu">
-            <span class="menu-context-title" title="@_contextMenuHeader">
-                @_contextMenuHeader
-            </span>
-            <FluentDivider />
+        @* Menu actions must not bubble into the card's selection or navigation handlers. *@
+        <div @onclick:stopPropagation="true"
+             @ondblclick:stopPropagation="true"
+             @onmouseup:stopPropagation="true">
+            <FluentMenu Anchor="@CardDomId" Trigger="MouseButton.Right"
+                        Anchored="false" OpenChanged="HandleContextMenu">
+                <span class="menu-context-title" title="@_contextMenuHeader">
+                    @_contextMenuHeader
+                </span>
+                <FluentDivider />
 
-            @if (_contextMenuActions != null)
-            {
-                <ActionMenuLevel Actions="_contextMenuActions"/>
-            }
-        </FluentMenu>
+                @if (_contextMenuActions != null)
+                {
+                    <ActionMenuLevel Actions="_contextMenuActions"/>
+                }
+            </FluentMenu>
+        </div>
     }
 
     @if (_isDragging && _dragCount > 1)
