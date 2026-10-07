@@ -659,7 +659,9 @@ public class SelectParticles : WarpJob, ILocalJob
         }
     }
     
-    public override Action TrackProgressResults()
+    public override Action TrackProgressResults() => TrackProgressResults(BakeryWrapper.TsSelectParticlesJobCard);
+
+    internal Action TrackProgressResults(Action<string, string, string, string, float, string> renderCard)
     {
         if (!_isFinalized)
             return null;
@@ -676,10 +678,11 @@ public class SelectParticles : WarpJob, ILocalJob
             ParticleSet particleSet = GetParticleSetResource(0);
             TomogramSet tomogramSet = GetTomogramSetResource(0);
 
-            BakeryWrapper.TsSelectParticlesJobCard(tomogramSet.ToTomogramPath(processedItems[0].Path),
+            int secondIndex = Math.Min(1, processedItems.Count - 1);
+            renderCard(tomogramSet.ToTomogramPath(processedItems[0].Path),
                                                    particleSet.ToMultiStarPath(processedItems[0].Path),
-                                                   tomogramSet.ToTomogramPath(processedItems[1].Path),
-                                                   particleSet.ToMultiStarPath(processedItems[1].Path),
+                                                   tomogramSet.ToTomogramPath(processedItems[secondIndex].Path),
+                                                   particleSet.ToMultiStarPath(processedItems[secondIndex].Path),
                                                    particleSet.Diameter,
                                                    VisCard(0));
             

@@ -226,31 +226,40 @@ public class Ctf : WarpJobGpu, IClusterJob
         optionsWarp.Save(Path.Combine(DirectoryPath, "processing.settings"));
     }
     
-    public override Action TrackProgressResults()
+    public override Action TrackProgressResults() => TrackProgressResults(BakeryWrapper.TsCtfCardView);
+
+    internal Action TrackProgressResults(Action<string, string, string> renderCard)
     {
         var baseUpdate = base.TrackProgressResults();
-        
-        if (VisAvailableIteration < 0 && !File.Exists(VisCard(0)) && NItemsProcessed > 1)
+
+        if (VisAvailableIteration >= 0)
+            return baseUpdate;
+
+        if (!File.Exists(VisCard(0)))
         {
+            // The card needs one completed series, regardless of console progress reporting.
+            if (!File.Exists(ResProcessedItemsJson))
+                return baseUpdate;
+
             List<WarpTools.MiniJsonTsItem> processedItems = JsonSerializer.Deserialize<List<WarpTools.MiniJsonTsItem>>(File.ReadAllText(ResProcessedItemsJson));
 
-            if (processedItems.Count == 0)
-                return null;
+            if (processedItems == null || processedItems.Count == 0 || processedItems[0].TiltMoviePaths is not { Length: > 0 })
+                return baseUpdate;
 
             MicrographSet fsSet = GetTiltSeriesResource(0).DataSet.Micrographs;
-            TiltSeries ts = new TiltSeries(Path.Combine(DirectoryPath, processedItems[0].Path));
+            string thumbnail = fsSet.ToThumbnailPath(processedItems[0].TiltMoviePaths[processedItems[0].TiltMoviePaths.Length / 2]);
+            string metadata = Path.ChangeExtension(Path.Combine(DirectoryPath, processedItems[0].Path), ".xml");
+            if (!File.Exists(thumbnail) || !File.Exists(metadata))
+                return baseUpdate;
 
-            BakeryWrapper.TsCtfCardView(fsSet.ToThumbnailPath(processedItems[0].TiltMoviePaths[processedItems[0].TiltMoviePaths.Length / 2]),
-                                        ts.XMLPath,
-                                        VisCard(0));
-
-            return () =>
-            {
-                baseUpdate?.Invoke();
-                VisAvailableIteration = 0;
-            };
+            Directory.CreateDirectory(RelayResultsDirectoryPath);
+            renderCard(thumbnail, metadata, VisCard(0));
         }
 
-        return baseUpdate;
+        return () =>
+        {
+            baseUpdate?.Invoke();
+            VisAvailableIteration = 0;
+        };
     }
 }
