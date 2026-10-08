@@ -24,6 +24,11 @@ public partial class Histogram : IAsyncDisposable
     private decimal[] _previousSecondaryBinSizes = Array.Empty<decimal>();
 
     /// <summary>
+    /// Whether to scale bin heights by log(1 + count), keeping empty bins at zero.
+    /// </summary>
+    [Parameter] public bool LogarithmicY { get; set; } = false;
+
+    /// <summary>
     /// The color for the secondary histogram bars.
     /// </summary>
     [Parameter] public string SecondaryColor { get; set; } = "#8A2BE2"; // Default to BlueViolet
@@ -189,7 +194,7 @@ public partial class Histogram : IAsyncDisposable
         // Update JS if needed
         if (binsChanged || secondaryBinsChanged || MinRange != _previousMinRange || MaxRange != _previousMaxRange || 
             Color != _previousColor || SecondaryColor != _previousSecondaryColor || SelectedRangeStart != _previousRangeStart || 
-            SelectedRangeEnd != _previousRangeEnd)
+            SelectedRangeEnd != _previousRangeEnd || LogarithmicY != _previousLogarithmicY)
         {
             await UpdateHistogramAsync();
             
@@ -199,6 +204,7 @@ public partial class Histogram : IAsyncDisposable
             _previousSecondaryColor = SecondaryColor;
             _previousRangeStart = SelectedRangeStart;
             _previousRangeEnd = SelectedRangeEnd;
+            _previousLogarithmicY = LogarithmicY;
         }
 
         await base.OnParametersSetAsync();
@@ -267,6 +273,7 @@ public partial class Histogram : IAsyncDisposable
         return new
         {
             binSizes = BinSizes,
+            logarithmicY = LogarithmicY,
             secondaryBinSizes = SecondaryBinSizes,
             minRange = MinRange,
             maxRange = MaxRange,
@@ -398,6 +405,7 @@ public partial class Histogram : IAsyncDisposable
     }
 
     // Field tracking for parameter changes
+    private bool _previousLogarithmicY;
     private decimal _previousMinRange;
     private decimal _previousMaxRange;
     private string _previousColor = "#0078D4";

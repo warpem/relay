@@ -101,6 +101,7 @@ class Histogram {
         
         // Update configuration
         this.binSizes = config.binSizes || [];
+        this.logarithmicY = config.logarithmicY || false;
         this.secondaryBinSizes = config.secondaryBinSizes || [];
         this.minRange = config.minRange;
         this.maxRange = config.maxRange;
@@ -141,8 +142,10 @@ class Histogram {
             ...(this.secondaryBinSizes.length > 0 ? this.secondaryBinSizes : [0])
         );
         
-        // Default to 1 if all bins are empty
-        const normFactor = maxBinSize > 0 ? maxBinSize : 1;
+        // log1p keeps empty bins at zero and single-count bins visible.
+        const scale = this.logarithmicY ? Math.log1p : value => value;
+        // Default to 1 if all bins are empty to avoid division by zero.
+        const normFactor = maxBinSize > 0 ? scale(maxBinSize) : 1;
         
         // Create a group for primary bars
         const primaryGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
@@ -151,7 +154,7 @@ class Histogram {
         
         // Create primary bars
         for (let i = 0; i < this.binSizes.length; i++) {
-            const barHeight = this.binSizes[i] / normFactor * height;
+            const barHeight = scale(this.binSizes[i]) / normFactor * height;
             const x = i * this.barWidth;
             const y = height - barHeight;
             
@@ -182,7 +185,7 @@ class Histogram {
             
             // Create secondary bars
             for (let i = 0; i < this.secondaryBinSizes.length && i < this.binSizes.length; i++) {
-                const barHeight = this.secondaryBinSizes[i] / normFactor * height;
+                const barHeight = scale(this.secondaryBinSizes[i]) / normFactor * height;
                 const x = i * this.barWidth;
                 const y = height - barHeight;
                 
