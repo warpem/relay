@@ -13,7 +13,7 @@ namespace Refund.Components.FourierSpace;
 /// Component that displays the amplitude spectrum (power spectrum) of a cryo-EM movie or tilt series, 
 /// allowing visualization of CTF (Contrast Transfer Function) fitting.
 /// This component presents both the 2D power spectrum image and the 1D plot showing 
-/// experimental data, fitted model, and quality metrics across spatial frequencies.
+/// experimental data, fitted model, and fit quality across spatial frequencies.
 /// </summary>
 public partial class AmplitudeSpectrumViewer : IAsyncDisposable
 {
@@ -67,6 +67,7 @@ public partial class AmplitudeSpectrumViewer : IAsyncDisposable
     private byte[]? _monoBuffer;
     private byte[]? _rightHalfBuffer;
     private SKBitmap? _reusableBitmap;
+    private decimal? _specimenThicknessAngstrom;
     
     /// <summary>
     /// Gets whether the component is in tilt series mode.
@@ -163,6 +164,7 @@ public partial class AmplitudeSpectrumViewer : IAsyncDisposable
             return;
             
         _isLoading = true;
+        _specimenThicknessAngstrom = null;
         await InvokeAsync(StateHasChanged);
 
         if (_isChartInitialized)
@@ -241,6 +243,7 @@ public partial class AmplitudeSpectrumViewer : IAsyncDisposable
                 
             if (_cachedTiltSeriesData.TryGetValue(_currentTiltIndex, out var warpSeries))
             {
+                _specimenThicknessAngstrom = warpSeries.SpecimenThicknessAngstrom;
                 // First update UI state to ensure the canvas is rendered
                 _isLoading = false;
                 await InvokeAsync(StateHasChanged);
@@ -259,7 +262,7 @@ public partial class AmplitudeSpectrumViewer : IAsyncDisposable
                         MaxNormalized = warpSeries.MaxNormalized,
                         ExperimentalValues = warpSeries.ExperimentalValues.Select(v => float.IsNaN(v) ? 0f : MathF.Round(v, 2)).ToArray(),
                         SimulatedValues = warpSeries.SimulatedValues.Select(v => float.IsNaN(v) ? 0f : MathF.Round(v, 2)).ToArray(),
-                        QualityValues = warpSeries.QualityValues.Select(v => float.IsNaN(v) ? 0f : MathF.Round(v, 2)).ToArray()
+                        QualityValues = warpSeries.QualityValues
                     });
             }
             else
@@ -292,6 +295,7 @@ public partial class AmplitudeSpectrumViewer : IAsyncDisposable
             _imageSource = powerSpectrumImage;
 
             var warpSeries = GetWarpSeries(movieFilePath, FittingRangeMin, FittingRangeMax);
+            _specimenThicknessAngstrom = warpSeries.SpecimenThicknessAngstrom;
 
             // First update UI state to ensure the canvas is rendered
             _isLoading = false;
@@ -311,7 +315,7 @@ public partial class AmplitudeSpectrumViewer : IAsyncDisposable
                     MaxNormalized = warpSeries.MaxNormalized,
                     ExperimentalValues = warpSeries.ExperimentalValues.Select(v => float.IsNaN(v) ? 0f : MathF.Round(v, 2)).ToArray(),
                     SimulatedValues = warpSeries.SimulatedValues.Select(v => float.IsNaN(v) ? 0f : MathF.Round(v, 2)).ToArray(),
-                    QualityValues = warpSeries.QualityValues.Select(v => float.IsNaN(v) ? 0f : MathF.Round(v, 2)).ToArray()
+                    QualityValues = warpSeries.QualityValues
                 });
 
             _isChartInitialized = true;
@@ -560,7 +564,7 @@ public partial class AmplitudeSpectrumViewer : IAsyncDisposable
     /// <param name="rangeMin">Minimum range for CTF fitting (fraction of Nyquist)</param>
     /// <param name="rangeMax">Maximum range for CTF fitting (fraction of Nyquist)</param>
     /// <returns>A WarpSeriesData object containing all data for the chart visualization</returns>
-    private WarpSeriesData GetWarpSeries(string basePath, decimal rangeMin, decimal rangeMax)
+    internal static WarpSeriesData GetWarpSeries(string basePath, decimal rangeMin, decimal rangeMax)
     {
         var movie = new Movie(basePath);
 
@@ -569,13 +573,6 @@ public partial class AmplitudeSpectrumViewer : IAsyncDisposable
 
         var experimentalData = movie.PS1D;
         var simulatedData = movie.Simulated1D;
-        var scaleData = movie.SimulatedScale;
-        var ctf = movie.CTF;
-
-        var quality = ctf.EstimateQuality(experimentalData.Select(p => p.Y).ToArray(),
-                                          scaleData.Interp(experimentalData.Select(p => p.X).ToArray()),
-                                          (float)fittingRangeMin,
-                                          16);
 
         var experimentalDataLengthMultiplied = experimentalData.Length * 2;
 
@@ -607,7 +604,8 @@ public partial class AmplitudeSpectrumViewer : IAsyncDisposable
                                   Math.Max(maxExperimental, maxSimulated) * 1.25f,
                                   experimentalValues,
                                   simulatedValues,
-                                  quality
+                                  GetQualityValues(movie.CTFQuality),
+                                  movie.CTFSpecimenThicknessAngstrom > 0 ? movie.CTFSpecimenThicknessAngstrom : null
         );
     }
     
@@ -619,23 +617,14 @@ public partial class AmplitudeSpectrumViewer : IAsyncDisposable
     /// <param name="rangeMin">Minimum range for CTF fitting (fraction of Nyquist)</param>
     /// <param name="rangeMax">Maximum range for CTF fitting (fraction of Nyquist)</param>
     /// <returns>A WarpSeriesData object containing all data for the chart visualization</returns>
-    private WarpSeriesData GetTiltWarpSeries(TiltSeries tiltSeries, int tiltIndex, decimal rangeMin, decimal rangeMax)
+    internal static WarpSeriesData GetTiltWarpSeries(TiltSeries tiltSeries, int tiltIndex, decimal rangeMin, decimal rangeMax)
     {
         var fittingRangeMin = tiltSeries.CTF.PixelSize * 2 / rangeMin;
         var fittingRangeMax = tiltSeries.CTF.PixelSize * 2 / rangeMax;
 
-        // Get the CTF for the specific tilt
-        var ctf = tiltSeries.GetTiltCTF(tiltIndex);
-        
         // Get the experimental and simulated data for the specific tilt
         var experimentalData = tiltSeries.TiltPS1D[tiltIndex];
         var simulatedData = tiltSeries.GetTiltSimulated1D(tiltIndex);
-        var scaleData = tiltSeries.TiltSimulatedScale[tiltIndex];
-
-        var quality = ctf.EstimateQuality(experimentalData.Select(p => p.Y).ToArray(),
-                                          scaleData.Interp(experimentalData.Select(p => p.X).ToArray()),
-                                          (float)fittingRangeMin,
-                                          16);
 
         var experimentalDataLengthMultiplied = experimentalData.Length * 2;
 
@@ -667,9 +656,14 @@ public partial class AmplitudeSpectrumViewer : IAsyncDisposable
                                   Math.Max(maxExperimental, maxSimulated) * 1.25f,
                                   experimentalValues,
                                   simulatedValues,
-                                  quality
+                                  GetQualityValues(tiltSeries.TiltCTFQuality.ElementAtOrDefault(tiltIndex)),
+                                  tiltSeries.CTFSpecimenThicknessAngstrom > 0 ? tiltSeries.CTFSpecimenThicknessAngstrom : null
         );
     }
+
+    // JSON nulls keep unsupported frequencies as gaps in Chart.js instead of zero correlations.
+    private static float?[] GetQualityValues(float2[] curve) =>
+        curve?.Select(p => float.IsFinite(p.Y) ? (float?)p.Y : null).ToArray() ?? [];
 
     /// <summary>
     /// Destroys the current chart by calling the JavaScript destroy function.
@@ -722,8 +716,7 @@ public partial class AmplitudeSpectrumViewer : IAsyncDisposable
 
 /// <summary>
 /// Record class containing all data needed for visualizing a CTF series.
-/// This includes data for the experimental and simulated CTF curves, as well as
-/// quality metrics and display range parameters.
+/// This includes experimental, simulated, and fit-quality curves and display range parameters.
 /// </summary>
 /// <param name="BinnedPixelSize">The pixel size after binning, used for Angstrom calculations</param>
 /// <param name="MinRange">The minimum index for the fitting range</param>
@@ -732,7 +725,8 @@ public partial class AmplitudeSpectrumViewer : IAsyncDisposable
 /// <param name="MaxNormalized">The maximum normalized value for chart Y-axis scaling</param>
 /// <param name="ExperimentalValues">Array of experimental CTF values from the power spectrum</param>
 /// <param name="SimulatedValues">Array of simulated CTF values from the fitted model</param>
-/// <param name="QualityValues">Array of quality metrics for the fit at different spatial frequencies</param>
+/// <param name="QualityValues">Saved fit correlations; null entries mark unsupported frequencies</param>
+/// <param name="SpecimenThicknessAngstrom">Estimated sample thickness, when available</param>
 public record WarpSeriesData(
     float BinnedPixelSize,
     int MinRange,
@@ -741,7 +735,8 @@ public record WarpSeriesData(
     float MaxNormalized,
     float[] ExperimentalValues,
     float[] SimulatedValues,
-    float[] QualityValues);
+    float?[] QualityValues,
+    decimal? SpecimenThicknessAngstrom);
 
 /// <summary>
 /// Configuration class for passing data to the JavaScript chart.
@@ -784,9 +779,7 @@ public class ChartConfig
     /// Array of simulated CTF values from the fitted model
     /// </summary>
     public float[] SimulatedValues { get; init; } = Array.Empty<float>();
-    
-    /// <summary>
-    /// Array of quality metrics for the fit at different spatial frequencies
-    /// </summary>
-    public float[] QualityValues { get; init; } = Array.Empty<float>();
+
+    /// <summary>Saved fit correlations; null entries mark unsupported frequencies.</summary>
+    public float?[] QualityValues { get; init; } = Array.Empty<float?>();
 }

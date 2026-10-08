@@ -178,7 +178,7 @@ public static class WarpTools
         public double? Defocus { get; set; }  // Defocus value
         
         [JsonPropertyName("Phase")]
-        public int? Phase { get; set; }     // Phase
+        public double? Phase { get; set; }  // Phase shift in pi radians
         
         [JsonPropertyName("Resolution")]
         public double? Resolution { get; set; }  // Resolution
@@ -195,6 +195,10 @@ public static class WarpTools
         [JsonPropertyName("Junk")]
         public double? Junk { get; set; } // Junk value
         
+        // Filled from Warp's metadata object; currently absent from processed_items.json.
+        [JsonIgnore]
+        public double? CtfSpecimenThicknessAngstrom { get; set; }
+
         [JsonPropertyName("Particles")]
         public int? ParticleCount { get; set; }    // Particle count
     }
@@ -276,6 +280,10 @@ public static class WarpTools
         [JsonPropertyName("CtfInclination")]
         public double? CtfInclination { get; set; }
         
+        // Filled from Warp's metadata object; currently absent from processed_items.json.
+        [JsonIgnore]
+        public double? CtfSpecimenThicknessAngstrom { get; set; }
+
         // Particles
         [JsonPropertyName("Particles")]
         public int? ParticleCount { get; set; }    // Particle count

@@ -35,6 +35,11 @@
             </div>
         }
 
+        @if (_specimenThicknessAngstrom.HasValue)
+        {
+            <div>Estimated sample thickness: @_specimenThicknessAngstrom.Value.ToString("F0") Å</div>
+        }
+
         <div class="chart-container" style="opacity: @(_isLoading ? "0" : "1")">
             <canvas @ref="_canvasReference"
                     class="chart"
@@ -60,7 +65,7 @@
                         </td>
                         <td class="fitted-value"></td>
                     </tr>
-                    <tr>
+                    <tr class="quality-row" hidden>
                         <td>
                             <span class="custom-tooltip-bullet" style="background: rgb(211, 211, 211)"></span>
                             Quality

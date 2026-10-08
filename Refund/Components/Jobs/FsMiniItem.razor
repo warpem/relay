@@ -18,6 +18,11 @@
                 <span>CTF fit resolution: @(miniFs.Resolution.Value.ToString("F1")) Å</span>
             }
             
+            @if (miniFs.CtfSpecimenThicknessAngstrom.HasValue)
+            {
+                <span>Estimated thickness: @(miniFs.CtfSpecimenThicknessAngstrom.Value.ToString("F0")) Å</span>
+            }
+
             @if (miniFs.Phase != null)
             {
                 <span>Phase shift: @(miniFs.Phase.Value.ToString("F2")) 𝛑</span>

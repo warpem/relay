@@ -27,7 +27,7 @@ public class Ctf : WarpJobGpu, IClusterJob
 
     public override string TypeNameShort => "CTF";
 
-    public override string TypeDescription => "Estimates CTF parameters in tilt series using geometric constraints";
+    public override string TypeDescription => "Estimates CTF parameters and sample thickness in tilt series using geometric constraints";
 
     public override Type ExpandedViewType => typeof(CtfExpandedView);
 

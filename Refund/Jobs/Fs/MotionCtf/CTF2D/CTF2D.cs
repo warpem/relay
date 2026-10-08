@@ -48,7 +48,7 @@ public class CTF2D : WarpJobGpu, IClusterJob
     /// <summary>
     /// Description of the job's purpose, displayed in tooltips and help documentation.
     /// </summary>
-    public override string TypeDescription => "CTF estimation on 2D images";
+    public override string TypeDescription => "CTF and sample thickness estimation on 2D images";
     
     /// <summary>
     /// Specifies this job requires GPU resources for optimal performance.

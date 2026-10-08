@@ -13,7 +13,7 @@ using WarpHelper = Warp.Tools.Helper;
 namespace Refund.Jobs.Ts.Picking.TemplateMatch;
 
 /// <summary>
-/// Job that performs template matching on reconstructed tomograms.
+/// Job that proposes template matches in a coarse volume and refines them against tilt images.
 /// This is based on the WarpTools TemplateMatchTiltseries command.
 /// </summary>
 [GenerateReadOnly]
@@ -27,7 +27,7 @@ public class TemplateMatch : WarpJobGpu, IClusterJob
 
     public override string TypeNameShort => "Template Match";
 
-    public override string TypeDescription => "Match previously reconstructed tomograms against a 3D template, producing a list of the highest-scoring matches";
+    public override string TypeDescription => "Match a 3D template against tilt images using coarse matched-filter proposals and multistart pose refinement";
 
     protected override int DefaultMemoryPerWorker => 48;
 
@@ -103,28 +103,45 @@ public class TemplateMatch : WarpJobGpu, IClusterJob
                helpText: "Number of subdivisions defining the angular search step: 2 = 15° step, 3 = 7.5°, 4 = 3.75° and so on")]
     public int HealpixOrder { get; set; } = 3;
     
+    // Retained for deserializing existing jobs; refinement is now always enabled.
     [RelayProperty]
-    [UiBool("optimize_poses", "Refine poses", 
-               helpText: "Refine poses with sub-pixel precision after initial cross-correlation with the volume")]
     public bool OptimizePoses { get; set; } = false;
 
     [RelayProperty]
+    public int OptimizePosesSteps { get; set; } = 1;
+
+    [RelayProperty]
     [UiDecimalNullable("optimize_poses_angpix", "Pixel size for pose refinement",
-                       min: 1.0, max: 99999.0, stepSize: 0.1, unit: "Å",
-                       helpText: "Minimum pixel size to use at the last iteration of pose optimization. " +
-                                 "Leave empty to use the tomogram pixel size.",
-                       ConditionalOnField = nameof(OptimizePoses),
-                       ConditionalOnValue = true)]
+                       min: 0.1, max: 99999.0, stepSize: 0.1, unit: "Å",
+                       helpText: "Minimum pixel size for pose refinement, no larger than the coarse-search pixel size. Leave empty to use the coarse-search pixel size.")]
     public decimal? OptimizePosesAngpix { get; set; } = null;
 
     [RelayProperty]
-    [UiInt("optimize_poses_steps", "Number of annealing steps",
-                       min: 1, max: 99999, stepSize: 1,
-                       helpText: "To avoid getting stuck in local minima, anneal the pixel size used for pose refinement " +
-                                 "from the tomogram pixel size to the pose refinement pixel size over this many iterations.",
-                       ConditionalOnField = nameof(OptimizePoses),
-                       ConditionalOnValue = true)]
-    public int OptimizePosesSteps { get; set; } = 1;
+    [UiInt("match_topk", "Orientations per voxel", min: 1, max: 128, isAdvanced: true,
+           helpText: "Retain this many orientation scores per voxel. Leaderboard GPU memory is 8 × K bytes per padded voxel.")]
+    public int MatchTopK { get; set; } = 8;
+
+    [RelayProperty]
+    [UiInt("refine_starts", "Refinement starts", min: 1, max: 1024,
+           helpText: "Maximum GPU pose hypotheses per peak, pooled from that voxel and its six neighbors")]
+    public int RefineStarts { get; set; } = 32;
+
+    [RelayProperty]
+    [UiBool("refine_fit_bfactor", "Fit amplitude and B-factor", isAdvanced: true,
+            helpText: "Jointly fit amplitude and B-factor at each final pose and write envelope diagnostics without changing particle scores or selection")]
+    public bool RefineFitBfactor { get; set; } = false;
+
+    [RelayProperty]
+    [UiDecimal("refine_fit_highpass", "Envelope fitting high-pass", min: 0, max: 10000, stepSize: 1, unit: "Å", isAdvanced: true,
+               helpText: "Use frequencies above 1/value for amplitude/B-factor fitting; 0 uses the full refinement band. Must be coarser than the final refinement resolution.",
+               ConditionalOnField = nameof(RefineFitBfactor), ConditionalOnValue = true)]
+    public decimal RefineFitHighpass { get; set; } = 30;
+
+    [RelayProperty]
+    [UiBool("refine_export_tilt_spectra", "Export per-tilt spectra", isAdvanced: true,
+            helpText: "Export per-tilt sufficient statistics for experimental shared tilt-scale calibration",
+            ConditionalOnField = nameof(RefineFitBfactor), ConditionalOnValue = true)]
+    public bool RefineExportTiltSpectra { get; set; } = false;
 
     /// <summary>
     /// Limit the range of angles between the reference's Z axis and the tomogram's XY plane to plus/minus this value, in degrees
@@ -144,20 +161,20 @@ public class TemplateMatch : WarpJobGpu, IClusterJob
     public int BatchAngles { get; set; } = 4;
 
     /// <summary>
-    /// Minimum distance in Angstrom between peaks; leave empty to use template diameter
+    /// Minimum distance in Angstrom between peaks; leave empty to use half the template diameter
     /// </summary>
     [RelayProperty]
     [UiIntNullable("peak_distance", "Peak distance", min: 10, max: 1000, stepSize: 10, unit: "Å", 
-                   helpText: "Minimum distance in Angstrom between peaks; leave empty to use template diameter")]
+                   helpText: "Minimum distance in Angstrom between peaks; leave empty to use half the template diameter")]
     public int? PeakDistance { get; set; } = null;
 
     /// <summary>
-    /// Maximum number of peak positions to save
+    /// Maximum number of coarse candidate positions to refine
     /// </summary>
     [RelayProperty]
-    [UiInt("npeaks", "Maximum peaks", min: 10, max: 10000, stepSize: 100,
-           helpText: "Maximum number of peak positions to save")]
-    public int PeakNumber { get; set; } = 2000;
+    [UiInt("npeaks", "Maximum coarse candidates", min: 1, max: 100000, stepSize: 100,
+           helpText: "Maximum coarse candidate positions; all are refined before final spatial suppression")]
+    public int PeakNumber { get; set; } = 8000;
     
     [RelayProperty]
     [UiIntNullable("tophat", "Tophat peak filter", min: 1, max: 3, stepSize: 1,
@@ -166,20 +183,11 @@ public class TemplateMatch : WarpJobGpu, IClusterJob
                      "For a description of the method, see Chaillet et al. 2025, J Struct Biol")]
     public int? Tophat { get; set; } = null;
 
-    /// <summary>
-    /// Don't set score distribution to median = 0, stddev = 1
-    /// </summary>
+    // Legacy parameters are kept in saved state but no longer emitted to WarpTools.
     [RelayProperty]
-    [UiBool("dont_normalize", "Don't normalize scores", 
-            "Don't set score distribution to median = 0, stddev = 1")]
     public bool DontNormalizeScores { get; set; } = false;
 
-    /// <summary>
-    /// Perform spectral whitening to give higher-resolution information more weight
-    /// </summary>
     [RelayProperty]
-    [UiBool("whiten", "Whiten spectra", 
-            "Perform spectral whitening to give higher-resolution information more weight; this can help when the alignments are already good and you need more selective matching")]
     public bool Whiten { get; set; } = false;
 
     /// <summary>
@@ -198,22 +206,14 @@ public class TemplateMatch : WarpJobGpu, IClusterJob
                helpText: "Sigma (i.e. fall-off) of the Gaussian low-pass filter, in fractions of Nyquist; larger value = slower fall-off")]
     public decimal LowpassSigma { get; set; } = 0.1M;
 
-    /// <summary>
-    /// Matching is performed locally using sub-volumes of this size in pixel
-    /// </summary>
     [RelayProperty]
-    [UiInt("subvolume_size", "Subvolume size", min: 64, max: 512, stepSize: 64, unit: "px",
-           helpText: "Matching is performed locally using sub-volumes of this size in pixel")]
     public int SubVolumeSize { get; set; } = 192;
 
-    /// <summary>
-    /// Dismiss positions not covered by at least this many tilts; set to -1 to disable position culling
-    /// </summary>
     [RelayProperty]
     [UiFieldGroup("Advanced Options", 4)]
-    [UiIntNullable("max_missing_tilts", "Maximum missing tilts", min: 1, max: 10, stepSize: 1,
-           helpText: "Dismiss positions not covered by at least this many tilts; clear to disable position culling")]
-    public int? MaxMissingTilts { get; set; } = 2;
+    [UiIntNullable("max_missing_tilts", "Maximum missing tilts", min: 0, max: 100, stepSize: 1,
+           helpText: "Optional coarse coverage restriction; clear to leave visibility handling to per-candidate refinement")]
+    public int? MaxMissingTilts { get; set; } = null;
 
     // /// <summary>
     // /// Reuse correlation volumes from a previous run if available, only extract peak positions
@@ -274,10 +274,11 @@ public class TemplateMatch : WarpJobGpu, IClusterJob
         if (!tomogramSet.TiltSeriesSet.HasMetadata)
             throw new InvalidOperationException("Tilt series must have metadata.");
         
-        tomogramSet.TomogramCorrVolumeDirectory = WarpHelper.PathCombine(DirectoryPath, TiltSeries.ReconstructionDirName);
-        tomogramSet.ToTomogramCorrVolumePath = path => WarpHelper.PathCombine(DirectoryPath,
-                                                                              TiltSeries.ReconstructionDirName,
-                                                                              $"{WarpHelper.PathToName(path)}_corr.mrc");
+        tomogramSet.TomogramCorrVolumeDirectory = WarpHelper.PathCombine(DirectoryPath, TiltSeries.MatchingDirName);
+        tomogramSet.ToTomogramCorrVolumePath = path => GetEffectiveTemplateFlip() is bool flip
+            ? WarpHelper.PathCombine(DirectoryPath, TiltSeries.MatchingDirName,
+                                    $"{TiltSeries.ToTomogramWithPixelSize(path, tomogramSet.PixelSize)}_{GetTemplateName(flip)}_corr.mrc")
+            : null;
 
         return tomogramSet;
     }
@@ -415,12 +416,17 @@ public class TemplateMatch : WarpJobGpu, IClusterJob
 
         result["settings"] = Space.GetRelativePath(Path.Combine(Path.GetFullPath(DirectoryPath), "processing.settings"));
         result["tomo_angpix"] = tomogramSet.PixelSize.ToString(CultureInfo.InvariantCulture);
+        // WarpTools expects an integer diameter, even when saved decimal state has a scale.
+        result["template_diameter"] = ((int)TemplateDiameter).ToString(CultureInfo.InvariantCulture);
 
         if (PortsIn[PortInMapList].GetSingleResource<MapList>() != null && TemplateEmdb == null)
         {
             var map = PortsIn[PortInMapList].GetSingleResource<MapList>().Maps.First();
             result["template_path"] = map.AverageVolumePath;
         }
+
+        // A missing nullable UI value would otherwise leave WarpTools' default implicit.
+        result["max_missing_tilts"] = (MaxMissingTilts ?? -1).ToString(CultureInfo.InvariantCulture);
 
         return result;
     }

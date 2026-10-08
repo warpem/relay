@@ -14,7 +14,7 @@ let binnedPixelSize = null;
 const COLORS = {
     experimental: 'rgb(0, 191, 255)',    // Cyan for experimental data
     simulated: 'rgb(255, 20, 147)',      // Pink for simulated/fitted data
-    quality: 'rgb(211, 211, 211)',       // Light gray for quality metrics
+    quality: 'rgb(211, 211, 211)',       // Light gray for fit quality
     annotation: 'rgba(192, 192, 192, 0.1)' // Semi-transparent gray for annotations
 };
 
@@ -32,10 +32,10 @@ export function initialize(dotNetReference) {
 /**
  * Sets up the Chart.js visualization with CTF fitting data.
  * 
- * Creates a multi-dataset line chart with three series:
+ * Creates a multi-dataset line chart with up to three series:
  * 1. Experimental data from the power spectrum
  * 2. Fitted/simulated CTF model
- * 3. Quality metrics showing goodness of fit
+ * 3. Saved fit quality, when available
  * 
  * Also highlights the fitting range with a box annotation.
  * 
@@ -52,15 +52,22 @@ export function setupChart(canvas, config) {
     binnedPixelSize = config.binnedPixelSize;
     const ctx = canvas.getContext('2d');
 
-    // Prepare data for the chart with three datasets
+    // Prepare data for the chart with two datasets
     const chartData = {
         labels: Array.from({ length: config.experimentalValues.length }, (_, i) => i),
         datasets: [
             createDataset('Experimental', config.experimentalValues, 'yExperimental', COLORS.experimental),
-            createDataset('Fitted', config.simulatedValues, 'ySimulated', COLORS.simulated),
-            createDataset('Quality', config.qualityValues, 'yQuality', COLORS.quality)
+            createDataset('Fitted', config.simulatedValues, 'ySimulated', COLORS.simulated)
         ]
     };
+
+    if (config.qualityValues?.length) {
+        chartData.datasets.push({
+            ...createDataset('Quality', config.qualityValues, 'yQuality', COLORS.quality),
+            spanGaps: false,
+            tension: 0
+        });
+    }
 
     // Create the chart with specific options for CTF visualization
     chart = new Chart(ctx, {
@@ -111,8 +118,8 @@ export function setupChart(canvas, config) {
                     type: 'linear',
                     display: false,
                     position: 'right',
-                    min: 0,
-                    max: 1                          // Quality values range from 0-1
+                    min: -1,
+                    max: 1
                 }
             },
             plugins: {
@@ -183,6 +190,11 @@ export function handleTooltip(context) {
     // Update tooltip title with resolution value
     tooltipEl.querySelector('.tooltip-title').textContent = `${angstromValue.toFixed(1)} Å`;
 
+    // Clear the quality row on every hover so a gap cannot show a previous bin's value.
+    const qualityRow = tooltipEl.querySelector('.quality-row');
+    qualityRow.hidden = true;
+    tooltipEl.querySelector('.quality-value').textContent = '';
+
     // Update values for each data series
     tooltip.dataPoints.forEach(point => {
         const dataset = point.dataset;
@@ -195,7 +207,10 @@ export function handleTooltip(context) {
                 tooltipEl.querySelector('.fitted-value').textContent = point.formattedValue;
                 break;
             case 'Quality':
-                tooltipEl.querySelector('.quality-value').textContent = point.formattedValue;
+                if (Number.isFinite(point.raw)) {
+                    qualityRow.hidden = false;
+                    tooltipEl.querySelector('.quality-value').textContent = point.formattedValue;
+                }
                 break;
         }
     });

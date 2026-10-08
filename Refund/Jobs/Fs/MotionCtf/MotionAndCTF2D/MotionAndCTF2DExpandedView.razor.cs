@@ -26,6 +26,7 @@ public partial class MotionAndCTF2DExpandedView : IAsyncDisposable
     
     private List<ScatterPoint> _pointsDefocus = new();
     private List<ScatterPoint> _pointsCtfRes = new();
+    private List<ScatterPoint> _pointsCtfThickness = new();
     private List<ScatterPoint> _pointsMotion = new();
 
     private string _movieFilePath => _selectedName != null 
@@ -105,6 +106,7 @@ public partial class MotionAndCTF2DExpandedView : IAsyncDisposable
             var pointsDefocus = new List<ScatterPoint>(_pointsDefocus.Capacity);
             var pointsCtfRes = new List<ScatterPoint>(_pointsCtfRes.Capacity);
             var pointsMotion = new List<ScatterPoint>(_pointsMotion.Capacity);
+            var pointsCtfThickness = new List<ScatterPoint>(_pointsCtfThickness.Capacity);
             
             for (var i = 0; i < _processedItems.Count; i++)
             {
@@ -129,6 +131,18 @@ public partial class MotionAndCTF2DExpandedView : IAsyncDisposable
                     Metadata = _processedItems[i]
                 });
                 
+                var item = _processedItems[i];
+                var movie = new Warp.Movie(_job.FrameSeriesXmlFile(item.Path));
+                item.CtfSpecimenThicknessAngstrom = movie.CTFSpecimenThicknessAngstrom > 0
+                    ? (double)movie.CTFSpecimenThicknessAngstrom : null;
+                if (item.CtfSpecimenThicknessAngstrom.HasValue)
+                    pointsCtfThickness.Add(new ScatterPoint
+                    {
+                        Value = item.CtfSpecimenThicknessAngstrom,
+                        Color = Color.YellowGreen,
+                        Metadata = item
+                    });
+
                 pointsMotion.Add(new ScatterPoint
                 {
                     Value = _processedItems[i].Motion,
@@ -140,6 +154,7 @@ public partial class MotionAndCTF2DExpandedView : IAsyncDisposable
             _allThumbnails = thumbnails;
             _pointsDefocus = pointsDefocus;
             _pointsCtfRes = pointsCtfRes;
+            _pointsCtfThickness = pointsCtfThickness;
             _pointsMotion = pointsMotion;
         }
         catch { }

@@ -78,6 +78,7 @@ public partial class CtfExpandedView : IAsyncDisposable
     
     private List<ScatterPoint> _pointsTsCtfRes = [];
     private List<ScatterPoint> _pointsTsCtfInclination = [];
+    private List<ScatterPoint> _pointsTsCtfThickness = [];
     
     private string[] _tiltStackPaths = Array.Empty<string>();
 
@@ -188,6 +189,7 @@ public partial class CtfExpandedView : IAsyncDisposable
                 var pointsAstigmatism = new List<ScatterPoint>();
                 var pointsCtfRes = new List<ScatterPoint>();
                 var pointsCtfInclination = new List<ScatterPoint>();
+                var pointsCtfThickness = new List<ScatterPoint>();
 
                 for (var i = 0; i < _processedTsItems.Count; i++)
                 {
@@ -270,6 +272,17 @@ public partial class CtfExpandedView : IAsyncDisposable
                         Metadata = item
                     });
                     
+                    var tiltSeries = new TiltSeries(Path.Combine(_job.DirectoryPath, item.Path));
+                    item.CtfSpecimenThicknessAngstrom = tiltSeries.CTFSpecimenThicknessAngstrom > 0
+                        ? (double)tiltSeries.CTFSpecimenThicknessAngstrom : null;
+                    if (item.CtfSpecimenThicknessAngstrom.HasValue)
+                        pointsCtfThickness.Add(new ScatterPoint
+                        {
+                            Value = item.CtfSpecimenThicknessAngstrom,
+                            Color = Color.YellowGreen,
+                            Metadata = item
+                        });
+
                     pointsCtfInclination.Add(new ScatterPoint
                     {
                         Value = item.CtfInclination,
@@ -291,6 +304,7 @@ public partial class CtfExpandedView : IAsyncDisposable
                 _pointsTsMaxPhase = pointsMaxPhase;
                 _pointsTsCtfRes = pointsCtfRes;
                 _pointsTsCtfInclination = pointsCtfInclination;
+                _pointsTsCtfThickness = pointsCtfThickness;
 
                 _pointsTsCollectionTilt = [pointsMinTilt, pointsMaxTilt];
                 _pointsTsCollectionDefocus = [pointsMinDefocus, pointsMeanDefocus, pointsMaxDefocus];

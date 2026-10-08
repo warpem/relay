@@ -19,6 +19,11 @@
                 <span>CTF fit resolution: @(miniTs.CtfResolution.Value.ToString("F1")) Å</span>
             }
             
+            @if (miniTs.CtfSpecimenThicknessAngstrom.HasValue)
+            {
+                <span>Estimated thickness: @(miniTs.CtfSpecimenThicknessAngstrom.Value.ToString("F0")) Å</span>
+            }
+
             @if (miniTs.TiltMoviePaths != null)
             {
                 <span>@(miniTs.TiltMoviePaths.Length.ToString()) tilts</span>

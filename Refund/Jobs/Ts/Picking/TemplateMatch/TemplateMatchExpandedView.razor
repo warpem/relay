@@ -35,7 +35,7 @@ else if (_allTomogramThumbnails != null && _allTomogramThumbnails.Any())
                     <FluentTab Id="@OverviewTabId" Label="Overview" Style="padding-top: 1rem;">
                         <div style="display: grid; grid-template-columns: repeat(2, minmax(350px, 1fr)); gap: 2rem; width: 100%;">
                             <div style="display: flex; flex-direction: column; align-items: center; gap: 1rem;">
-                                <h6>Correlation score</h6>
+                                <h6>Detection score</h6>
                                 <Histogram BinSizes="@_histogramBinsScore"
                                            MinRange="@_scoreRange.Min"
                                            MaxRange="@_scoreRange.Max"

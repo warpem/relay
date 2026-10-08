@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.Text.Json;
+using Warp;
 using Refund.DataModel;
 using Refund.JobExecution;
 using Refund.JobResources;
@@ -9,6 +11,26 @@ namespace Refund.Tests.Jobs;
 public class TiltSeriesCtfTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "relay-ts-ctf-" + Guid.NewGuid().ToString("N"));
+
+    [Theory]
+    [InlineData("1234.5", 1234.5)]
+    [InlineData(null, 0)]
+    public void WarpMetadata_ProvidesThicknessInAngstrom(string? thickness, double expected)
+    {
+        Directory.CreateDirectory(_root);
+        string attribute = thickness == null ? "" : $"CTFSpecimenThicknessAngstrom=\"{thickness}\"";
+        File.WriteAllText(Path.Combine(_root, "TS_01.xml"),
+            $"<TiltSeries {attribute}><Angles>-30\n30</Angles></TiltSeries>");
+
+        var originalCulture = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("de-DE");
+            var series = new TiltSeries(Path.Combine(_root, "TS_01.tomostar"));
+            Assert.Equal((decimal)expected, series.CTFSpecimenThicknessAngstrom);
+        }
+        finally { CultureInfo.CurrentCulture = originalCulture; }
+    }
 
     private RenderingJob CreateJob()
     {

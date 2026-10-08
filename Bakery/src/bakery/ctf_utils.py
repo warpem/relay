@@ -49,6 +49,9 @@ class CTFFitInfo(BaseModel):
     )
 
     power_spectrum_1d: np.ndarray
+    frequencies_1d: np.ndarray
+    quality_curve: np.ndarray | None = None
+    specimen_thickness_angstrom: float | None = None
     simulated_ctf_1d: np.ndarray
     experimental_scale: np.ndarray
     minimum_fitting_frequency: float  # fftfreq
@@ -57,8 +60,16 @@ class CTFFitInfo(BaseModel):
 
     @classmethod
     def from_warp_xml_root(cls, root: ElementTree):
-        power_spectrum_1d = cls.get_warp_ps1d(root)
-        experimental_scale = cls.get_warp_ps1d_scale(root, n_elements=len(power_spectrum_1d))
+        spectrum = np.asarray([[float(v) for v in pair.split('|')] for pair in root.find("PS1D").text.split(';')])
+        frequencies_1d, power_spectrum_1d = spectrum[:, 0], spectrum[:, 1]
+        experimental_scale = cls.get_warp_ps1d_scale(root, frequencies=frequencies_1d)
+        quality_node = root.find("CTFQuality")
+        quality_curve = None
+        if quality_node is not None and quality_node.text:
+            quality_curve = np.asarray([[float(v) for v in pair.split('|')] for pair in quality_node.text.split(';')])
+            quality_curve[~np.isfinite(quality_curve[:, 1]), 1] = np.nan
+        thickness = float(root.get("CTFSpecimenThicknessAngstrom", "0"))
+        specimen_thickness_angstrom = thickness if np.isfinite(thickness) and thickness > 0 else None
         ctf_parameters = CTFParameters.from_warp_xml_root(root)
         simulated_ctf_1d = get_ctf_1d(
             num_elements=len(power_spectrum_1d),
@@ -72,6 +83,9 @@ class CTFFitInfo(BaseModel):
         )
         instance = cls(
             power_spectrum_1d=power_spectrum_1d,
+            frequencies_1d=frequencies_1d,
+            quality_curve=quality_curve,
+            specimen_thickness_angstrom=specimen_thickness_angstrom,
             simulated_ctf_1d=simulated_ctf_1d,
             experimental_scale=experimental_scale,
             minimum_fitting_frequency=minimum_fitting_frequency,
@@ -92,7 +106,7 @@ class CTFFitInfo(BaseModel):
         return np.asarray([float(v.split('|')[1]) for v in values])
 
     @classmethod
-    def get_warp_ps1d_scale(cls, root: ElementTree, n_elements: int) -> np.ndarray:
+    def get_warp_ps1d_scale(cls, root: ElementTree, frequencies: np.ndarray) -> np.ndarray:
         values = root.find("SimulatedScale").text.split(';')
 
         # x is fraction of nyquist, y values are fit to RAPS at CTF zero crossings
@@ -101,7 +115,7 @@ class CTFFitInfo(BaseModel):
 
         # let's get interpolated y values across whole spectrum
         scale_interpolator = CubicSpline(x=x, y=y, extrapolate=True)
-        experimental_scale = scale_interpolator(np.linspace(0, 0.5, num=n_elements))
+        experimental_scale = scale_interpolator(frequencies)
         return experimental_scale
 
 
@@ -274,36 +288,39 @@ def draw_ctf_fit_quality_panel(
     item_xml_file: Path
 ):
     info = CTFFitInfo.from_warp_xml(item_xml_file)
-    quality = estimate_ctf_fit_quality(
-        ctf_parameters=info.ctf_parameters,
-        experimental_power_spectrum_1d=info.power_spectrum_1d,
-        experimental_power_spectrum_scale_1d=info.experimental_scale,
-        minimum_fitting_frequency=info.minimum_fitting_frequency
-    )
     linewidth = 0.4
 
-    # plot simulated CTF and experimental curve
-    ctf_1d = np.abs(info.simulated_ctf_1d) * info.experimental_scale
-    ax.plot(ctf_1d, color='#FF1493', linewidth=linewidth)
-    ax.plot(info.power_spectrum_1d, color='#00BFFF', linewidth=linewidth)
+    # Warp's saved spectrum is in power units. Its slab/background corrections are
+    # already included in the diagnostic spectrum and envelope.
+    ctf_1d = info.simulated_ctf_1d ** 2 * info.experimental_scale
+    ax.plot(info.frequencies_1d, ctf_1d, color='#FF1493', linewidth=linewidth)
+    ax.plot(info.frequencies_1d, info.power_spectrum_1d, color='#00BFFF', linewidth=linewidth)
 
-    # plot quality metric on a new y-axis, sharing x-axis
+    # Use the saved fit diagnostic, preserving negative correlations and unsupported bins.
     ax2 = ax.twinx()
-    ax2.plot(quality, color='#69696969', linewidth=linewidth)
+    if info.quality_curve is not None:
+        ax2.plot(info.quality_curve[:, 0], info.quality_curve[:, 1], color='#69696969', linewidth=linewidth)
     ax2.axis('off')
 
-    # set y-axis max to max experimental scale found in fitting range
-    fit_idx_min = int(info.minimum_fitting_frequency / 0.5 * (len(ctf_1d) - 1))
-    fit_idx_max = int(info.maximum_fitting_frequency / 0.5 * (len(ctf_1d) - 1))
-    scale_in_fitting_range = info.experimental_scale[fit_idx_min:fit_idx_max]
-    scale_min, scale_max = np.min(scale_in_fitting_range), np.max(scale_in_fitting_range)
-    scale_range = scale_max - scale_min
-    ax.set_ylim(bottom=0 - 0.05 * scale_range, top=scale_max + 0.05 * scale_range)
+    in_fit = ((info.frequencies_1d >= info.minimum_fitting_frequency) &
+              (info.frequencies_1d <= info.maximum_fitting_frequency))
+    fit_values = np.concatenate([info.power_spectrum_1d[in_fit], ctf_1d[in_fit]])
+    fit_values = fit_values[np.isfinite(fit_values)]
+    if fit_values.size:
+        low, high = np.min(fit_values), np.max(fit_values)
+        padding = max(float(high - low) * 0.05, 1e-6)
+        ax.set_ylim(low - padding, high + padding)
 
-    # add box showing frequency range used for fit
-    box = Rectangle(xy=(fit_idx_min, -1.25), width=fit_idx_max - fit_idx_min, height=2.5, facecolor='#69696935')
+    box = Rectangle(xy=(info.minimum_fitting_frequency, -1.05),
+                    width=info.maximum_fitting_frequency - info.minimum_fitting_frequency,
+                    height=2.1, facecolor='#69696935')
     ax2.add_patch(box)
-    ax2.set_ylim(bottom=0, top=1.05)
+    ax2.set_ylim(bottom=-1.05, top=1.05)
+
+    if info.specimen_thickness_angstrom is not None:
+        ax2.text(0.03, 0.97, f'Est. thickness: {info.specimen_thickness_angstrom:.0f} Å',
+                 transform=ax2.transAxes, ha='left', va='top', fontsize=4,
+                 bbox=dict(facecolor='white', edgecolor='none', alpha=0.8, pad=1))
 
     # remove spines
     ax.spines["top"].set_visible(False)

@@ -34,9 +34,15 @@ def card_inputs(tmp_path):
 
 
 @pytest.mark.parametrize('with_motion', [False, True])
-def test_card_renders_with_and_without_motion(card_inputs, tmp_path, with_motion):
+@pytest.mark.parametrize('with_diagnostics', [False, True])
+def test_card_renders_with_and_without_motion(card_inputs, tmp_path, with_motion, with_diagnostics):
     image_file, xml_file = card_inputs
     output_file = tmp_path / 'card.png'
+    if with_diagnostics:
+        tree = ET.parse(xml_file)
+        tree.getroot().set('CTFSpecimenThicknessAngstrom', '1234.25')
+        ET.SubElement(tree.getroot(), 'CTFQuality').text = '0|NaN;0.1|-0.4;0.2|0.85'
+        tree.write(xml_file)
     args = ['motion-and-ctf-job-card',
             '--motion-corrected-image-file', str(image_file),
             '--frame-series-xml-file', str(xml_file),
@@ -57,7 +63,14 @@ def test_card_renders_with_and_without_motion(card_inputs, tmp_path, with_motion
         assert not image_ax.axison
         assert len(image_ax.lines) == (9 if with_motion else 0)
         assert len(ctf_ax.lines) == 2
-        assert len(quality_ax.lines) == 1
+        assert len(quality_ax.lines) == (1 if with_diagnostics else 0)
+        assert quality_ax.get_ylim()[0] < 0
+        if with_diagnostics:
+            np.testing.assert_allclose(quality_ax.lines[0].get_xdata(), [0, 0.1, 0.2])
+            np.testing.assert_allclose(quality_ax.lines[0].get_ydata(), [np.nan, -0.4, 0.85])
+            assert quality_ax.texts[0].get_text() == 'Est. thickness: 1234 Å'
+        else:
+            assert len(quality_ax.texts) == 0
     finally:
         plt.close('all')
 

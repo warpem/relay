@@ -43,7 +43,7 @@ public class MotionAndCTF2D : WarpJobGpu, IClusterJob
     /// <summary>
     /// A brief description of the job's purpose.
     /// </summary>
-    public override string TypeDescription => "Motion correction and CTF estimation on 2D images";
+    public override string TypeDescription => "Motion correction, CTF estimation, and sample thickness estimation on 2D images";
 
     /// <summary>
     /// Specifies that this job runs on GPU resources for faster processing.
