@@ -143,7 +143,8 @@ public sealed record WorkerGroupRequest(
 public sealed record WorkerLaunchSnapshot(
     Guid OperationId,
     WorkerPhase Phase,
-    BackendReceipt Receipt);
+    BackendReceipt Receipt,
+    DateTimeOffset? RetryAfter = null);
 
 public sealed record WorkerGroupSnapshot(
     int QueueId,
@@ -244,13 +245,15 @@ public sealed class WorkerLaunchState
         OperationId = snapshot.OperationId;
         Phase = snapshot.Phase;
         Receipt = snapshot.Receipt;
+        RetryAfter = snapshot.RetryAfter;
     }
 
     public Guid OperationId { get; }
     public WorkerPhase Phase { get; internal set; }
     public BackendReceipt Receipt { get; internal set; }
+    public DateTimeOffset? RetryAfter { get; internal set; }
 
-    internal WorkerLaunchSnapshot CreateSnapshot() => new(OperationId, Phase, Receipt);
+    internal WorkerLaunchSnapshot CreateSnapshot() => new(OperationId, Phase, Receipt, RetryAfter);
 }
 
 public sealed class ExecutionAttempt

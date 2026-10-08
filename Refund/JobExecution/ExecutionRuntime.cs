@@ -715,6 +715,8 @@ public sealed class ExecutionRuntime : IAsyncDisposable
         }
         catch (Exception exception)
         {
+            _logger.Warning(exception, "Worker submission failed for attempt {AttemptId}; the pool may retry",
+                effect.AttemptId);
             await ApplyResultAsync(
                 () => _coordinator.WorkerStartFailed(
                     effect.AttemptId, effect.OperationId, exception.Message),

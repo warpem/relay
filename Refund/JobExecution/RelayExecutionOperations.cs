@@ -178,6 +178,10 @@ public sealed class RelayExecutionOperations : IExecutionOperations
         {
             receipt = await queue.SubmitScript(WorkerScriptPath(job));
         }
+        catch (ClusterCommandNotStartedException)
+        {
+            throw;
+        }
         catch (Exception exception)
         {
             throw new IndeterminateBackendStartException(
@@ -348,6 +352,10 @@ public sealed class RelayExecutionOperations : IExecutionOperations
         {
             receipt = await queue.SubmitScript(
                 SubmissionScriptPath(job), output => rawOutput = output);
+        }
+        catch (ClusterCommandNotStartedException)
+        {
+            throw;
         }
         catch (Exception exception)
         {

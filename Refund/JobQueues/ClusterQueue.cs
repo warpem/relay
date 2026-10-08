@@ -455,7 +455,7 @@ public sealed class ClusterQueue : JobQueue
             Id,
             _ => new SemaphoreSlim(Math.Max(1, Environment.ProcessorCount)));
         if (!await commandGate.WaitAsync(TimeSpan.FromSeconds(30)))
-            throw new TimeoutException("Timed out waiting to run a cluster command.");
+            throw new ClusterCommandNotStartedException("Timed out waiting to run a cluster command; nothing was submitted.");
 
         try
         {
@@ -505,7 +505,14 @@ public sealed class ClusterQueue : JobQueue
                      .ToArray())
             process.StartInfo.Environment.Remove(key);
 
-        process.Start();
+        try
+        {
+            process.Start();
+        }
+        catch (Exception exception)
+        {
+            throw new ClusterCommandNotStartedException("Could not start the cluster command; nothing was submitted.", exception);
+        }
         var outputTask = process.StandardOutput.ReadToEndAsync();
         var errorTask = process.StandardError.ReadToEndAsync();
 

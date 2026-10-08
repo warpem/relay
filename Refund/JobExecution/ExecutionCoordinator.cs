@@ -7,6 +7,7 @@ namespace Refund.JobExecution;
 /// </summary>
 public sealed class ExecutionCoordinator
 {
+    internal static readonly TimeSpan UnconfirmedWorkerRetryDelay = TimeSpan.FromMinutes(2);
     // Recognize warnings persisted by versions that treated worker uncertainty as parent failure.
     private const string LegacyUntraceableWorkerDetail =
         "A worker submission has an unknown outcome and no scheduler receipt; " +
@@ -516,6 +517,7 @@ public sealed class ExecutionCoordinator
         worker.Phase = attempt.Phase == ExecutionPhase.Finalizing
             ? WorkerPhase.Ended
             : WorkerPhase.Indeterminate;
+        worker.RetryAfter = Now() + UnconfirmedWorkerRetryDelay;
     }
 
     public void ObserveWorkers(
@@ -700,6 +702,16 @@ public sealed class ExecutionCoordinator
         if (workerGroup == null || !workerGroup.Prepared || attempt.Phase != ExecutionPhase.Running)
             return;
 
+        // Unknown submissions must not permanently occupy pool capacity. Retire the
+        // attempt after a grace period and use a new operation ID for its replacement.
+        // A lost receipt can mean an extra worker exists; the submission cap still applies.
+        foreach (var worker in workerGroup.Workers.Where(worker => worker.Phase == WorkerPhase.Indeterminate))
+        {
+            worker.RetryAfter ??= Now() + UnconfirmedWorkerRetryDelay;
+            if (Now() >= worker.RetryAfter.Value)
+                worker.Phase = WorkerPhase.Ended;
+        }
+
         int excess = workerGroup.AliveCount - workerGroup.DesiredCount;
         if (excess > 0)
         {
@@ -738,14 +750,17 @@ public sealed class ExecutionCoordinator
         }
     }
 
-    private static void RecoverReceiptlessWorkers(ExecutionAttempt attempt)
+    private void RecoverReceiptlessWorkers(ExecutionAttempt attempt)
     {
         if (attempt.WorkerGroup == null)
             return;
 
         foreach (var worker in attempt.WorkerGroup.Workers.Where(worker =>
-                     worker.Receipt == null && worker.Phase is WorkerPhase.Starting or WorkerPhase.Cancelling))
+                     worker.Receipt == null && worker.Phase is WorkerPhase.Starting or WorkerPhase.Cancelling or WorkerPhase.Indeterminate))
+        {
             worker.Phase = WorkerPhase.Indeterminate;
+            worker.RetryAfter ??= Now() + UnconfirmedWorkerRetryDelay;
+        }
 
         if (attempt.HealthDetail == LegacyUntraceableWorkerDetail)
             MarkObservationHealthy(attempt);
