@@ -101,8 +101,8 @@ class Histogram {
         
         // Update configuration
         this.binSizes = config.binSizes || [];
-        this.logarithmicY = config.logarithmicY || false;
-        this.minBinWidth = config.minBinWidth || 0;
+        this.logarithmicY = config.logarithmicY ?? true;
+        this.minBinWidth = config.minBinWidth ?? 2;
         this.secondaryBinSizes = config.secondaryBinSizes || [];
         this.minRange = config.minRange;
         this.maxRange = config.maxRange;

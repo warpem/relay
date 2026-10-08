@@ -26,13 +26,13 @@ public partial class Histogram : IAsyncDisposable
     /// <summary>
     /// Whether to scale bin heights by log(1 + count), keeping empty bins at zero.
     /// </summary>
-    [Parameter] public bool LogarithmicY { get; set; } = false;
+    [Parameter] public bool LogarithmicY { get; set; } = true;
 
     /// <summary>
     /// Minimum rendered bin width in CSS pixels; adjacent bins are summed to meet it.
     /// Zero preserves the original bins.
     /// </summary>
-    [Parameter] public double MinBinWidth { get; set; } = 0;
+    [Parameter] public double MinBinWidth { get; set; } = 2;
 
     /// <summary>
     /// The color for the secondary histogram bars.
