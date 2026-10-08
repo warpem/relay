@@ -23,16 +23,15 @@
 .port-tooltip {
     position: absolute;
     left: 18px;
-    top: -2px;
-    height: 16px;
+    top: 50%;
+    transform: translateY(-50%);
     line-height: 16px;
     font-size: 9pt;
     border-radius: 4px;
     background-color: var(--neutral-fill-layer-rest);
     text-wrap: nowrap;
     z-index: 99;
-    padding-left: 2px;
-    padding-right: 2px;
+    padding: 0 2px 2px;
 }
 
 .port-item-count {
