@@ -38,6 +38,10 @@ public partial class Thumbnail : ComponentBase, IDisposable
     [Parameter]
     public EventCallback<ThumbnailData> CheckChanged { get; set; }
 
+    private string DisplayName => string.IsNullOrWhiteSpace(Data.DisplayName)
+        ? Path.GetFileName(Data.ImagePath)
+        : Data.DisplayName;
+
     public bool IsLoaded { get; set; } = false;
     public string ImageDataUrl { get; set; }
     public bool HasAnimation => Data?.AnimationPaths != null && Data.AnimationPaths.Length > 0;

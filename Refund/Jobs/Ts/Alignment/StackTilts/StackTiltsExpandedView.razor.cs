@@ -186,6 +186,7 @@ public partial class StackTiltsExpandedView : IAsyncDisposable
                 {
                     Index = i,
                     ImagePath = _micrographs.ToThumbnailPath(item.TiltMoviePaths[item.TiltMoviePaths.Length / 2]),
+                    DisplayName = Warp.Tools.Helper.PathToName(item.Path),
                     AnimationPaths = animationIndices.Select(j => _micrographs.ToThumbnailPath(item.TiltMoviePaths[j])).ToArray(),
                     Status = ProcessingStatus.Processed
                 });

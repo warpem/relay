@@ -167,6 +167,7 @@ public partial class ImportDataSetTsExpandedView : IAsyncDisposable
                 {
                     Index = i,
                     ImagePath = _micrographs.ToThumbnailPath(item.TiltMoviePaths[item.TiltMoviePaths.Length / 2]),
+                    DisplayName = Warp.Tools.Helper.PathToName(item.Path),
                     AnimationPaths = animationIndices.Select(j => _micrographs.ToThumbnailPath(item.TiltMoviePaths[j])).ToArray(),
                     Status = ProcessingStatus.Processed,
                     Check = !_job.DeselectedTiltSeries.Contains(Warp.Tools.Helper.PathToName(item.Path))

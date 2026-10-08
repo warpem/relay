@@ -204,6 +204,7 @@ public partial class CtfExpandedView : IAsyncDisposable
                     {
                         Index = i,
                         ImagePath = _micrographs?.ToThumbnailPath(item.TiltMoviePaths[item.TiltMoviePaths.Length / 2]) ?? "",
+                        DisplayName = Warp.Tools.Helper.PathToName(item.Path),
                         AnimationPaths = _micrographs != null ? 
                             animationIndices.Select(j => _micrographs.ToThumbnailPath(item.TiltMoviePaths[j])).ToArray() : 
                             Array.Empty<string>(),

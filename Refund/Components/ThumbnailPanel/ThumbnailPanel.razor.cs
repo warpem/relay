@@ -768,6 +768,12 @@ public class ThumbnailData
     /// recover a selection after the parent rebuilds its list.
     /// </summary>
     public string ImagePath { get; set; }
+
+    /// <summary>
+    /// Optional name of the represented item, independent of the preview image filename.
+    /// Tilt-series previews use an individual movie image but should identify the series.
+    /// </summary>
+    public string DisplayName { get; set; }
     
     /// <summary>
     /// The file system paths to the optional animation images for the thumbnail.
