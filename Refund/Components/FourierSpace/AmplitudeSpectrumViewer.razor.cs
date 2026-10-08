@@ -214,8 +214,13 @@ public partial class AmplitudeSpectrumViewer : IAsyncDisposable
         var tiltSeries = new TiltSeries(tiltSeriesPath);
         _tiltCount = tiltSeries.NTilts;
         _tiltAngles = tiltSeries.Angles;
-        _zeroTiltIndex = tiltSeries.IndicesSortedDose.First();
-        _currentTiltIndex = 0;
+        _zeroTiltIndex = 0;
+        for (int tiltIndex = 1; tiltIndex < _tiltAngles.Length; tiltIndex++)
+        {
+            if (Math.Abs(_tiltAngles[tiltIndex]) < Math.Abs(_tiltAngles[_zeroTiltIndex]))
+                _zeroTiltIndex = tiltIndex;
+        }
+        _currentTiltIndex = _zeroTiltIndex;
         
         // Preload all tilt power spectrum images
         for (int tiltIndex = 0; tiltIndex < _tiltCount; tiltIndex++)

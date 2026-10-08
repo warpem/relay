@@ -11,9 +11,10 @@
     }
     else
     {
-        @if (IsTiltSeriesMode)
+        @if (IsTiltSeriesMode && _tiltAngles.Length > 0)
         {
             <div class="tilt-slider-container">
+                <div>Current tilt: @_tiltAngles[_currentTiltIndex].ToString("F1") °</div>
                 <FluentSlider TValue="int"
                               Embedded="true"
                               Min="0"
