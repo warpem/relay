@@ -102,6 +102,7 @@ class Histogram {
         // Update configuration
         this.binSizes = config.binSizes || [];
         this.logarithmicY = config.logarithmicY || false;
+        this.minBinWidth = config.minBinWidth || 0;
         this.secondaryBinSizes = config.secondaryBinSizes || [];
         this.minRange = config.minRange;
         this.maxRange = config.maxRange;
@@ -136,11 +137,24 @@ class Histogram {
         // Calculate bar width (no gaps)
         this.barWidth = width / this.binSizes.length;
         
-        // Find the maximum bin size across both datasets for scaling
-        const maxBinSize = Math.max(
-            ...this.binSizes,
-            ...(this.secondaryBinSizes.length > 0 ? this.secondaryBinSizes : [0])
-        );
+        // Aggregate original bins on every render so resizing preserves all counts.
+        const groupSize = Math.max(1, Math.ceil(this.minBinWidth / this.barWidth));
+        const groupCount = Math.max(1, Math.floor(this.binSizes.length / groupSize));
+        const bins = [];
+        let maxBinSize = 0;
+        for (let i = 0; i < groupCount; i++) {
+            const start = i * groupSize;
+            // Include the remainder in the last group, avoiding a narrow final bar.
+            const end = i === groupCount - 1 ? this.binSizes.length : start + groupSize;
+            let primary = 0;
+            let secondary = 0;
+            for (let j = start; j < end; j++) {
+                primary += this.binSizes[j];
+                secondary += this.secondaryBinSizes[j] || 0;
+            }
+            bins.push({ start, end, primary, secondary });
+            maxBinSize = Math.max(maxBinSize, primary, secondary);
+        }
         
         // log1p keeps empty bins at zero and single-count bins visible.
         const scale = this.logarithmicY ? Math.log1p : value => value;
@@ -153,24 +167,25 @@ class Histogram {
         this.svg.appendChild(primaryGroup);
         
         // Create primary bars
-        for (let i = 0; i < this.binSizes.length; i++) {
-            const barHeight = scale(this.binSizes[i]) / normFactor * height;
-            const x = i * this.barWidth;
+        for (let i = 0; i < bins.length; i++) {
+            const bin = bins[i];
+            const barHeight = scale(bin.primary) / normFactor * height;
+            const x = bin.start * this.barWidth;
             const y = height - barHeight;
             
             const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
             rect.setAttribute('class', 'histogram-bar primary');
             rect.setAttribute('x', x);
             rect.setAttribute('y', y);
-            rect.setAttribute('width', this.barWidth);
+            rect.setAttribute('width', (bin.end - bin.start) * this.barWidth);
             rect.setAttribute('height', barHeight);
             rect.setAttribute('fill', this.color);
             rect.setAttribute('fill-opacity', '0.5'); // Make semi-transparent for overlapping
             rect.setAttribute('data-index', i);
             
             // Add tooltip for bar value range
-            const binStart = this.getBinValue(i);
-            const binEnd = this.getBinValue(i + 1);
+            const binStart = this.getBinValue(bin.start);
+            const binEnd = this.getBinValue(bin.end);
             rect.setAttribute('title', `Primary: ${binStart} - ${binEnd}`);
             
             primaryGroup.appendChild(rect);
@@ -184,24 +199,25 @@ class Histogram {
             this.svg.appendChild(secondaryGroup);
             
             // Create secondary bars
-            for (let i = 0; i < this.secondaryBinSizes.length && i < this.binSizes.length; i++) {
-                const barHeight = scale(this.secondaryBinSizes[i]) / normFactor * height;
-                const x = i * this.barWidth;
+            for (let i = 0; i < bins.length; i++) {
+                const bin = bins[i];
+                const barHeight = scale(bin.secondary) / normFactor * height;
+                const x = bin.start * this.barWidth;
                 const y = height - barHeight;
                 
                 const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
                 rect.setAttribute('class', 'histogram-bar secondary');
                 rect.setAttribute('x', x);
                 rect.setAttribute('y', y);
-                rect.setAttribute('width', this.barWidth);
+                rect.setAttribute('width', (bin.end - bin.start) * this.barWidth);
                 rect.setAttribute('height', barHeight);
                 rect.setAttribute('fill', this.secondaryColor);
                 rect.setAttribute('fill-opacity', '0.5'); // Make semi-transparent for overlapping
                 rect.setAttribute('data-index', i);
                 
                 // Add tooltip for bar value range
-                const binStart = this.getBinValue(i);
-                const binEnd = this.getBinValue(i + 1);
+                const binStart = this.getBinValue(bin.start);
+                const binEnd = this.getBinValue(bin.end);
                 rect.setAttribute('title', `Secondary: ${binStart} - ${binEnd}`);
                 
                 secondaryGroup.appendChild(rect);

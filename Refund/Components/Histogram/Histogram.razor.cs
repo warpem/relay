@@ -29,6 +29,12 @@ public partial class Histogram : IAsyncDisposable
     [Parameter] public bool LogarithmicY { get; set; } = false;
 
     /// <summary>
+    /// Minimum rendered bin width in CSS pixels; adjacent bins are summed to meet it.
+    /// Zero preserves the original bins.
+    /// </summary>
+    [Parameter] public double MinBinWidth { get; set; } = 0;
+
+    /// <summary>
     /// The color for the secondary histogram bars.
     /// </summary>
     [Parameter] public string SecondaryColor { get; set; } = "#8A2BE2"; // Default to BlueViolet
@@ -194,7 +200,7 @@ public partial class Histogram : IAsyncDisposable
         // Update JS if needed
         if (binsChanged || secondaryBinsChanged || MinRange != _previousMinRange || MaxRange != _previousMaxRange || 
             Color != _previousColor || SecondaryColor != _previousSecondaryColor || SelectedRangeStart != _previousRangeStart || 
-            SelectedRangeEnd != _previousRangeEnd || LogarithmicY != _previousLogarithmicY)
+            SelectedRangeEnd != _previousRangeEnd || LogarithmicY != _previousLogarithmicY || MinBinWidth != _previousMinBinWidth)
         {
             await UpdateHistogramAsync();
             
@@ -205,6 +211,7 @@ public partial class Histogram : IAsyncDisposable
             _previousRangeStart = SelectedRangeStart;
             _previousRangeEnd = SelectedRangeEnd;
             _previousLogarithmicY = LogarithmicY;
+            _previousMinBinWidth = MinBinWidth;
         }
 
         await base.OnParametersSetAsync();
@@ -274,6 +281,7 @@ public partial class Histogram : IAsyncDisposable
         {
             binSizes = BinSizes,
             logarithmicY = LogarithmicY,
+            minBinWidth = MinBinWidth,
             secondaryBinSizes = SecondaryBinSizes,
             minRange = MinRange,
             maxRange = MaxRange,
@@ -405,6 +413,7 @@ public partial class Histogram : IAsyncDisposable
     }
 
     // Field tracking for parameter changes
+    private double _previousMinBinWidth;
     private bool _previousLogarithmicY;
     private decimal _previousMinRange;
     private decimal _previousMaxRange;
