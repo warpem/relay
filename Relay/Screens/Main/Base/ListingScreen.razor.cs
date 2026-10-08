@@ -62,7 +62,7 @@ public partial class ListingScreen<TItem> where TItem : class, IIdentifiable, IA
     /// <summary>
     /// When true, items grid uses wrap-reverse (bottom-to-top).
     /// Default is false: items flow top-to-bottom in the order supplied, so callers
-    /// order them explicitly (listings use <see cref="ListingOrder.NewestFirst{T}"/>).
+    /// order them explicitly. Bottom-to-top listings use <see cref="ListingOrder.OldestFirst{T}"/>.
     /// </summary>
     [Parameter]
     public bool ReverseGrid { get; set; }
@@ -84,6 +84,13 @@ public static class ListingOrder
     /// </summary>
     public static IOrderedEnumerable<T> NewestFirst<T>(this IEnumerable<T> items) where T : IIdentifiable, IAudited
         => items.OrderByDescending(i => GetCreated(i)).ThenByDescending(i => i.Id);
+
+    /// <summary>
+    /// Orders items oldest-to-newest by creation time, breaking ties by ascending ID.
+    /// With bottom-to-top wrapping, items advance left-to-right from the bottom row.
+    /// </summary>
+    public static IOrderedEnumerable<T> OldestFirst<T>(this IEnumerable<T> items) where T : IIdentifiable, IAudited
+        => items.OrderBy(i => GetCreated(i)).ThenBy(i => i.Id);
 }
 
 /// <summary>

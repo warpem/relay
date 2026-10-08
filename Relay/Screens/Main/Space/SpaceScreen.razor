@@ -12,6 +12,7 @@
                            Title="@GetTitle()"
                            CreateButtonText="@GetCreateButtonText()"
                            Items="@GetItems()"
+                           ReverseGrid="true"
                            OnCreateClick="@ShowCreateDialogAsync">
                 <ItemTemplate>
                     <ViewCard @key="context.QualifiedName"

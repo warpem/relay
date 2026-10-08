@@ -17,7 +17,7 @@ public partial class HomeScreen : ListingScreenLogic<ReadOnlyProject>
     protected override string GetCreateButtonText() => "Create new project";
     
     protected override IEnumerable<ReadOnlyProject> GetItems() =>
-        DataManager.GetUserProjects(Session.User).NewestFirst();
+        DataManager.GetUserProjects(Session.User).OldestFirst();
 
     protected override async Task HandleItemClicked(ReadOnlyProject item, MouseEventArgs args)
     {

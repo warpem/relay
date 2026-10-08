@@ -57,7 +57,7 @@ public partial class SpaceScreen : ListingScreenLogic<ReadOnlyView>
     protected override string GetTitle() => "Views";
     protected override string GetCreateButtonText() => "Create new view";
     protected override IEnumerable<ReadOnlyView> GetItems() =>
-        Session.Space?.Views.NewestFirst() ?? Enumerable.Empty<ReadOnlyView>();
+        Session.Space?.Views.OldestFirst() ?? Enumerable.Empty<ReadOnlyView>();
 
     protected override Task ShowCreateDialogAsync()
     {

@@ -48,7 +48,7 @@ public partial class ProjectScreen : ListingScreenLogic<ReadOnlySpace>
     protected override string GetCreateButtonText() => "Create or reconnect space";
 
     protected override IEnumerable<ReadOnlySpace> GetItems() =>
-        Session.Project?.Spaces.NewestFirst() ?? Enumerable.Empty<ReadOnlySpace>();
+        Session.Project?.Spaces.OldestFirst() ?? Enumerable.Empty<ReadOnlySpace>();
 
     protected override Task ShowCreateDialogAsync() => CreateSpaceDialog.Show(DialogService, this, OnCreateDialogClosedAsync);
 
