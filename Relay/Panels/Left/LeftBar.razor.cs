@@ -95,6 +95,9 @@ public partial class LeftBar : ComponentBase, IDisposable
             ProjectId = Session.ProjectId,
             SpaceId = Session.SpaceId,
             ViewId = Session.ViewId,
+            FolderId = Session.FolderId,
+            FactoryDefinitionId = Session.FactoryDefinitionId,
+            FactoryInstanceId = Session.FactoryInstanceId,
             JobId = Session.JobId,
             Overlay = OverlayScreenType.Queues
         });
@@ -111,6 +114,9 @@ public partial class LeftBar : ComponentBase, IDisposable
             ProjectId = Session.ProjectId,
             SpaceId = Session.SpaceId,
             ViewId = Session.ViewId,
+            FolderId = Session.FolderId,
+            FactoryDefinitionId = Session.FactoryDefinitionId,
+            FactoryInstanceId = Session.FactoryInstanceId,
             JobId = Session.JobId,
             Overlay = OverlayScreenType.Settings
         });
@@ -127,6 +133,9 @@ public partial class LeftBar : ComponentBase, IDisposable
             ProjectId = Session.ProjectId,
             SpaceId = Session.SpaceId,
             ViewId = Session.ViewId,
+            FolderId = Session.FolderId,
+            FactoryDefinitionId = Session.FactoryDefinitionId,
+            FactoryInstanceId = Session.FactoryInstanceId,
             JobId = Session.JobId,
             Overlay = OverlayScreenType.Personal
         });
