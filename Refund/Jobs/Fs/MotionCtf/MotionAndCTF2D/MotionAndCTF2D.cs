@@ -138,13 +138,13 @@ public class MotionAndCTF2D : WarpJobGpu, IClusterJob
     public bool CTFMovieSumEnable { get; set; }
 
     /// <summary>
-    /// The resolution of the defocus model grid in X, Y, and temporal dimensions.
+    /// The resolution of the defocus model grid in X and Y.
     /// Higher values allow modeling more complex defocus variations across the image.
     /// </summary>
-    [UiInt3("c_grid", "Grid dimensions",
-            helpText: "Resolution of the defocus model grid in X, Y, and temporal dimensions, separated by 'x': e.g. 5x5x40; empty = auto; Z > 1 is purely experimental")]
+    [UiInt2("c_grid", "Grid dimensions", min: 1,
+            helpText: "Resolution of the defocus model grid in X and Y, separated by 'x': e.g. 5x5")]
     [RelayProperty]
-    public int3 CTFGridDims { get; set; } = new int3(1);
+    public int2 CTFGridDims { get; set; } = new int2(1);
 
     /// <summary>
     /// The minimum resolution (in Angstroms) considered during CTF fitting.
@@ -395,7 +395,7 @@ public class MotionAndCTF2D : WarpJobGpu, IClusterJob
         result["settings"] = Space.GetRelativePath(Path.Combine(Path.GetFullPath(DirectoryPath), "processing.settings"));
 
         result["m_grid"] = $"{MotionGridDims.X}x{MotionGridDims.Y}x{MotionGridDims.Z}";
-        result["c_grid"] = $"{CTFGridDims.X}x{CTFGridDims.Y}x{CTFGridDims.Z}";
+        result["c_grid"] = $"{CTFGridDims.X}x{CTFGridDims.Y}";
 
         result["out_thumbnails"] = "256";
 

@@ -1,10 +1,14 @@
 using System.Reflection;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Refund.Components.SingleAxisScatter;
 using Refund.DataModel;
 using Refund.Jobs.Fs.MotionCtf.MotionAndCTF2D;
+using Refund.Jobs.Fs.MotionCtf.CTF2D;
+using Refund.UIFields;
 using Refund.Utils;
 using Warp;
+using Warp.Tools;
 
 namespace Refund.Tests.Jobs;
 
@@ -12,6 +16,33 @@ namespace Refund.Tests.Jobs;
 public class FrameSeriesCtfTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "relay-fs-thickness-" + Guid.NewGuid().ToString("N"));
+
+    [Theory]
+    [InlineData(false, "grid")]
+    [InlineData(true, "c_grid")]
+    public void CtfGrid_UsesTwoSpatialDimensionsAndLoadsLegacySavedGrids(bool combined, string flag)
+    {
+        JobRegistry.EnsurePopulated();
+        Job job = combined ? new MotionAndCTF2D() : new CTF2D();
+        job.Id = 12;
+        job.Space = new Space { RootDirectory = _root };
+
+        var property = job.GetType().GetProperty("CTFGridDims")!;
+        Assert.IsType<UiInt2>(property.GetCustomAttribute<UiFieldBase>());
+        Assert.Equal(new int2(1), property.GetValue(job));
+        Assert.Equal("1x1", job.ComposeCommandArguments()[flag]);
+
+        job.ReadFromJson(JsonNode.Parse("{\"CTFGridDims\":[5,6,40]}")!);
+        Assert.Equal(new int2(5, 6), property.GetValue(job));
+        Assert.Equal("5x6", job.ComposeCommandArguments()[flag]);
+        Assert.Equal("[5,6]", job.ToJson()["CTFGridDims"]!.ToJsonString());
+
+        if (job is MotionAndCTF2D motionAndCtf)
+        {
+            motionAndCtf.MotionGridDims = new int3(5, 6, 40);
+            Assert.Equal("5x6x40", job.ComposeCommandArguments()["m_grid"]);
+        }
+    }
 
     [Fact]
     public async Task Overview_LoadsThicknessFromMovieMetadataAndRefreshesWithoutInventingMissingValues()

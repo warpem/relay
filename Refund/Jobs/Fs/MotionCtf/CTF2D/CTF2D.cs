@@ -90,13 +90,14 @@ public class CTF2D : WarpJobGpu, IClusterJob
     public bool CTFMovieSumEnable { get; set; }
 
     /// <summary>
-    /// Specifies the resolution of the defocus model grid in spatial and temporal dimensions.
+    /// Specifies the resolution of the defocus model grid in X and Y.
     /// Higher grid dimensions provide more localized CTF estimation but require more 
     /// signal and computational resources.
     /// </summary>
-    [UiInt3("grid", "Grid dimensions",
-        helpText: "Resolution of the defocus model grid in X, Y, and temporal dimensions, separated by 'x': e.g. 5x5x40; empty = auto; Z > 1 is purely experimental")]
-    public int3 CTFGridDims { get; set; } = new int3(1);
+    [UiInt2("grid", "Grid dimensions", min: 1,
+        helpText: "Resolution of the defocus model grid in X and Y, separated by 'x': e.g. 5x5")]
+    [RelayProperty]
+    public int2 CTFGridDims { get; set; } = new int2(1);
 
     /// <summary>
     /// The minimum resolution (maximum spacing) to consider during CTF fitting.
@@ -230,4 +231,11 @@ public class CTF2D : WarpJobGpu, IClusterJob
     /// </summary>
     /// <returns>Throws NotImplementedException as this method is just a placeholder</returns>
     public string ComposeCommand() => throw new NotImplementedException();
+
+    public override Dictionary<string, string> ComposeCommandArguments()
+    {
+        var result = base.ComposeCommandArguments();
+        result["grid"] = $"{CTFGridDims.X}x{CTFGridDims.Y}";
+        return result;
+    }
 }
