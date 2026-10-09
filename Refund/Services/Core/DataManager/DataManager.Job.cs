@@ -103,7 +103,7 @@ public partial class DataManager
     public Task UpdateJobParameters(ReadOnlyUser user, ReadOnlyJob job, Action<Job> updateAction) =>
         UpdateJob(user, job, mutable =>
         {
-            EnsureNoPendingExecutions([mutable], $"Job {mutable.QualifiedName}");
+            EnsureNoPendingExecutions([mutable], $"Job {mutable.QualifiedName}", allowWaitingDependents: true);
             updateAction(mutable);
         });
 

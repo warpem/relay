@@ -259,7 +259,14 @@ public partial class JobEditor : ComponentBase, IDisposable
         if (edge == null)
             return;
 
-        await DataManager.DeleteEdge(edge);
+        try
+        {
+            await DataManager.DeleteEdge(edge);
+        }
+        catch (Exception exc)
+        {
+            ToastService.ShowError($"Couldn't remove connection: {exc.Message}");
+        }
     }
 
     /// <summary>
@@ -277,11 +284,15 @@ public partial class JobEditor : ComponentBase, IDisposable
         }
         else
         {
-            await DataManager.UpdateJobParameters(Session.User, _job,
-                                        originalJob =>
-                                        {
-                                            args.prop.SetValue(originalJob, args.value);
-                                        });
+            try
+            {
+                await DataManager.UpdateJobParameters(Session.User, _job,
+                    originalJob => args.prop.SetValue(originalJob, args.value));
+            }
+            catch (Exception exc)
+            {
+                ToastService.ShowError($"Couldn't update parameter: {exc.Message}");
+            }
         }
     }
 

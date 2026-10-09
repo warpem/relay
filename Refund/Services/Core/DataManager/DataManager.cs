@@ -378,7 +378,7 @@ public partial class DataManager
     {
         // Clearing owns the target's files, but does not consume its parents' outputs.
         // Other mutations (such as deleting a space) must still wait for clears to finish.
-        bool CanWaitThroughClear(Job parent, Job child) =>
+        bool CanWaitForParent(Job parent, Job child) =>
             allowWaitingDependents && parent.Status != JobStatus.Finished &&
             child.Status == JobStatus.Waiting && _queueRepository.IsWaitingForDependencies(child);
 
@@ -386,7 +386,7 @@ public partial class DataManager
         // exempt Preparing/Queued attempts, which also project to the Waiting status.
         if (jobs.Any(job => job.Status == JobStatus.Clearing || HasPendingExecution(job) ||
                             job.GetChildren().Any(child =>
-                                (HasPendingExecution(child) && !CanWaitThroughClear(job, child)) ||
+                                (HasPendingExecution(child) && !CanWaitForParent(job, child)) ||
                                 (!allowClearingDependents && child.Status == JobStatus.Clearing))))
             throw new InvalidOperationException(
                 $"{target} has pending execution work or active dependent jobs. Abort active jobs and wait for completion first.");

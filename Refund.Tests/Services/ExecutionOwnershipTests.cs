@@ -121,6 +121,56 @@ public sealed class ExecutionOwnershipTests
             fixture.Manager.ClearJob(fixture.User, fixture.Parent));
     }
 
+    [Theory]
+    [InlineData("delete")]
+    [InlineData("create")]
+    [InlineData("update")]
+    [InlineData("parameters")]
+    public async Task BuildingJobRemainsEditableWithDependencyWaitingChild(string mutation)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var child = await fixture.Manager.CreateJob(fixture.User, fixture.Space.Views[0],
+            new Refund.Jobs.Refinement.PostProcess.PostProcess3D.PostProcess().TypeGuid);
+        await fixture.Manager.CreateEdge(fixture.Space, fixture.Target.PortsOut[CreateMask.PortOutMask],
+            child.PortsIn[Refund.Jobs.Refinement.PostProcess.PostProcess3D.PostProcess.PortInMask]);
+        if (mutation == "create")
+            await fixture.Manager.DeleteEdge(fixture.Edge);
+        var runtime = Field<ExecutionRuntime>(fixture.Queues, "_runtime");
+        await runtime.RequestRunAsync(new JobAddress(fixture.Space.Project.Id, fixture.Space.Id, child.Id),
+            fixture.Queue.Id, ResourceVector.None, dependenciesReady: false);
+        var attemptId = Assert.Single(runtime.Attempts).Id;
+
+        switch (mutation)
+        {
+            case "delete":
+                await fixture.Manager.DeleteEdge(fixture.Edge);
+                Assert.Empty(fixture.Target.PortsIn[CreateMask.PortInMap].Edges);
+                break;
+            case "create":
+                await fixture.Manager.CreateEdge(fixture.Space,
+                    fixture.Parent.PortsOut[ImportMap.PortOutMap], fixture.Target.PortsIn[CreateMask.PortInMap]);
+                Assert.Single(fixture.Target.PortsIn[CreateMask.PortInMap].Edges);
+                break;
+            case "update":
+                bool updated = false;
+                await fixture.Manager.UpdateEdge(fixture.Edge, _ => updated = true);
+                Assert.True(updated);
+                break;
+            case "parameters":
+                await fixture.Manager.UpdateJobParameters(fixture.User, fixture.Target,
+                    job => ((CreateMask)job).NThreads = 7);
+                Assert.Equal(7, ((CreateMask)fixture.MutableTarget).NThreads);
+                break;
+        }
+
+        await runtime.TickAsync().WaitAsync(Timeout);
+        var attempt = Assert.Single(runtime.Attempts);
+        Assert.Equal(attemptId, attempt.Id);
+        Assert.Equal(ExecutionPhase.WaitingForDependencies, attempt.Phase);
+        Assert.Equal(JobStatus.Building, fixture.Target.Status);
+        Assert.Equal(JobStatus.Waiting, child.Status);
+    }
+
     [Fact]
     public async Task FailedClearReportsTheOriginalErrorAndLeavesTheJobRetryable()
     {
