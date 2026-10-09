@@ -78,6 +78,49 @@ public sealed class ExecutionOwnershipTests
         Assert.DoesNotContain(fixture.MutableTarget.Space.FindJob(fixture.Parent.Id).Events, evt => evt.Type == EventType.ClearingStarted);
     }
 
+    [Theory]
+    [InlineData(JobStatus.Failed)]
+    [InlineData(JobStatus.Aborted)]
+    [InlineData(JobStatus.Interrupted)]
+    public async Task UnfinishedParentCanClearWithoutAbortingWaitingDescendants(JobStatus status)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        await fixture.Manager.UpdateJob(fixture.User, fixture.Parent, job => job.Status = status);
+        var otherChild = await fixture.Manager.CreateJob(fixture.User, fixture.Space.Views[0], new CreateMask().TypeGuid);
+        await fixture.Manager.CreateEdge(fixture.Space,
+            fixture.Parent.PortsOut[ImportMap.PortOutMap], otherChild.PortsIn[CreateMask.PortInMap]);
+        await fixture.QueueAsync().WaitAsync(Timeout);
+        await fixture.Manager.QueueClusterJob(fixture.User, otherChild, fixture.Queue).WaitAsync(Timeout);
+        var runtime = Field<ExecutionRuntime>(fixture.Queues, "_runtime");
+        var attemptIds = runtime.Attempts.Select(attempt => attempt.Id).Order().ToArray();
+        Directory.CreateDirectory(fixture.Parent.DirectoryPath);
+        var output = Path.Combine(fixture.Parent.DirectoryPath, "partial.mrc");
+        await File.WriteAllTextAsync(output, "partial output");
+
+        await fixture.Manager.ClearJob(fixture.User, fixture.Parent).WaitAsync(Timeout);
+        await runtime.TickAsync().WaitAsync(Timeout);
+
+        Assert.Equal(JobStatus.Building, fixture.Parent.Status);
+        Assert.False(File.Exists(output));
+        Assert.Equal(JobStatus.Waiting, fixture.Target.Status);
+        Assert.Equal(JobStatus.Waiting, otherChild.Status);
+        Assert.Equal(attemptIds, runtime.Attempts.Select(attempt => attempt.Id).Order());
+        Assert.All(runtime.Attempts, attempt => Assert.Equal(ExecutionPhase.WaitingForDependencies, attempt.Phase));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            fixture.Manager.ClearJob(fixture.User, fixture.Target));
+    }
+
+    [Fact]
+    public async Task FinishedParentStillProtectsOutputsFromAWaitingAttemptThatCanAdvance()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        await fixture.QueueAsync().WaitAsync(Timeout);
+        await fixture.Manager.UpdateJob(fixture.User, fixture.Parent, job => job.Status = JobStatus.Finished);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            fixture.Manager.ClearJob(fixture.User, fixture.Parent));
+    }
+
     [Fact]
     public async Task FailedClearReportsTheOriginalErrorAndLeavesTheJobRetryable()
     {
@@ -308,7 +351,7 @@ public sealed class ExecutionOwnershipTests
     }
 
     [Fact]
-    public async Task PendingExecutionProtectsItsInputConnectionAndSourceFiles()
+    public async Task PendingExecutionProtectsItsInputConnectionAndSourceFromDeletion()
     {
         await using var fixture = await Fixture.CreateAsync();
         Directory.CreateDirectory(fixture.Parent.DirectoryPath);
@@ -322,8 +365,7 @@ public sealed class ExecutionOwnershipTests
             fixture.Manager.CreateEdge(fixture.Space,
                 fixture.Parent.PortsOut[ImportMap.PortOutMap],
                 fixture.Target.PortsIn[CreateMask.PortInMap]));
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            fixture.Manager.ClearJob(fixture.User, fixture.Parent));
+
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             fixture.Manager.DeleteJob(fixture.User, fixture.Parent));
 

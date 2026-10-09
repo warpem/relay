@@ -373,12 +373,20 @@ public partial class DataManager
         (job.Status.IsUnsettled() && job.Status != JobStatus.Clearing) ||
         _queueRepository.HasExecutionAttempt(job);
 
-    private void EnsureNoPendingExecutions(IEnumerable<Job> jobs, string target, bool allowClearingDependents = false)
+    private void EnsureNoPendingExecutions(IEnumerable<Job> jobs, string target, bool allowClearingDependents = false,
+        bool allowWaitingDependents = false)
     {
         // Clearing owns the target's files, but does not consume its parents' outputs.
         // Other mutations (such as deleting a space) must still wait for clears to finish.
+        bool CanWaitThroughClear(Job parent, Job child) =>
+            allowWaitingDependents && parent.Status != JobStatus.Finished &&
+            child.Status == JobStatus.Waiting && _queueRepository.IsWaitingForDependencies(child);
+
+        // A dependency waiter cannot advance while its parent is unfinished. Do not
+        // exempt Preparing/Queued attempts, which also project to the Waiting status.
         if (jobs.Any(job => job.Status == JobStatus.Clearing || HasPendingExecution(job) ||
-                            job.GetChildren().Any(child => HasPendingExecution(child) ||
+                            job.GetChildren().Any(child =>
+                                (HasPendingExecution(child) && !CanWaitThroughClear(job, child)) ||
                                 (!allowClearingDependents && child.Status == JobStatus.Clearing))))
             throw new InvalidOperationException(
                 $"{target} has pending execution work or active dependent jobs. Abort active jobs and wait for completion first.");

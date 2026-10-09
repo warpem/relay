@@ -344,6 +344,10 @@ public sealed class QueueRepository
     public bool HasExecutionAttempt(Job job) =>
         _runtime.Attempts.Any(attempt => attempt.Job == AddressOf(job));
 
+    public bool IsWaitingForDependencies(Job job) =>
+        _runtime.Attempts.Any(attempt => attempt.Job == AddressOf(job) &&
+                                         attempt.Phase == ExecutionPhase.WaitingForDependencies);
+
     public JobQueue FindQueue(int id)
     {
         if (id == _localQueue.Id)

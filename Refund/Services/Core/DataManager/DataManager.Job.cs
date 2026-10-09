@@ -363,7 +363,8 @@ public partial class DataManager
                 EnsureNoPendingExecutions(
                     [resolvedJob],
                     $"Job {resolvedJob.QualifiedName}",
-                    allowClearingDependents: true);
+                    allowClearingDependents: true,
+                    allowWaitingDependents: true);
                 resolvedJob.AddEvent(EventType.ClearingStarted, originalUser);
                 resolvedJob.Status = JobStatus.Clearing;
                 originalJob = resolvedJob;
