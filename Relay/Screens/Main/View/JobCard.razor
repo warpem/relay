@@ -14,14 +14,17 @@
 @inject Refund.Services.Core.Session.RelaySession Session
 
 @{
+    // Starting a job can close the editor concurrently with this render.
+    // Keep one snapshot for every compatibility check in this render pass.
+    var editingJob = JobEditor.CurrentJob;
     bool fadeOut = false;
 
-    if (JobEditor.IsActive && Session.CurrentMain != MainScreenType.FactoryBuilder)
+    if (editingJob != null && Session.CurrentMain != MainScreenType.FactoryBuilder)
     {
         // Port-compatibility dimming guides connections, which overview cards can't make
         if (!OverviewMode &&
-            (Job.PortsOut.Values.All(po => !JobEditor.CurrentJob.PortsIn.Values.Any(pi => pi.ResourceType == po.ResourceType)) ||
-             Job.Space != JobEditor.CurrentJob.Space))
+            (Job.PortsOut.Values.All(po => !editingJob.PortsIn.Values.Any(pi => pi.ResourceType == po.ResourceType)) ||
+             Job.Space != editingJob.Space))
             fadeOut = true;
     }
     else if ((OverviewMode ? Selection.SelectedItems.Any(k => k.Type == ItemType.Job) : Selection.SelectedItems.Any()) &&
@@ -124,8 +127,8 @@
                 bool isEnabled = true;
                 if (!OverviewMode &&
                     Session.CurrentMain != MainScreenType.FactoryBuilder &&
-                    JobEditor.IsActive && (JobEditor.CurrentJob == Job ||
-                                           JobEditor.CurrentJob.PortsIn.Values.All(p => p.ResourceType != port.ResourceType)))
+                    editingJob != null && (editingJob == Job ||
+                                           editingJob.PortsIn.Values.All(p => p.ResourceType != port.ResourceType)))
                     isEnabled = false;
 
                 <div class="port-dot" style="border: 0;">
@@ -160,7 +163,7 @@
                     @if (Job.Status == JobStatus.Building ||
                          Job is { Status: JobStatus.Running, IsInteractive: true, IsInteractiveFinished: false })
                     {
-                        bool isEditing = Job.Status == JobStatus.Building && JobEditor.CurrentJob == Job;
+                        bool isEditing = Job.Status == JobStatus.Building && editingJob == Job;
                         <div style="padding: 0.15rem 0.5rem;
                                     border-radius: 14px;
                                     text-align: center;
