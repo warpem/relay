@@ -28,3 +28,48 @@
 .diagram-edges path {
     stroke-width: max(2, calc(1 * var(--inv-zoom, 1)));
 }
+
+/* Boundary annotations deliberately do not inherit job-card visuals or interactions. */
+.diagram-external {
+    position: absolute;
+    box-sizing: border-box;
+    padding: 4px 8px;
+    border: 1px dashed var(--neutral-stroke-rest, #999);
+    border-radius: 3px;
+    background: var(--neutral-layer-1, #fafafa);
+    color: var(--neutral-foreground-rest, #444);
+    cursor: default;
+    font-size: 11px;
+    box-shadow: none;
+}
+
+.external-caption {
+    font-size: 10px;
+    opacity: 0.65;
+    line-height: 16px;
+}
+
+.diagram-external a,
+.external-summary {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    line-height: 20px;
+}
+
+.diagram-external a {
+    color: var(--accent-foreground-rest, #3269a8);
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.diagram-external a:focus-visible {
+    outline: 2px solid var(--accent-foreground-rest, #3269a8);
+    outline-offset: 1px;
+}
+
+.external-edge {
+    stroke-dasharray: 3 3;
+    opacity: 0.65;
+}

@@ -264,6 +264,7 @@ public class Folder : RelayBase, IFolderContent
             {
                 ["GraphWidth"] = DiagramLayout.GraphWidth,
                 ["GraphHeight"] = DiagramLayout.GraphHeight,
+                ["ExternalConnections"] = System.Text.Json.JsonSerializer.SerializeToNode(DiagramLayout.ExternalConnections),
                 ["ConnectivityHash"] = DiagramLayout.ConnectivityHash
             };
 
@@ -389,6 +390,8 @@ public class Folder : RelayBase, IFolderContent
             {
                 GraphWidth = diagramLayoutJson["GraphWidth"]?.GetValue<double>() ?? 0,
                 GraphHeight = diagramLayoutJson["GraphHeight"]?.GetValue<double>() ?? 0,
+                ExternalConnections = diagramLayoutJson["ExternalConnections"] is { } externalJson
+                    ? System.Text.Json.JsonSerializer.Deserialize<List<DiagramExternalConnection>>(externalJson.ToJsonString()) ?? [] : [],
                 ConnectivityHash = diagramLayoutJson["ConnectivityHash"]?.GetValue<string>() ?? ""
             };
 

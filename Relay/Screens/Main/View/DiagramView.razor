@@ -24,7 +24,37 @@
                           stroke="@PortColors.Get(edge.ResourceType)"
                           opacity="0.7" />
                 }
+                @foreach (var connection in Layout.ExternalConnections)
+                {
+                    <path d="@GetExternalPath(connection)" class="external-edge"
+                          fill="none" stroke="@PortColors.Get(connection.ResourceType)" />
+                }
             </svg>
+
+            @foreach (var connection in Layout.ExternalConnections)
+            {
+                <aside class="diagram-external" data-relay-context="false" aria-label="@(connection.IsOutput ? "External consumers" : "External parents")"
+                       style="left: @F(connection.X)px; top: @F(connection.Y)px; width: @F(connection.Width)px; height: @F(connection.Height)px;"
+                       @onclick:stopPropagation="true" @ondblclick:stopPropagation="true"
+                       @oncontextmenu:stopPropagation="true">
+                    <div class="external-caption">↗ Outside this diagram</div>
+                    @if (connection.IsSummary)
+                    {
+                        <div class="external-summary">@connection.JobIds.Count external consumers</div>
+                    }
+                    else
+                    {
+                        @foreach (var id in connection.JobIds)
+                        {
+                            var externalJob = Session.Space?.FindJob(id);
+                            @if (externalJob != null)
+                            {
+                                <a href="@GetJobUrl(externalJob)" draggable="false" title="@($"J{externalJob.Id}: {externalJob.TypeName} — {externalJob.Alias}")">J@(externalJob.Id) · @(string.IsNullOrWhiteSpace(externalJob.Alias) ? externalJob.TypeName : externalJob.Alias)</a>
+                            }
+                        }
+                    }
+                </aside>
+            }
 
             @* Node layer *@
             @foreach (var item in Items)

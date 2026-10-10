@@ -170,6 +170,7 @@ public class FactoryDefinition : RelayBase
         {
             ["GraphWidth"] = layout.GraphWidth,
             ["GraphHeight"] = layout.GraphHeight,
+            ["ExternalConnections"] = System.Text.Json.JsonSerializer.SerializeToNode(layout.ExternalConnections),
             ["ConnectivityHash"] = layout.ConnectivityHash
         };
 
@@ -226,6 +227,8 @@ public class FactoryDefinition : RelayBase
         {
             GraphWidth = layoutJson["GraphWidth"]?.GetValue<double>() ?? 0,
             GraphHeight = layoutJson["GraphHeight"]?.GetValue<double>() ?? 0,
+            ExternalConnections = layoutJson["ExternalConnections"] is { } externalJson
+                ? System.Text.Json.JsonSerializer.Deserialize<List<DiagramExternalConnection>>(externalJson.ToJsonString()) ?? [] : [],
             ConnectivityHash = layoutJson["ConnectivityHash"]?.GetValue<string>() ?? ""
         };
 

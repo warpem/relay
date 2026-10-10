@@ -47,7 +47,7 @@ window.diagramInterop = {
         state.onPointerDown = (e) => {
             if (e.button !== 0) return;  // only primary button
             // Don't pan if clicking on a card or interactive element
-            if (e.target.closest('.card-common, .folder-card, .port-dot')) return;
+            if (e.target.closest('.card-common, .folder-card, .port-dot, .diagram-external')) return;
 
             state.isPanning = true;
             state.startX = e.clientX;

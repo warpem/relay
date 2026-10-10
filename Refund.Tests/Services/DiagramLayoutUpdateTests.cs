@@ -495,6 +495,102 @@ public sealed class DiagramLayoutUpdateTests
         Assert.Equal(instance.Id, session.FactoryInstanceId);
     }
 
+    [Fact]
+    public async Task ExternalParentsAreGroupedPerPortAndReplicatedPerConsumer()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var first = await fixture.CreateJobAsync(new ImportMap());
+        var second = await fixture.CreateJobAsync(new ImportMap());
+        var target = await fixture.CreateJobAsync(new CreateMask());
+        var other = await fixture.CreateJobAsync(new CreateMask());
+        await fixture.ConnectAsync(first, target);
+        await fixture.ConnectAsync(second, target);
+        await fixture.ConnectAsync(first, other);
+        var folder = await fixture.Manager.CreateFolder(fixture.User, fixture.View, "Consumers");
+        await fixture.Manager.MoveJobToFolder(fixture.User, fixture.View, target, folder);
+        await fixture.Manager.MoveJobToFolder(fixture.User, fixture.View, other, folder);
+
+        var layout = folder.DiagramLayout!;
+        Assert.Empty(layout.Edges);
+        Assert.Equal(2, layout.ExternalConnections.Count);
+        Assert.Contains(layout.ExternalConnections, c => c.JobIds.SequenceEqual(new[] { first.Id, second.Id }));
+        Assert.Contains(layout.ExternalConnections, c => c.JobIds.SequenceEqual(new[] { first.Id }));
+        Assert.All(layout.ExternalConnections, c =>
+        {
+            Assert.False(c.IsOutput);
+            Assert.True(c.X >= 0 && c.Y >= 0);
+            Assert.True(c.X + c.Width < c.PortX);
+            Assert.True(c.Y + c.Height <= layout.GraphHeight);
+            Assert.Contains(layout.Nodes, n => n.X + 2 == c.PortX);
+        });
+        var serialized = FactoryDefinition.SerializeDiagramLayout(layout).AsObject();
+        var restored = FactoryDefinition.DeserializeDiagramLayout(serialized);
+        Assert.Equal(layout.ExternalConnections[0].JobIds, restored.ExternalConnections[0].JobIds);
+        Assert.Equal(layout.ExternalConnections[0].PortX, restored.ExternalConnections[0].PortX);
+    }
+
+    [Fact]
+    public async Task ExternalConsumersCollapseWithoutAddingJobNodesAndRefreshOnEdgeChanges()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var source = await fixture.CreateJobAsync(new ImportMap());
+        var folder = await fixture.Manager.CreateFolder(fixture.User, fixture.View, "Source");
+        await fixture.Manager.MoveJobToFolder(fixture.User, fixture.View, source, folder);
+        ReadOnlyEdge? last = null;
+        for (int i = 0; i < 4; i++)
+            last = await fixture.ConnectAsync(source, await fixture.CreateJobAsync(new CreateMask()));
+        var layout = folder.DiagramLayout!;
+        Assert.Single(layout.Nodes);
+        Assert.Empty(layout.Edges);
+        var consumers = Assert.Single(layout.ExternalConnections);
+        Assert.True(consumers.IsSummary);
+        Assert.Equal(4, consumers.JobIds.Count);
+        Assert.True(consumers.X > consumers.PortX);
+        Assert.True(consumers.X + consumers.Width <= layout.GraphWidth);
+
+        await fixture.Manager.DeleteEdge(last!);
+        Assert.NotSame(layout, folder.DiagramLayout);
+        Assert.False(Assert.Single(folder.DiagramLayout!.ExternalConnections).IsSummary);
+    }
+
+    [Fact]
+    public async Task InternalEdgesAndExternalReferencesCoexistWithoutDuplicateConnections()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var source = await fixture.CreateJobAsync(new ImportMap());
+        var inside = await fixture.CreateJobAsync(new CreateMask());
+        var outside = await fixture.CreateJobAsync(new CreateMask());
+        await fixture.ConnectAsync(source, inside);
+        await fixture.ConnectAsync(source, outside);
+        await fixture.Manager.RemoveJobFromView(fixture.User, fixture.View, outside);
+        var layout = fixture.View.DiagramLayout!;
+        Assert.Single(layout.Edges);
+        Assert.Equal(outside.Id, Assert.Single(Assert.Single(layout.ExternalConnections).JobIds));
+        var edge = layout.Edges[0];
+        var sourceNode = layout.Nodes.Single(n => n.ItemId == source.Id);
+        var targetNode = layout.Nodes.Single(n => n.ItemId == inside.Id);
+        Assert.Equal(sourceNode.X + sourceNode.Width, edge.SourceX);
+        Assert.Equal(targetNode.X + 2, edge.TargetX);
+        Assert.Equal(sourceNode.Y + 38, edge.SourceY);
+        Assert.Equal(targetNode.Y + 38, edge.TargetY);
+        Assert.True(edge.BendPoints.Count >= 3);
+        var external = Assert.Single(layout.ExternalConnections);
+        Assert.Contains(edge.BendPoints, p => p.Y < external.Y && p.X > external.X + external.Width);
+    }
+
+    [Fact]
+    public async Task CollapsedFactoryExposedInputShowsExternalParents()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var source = await fixture.CreateJobAsync(new ImportMap());
+        var factory = await fixture.CreateFactoryAsync(includeSource: false);
+        await fixture.ConnectAsync(source, factory.SubJobs.Single());
+        await fixture.Manager.RemoveJobFromView(fixture.User, fixture.View, source);
+        var layout = fixture.View.DiagramLayout!;
+        Assert.True(Assert.Single(layout.Nodes).IsFactoryInstance);
+        Assert.Equal(source.Id, Assert.Single(Assert.Single(layout.ExternalConnections).JobIds));
+    }
+
     private static T Field<T>(object target, string name) =>
         (T)target.GetType().GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(target)!;
 

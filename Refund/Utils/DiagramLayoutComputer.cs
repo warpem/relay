@@ -6,7 +6,7 @@ using Refund.DataModel.ReadOnly;
 
 namespace Refund.Utils;
 
-public static class DiagramLayoutComputer
+public static partial class DiagramLayoutComputer
 {
     public static DiagramLayout ComputeLayout(View view, Space space, DiagramLayout? previous)
     {
@@ -68,61 +68,62 @@ public static class DiagramLayoutComputer
         var edgeSourceRemap = new List<(bool isFactory, int fiId, int portIndex)?>(); // parallel to relevantEdges
         var edgeTargetRemap = new List<(bool isFactory, int fiId, int portIndex)?>(); // parallel to relevantEdges
 
+        var external = new List<ExternalPortGroup>();
+        var touchingEdges = new List<Edge>();
+        (int index, int portIndex, bool factory)? Resolve(Job job, string port, bool output)
+        {
+            if (directJobIds.Contains(job.Id))
+            {
+                var index = jobs.First(j => j.job.Id == job.Id).index;
+                var names = output ? job.PortsOut.Keys.ToList() : job.PortsIn.Keys.ToList();
+                return (index, names.IndexOf(port), false);
+            }
+            if (subJobToFactory.TryGetValue(job.Id, out var owner))
+            {
+                int portIndex = output ? FindExposedOutputPortIndex(owner.fi, job.Id, port)
+                    : FindExposedInputPortIndex(owner.fi, job.Id, port);
+                if (portIndex >= 0) return (owner.index, portIndex, true);
+            }
+            return null;
+        }
         foreach (var edge in space.Edges)
         {
-            int srcJobId = edge.Source.Job.Id;
-            int tgtJobId = edge.Target.Job.Id;
-
-            bool srcIsDirect = directJobIds.Contains(srcJobId);
-            bool tgtIsDirect = directJobIds.Contains(tgtJobId);
-            bool srcIsSubJob = subJobToFactory.ContainsKey(srcJobId);
-            bool tgtIsSubJob = subJobToFactory.ContainsKey(tgtJobId);
-
-            // Case 1: direct job -> direct job (normal)
-            if (srcIsDirect && tgtIsDirect)
+            var source = Resolve(edge.Source.Job, edge.Source.Name, true);
+            var target = Resolve(edge.Target.Job, edge.Target.Name, false);
+            if (source == null && target == null) continue;
+            // Connections within a collapsed factory are not external connections.
+            if (subJobToFactory.TryGetValue(edge.Source.Job.Id, out var sf) &&
+                subJobToFactory.TryGetValue(edge.Target.Job.Id, out var tf) && sf.fi.Id == tf.fi.Id)
+                continue;
+            touchingEdges.Add(edge);
+            if (source is { } src && target is { } tgt)
             {
                 relevantEdges.Add(edge);
-                edgeSourceRemap.Add(null);
-                edgeTargetRemap.Add(null);
-                continue;
+                edgeSourceRemap.Add(src.factory ? (true, ((FactoryInstance)directItems[src.index]).Id, src.portIndex) : null);
+                edgeTargetRemap.Add(tgt.factory ? (true, ((FactoryInstance)directItems[tgt.index]).Id, tgt.portIndex) : null);
             }
-
-            // Case 2: sub-job -> sub-job (internal or cross-factory, skip both)
-            if (srcIsSubJob && tgtIsSubJob)
-                continue;
-
-            // Case 3: direct job -> sub-job of factory (remap target)
-            if (srcIsDirect && tgtIsSubJob)
+            else
             {
-                var (fiIndex, fi) = subJobToFactory[tgtJobId];
-                int portIndex = FindExposedInputPortIndex(fi, tgtJobId, edge.Target.Name);
-                if (portIndex < 0) continue; // no matching exposed port, skip
-
-                relevantEdges.Add(edge);
-                edgeSourceRemap.Add(null);
-                edgeTargetRemap.Add((true, fi.Id, portIndex));
-                continue;
+                var endpoint = (source ?? target)!.Value;
+                bool output = source != null;
+                var group = external.FirstOrDefault(g => g.Index == endpoint.index &&
+                    g.PortIndex == endpoint.portIndex && g.IsOutput == output);
+                if (group == null)
+                {
+                    group = new ExternalPortGroup
+                    {
+                        Index = endpoint.index, PortIndex = endpoint.portIndex, IsOutput = output,
+                        ResourceType = edge.Source.ResourceType.Name,
+                        PortName = output ? edge.Source.Name : edge.Target.Name
+                    };
+                    external.Add(group);
+                }
+                group.JobIds.Add(output ? edge.Target.Job.Id : edge.Source.Job.Id);
             }
-
-            // Case 4: sub-job of factory -> direct job (remap source)
-            if (srcIsSubJob && tgtIsDirect)
-            {
-                var (fiIndex, fi) = subJobToFactory[srcJobId];
-                int portIndex = FindExposedOutputPortIndex(fi, srcJobId, edge.Source.Name);
-                if (portIndex < 0) continue; // no matching exposed port, skip
-
-                relevantEdges.Add(edge);
-                edgeSourceRemap.Add((true, fi.Id, portIndex));
-                edgeTargetRemap.Add(null);
-                continue;
-            }
-
-            // Case 5: sub-job of factory -> sub-job of different factory (remap both)
-            // This shouldn't normally exist, but handle gracefully by skipping
         }
 
         // 3. Compute connectivity hash
-        var hash = ComputeConnectivityHash(directItems, jobs, folders, factoryInstances, relevantEdges);
+        var hash = ComputeConnectivityHash(directItems, jobs, folders, factoryInstances, touchingEdges);
         if (previous != null && previous.ConnectivityHash == hash)
             return previous;
 
@@ -167,6 +168,8 @@ public static class DiagramLayoutComputer
             nodeDimensions[index] = (VisualProvider.GetWidth(1), VisualProvider.GetHeight(heightSquares));
         }
 
+        var envelopes = ReserveExternalSpace(nodeDimensions, external);
+
         // 5. Build ELK graph
         var graph = new LayoutGraph();
         graph.Options.Direction = LayoutDirection.Right;
@@ -181,7 +184,7 @@ public static class DiagramLayoutComputer
         // Create nodes
         for (int i = 0; i < directItems.Count; i++)
         {
-            var (w, h) = nodeDimensions[i];
+            var (w, h) = envelopes[i];
             layoutNodes[i] = graph.AddNode(w, h);
         }
 
@@ -300,6 +303,18 @@ public static class DiagramLayoutComputer
             });
         }
 
+        // Edges terminate at the actual cards, inside their reserved envelopes.
+        var cardGraph = new LayoutGraph();
+        for (int i = 0; i < directItems.Count; i++)
+        {
+            var envelope = layoutNodes[i];
+            var dimensions = nodeDimensions[i];
+            var card = cardGraph.AddNode(dimensions.width, dimensions.height);
+            card.X = envelope.X + (external.Any(g => g.Index == i && !g.IsOutput) ? ExternalInset : 0);
+            card.Y = envelope.Y + (external.Any(g => g.Index == i) ? ExternalTop : 0);
+            layoutNodes[i] = card;
+        }
+
         // Build edges with port metadata
         // Use actual rendered port positions (matching CSS layout) instead of ELK-computed positions,
         // because ELK port placement doesn't match our card rendering.
@@ -372,12 +387,19 @@ public static class DiagramLayoutComputer
                 SourceY = srcY,
                 TargetX = tgtX,
                 TargetY = tgtY,
-                BendPoints = elkEdge.BendPoints.ToList()
+                BendPoints = RouteAroundExternalConnections(result,
+                    srcRemap != null ? factoryInstances.First(f => f.fi.Id == srcRemap.Value.fiId).index
+                        : jobs.First(j => j.job.Id == originalEdge.Source.Job.Id).index,
+                    tgtRemap != null ? factoryInstances.First(f => f.fi.Id == tgtRemap.Value.fiId).index
+                        : jobs.First(j => j.job.Id == originalEdge.Target.Job.Id).index,
+                    srcX, srcY, tgtX, tgtY, elkEdge.BendPoints.ToList(), external)
             });
         }
 
         // Post-process: compact disconnected components and reposition singletons
         PostProcessDisconnectedComponents(result, directItems);
+
+        PlaceExternalConnections(result, nodeDimensions, external);
 
         // Compute actual bounding box
         double bbMaxX = 0, bbMaxY = 0;
@@ -396,6 +418,11 @@ public static class DiagramLayoutComputer
                     bbMaxX = Math.Max(bbMaxX, bp.X);
                     bbMaxY = Math.Max(bbMaxY, bp.Y);
                 }
+        }
+        foreach (var connection in result.ExternalConnections)
+        {
+            bbMaxX = Math.Max(bbMaxX, connection.X + connection.Width);
+            bbMaxY = Math.Max(bbMaxY, connection.Y + connection.Height);
         }
         result.GraphWidth = bbMaxX + 2;
         result.GraphHeight = bbMaxY + 2;
@@ -646,7 +673,7 @@ public static class DiagramLayoutComputer
         dimDescs.Sort(StringComparer.Ordinal);
 
         // Invalidate saved layouts produced with the old position-preserving algorithm.
-        var raw = "topology-v2|" + string.Join(",", itemKeys) +
+        var raw = "external-connections-v2|" + string.Join(",", itemKeys) +
                   "|" + string.Join(",", edgeDescs) +
                   "|" + string.Join(",", dimDescs);
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(raw));

@@ -13,6 +13,7 @@ const clamp = (value, min, max) => Math.max(min, Math.min(value, Math.max(min, m
 
 function anchorController(target) {
     for (let element = target; element instanceof Element; element = element.parentElement) {
+        if (element.getAttribute("data-relay-context") === "false") return null;
         for (const controller of controllers) {
             if (controller.options.context && element.id && element.id === controller.options.anchor)
                 return controller;
@@ -55,8 +56,8 @@ function installGlobalEvents() {
                 controller.requestOpen(rect.left, rect.bottom, event.target);
                 return;
             }
-            const target = event.target.closest('[data-relay-context="true"]');
-            if (target) {
+            const target = event.target.closest('[data-relay-context]');
+            if (target?.getAttribute("data-relay-context") === "true") {
                 event.preventDefault();
                 event.stopPropagation();
                 const rect = target.getBoundingClientRect();

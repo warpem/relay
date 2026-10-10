@@ -427,6 +427,7 @@ public class View : RelayBase
             {
                 ["GraphWidth"] = DiagramLayout.GraphWidth,
                 ["GraphHeight"] = DiagramLayout.GraphHeight,
+                ["ExternalConnections"] = System.Text.Json.JsonSerializer.SerializeToNode(DiagramLayout.ExternalConnections),
                 ["ConnectivityHash"] = DiagramLayout.ConnectivityHash
             };
 
@@ -645,6 +646,8 @@ public class View : RelayBase
             {
                 GraphWidth = diagramLayoutJson["GraphWidth"]?.GetValue<double>() ?? 0,
                 GraphHeight = diagramLayoutJson["GraphHeight"]?.GetValue<double>() ?? 0,
+                ExternalConnections = diagramLayoutJson["ExternalConnections"] is { } externalJson
+                    ? System.Text.Json.JsonSerializer.Deserialize<List<DiagramExternalConnection>>(externalJson.ToJsonString()) ?? [] : [],
                 ConnectivityHash = diagramLayoutJson["ConnectivityHash"]?.GetValue<string>() ?? ""
             };
 
