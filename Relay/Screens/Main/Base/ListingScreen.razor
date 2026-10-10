@@ -6,7 +6,9 @@
 
 @inject CardSelectionService Selection
 
-<div style="width: 100%; height: 100%;"
+<div tabindex="@(OnContextMenu.HasDelegate ? "0" : null)"
+     data-relay-context="@(OnContextMenu.HasDelegate ? "true" : null)"
+     style="width: 100%; height: 100%;"
      @onclick:stopPropagation="true"
      @onclick="@(() => Selection.Clear())"
      @oncontextmenu:preventDefault="OnContextMenu.HasDelegate"

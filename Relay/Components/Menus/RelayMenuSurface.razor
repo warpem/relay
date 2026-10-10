@@ -1,0 +1,15 @@
+<div id="@Id" class="relay-menu-surface" popover="manual" style="@Style"
+     @onclick:stopPropagation="true" @oncontextmenu:stopPropagation="true" @oncontextmenu:preventDefault="true">
+    <button class="relay-menu-scroll-arrow" data-scroll="-1" tabindex="-1" aria-label="Scroll menu up" hidden>▴</button>
+    <div class="relay-menu-scroll" role="menu" aria-label="@Label" tabindex="-1">
+        @ChildContent
+    </div>
+    <button class="relay-menu-scroll-arrow" data-scroll="1" tabindex="-1" aria-label="Scroll menu down" hidden>▾</button>
+</div>
+
+@code {
+    [Parameter] public string Id { get; set; }
+    [Parameter] public string Label { get; set; } = "Actions";
+    [Parameter] public string Style { get; set; }
+    [Parameter] public RenderFragment ChildContent { get; set; }
+}

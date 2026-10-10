@@ -3,7 +3,9 @@
 @using Refund.Services
 @using Refund.Utils
 
-<div class="diagram-viewport" @ref="_viewport"
+<div tabindex="@(OnContextMenu.HasDelegate ? "0" : null)"
+     data-relay-context="@(OnContextMenu.HasDelegate ? "true" : null)"
+     class="diagram-viewport" @ref="_viewport"
      @onclick:stopPropagation="true"
      @onclick="@HandleBackgroundClick"
      @oncontextmenu:preventDefault="OnContextMenu.HasDelegate"

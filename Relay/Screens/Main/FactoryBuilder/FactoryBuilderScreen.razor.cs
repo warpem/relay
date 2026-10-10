@@ -209,8 +209,8 @@ public partial class FactoryBuilderScreen : ComponentBase, IDisposable
             return;
         }
 
-        _clickedPosition = new float2((float)args.MouseEventArgs.ClientX - RelaySession.LeftPanelWidth,
-                                      (float)args.MouseEventArgs.ClientY - RelaySession.TopPanelHeight);
+        _clickedPosition = new float2((float)args.MouseEventArgs.ClientX,
+                                      (float)args.MouseEventArgs.ClientY);
         _clickedPort = args.Port;
         _jobTypeMenuOpen = true;
     }
@@ -223,8 +223,8 @@ public partial class FactoryBuilderScreen : ComponentBase, IDisposable
             return;
         }
 
-        _clickedPosition = new float2((float)args.ClientX - RelaySession.LeftPanelWidth,
-                                      (float)args.ClientY - RelaySession.TopPanelHeight);
+        _clickedPosition = new float2((float)args.ClientX,
+                                      (float)args.ClientY);
         _clickedPort = null;
         _jobTypeMenuOpen = true;
     }

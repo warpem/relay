@@ -50,8 +50,8 @@ public partial class JobCard : ComponentBase, IDisposable
     public EventCallback<MouseEventArgs> OnMiddleClick { get; set; }
 
     /// <summary>
-    /// Event callback for context menu in diagram mode (where FluentMenu can't be used
-    /// inside CSS-transformed containers). Carries the job, mouse args, header, and actions.
+    /// Event callback for context menus customized by the diagram host.
+    /// Carries the job, mouse args, header, and actions.
     /// </summary>
     [Parameter]
     public EventCallback<CardContextMenuArgs> OnDiagramContextMenu { get; set; }
@@ -345,7 +345,7 @@ public partial class JobCard : ComponentBase, IDisposable
                 // Card is already selected — build actions for entire selection
                 var selectedJobs = Selection.ResolveSelectedJobs(_job.Space);
                 _contextMenuActions = MenuActions.GetJobActions(selectedJobs);
-                _contextMenuHeader = $"{selectedJobs.Count} jobs selected";
+                _contextMenuHeader = selectedJobs.Count > 1 ? $"{selectedJobs.Count} jobs selected" : _job.QualifiedName;
             }
             else
             {
@@ -374,7 +374,7 @@ public partial class JobCard : ComponentBase, IDisposable
     
     private async Task HandleRightClick(MouseEventArgs args)
     {
-        if (!DiagramMode) return; // FluentMenu handles it in list mode
+        if (!DiagramMode) return; // RelayMenu handles it in list mode
 
         // Build context menu actions (same logic as HandleContextMenu)
         string header;
@@ -384,7 +384,7 @@ public partial class JobCard : ComponentBase, IDisposable
         {
             var selectedJobs = Selection.ResolveSelectedJobs(_job.Space);
             actions = MenuActions.GetJobActions(selectedJobs);
-            header = $"{selectedJobs.Count} jobs selected";
+            header = selectedJobs.Count > 1 ? $"{selectedJobs.Count} jobs selected" : _job.QualifiedName;
         }
         else
         {

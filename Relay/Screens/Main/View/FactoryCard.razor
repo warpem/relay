@@ -6,7 +6,7 @@
 @using Relay.Panels.Right.Actions
 @using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
 
-<div class="factory-card @(Selection.IsSelected(SelectionKey) ? "selected" : "")"
+<div tabindex="0" data-relay-context="true" class="factory-card @(Selection.IsSelected(SelectionKey) ? "selected" : "")"
      id="@($"factory-{(Mode == FactoryCardMode.Instance ? $"fi-{Instance?.Id}" : $"fd-{Definition?.Id}")}")"
      style="width: @(DiagramMode ? DiagramWidth : VisualProvider.GetWidth(1))px;
             height: @(DiagramMode ? DiagramHeight : VisualProvider.GetHeight(HeightSquares))px;
@@ -113,9 +113,9 @@
 
     @if (!DiagramMode)
     {
-        <FluentMenu Anchor="@($"factory-{(Mode == FactoryCardMode.Instance ? $"fi-{Instance?.Id}" : $"fd-{Definition?.Id}")}")"
+        <RelayMenu Anchor="@($"factory-{(Mode == FactoryCardMode.Instance ? $"fi-{Instance?.Id}" : $"fd-{Definition?.Id}")}")"
                     Trigger="MouseButton.Right"
-                    Anchored="false" OpenChanged="HandleContextMenu">
+                    OpenChanged="HandleContextMenu">
             <span style="font-size: 0.75rem; padding: 0 1rem; opacity: 0.5;
                         display: block; max-width: 250px; overflow: hidden;
                         text-overflow: ellipsis; white-space: nowrap;">
@@ -127,6 +127,6 @@
             {
                 <ActionMenuLevel Actions="_contextMenuActions"/>
             }
-        </FluentMenu>
+        </RelayMenu>
     }
 </div>

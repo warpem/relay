@@ -1,6 +1,4 @@
 using Microsoft.AspNetCore.Components;
-using Microsoft.FluentUI.AspNetCore.Components;
-using Microsoft.JSInterop;
 using Refund.DataModel.ReadOnly;
 using Refund.Services;
 
@@ -10,7 +8,7 @@ namespace Relay.Screens.Main.View;
 /// A context menu component that displays job types or port connections based on the current menu context.
 /// Used in the ViewScreen for creating new jobs and connecting ports between jobs.
 /// </summary>
-public partial class JobTypeMenu : ComponentBase, IAsyncDisposable
+public partial class JobTypeMenu : ComponentBase
 {
     /// <summary>
     /// Gets or sets whether the menu is open.
@@ -30,7 +28,6 @@ public partial class JobTypeMenu : ComponentBase, IAsyncDisposable
     /// </summary>
     [Parameter]
     public MenuType Type { get; set; }
-    private MenuType _type;
     
     /// <summary>
     /// Gets or sets the port that was clicked to open this menu.
@@ -64,29 +61,9 @@ public partial class JobTypeMenu : ComponentBase, IAsyncDisposable
     [Parameter]
     public string Anchor { get; set; }
 
-    /// <summary>
-    /// The horizontal position of the menu relative to its anchor.
-    /// </summary>
-    [Parameter]
-    public HorizontalPosition HorizontalPosition { get; set; } = HorizontalPosition.Right;
-
-    /// <summary>
-    /// The vertical position of the menu relative to its anchor.
-    /// </summary>
-    [Parameter]
-    public VerticalPosition VerticalPosition { get; set; } = VerticalPosition.Bottom;
-
-    /// <summary>
-    /// Gets or sets the width of the menu.
-    /// </summary>
-    [Parameter]
-    public string Width { get; set; } = "300px";
-
-    /// <summary>
-    /// Additional CSS styles to apply to the menu.
-    /// </summary>
-    [Parameter]
-    public string Style { get; set; } = string.Empty;
+    [Parameter] public double? X { get; set; }
+    [Parameter] public double? Y { get; set; }
+    [Parameter] public string Width { get; set; } = "300px";
 
     /// <summary>
     /// Event callback that is invoked when a job type is selected from the menu.
@@ -126,97 +103,12 @@ public partial class JobTypeMenu : ComponentBase, IAsyncDisposable
     public IEnumerable<ReadOnlyFactoryDefinition> Definitions { get; set; }
 
     /// <summary>
-    /// Event callback that is invoked when the mouse leaves the menu area.
-    /// </summary>
-    [Parameter]
-    public EventCallback OnMouseLeave { get; set; }
-    
-    /// <summary>
     /// The job editor service used to interact with the current job being edited.
     /// </summary>
     [Inject]
     public JobEditorService JobEditor { get; set; }
     
-    /// <summary>
-    /// JavaScript runtime for interacting with browser APIs.
-    /// </summary>
-    [Inject]
-    private IJSRuntime JSRuntime { get; set; }
 
-    private IJSObjectReference _module;
-    private IJSObjectReference _clickOutsideHandler;
-    private DotNetObjectReference<JobTypeMenu> _dotNetRef;
-
-    private FluentMenu _menu;
-
-    /// <summary>
-    /// Called when component parameters are set. Updates the local state if the menu type has changed.
-    /// </summary>
-    protected override void OnParametersSet()
-    {
-        base.OnParametersSet();
-
-        if (Type != _type)
-        {
-            _type = Type;
-            StateHasChanged();
-        }
-    }
-
-    /// <summary>
-    /// Called after the component has been rendered. Initializes JavaScript interop for click-outside detection.
-    /// </summary>
-    /// <param name="firstRender">True if this is the first time the component has been rendered.</param>
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (firstRender)
-        {
-            // Load the JS module
-            _module = await JSRuntime.InvokeAsync<IJSObjectReference>("import", "./Screens/Main/View/JobTypeMenu.razor.js");
-            _dotNetRef = DotNetObjectReference.Create(this);
-                
-            // Initialize the click outside handler
-            _clickOutsideHandler = await _module.InvokeAsync<IJSObjectReference>("initialize", 
-                                                                                 _dotNetRef,
-                                                                                 "fluent-menu, fluent-menu-item");
-        }
-    }
-
-    /// <summary>
-    /// Handles clicks outside the menu component, closing the menu if it's open.
-    /// This method is called from JavaScript.
-    /// </summary>
-    [JSInvokable]
-    public async Task HandleClickOutside()
-    {
-        if (Open)
-        {
-            await _menu.CloseAsync();
-        }
-    }
-
-    /// <summary>
-    /// Disposes of JavaScript interop resources when the component is removed from the UI.
-    /// </summary>
-    public async ValueTask DisposeAsync()
-    {
-        try
-        {
-            if (_clickOutsideHandler != null)
-            {
-                await _clickOutsideHandler.InvokeVoidAsync("dispose");
-                await _clickOutsideHandler.DisposeAsync();
-            }
-
-            if (_module != null)
-            {
-                await _module.DisposeAsync();
-            }
-
-            _dotNetRef?.Dispose();
-        }
-        catch { }
-    }
 }
 
 /// <summary>

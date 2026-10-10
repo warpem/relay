@@ -36,7 +36,7 @@ public partial class ViewScreen : ListingScreenLogic<IViewItem>
     private ReadOnlyPortOut _clickedPort = null;
     private float2? _clickedPosition = null;
 
-    // Card context menu state (used in diagram mode where FluentMenu can't render inside CSS transforms)
+    // Card context menu state; surfaces use viewport coordinates, including diagram mode.
     private bool _cardContextMenuOpen;
     private double _cardContextMenuX;
     private double _cardContextMenuY;
@@ -485,8 +485,8 @@ public partial class ViewScreen : ListingScreenLogic<IViewItem>
     {
         if (IsBrowseMode) return;
 
-        _clickedPosition = new float2((float)args.ClientX - RelaySession.LeftPanelWidth,
-                                      (float)args.ClientY - RelaySession.TopPanelHeight);
+        _clickedPosition = new float2((float)args.ClientX,
+                                      (float)args.ClientY);
         _clickedPort = null;
         _jobTypeMenuOpen = true;
 
@@ -497,8 +497,8 @@ public partial class ViewScreen : ListingScreenLogic<IViewItem>
     {
         if (IsBrowseMode) return;
 
-        _clickedPosition = new float2((float)args.MouseEventArgs.ClientX - RelaySession.LeftPanelWidth,
-                                      (float)args.MouseEventArgs.ClientY - RelaySession.TopPanelHeight);
+        _clickedPosition = new float2((float)args.MouseEventArgs.ClientX,
+                                      (float)args.MouseEventArgs.ClientY);
         _clickedPort = args.Port;
         _jobTypeMenuOpen = true;
 

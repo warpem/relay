@@ -36,7 +36,7 @@
     }
 }
 
-<div id="@CardDomId"
+<div tabindex="0" data-relay-context="true" id="@CardDomId"
      class="@("card-common" + (Selection.IsSelected(CardKey) ? " selected" : ""))"
      style="width: @(DiagramMode ? DiagramWidth : VisualProvider.GetWidth(Job.CardSquareCount.X))px;
             height: @(DiagramMode ? DiagramHeight : VisualProvider.GetHeight(Job.CardSquareCount.Y))px;
@@ -342,8 +342,8 @@
         <div @onclick:stopPropagation="true"
              @ondblclick:stopPropagation="true"
              @onmouseup:stopPropagation="true">
-            <FluentMenu Anchor="@CardDomId" Trigger="MouseButton.Right"
-                        Anchored="false" OpenChanged="HandleContextMenu">
+            <RelayMenu Anchor="@CardDomId" Trigger="MouseButton.Right"
+                        OpenChanged="HandleContextMenu">
                 <span class="menu-context-title" title="@_contextMenuHeader">
                     @_contextMenuHeader
                 </span>
@@ -353,7 +353,7 @@
                 {
                     <ActionMenuLevel Actions="_contextMenuActions"/>
                 }
-            </FluentMenu>
+            </RelayMenu>
         </div>
     }
 

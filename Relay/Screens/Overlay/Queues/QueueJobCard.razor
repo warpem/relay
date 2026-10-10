@@ -5,7 +5,7 @@
 @using IconSize = Refund.Utils.IconSize
 @using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
 
-<div class="job-card @("card-common" + (_isSelected ? " selected" : ""))"
+<div tabindex="0" data-relay-context="true" class="job-card @("card-common" + (_isSelected ? " selected" : ""))"
      id="@($"job-card-{_id}")"
      @onmouseup="HandleMouseUp"
      @onclick="HandleClick"
@@ -155,8 +155,8 @@
         }
     }
 
-    <FluentMenu Anchor="@($"job-card-{_id}")" Trigger="MouseButton.Right"
-                Anchored="false" OpenChanged="HandleContextMenu">
+    <RelayMenu Anchor="@($"job-card-{_id}")" Trigger="MouseButton.Right"
+                OpenChanged="HandleContextMenu">
         <span style="font-size: 0.75rem; padding: 0 1rem; opacity: 0.5; max-width: 200px;">
             @Job.QualifiedName
         </span>
@@ -166,5 +166,5 @@
         {
             <ActionMenuLevel Actions="@_contextMenuActions"/>
         }
-    </FluentMenu>
+    </RelayMenu>
 </div>

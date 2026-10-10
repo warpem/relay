@@ -72,9 +72,7 @@
                          PortFilter="@GetPortFilter()"
                          Type="@GetMenuType()"
                          ClickedPort="@_clickedPort"
-                         Style="@($"position: absolute; " +
-                                  $"left: {_clickedPosition?.X ?? 0}px; " +
-                                  $"top: {_clickedPosition?.Y ?? 0}px;")"
+                         X="@(_clickedPosition?.X)" Y="@(_clickedPosition?.Y)"
                          OnTypeSelected="@HandleMenuTypeSelected"
                          OnPortSelected="@HandlePortSelected"
                          OnPortConnected="@HandlePortConnected"
@@ -85,25 +83,14 @@
 
         @if (_cardContextMenuOpen && _cardContextMenuActions != null)
         {
-            @* Full-screen overlay to capture clicks outside the menu *@
-            <div style="position: fixed; inset: 0; z-index: 999;"
-                 @onclick="@CloseCardContextMenu"
-                 @oncontextmenu="@CloseCardContextMenu"
-                 @oncontextmenu:preventDefault="true">
-            </div>
-            <div style="position: fixed;
-                        left: @(_cardContextMenuX)px;
-                        top: @(_cardContextMenuY)px;
-                        z-index: 1000;">
-                <FluentMenu Open="@_cardContextMenuOpen"
-                             OpenChanged="@(v => { if (!v) CloseCardContextMenu(); })">
-                    <span class="menu-context-title" title="@_cardContextMenuHeader">
-                        @_cardContextMenuHeader
-                    </span>
-                    <FluentDivider />
-                    <ActionMenuLevel Actions="_cardContextMenuActions"/>
-                </FluentMenu>
-            </div>
+            <RelayMenu Open="@_cardContextMenuOpen" X="@_cardContextMenuX" Y="@_cardContextMenuY"
+                         OpenChanged="@(v => { if (!v) CloseCardContextMenu(); })">
+                <span class="menu-context-title" title="@_cardContextMenuHeader">
+                    @_cardContextMenuHeader
+                </span>
+                <FluentDivider />
+                <ActionMenuLevel Actions="_cardContextMenuActions"/>
+            </RelayMenu>
         }
     </div>
 </div>

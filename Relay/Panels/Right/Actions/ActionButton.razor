@@ -32,10 +32,9 @@
                       OnClick="@(() => _menuOpen = !_menuOpen)">
             @Action.Name
         </FluentButton>
-        <FluentMenu Anchor="@_id" @bind-Open="_menuOpen"
-                    VerticalThreshold="200">
+        <RelayMenu Anchor="@_id" @bind-Open="_menuOpen" Label="@Action.Name">
             <ActionMenuLevel Actions="Action.SubActions" />
-        </FluentMenu>
+        </RelayMenu>
     }
 
     @if (Action.IsDisabled)

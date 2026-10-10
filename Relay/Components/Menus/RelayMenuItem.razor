@@ -1,0 +1,47 @@
+<div class="relay-menu-entry" role="none">
+    <div class="relay-menu-item" role="menuitem" tabindex="-1" style="@Style"
+         aria-disabled="@(Disabled ? "true" : null)"
+         aria-haspopup="@(MenuItems != null ? "menu" : null)"
+         aria-expanded="@(MenuItems != null ? "false" : null)"
+         aria-controls="@(MenuItems != null ? _submenuId : null)"
+         aria-describedby="@(!string.IsNullOrEmpty(DisabledBecause) ? _descriptionId : null)"
+         title="@(DisabledBecause ?? Label)" @onclick="HandleClick">
+        <span class="relay-menu-label"><span style="@LabelStyle">@Label</span>@ChildContent</span>
+        @if (MenuItems != null)
+        {
+            <span class="relay-menu-chevron" aria-hidden="true">›</span>
+        }
+    </div>
+    @if (!string.IsNullOrEmpty(DisabledBecause))
+    {
+        <span id="@_descriptionId" class="relay-menu-description">@DisabledBecause</span>
+    }
+    @if (MenuItems != null)
+    {
+        <RelayMenuSurface Id="@_submenuId" Label="@(Label ?? "More actions")">@MenuItems</RelayMenuSurface>
+    }
+</div>
+
+@code {
+    [CascadingParameter] public RelayMenu Menu { get; set; }
+    [Parameter] public string Label { get; set; }
+    [Parameter] public string Style { get; set; }
+    [Parameter] public string LabelStyle { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public string DisabledBecause { get; set; }
+    [Parameter] public RenderFragment ChildContent { get; set; }
+    [Parameter] public RenderFragment MenuItems { get; set; }
+    [Parameter] public EventCallback OnClick { get; set; }
+    private readonly string _submenuId = $"relay-submenu-{Guid.NewGuid():N}";
+    private readonly string _descriptionId = $"relay-menu-description-{Guid.NewGuid():N}";
+
+    private async Task HandleClick()
+    {
+        if (Disabled || MenuItems != null) return;
+        // The browser has already hidden the menu. Keep its context alive until the
+        // callback finishes (port-connection commands read their parent's parameters).
+        var action = OnClick;
+        try { await action.InvokeAsync(); }
+        finally { await Menu.CloseAsync(); }
+    }
+}

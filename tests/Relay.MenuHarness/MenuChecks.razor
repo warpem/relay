@@ -1,0 +1,56 @@
+@page "/"
+@rendermode InteractiveServer
+
+<h1>Relay menu regression checks</h1>
+<p>Right-click either target or focus it and press Shift+F10. Use arrows, Home/End, Page Up/Down, and type-ahead.</p>
+<output aria-live="polite">Last command: @_last — executions: @_executions</output>
+<div class="targets">
+    <button id="left-target">Left context target</button>
+    <button id="right-target">Right context target</button>
+</div>
+<div class="clipped">
+    <button id="clipped-target">Clipped and transformed target</button>
+    <RelayMenu Anchor="clipped-target" Trigger="MouseButton.Right" Label="Transformed context">@Entries</RelayMenu>
+</div>
+<div class="overlap">Maximum z-index overlay</div>
+<div style="position: fixed; bottom: 8px; right: 8px;">
+    <button id="bottom-target">Bottom context target</button>
+</div>
+<button id="toggle-target" @onclick="() => _open = !_open">Toggle menu</button>
+<button id="outside-id">Outside target with an ID</button>
+<RelayMenu Anchor="left-target" Trigger="MouseButton.Right" Label="Left context">@Entries</RelayMenu>
+<RelayMenu Anchor="right-target" Trigger="MouseButton.Right" Label="Right context">@Entries</RelayMenu>
+<RelayMenu Anchor="bottom-target" Trigger="MouseButton.Right" Label="Bottom context">@Entries</RelayMenu>
+<RelayMenu Anchor="toggle-target" @bind-Open="_open" Label="Button context">@Entries</RelayMenu>
+
+@code {
+    private string _last = "none";
+    private int _executions;
+    private bool _open;
+    private Task Record(string name) { _last = name; _executions++; return Task.CompletedTask; }
+    private RenderFragment Entries => @<text>
+        <RelayMenuItem Label="Alpha" OnClick="@(() => Record("Alpha"))" />
+        <RelayMenuItem Label="Nested menu">
+            <MenuItems>
+                <RelayMenuItem Label="First child" OnClick="@(() => Record("First child"))" />
+                <RelayMenuItem Label="Deep menu">
+                    <MenuItems>
+                        @for (var i = 1; i <= 60; i++)
+                        {
+                            var label = $"Deep item {i:D2}";
+                            <RelayMenuItem Label="@label" OnClick="() => Record(label)" />
+                        }
+                    </MenuItems>
+                </RelayMenuItem>
+                <RelayMenuItem Label="Last child" OnClick="@(() => Record("Last child"))" />
+            </MenuItems>
+        </RelayMenuItem>
+        <RelayMenuItem Label="Unavailable command" Disabled="true" DisabledBecause="Needs an input file." OnClick="@(() => Record("ERROR: disabled command"))" />
+        @for (var i = 1; i <= 60; i++)
+        {
+            var label = $"Item {i:D2}";
+            <RelayMenuItem Label="@label" OnClick="() => Record(label)" />
+        }
+        <RelayMenuItem Label="Zulu" OnClick="@(() => Record("Zulu"))" />
+    </text>;
+}

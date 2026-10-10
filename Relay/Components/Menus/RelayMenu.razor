@@ -1,0 +1,91 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+<CascadingValue Value="this" IsFixed="true">
+    <RelayMenuSurface Id="@_id" Label="@Label" Style="@($"width: {Width};")">
+        @ChildContent
+    </RelayMenuSurface>
+</CascadingValue>
+
+@code {
+    [Parameter] public RenderFragment ChildContent { get; set; }
+    [Parameter] public string Label { get; set; } = "Actions";
+    [Parameter] public string Anchor { get; set; }
+    [Parameter] public MouseButton? Trigger { get; set; }
+    [Parameter] public bool Open { get; set; }
+    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
+    [Parameter] public double? X { get; set; }
+    [Parameter] public double? Y { get; set; }
+    [Parameter] public string Width { get; set; } = "max-content";
+
+    private readonly string _id = $"relay-menu-{Guid.NewGuid():N}";
+    private bool _open, _previousOpen;
+    private bool _disposed, _initializing;
+    private IJSObjectReference _module, _controller;
+    private DotNetObjectReference<RelayMenu> _reference;
+
+    protected override void OnParametersSet()
+    {
+        if (Open != _previousOpen)
+            _open = Open;
+        _previousOpen = Open;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_disposed || _initializing) return;
+        if (_controller == null)
+        {
+            _initializing = true;
+            try
+            {
+                _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/relay-menu.js");
+                if (_disposed) { await _module.DisposeAsync(); return; }
+                _reference ??= DotNetObjectReference.Create(this);
+                _controller = await _module.InvokeAsync<IJSObjectReference>("initialize", _id, _reference);
+                if (_disposed && _controller != null)
+                {
+                    await _controller.InvokeVoidAsync("dispose");
+                    await _controller.DisposeAsync();
+                    return;
+                }
+            }
+            finally { _initializing = false; }
+        }
+        if (!_disposed && _controller != null)
+            await _controller.InvokeVoidAsync("update", _open, new { anchor = Anchor, context = Trigger == MouseButton.Right, x = X, y = Y });
+    }
+
+    [JSInvokable]
+    public async Task SetOpen(bool value)
+    {
+        if (_disposed) return;
+        _open = value;
+        await OpenChanged.InvokeAsync(value);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public async Task CloseAsync()
+    {
+        if (_disposed) return;
+        if (_controller != null)
+            await _controller.InvokeVoidAsync("close", false, true);
+        await SetOpen(false);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _disposed = true;
+        try
+        {
+            if (_controller != null)
+            {
+                await _controller.InvokeVoidAsync("dispose");
+                await _controller.DisposeAsync();
+            }
+            if (_module != null) await _module.DisposeAsync();
+        }
+        catch (JSDisconnectedException) { }
+        finally { _reference?.Dispose(); }
+    }
+}

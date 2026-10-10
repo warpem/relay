@@ -3,18 +3,8 @@
 @using Refund.Utils
 @using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
 
-<FluentMenu @ref="_menu"
-            Open="@Open"
-            OpenChanged="@(async (v) => await OpenChanged.InvokeAsync(v))"
-            HorizontalPosition="@HorizontalPosition"
-            VerticalPosition="@VerticalPosition"
-            Width="@Width"
-            Anchor="@Anchor"
-            Anchored="false"
-            UseMenuService="true"
-            Style="@Style"
-            KeepOpen="false"
-            @onmouseleave="async () => await OnMouseLeave.InvokeAsync()">
+<RelayMenu Open="@Open" OpenChanged="@OpenChanged"
+           Anchor="@Anchor" X="@X" Y="@Y" Width="@Width" Label="Job types and connections">
     
         @if (Type == MenuType.CreateFromPort)
         {
@@ -47,7 +37,7 @@
             {
                 var port = _port;
 
-                <FluentMenuItem OnClick="() => OnPortConnected.InvokeAsync((ClickedPort, port))">
+                <RelayMenuItem OnClick="() => OnPortConnected.InvokeAsync((ClickedPort, port))">
                     <div style="display: flex; align-items: center; column-gap: 8px;">
                         <div style="background-color: @(PortColors.Get(port.ResourceType));
                                         width: 12px;
@@ -55,7 +45,7 @@
                                         border-radius: 6px;"></div>
                         @port.Alias
                     </div>
-                </FluentMenuItem>
+                </RelayMenuItem>
             }
         }
         else
@@ -71,12 +61,12 @@
         {
             @if (OnFolderRequested.HasDelegate)
             {
-                <FluentMenuItem OnClick="() => OnFolderRequested.InvokeAsync()">
+                <RelayMenuItem OnClick="() => OnFolderRequested.InvokeAsync()">
                     <div style="display: flex; align-items: center; column-gap: 8px;">
                         <FluentIcon Value="@(new Icons.Regular.Size16.Folder())" />
                         Folder
                     </div>
-                </FluentMenuItem>
+                </RelayMenuItem>
             }
 
             @if (Definitions?.Any() == true)
@@ -86,12 +76,12 @@
                 @foreach (var def in Definitions)
                 {
                     var _def = def;
-                    <FluentMenuItem OnClick="() => OnFactorySelected.InvokeAsync(_def)">
+                    <RelayMenuItem OnClick="() => OnFactorySelected.InvokeAsync(_def)">
                         <div style="display: flex; align-items: center; column-gap: 8px; max-width: 260px;">
                             <FluentIcon Value="@(new Icons.Regular.Size16.BuildingFactory())" Style="flex-shrink: 0;" />
                             <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">@_def.Alias</span>
                         </div>
-                    </FluentMenuItem>
+                    </RelayMenuItem>
                 }
             }
 
@@ -122,17 +112,17 @@
 
                 @if (Type == MenuType.CreateFromType)
                 {
-                    <FluentMenuItem Label="@(Job.TypeNames[type])" OnClick="() => OnTypeSelected.InvokeAsync(type)"/>
+                    <RelayMenuItem Label="@(Job.TypeNames[type])" OnClick="() => OnTypeSelected.InvokeAsync(type)"/>
                 }
                 else
                 {
-                    <FluentMenuItem Label="@(Job.TypeNames[type])">
+                    <RelayMenuItem Label="@(Job.TypeNames[type])">
                         <MenuItems>
                             @foreach (var _port in Job.AllTypesPortsIn[type].Values.Where(p => PortFilter(p.ResourceType)))
                             {
                                 var port = _port;
 
-                                <FluentMenuItem OnClick="() => OnPortSelected.InvokeAsync((type, ClickedPort, port.AsReadOnly()))">
+                                <RelayMenuItem OnClick="() => OnPortSelected.InvokeAsync((type, ClickedPort, port.AsReadOnly()))">
                                     <div style="display: flex; align-items: center; column-gap: 8px;">
                                         <div style="background-color: @(PortColors.Get(port.ResourceType));
                                         width: 12px;
@@ -140,16 +130,16 @@
                                         border-radius: 6px;"></div>
                                         @port.Alias
                                     </div>
-                                </FluentMenuItem>
+                                </RelayMenuItem>
                             }
                         </MenuItems>
-                    </FluentMenuItem>
+                    </RelayMenuItem>
                 }
             }
         }
         else
         {
-            <FluentMenuItem Label="No matching types" Disabled="true"/>
+            <RelayMenuItem Label="No matching types" Disabled="true"/>
         }
     }
-</FluentMenu>
+</RelayMenu>

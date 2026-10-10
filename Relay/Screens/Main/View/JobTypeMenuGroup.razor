@@ -2,7 +2,7 @@
 @using Refund.Utils
 
 
-<FluentMenuItem Label="@Group.Name">
+<RelayMenuItem Label="@Group.Name">
     <MenuItems>
         @{
             IEnumerable<JobTypeGroup> filteredSubgroups = TypeFilter != null ?
@@ -26,11 +26,11 @@
 
             @if (Type == MenuType.CreateFromType)
             {
-                <FluentMenuItem Label="@(Job.TypeNames[type])" OnClick="() => OnTypeSelected.InvokeAsync(type)"/>
+                <RelayMenuItem Label="@(Job.TypeNames[type])" OnClick="() => OnTypeSelected.InvokeAsync(type)"/>
             }
             else
             {
-                <FluentMenuItem Label="@(Job.TypeNames[type])">
+                <RelayMenuItem Label="@(Job.TypeNames[type])">
                     <MenuItems>
                         <span style="font-size: 0.75rem; padding-left: 1rem; padding-right: 1rem; opacity: 0.5;">
                             Connect to
@@ -41,7 +41,7 @@
                         {
                             var port = _port;
 
-                            <FluentMenuItem OnClick="() => OnPortSelected.InvokeAsync((type, ClickedPort, port.AsReadOnly()))">
+                            <RelayMenuItem OnClick="() => OnPortSelected.InvokeAsync((type, ClickedPort, port.AsReadOnly()))">
                                 <div style="display: flex; align-items: center; column-gap: 8px;">
                                     <div style="background-color: @(PortColors.Get(port.ResourceType));
                                             width: 12px;
@@ -49,11 +49,11 @@
                                             border-radius: 6px;"></div>
                                     @port.Alias
                                 </div>
-                            </FluentMenuItem>
+                            </RelayMenuItem>
                         }
                     </MenuItems>
-                </FluentMenuItem>
+                </RelayMenuItem>
             }
         }
     </MenuItems>
-</FluentMenuItem>
+</RelayMenuItem>

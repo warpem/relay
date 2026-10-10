@@ -5,7 +5,7 @@
 
 @typeparam TItem where TItem : class, IIdentifiable, IAnnotated, IAudited, IJobContainer
 
-<div id="@CardId"
+<div tabindex="0" data-relay-context="true" id="@CardId"
      class="card-common listing-card@(IsSelected ? " selected" : "")"
      style="width: min(100%, @Width);"
      @onclick:stopPropagation="true"
@@ -64,8 +64,8 @@
     }
 </div>
 
-<FluentMenu Anchor="@CardId" Trigger="MouseButton.Right"
-            Anchored="false" OpenChanged="HandleContextMenu">
+<RelayMenu Anchor="@CardId" Trigger="MouseButton.Right"
+            OpenChanged="HandleContextMenu">
     <span class="menu-context-title" title="@Item.QualifiedName">
         @Item.QualifiedName
     </span>
@@ -75,4 +75,4 @@
     {
         <ActionMenuLevel Actions="_contextMenuActions"/>
     }
-</FluentMenu>
+</RelayMenu>

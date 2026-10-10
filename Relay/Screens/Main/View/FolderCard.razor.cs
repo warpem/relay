@@ -149,7 +149,7 @@ public partial class FolderCard : ComponentBase, IDisposable
 
     private async Task HandleRightClick(MouseEventArgs args)
     {
-        if (!DiagramMode) return; // FluentMenu handles it in list mode
+        if (!DiagramMode) return; // RelayMenu handles it in list mode
 
         await Selection.Replace([SelectionKey]);
         var actions = MenuActions.GetFolderActions(Folder);

@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <base href="/" />
+    <link href="css/menus.css" rel="stylesheet" />
+    <style>
+        body { font: 14px system-ui; background: #eee; margin: 24px; }
+        button { padding: 8px; }
+        .targets { display: flex; justify-content: space-between; margin: 24px 0; }
+        .clipped { transform: translateZ(0); overflow: hidden; height: 80px; border: 2px solid #567; padding: 16px; }
+        .overlap { position: fixed; right: 0; top: 120px; z-index: 2147483647; background: #fbbc; padding: 20px; pointer-events: none; }
+        output { display: block; margin: 16px 0; }
+    </style>
+</head>
+<body>
+    <Router AppAssembly="typeof(App).Assembly"><Found Context="route"><RouteView RouteData="route" /></Found></Router>
+    <script src="_framework/blazor.web.js"></script>
+</body>
+</html>
