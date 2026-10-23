@@ -126,7 +126,8 @@ public sealed class ClusterQueue : JobQueue
 
     public async Task<string> SubmitScript(
         string scriptPath,
-        Action<string> onRawOutput = null)
+        Action<string> onRawOutput = null,
+        string username = "")
     {
         if (IsManaged)
             throw new InvalidOperationException("Managed queues launch scripts through relay-runner.");
@@ -135,7 +136,8 @@ public sealed class ClusterQueue : JobQueue
 
         string command = SubmitJobTemplate.ReplaceRegex(
             "{{\\s*script_path_abs\\s*}}",
-            scriptPath);
+            scriptPath)
+            .ReplaceRegex("{{\\s*username\\s*}}", username ?? string.Empty);
         string output = await ExecuteOnCluster(command);
         onRawOutput?.Invoke(output);
         return ParseClusterJobId(output);

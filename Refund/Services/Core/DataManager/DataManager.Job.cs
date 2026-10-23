@@ -534,7 +534,11 @@ public partial class DataManager
                 _dataRepository.UpdateJob(
                     originalUser,
                     mutableJob,
-                    queued => queued.QueueId = mutableQueue.Id);
+                    queued =>
+                    {
+                        queued.QueueId = mutableQueue.Id;
+                        queued.SubmittedByUsername = originalUser.Username;
+                    });
                 await _queueRepository.QueueJobAsync(mutableJob, mutableQueue);
             });
         }

@@ -202,6 +202,11 @@ public abstract class Job : RelayBase, IFolderContent
     [RelayProperty(Order = -103)]
     public JobStatus Status { get; set; } = JobStatus.Building;
 
+    /// <summary>Relay username captured when the job is queued, exposed as {{username}} in submission templates.</summary>
+    [Clearable]
+    [RelayProperty]
+    public string SubmittedByUsername { get; set; } = string.Empty;
+
     /// <summary>Current execution observation or cleanup warning, projected by the coordinator.</summary>
     [Clearable]
     [RelayProperty]
@@ -476,7 +481,8 @@ public abstract class Job : RelayBase, IFolderContent
             { "gpu_memory_gb", GpuMemoryGb.ToString() },
             { "run_directory", RunDirectory },
             { "std_out", PathStdOut },
-            { "std_err", PathStdErr }
+            { "std_err", PathStdErr },
+            { "username", SubmittedByUsername ?? string.Empty }
         };
     }
 
