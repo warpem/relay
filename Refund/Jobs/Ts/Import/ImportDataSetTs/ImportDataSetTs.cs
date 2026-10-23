@@ -89,15 +89,23 @@ public class ImportDataSetTs : WarpJob, IClusterJob
     [RelayProperty]
     public bool InvertTiltAngles { get; set; } = true;
 
-    [UiDecimal("tilt_offset", "Tilt angle offset", -100, 100, 0.1,
-               unit: "\u00b0",
-               helpText: "Subtract this value from all tilt angle values to compensate pre-tilt.")]
-    [RelayProperty]
-    public decimal TiltOffset { get; set; } = 0;
+    [UiEnum("", "Tilt zeroing", typeof(TiltZeroMode),
+            helpText: "Use a manual tilt angle offset, or automatically set the highest-intensity tilt to zero.")]
+    public TiltZeroMode ZeroTiltMode
+    {
+        get => AutoZeroTilt ? TiltZeroMode.AutoZero : TiltZeroMode.ManualOffset;
+        set => AutoZeroTilt = value == TiltZeroMode.AutoZero;
+    }
 
-    [UiBool("auto_zero", "Auto-zero overall tilt",
-            helpText: "Adjust tilt angles so that the tilt with the highest average " +
-                      "intensity becomes the 0-tilt")]
+    [UiDecimalNullable("tilt_offset", "Tilt angle offset", -100, 100, 0.1,
+                       unit: "\u00b0",
+                       helpText: "Subtract this value from all tilt angle values to compensate pre-tilt. " +
+                                 "Leave empty to keep the original tilt angles.",
+                       ConditionalOnField = nameof(ZeroTiltMode), ConditionalOnValue = TiltZeroMode.ManualOffset)]
+    [RelayProperty]
+    public decimal? TiltOffset { get; set; } = null;
+
+    // Retain the saved setting; ZeroTiltMode provides the mutually exclusive GUI choices.
     [RelayProperty]
     public bool AutoZeroTilt { get; set; } = false;
 
@@ -196,6 +204,12 @@ public class ImportDataSetTs : WarpJob, IClusterJob
 
         var result = base.ComposeCommandArguments();
 
+        if (ZeroTiltMode == TiltZeroMode.AutoZero)
+        {
+            result.Remove("tilt_offset");
+            result["auto_zero"] = "";
+        }
+
         result["mdocs"] = MdocDirectory;
         result["frameseries"] = PortsIn["Micrographs"].Edges.First().Source.Job.DirectoryPath;
         result["tilt_exposure"] = micrographSet.DataSetFs.OverallExposure.ToString(CultureInfo.InvariantCulture);
@@ -203,4 +217,10 @@ public class ImportDataSetTs : WarpJob, IClusterJob
 
         return result;
     }
+}
+
+public enum TiltZeroMode
+{
+    ManualOffset,
+    AutoZero
 }
