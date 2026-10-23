@@ -175,6 +175,7 @@ public partial class QueueEditor
         var variables = new List<string>
         {
             "command",
+            "username",
             "job_id",
             "attempt_id",
             "n_processes",
@@ -200,7 +201,7 @@ public partial class QueueEditor
 
     private IEnumerable<string> GetSubmitJobTemplateVariables()
     {
-        return ["script_path_abs"];
+        return ["script_path_abs", "username"];
     }
 
     private IEnumerable<string> GetStatusJobTemplateVariables()

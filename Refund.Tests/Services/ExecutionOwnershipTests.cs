@@ -19,6 +19,20 @@ public sealed class ExecutionOwnershipTests
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(5);
 
     [Fact]
+    public async Task QueueingCapturesUsernameIndependentlyOfLaterUserEdits()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        await fixture.Manager.UpdateUser(fixture.User, user => user.Username = "alice");
+        await fixture.QueueAsync().WaitAsync(Timeout);
+        await fixture.Manager.UpdateUser(fixture.User, user => user.Username = "renamed");
+
+        Assert.Equal("alice", fixture.MutableTarget.SubmittedByUsername);
+        var restored = new CreateMask();
+        restored.ReadFromJson(fixture.MutableTarget.ToJson());
+        Assert.Equal("alice", restored.SubmittedByUsername);
+    }
+
+    [Fact]
     public async Task ParentCanClearWhileChildIsClearingButDuplicateClearIsRejected()
     {
         await using var fixture = await Fixture.CreateAsync();

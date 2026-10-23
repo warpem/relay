@@ -176,7 +176,7 @@ public sealed class RelayExecutionOperations : IExecutionOperations
         string receipt;
         try
         {
-            receipt = await queue.SubmitScript(WorkerScriptPath(job));
+            receipt = await queue.SubmitScript(WorkerScriptPath(job), username: job.SubmittedByUsername);
         }
         catch (ClusterCommandNotStartedException)
         {
@@ -351,7 +351,7 @@ public sealed class RelayExecutionOperations : IExecutionOperations
         try
         {
             receipt = await queue.SubmitScript(
-                SubmissionScriptPath(job), output => rawOutput = output);
+                SubmissionScriptPath(job), output => rawOutput = output, job.SubmittedByUsername);
         }
         catch (ClusterCommandNotStartedException)
         {
