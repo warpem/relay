@@ -89,11 +89,12 @@ public class ImportDataSetTs : WarpJob, IClusterJob
     [RelayProperty]
     public bool InvertTiltAngles { get; set; } = true;
 
-    [UiDecimal("tilt_offset", "Tilt angle offset", -100, 100, 0.1,
-               unit: "\u00b0",
-               helpText: "Subtract this value from all tilt angle values to compensate pre-tilt.")]
+    [UiDecimalNullable("tilt_offset", "Tilt angle offset", -100, 100, 0.1,
+                       unit: "\u00b0",
+                       helpText: "Subtract this value from all tilt angle values to compensate pre-tilt. " +
+                                 "Cannot be combined with auto-zero.")]
     [RelayProperty]
-    public decimal TiltOffset { get; set; } = 0;
+    public decimal? TiltOffset { get; set; } = null;
 
     [UiBool("auto_zero", "Auto-zero overall tilt",
             helpText: "Adjust tilt angles so that the tilt with the highest average " +
