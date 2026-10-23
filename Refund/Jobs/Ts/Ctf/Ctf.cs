@@ -119,6 +119,14 @@ public class Ctf : WarpJobGpu, IClusterJob
     public bool PhaseEnable { get; set; } = false;
 
     /// <summary>
+    /// Fit specimen thickness jointly with CTF parameters; disabled by default (thin-specimen model)
+    /// </summary>
+    [RelayProperty]
+    [UiBool("fit_thickness", "Fit specimen thickness",
+            "Fit specimen thickness jointly with CTF parameters; disabled by default (thin-specimen model)")]
+    public bool ThicknessEnable { get; set; } = false;
+
+    /// <summary>
     /// Run defocus handedness estimation based on this many tilt series (e.g. 10), then estimate CTF with the correct handedness
     /// </summary>
     [RelayProperty]
@@ -196,6 +204,9 @@ public class Ctf : WarpJobGpu, IClusterJob
 
         if (PhaseEnable)
             result["fit_phase"] = "";
+
+        if (ThicknessEnable)
+            result["fit_thickness"] = "";
 
         if (AutoHand is > 0)
             result["auto_hand"] = AutoHand.Value.ToString();
