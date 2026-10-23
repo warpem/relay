@@ -161,8 +161,9 @@ public partial class ViewScreen : ListingScreenLogic<IViewItem>
         if (SortingService.Criterion == JobSortCriterion.Custom)
             return items;
 
-        // Note: flex-wrap: wrap-reverse means array index 0 = bottom-left of screen,
-        // last index = top-right. Nulls/empty values sort to array start (screen bottom)
+        // The grid uses plain flex-wrap (no reverse): array index 0 is the first item
+        // laid out, i.e. top-left of screen; later indices fill left-to-right then wrap
+        // to the next row down. Nulls/empty values sort to the array end (bottom-right)
         // so they stay out of the way regardless of sort direction.
         IOrderedEnumerable<IViewItem> sorted = SortingService.Criterion switch
         {
@@ -179,17 +180,17 @@ public partial class ViewScreen : ListingScreenLogic<IViewItem>
                 ? items.OrderBy(GetTypeCategory, StringComparer.OrdinalIgnoreCase)
                 : items.OrderByDescending(GetTypeCategory, StringComparer.OrdinalIgnoreCase),
             JobSortCriterion.Name => SortingService.IsAscending
-                ? items.OrderBy(i => string.IsNullOrWhiteSpace(i.Alias) ? 0 : 1)
+                ? items.OrderBy(i => string.IsNullOrWhiteSpace(i.Alias) ? 1 : 0)
                        .ThenBy(i => i.Alias, StringComparer.OrdinalIgnoreCase)
                        .ThenBy(i => i.Id)
-                : items.OrderBy(i => string.IsNullOrWhiteSpace(i.Alias) ? 0 : 1)
+                : items.OrderBy(i => string.IsNullOrWhiteSpace(i.Alias) ? 1 : 0)
                        .ThenByDescending(i => i.Alias, StringComparer.OrdinalIgnoreCase)
                        .ThenByDescending(i => i.Id),
             JobSortCriterion.Color => SortingService.IsAscending
-                ? items.OrderBy(i => GetColorTag(i) == null ? 0 : 1)
+                ? items.OrderBy(i => string.IsNullOrWhiteSpace(GetColorTag(i)) ? 1 : 0)
                        .ThenBy(GetColorTag, StringComparer.OrdinalIgnoreCase)
                        .ThenBy(i => i.Id)
-                : items.OrderBy(i => GetColorTag(i) == null ? 0 : 1)
+                : items.OrderBy(i => string.IsNullOrWhiteSpace(GetColorTag(i)) ? 1 : 0)
                        .ThenByDescending(GetColorTag, StringComparer.OrdinalIgnoreCase)
                        .ThenByDescending(i => i.Id),
             _ => items.OrderBy(i => i.Id)
