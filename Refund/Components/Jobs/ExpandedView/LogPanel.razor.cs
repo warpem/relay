@@ -12,6 +12,12 @@ namespace Refund.Components.Jobs.ExpandedView;
 /// </summary>
 public partial class LogPanel : IAsyncDisposable
 {
+    // Keep Fluent's CSS anchors in the rendered styles so background-color
+    // updates cannot erase them. IDs are unique to each log panel instance.
+    private readonly string _outputButtonId = $"log-output-{Guid.NewGuid():N}";
+    private readonly string _stagingButtonId = $"log-staging-{Guid.NewGuid():N}";
+    private readonly string _errorButtonId = $"log-error-{Guid.NewGuid():N}";
+
     /// <summary>
     /// JavaScript runtime for browser interactions.
     /// </summary>

@@ -8,7 +8,8 @@
             
             <div class="button-wrapper">
                 <FluentCounterBadge ShowEmpty="false" Dot="@(Service.HasNewLogs && !_showingLogs)" Color="BadgeColor.Brand"><AnchorContent>
-                    <FluentButton Id="buttonStdout" 
+                    <FluentButton Id="@_outputButtonId"
+                                  Style="@($"anchor-name: --{_outputButtonId};")"
                                   IconStart="@(new Icons.Regular.Size24.DocumentText())"
                                   Appearance="@(_showingLogs ?
                                                     ButtonAppearance.Primary :
@@ -18,7 +19,7 @@
                                                          "transparent")"
                                   OnClick="@(_ => TogglePanel(LogSection.Output))" />
                 </AnchorContent></FluentCounterBadge>
-                <FluentTooltip Anchor="buttonStdout" 
+                <FluentTooltip Anchor="@_outputButtonId"
                                Positioning="Positioning.After">
                     Show output log
                 </FluentTooltip>
@@ -28,7 +29,8 @@
             {
                 <div class="button-wrapper">
                     <FluentCounterBadge ShowEmpty="false" Dot="@(Service.HasNewStaging && !_showingStaging)" Color="BadgeColor.Brand"><AnchorContent>
-                        <FluentButton Id="buttonStaging"
+                        <FluentButton Id="@_stagingButtonId"
+                                      Style="@($"anchor-name: --{_stagingButtonId};")"
                                       IconStart="@(new Icons.Regular.Size24.HeartPulse())"
                                       Appearance="@(_showingStaging ?
                                                         ButtonAppearance.Primary :
@@ -38,7 +40,7 @@
                                                              "transparent")"
                                       OnClick="@(_ => TogglePanel(LogSection.Staging))"/>
                     </AnchorContent></FluentCounterBadge>
-                    <FluentTooltip Anchor="buttonStaging"
+                    <FluentTooltip Anchor="@_stagingButtonId"
                                    Positioning="Positioning.After">
                         Show lifecycle log
                     </FluentTooltip>
@@ -49,7 +51,8 @@
             {
                 <div class="button-wrapper">
                     <FluentCounterBadge ShowEmpty="false" Dot="@(Service.HasNewErrors && !_showingErrors)" Color="BadgeColor.Danger"><AnchorContent>
-                        <FluentButton Id="buttonStderr" 
+                        <FluentButton Id="@_errorButtonId"
+                                      Style="@($"anchor-name: --{_errorButtonId};")"
                                       IconStart="@(new Icons.Regular.Size24.Warning().WithColor(_showingErrors ? 
                                                                                                     "white" : 
                                                                                                     "var(--error)"))"
@@ -58,7 +61,7 @@
                                                              "transparent")"
                                       OnClick="@(_ => TogglePanel(LogSection.Errors))"/>
                         </AnchorContent></FluentCounterBadge>
-                    <FluentTooltip Anchor="buttonStderr" Positioning="Positioning.After">
+                    <FluentTooltip Anchor="@_errorButtonId" Positioning="Positioning.After">
                         Show error log
                     </FluentTooltip>
                 </div>
