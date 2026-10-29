@@ -176,7 +176,7 @@ public class ImportParticlesTests : IDisposable
         Assert.False(File.Exists(job.VisParticlesPath));
         Assert.Equal(-1, job.VisAvailableIteration);
 
-        var refine = new BeamRefine3D { Id = 2, Space = job.Space, CtfFit = BeamCtfFit.DefocusAndAberrations, Ewald = BeamEwald.Positive };
+        var refine = new BeamRefine3D { Id = 2, Space = job.Space, RefineDefocus = true, RefineAberrations = true, Ewald = BeamEwald.Positive };
         refine.PortsIn["Particles"].Edges.Add(new Edge { Source = job.PortsOut["Particles"], Target = refine.PortsIn["Particles"] });
         Assert.DoesNotContain("Particles", refine.ValidatePortInputs().Keys);
     }

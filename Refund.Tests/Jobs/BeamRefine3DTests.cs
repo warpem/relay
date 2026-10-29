@@ -1,3 +1,4 @@
+using System.Reflection;
 using Refund.DataModel;
 using Refund.JobResources;
 using Refund.Jobs.Refinement.Refinement3D.BeamRefine3D;
@@ -69,7 +70,7 @@ public class BeamRefine3DTests : IDisposable
         Assert.Equal("10", args["translation-range"]);
         Assert.Equal("box-center", args["local-pivot"]);
         Assert.Equal("0.08", args["denoise-alignment-fsc"]);
-        Assert.True(args.ContainsKey("dont-align-symmetry"));
+        Assert.False(args.ContainsKey("dont-align-symmetry"));
         Assert.False(args.ContainsKey("particle-diameter"));
         Assert.Empty(job.ValidatePortInputs());
     }
@@ -80,7 +81,7 @@ public class BeamRefine3DTests : IDisposable
         var job = NewJob();
         job.Device = BeamDevice.CPU;
         job.Ewald = BeamEwald.Negative;
-        job.CtfFit = BeamCtfFit.DefocusAndAberrations;
+        job.RefineDefocus = job.RefineAberrations = true;
         var args = job.ComposeCommandArguments();
         Assert.Equal(0, job.GpuCount);
         Assert.Equal(JobQueueType.CPU, job.QueueType);
@@ -88,7 +89,7 @@ public class BeamRefine3DTests : IDisposable
         Assert.True(args.ContainsKey("fit-defocus"));
         Assert.True(args.ContainsKey("fit-aberrations"));
         Assert.True(args.ContainsKey("defocus-range"));
-        job.CtfFit = BeamCtfFit.None;
+        job.RefineDefocus = job.RefineAberrations = false;
         Assert.False(job.ComposeCommandArguments().ContainsKey("defocus-range"));
         foreach (string field in new[] { nameof(job.LocalAngularRange), nameof(job.DenoiseAlignmentFsc), nameof(job.DefocusRange) })
             Assert.False(Job.IsPropertyVisible(typeof(BeamRefine3D), typeof(BeamRefine3D).GetProperty(field), job.AsReadOnly()));
@@ -183,6 +184,79 @@ public class BeamRefine3DTests : IDisposable
         var job = NewJob();
         job.AdditionalArguments = argument;
         Assert.Contains(nameof(job.AdditionalArguments), job.ValidateInputs().Keys);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void PairedHalfMapsTakePrecedenceOverAnAverageReference(bool withAverage)
+    {
+        var job = NewJob();
+        job.PortsIn["Reference"].Edges.Clear();
+        Connect(job.PortsIn["Reference"], new MapList([new Map(
+            half1VolumePath: "/data/half1.mrc", half2VolumePath: "/data/half2.mrc",
+            averageVolumePath: withAverage ? "/data/average.mrc" : null)]));
+        Assert.Empty(job.ValidatePortInputs());
+        var args = job.ComposeCommandArguments();
+        Assert.Equal("/data/half1.mrc", args["reference-half-1"]);
+        Assert.Equal("/data/half2.mrc", args["reference-half-2"]);
+        Assert.False(args.ContainsKey("reference"));
+    }
+
+    [Fact]
+    public void NewControlsComposeIndependentAberrationOrdersAndComputeDefaults()
+    {
+        var job = NewJob();
+        Assert.Equal(8, job.Workers);
+        Assert.Equal(8, job.CoreCount);
+        Assert.Equal("8", job.ComposeCommandArguments()["workers"]);
+        Assert.False(job.ComposeCommandArguments().ContainsKey("extra-iterations"));
+        job.RefineDefocus = true;
+        job.RefineAberrations = true;
+        job.AberrationOrder1 = job.AberrationOrder2 = job.AberrationOrder3 = job.AberrationOrder4 = false;
+        job.AberrationOrder5 = true;
+        job.FitMagnification = true;
+        job.ExtraIterations = 3;
+        job.AlwaysUseAllParticles = true;
+        job.SearchCacheFsc = 0.9m;
+        job.PoseMarginalizationTemperature = 0;
+        job.DontAlignSymmetry = true;
+        var args = job.ComposeCommandArguments();
+        Assert.Equal("5", args["aberration-orders"]);
+        Assert.True(args.ContainsKey("fit-defocus"));
+        Assert.True(args.ContainsKey("fit-aberrations"));
+        Assert.True(args.ContainsKey("fit-magnification"));
+        Assert.True(args.ContainsKey("dont-align-symmetry"));
+        Assert.True(args.ContainsKey("dont-autotune-particle-count"));
+        Assert.Equal("3", args["extra-iterations"]);
+        Assert.Equal("0.9", args["search-cache-fsc"]);
+        Assert.Equal("0", args["pose-marginalization-temperature"]);
+        job.AberrationOrder5 = false;
+        Assert.Contains(nameof(job.RefineAberrations), job.ValidateInputs().Keys);
+        job.AberrationOrder4 = true;
+        Assert.Equal("0,4", job.ComposeCommandArguments()["aberration-orders"]);
+    }
+
+    [Fact]
+    public void FieldVisibilityAndEditorsMatchTheRefinementControls()
+    {
+        var job = NewJob();
+        foreach (string name in new[] { nameof(job.CacheDirectory), nameof(job.FitMagnification), nameof(job.Ewald), nameof(job.DontAlignSymmetry) })
+            Assert.False(typeof(BeamRefine3D).GetProperty(name)!.GetCustomAttribute<UiFieldBase>()!.IsAdvanced);
+        foreach (string name in new[] { nameof(job.ExtraIterations), nameof(job.SearchCacheFsc), nameof(job.AlwaysUseAllParticles), nameof(job.PoseMarginalizationTemperature) })
+            Assert.True(typeof(BeamRefine3D).GetProperty(name)!.GetCustomAttribute<UiFieldBase>()!.IsAdvanced);
+        Assert.NotNull(typeof(BeamRefine3D).GetProperty(nameof(job.AdditionalArguments))!.GetCustomAttribute<UiString>());
+        var order = typeof(BeamRefine3D).GetProperty(nameof(job.AberrationOrder5))!;
+        Assert.False(Job.IsPropertyVisible(typeof(BeamRefine3D), order, job.AsReadOnly()));
+        job.RefineAberrations = true;
+        Assert.True(Job.IsPropertyVisible(typeof(BeamRefine3D), order, job.AsReadOnly()));
+        Connect(job.PortsIn["Mask"], new Mask("/data/mask.mrc"));
+        Assert.False(job.ComposeCommandArguments().ContainsKey("dont-align-symmetry"));
+        job.DontAlignSymmetry = true;
+        Assert.True(job.ComposeCommandArguments().ContainsKey("dont-align-symmetry"));
+        job.VisAvailableIteration = 1;
+        var mask = Assert.IsType<Mask>(job.PortsOut["Mask"].GetResource());
+        Assert.Equal(job.IterationFile(1, "mask_refinement.mrc"), mask.MaskVolumePath);
     }
 
     [Fact]

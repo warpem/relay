@@ -16,7 +16,6 @@ public enum BeamRegularization { FSC, Denoise, Blush }
 public enum BeamDevice { GPU, CPU }
 public enum BeamEwald { Off, Positive, Negative }
 public enum BeamLocalPivot { MaskCenter, BoundingBox, BoxCenter }
-public enum BeamCtfFit { None, Defocus, Aberrations, DefocusAndAberrations }
 
 /// <summary>Single-device Beam refinement. Only committed iterations are exposed to Relay.</summary>
 [GenerateReadOnly]
@@ -64,6 +63,22 @@ public class BeamRefine3D : Job, IClusterJob
         isAdvanced: true, ConditionalOnField = nameof(Regularization), ConditionalOnValue = BeamRegularization.Denoise)]
     [RelayProperty] public decimal DenoiseAlignmentFsc { get; set; } = 0.08m;
 
+    [UiInt("", "Extra iterations", min: -1, max: 100, isAdvanced: true,
+        helpText: "Iterations after convergence. -1 uses Beam's default: 0 for global refinement, 2 for local refinement.")]
+    [RelayProperty] public int ExtraIterations { get; set; } = -1;
+
+    [UiBool("dont-align-symmetry", "Don't align symmetry",
+        helpText: "Leave the starting reference frame unchanged. Otherwise Beam transforms both the reference and connected mask.",
+        ConditionalOnField = nameof(Alignment), ConditionalOnValue = BeamAlignment.Global)]
+    [RelayProperty] public bool DontAlignSymmetry { get; set; }
+
+    [UiBool("dont-autotune-particle-count", "Always use all particles", isAdvanced: true)]
+    [RelayProperty] public bool AlwaysUseAllParticles { get; set; }
+
+    [UiDecimal("pose-marginalization-temperature", "Pose marginalization temperature", min: 0, max: 100,
+        stepSize: 0.1, isAdvanced: true, helpText: "Scales the pose posterior covariance; 0 uses only the best pose.")]
+    [RelayProperty] public decimal PoseMarginalizationTemperature { get; set; } = 1;
+
     [UiFieldGroup("Alignment", 1)]
     [UiDecimal("local-angular-range", "Local angular range", min: 0.1, max: 60, stepSize: 0.1, unit: "°",
         ConditionalOnField = nameof(Alignment), ConditionalOnValue = BeamAlignment.Local)]
@@ -90,34 +105,62 @@ public class BeamRefine3D : Job, IClusterJob
         ConditionalOnField = nameof(Alignment), ConditionalOnValue = BeamAlignment.Local)]
     [RelayProperty] public bool LocalGaussianPriors { get; set; }
 
+    [UiDecimal("search-cache-fsc", "Search cache FSC", min: 0, max: 2, stepSize: 0.01,
+        isAdvanced: true, helpText: "Minimum reference agreement for reusing global-search candidates; values above 1 disable reuse.",
+        ConditionalOnField = nameof(Alignment), ConditionalOnValue = BeamAlignment.Global)]
+    [RelayProperty] public decimal SearchCacheFsc { get; set; } = 0.95m;
+
     [UiInt("beams", "Alignment candidates", min: 1, max: 64, isAdvanced: true)]
     [RelayProperty] public int Beams { get; set; } = 20;
 
     [UiFieldGroup("CTF", 2)]
-    [UiEnum("", "CTF refinement", typeof(BeamCtfFit),
-        helpText: "Optionally fit particle defocus, optics-group aberrations, or both during refinement.")]
-    [RelayProperty] public BeamCtfFit CtfFit { get; set; } = BeamCtfFit.None;
-
-    public bool FitsDefocus => CtfFit is BeamCtfFit.Defocus or BeamCtfFit.DefocusAndAberrations;
+    [UiBool("fit-defocus", "Refine defocus")]
+    [RelayProperty] public bool RefineDefocus { get; set; }
 
     [UiDecimal("defocus-range", "Defocus search range", min: 1, max: 10000, unit: "Å", isAdvanced: true,
-        ConditionalOnField = nameof(FitsDefocus), ConditionalOnValue = true)]
+        ConditionalOnField = nameof(RefineDefocus), ConditionalOnValue = true)]
     [RelayProperty] public decimal DefocusRange { get; set; } = 1000;
 
-    [UiBool("fit-magnification", "Refine anisotropic magnification", isAdvanced: true)]
-    [RelayProperty] public bool FitMagnification { get; set; }
-
-    [UiEnum("", "Ewald curvature", typeof(BeamEwald), isAdvanced: true,
+    [UiEnum("", "Ewald curvature", typeof(BeamEwald),
         helpText: "Positive and negative select opposite Ewald-sphere hands. Requires uncorrected particles with parametric CTF metadata.")]
     [RelayProperty] public BeamEwald Ewald { get; set; } = BeamEwald.Off;
 
-    [UiFieldGroup("Compute", 3)]
+    [UiFieldGroup("Aberrations", 3)]
+    [UiBool("fit-aberrations", "Refine aberrations",
+        helpText: "Fit only the selected radial orders. Even-order fits also include a constant phase offset.")]
+    [RelayProperty] public bool RefineAberrations { get; set; }
+
+    [UiBool("", "1st order (image shifts)",
+        ConditionalOnField = nameof(RefineAberrations), ConditionalOnValue = true)]
+    [RelayProperty] public bool AberrationOrder1 { get; set; } = true;
+
+    [UiBool("", "2nd order (defocus, astigmatism)",
+        helpText: "Even-order fits also include the constant phase-offset term.",
+        ConditionalOnField = nameof(RefineAberrations), ConditionalOnValue = true)]
+    [RelayProperty] public bool AberrationOrder2 { get; set; } = true;
+
+    [UiBool("", "3rd order (beam tilt/coma, trefoil)",
+        ConditionalOnField = nameof(RefineAberrations), ConditionalOnValue = true)]
+    [RelayProperty] public bool AberrationOrder3 { get; set; } = true;
+
+    [UiBool("", "4th order (spherical aberration, secondary astigmatism, tetrafoil)",
+        ConditionalOnField = nameof(RefineAberrations), ConditionalOnValue = true)]
+    [RelayProperty] public bool AberrationOrder4 { get; set; } = true;
+
+    [UiBool("", "5th order (secondary coma/trefoil, pentafoil)",
+        ConditionalOnField = nameof(RefineAberrations), ConditionalOnValue = true)]
+    [RelayProperty] public bool AberrationOrder5 { get; set; }
+
+    [UiBool("fit-magnification", "Refine anisotropic magnification")]
+    [RelayProperty] public bool FitMagnification { get; set; }
+
+    [UiFieldGroup("Compute", 4)]
     [UiEnum("", "Compute device", typeof(BeamDevice))]
     [RelayProperty] public BeamDevice Device { get; set; } = BeamDevice.GPU;
 
     [UiInt("workers", "CPU workers", min: 1, max: 256,
         helpText: "Concurrent processing batches and CPU thread budget. More workers also use more host and GPU memory.")]
-    [RelayProperty] public int Workers { get; set; } = 4;
+    [RelayProperty] public int Workers { get; set; } = 8;
 
     [UiInt("batch-size", "Particles per batch", min: 1, max: 4096, isAdvanced: true,
         helpText: "Reduce for large particle boxes or limited GPU memory.")]
@@ -126,11 +169,11 @@ public class BeamRefine3D : Job, IClusterJob
     [UiInt("", "Host memory", min: 1, max: 4096, unit: "GB")]
     [RelayProperty] public int Memory { get; set; } = 32;
 
-    [UiPath("cache-dir", "Particle scratch directory", SelectionMode.SingleFolder, isAdvanced: true,
+    [UiPath("cache-dir", "Particle scratch directory", SelectionMode.SingleFolder,
         helpText: "Optional node-local scratch for particle-stack caching. Queue variables such as $TMPDIR are supported.")]
     [RelayProperty] public string CacheDirectory { get; set; } = "";
 
-    [UiText("", "Additional arguments", isAdvanced: true,
+    [UiString("", "Additional arguments", isAdvanced: true,
         helpText: "Additional Beam options, e.g. --convergence-relative-improvement 0.005. Values may be quoted. Input/output paths, device, workers and resume are managed by Relay.")]
     [RelayProperty] public string AdditionalArguments { get; set; } = "";
 
@@ -184,9 +227,8 @@ public class BeamRefine3D : Job, IClusterJob
             fscStarPath: IterationFile(i, "model.star"), isAbsoluteScale: true)], IterationFile(i, "model.star"));
     }
 
-    private Mask GetMask(int iteration) => PortsIn["Mask"].Count > 0
-        ? PortsIn["Mask"].GetSingleResource<Mask>()
-        : new Mask(IterationFile(iteration < 0 ? VisAvailableIteration : iteration, "mask_refinement.mrc"));
+    private Mask GetMask(int iteration) =>
+        new(IterationFile(iteration < 0 ? VisAvailableIteration : iteration, "mask_refinement.mrc"));
 
     public override Dictionary<string, List<string>> ValidatePortInputs()
     {
@@ -198,15 +240,28 @@ public class BeamRefine3D : Job, IClusterJob
                     AddPortValidationError(errors, "Particles", "Beam requires extracted 2D particles in a single STAR file.");
                 if (Alignment == BeamAlignment.Local && (!particles.HasAngles || !particles.HasShifts))
                     AddPortValidationError(errors, "Particles", "Local refinement requires existing orientations and shifts.");
-                if ((CtfFit != BeamCtfFit.None || FitMagnification || Ewald != BeamEwald.Off) && !particles.HasCtf)
+                if ((RefineDefocus || RefineAberrations || FitMagnification || Ewald != BeamEwald.Off) && !particles.HasCtf)
                     AddPortValidationError(errors, "Particles", "CTF refinement and Ewald correction require particle CTF metadata.");
             }
         if (Alignment == BeamAlignment.Local && PortsIn["Mask"].Count == 0)
             AddPortValidationError(errors, "Mask", "Local refinement requires a mask.");
         var maps = PortsIn["Reference"].GetSingleResource<MapList>();
-        if (maps != null && (maps.Maps.Count != 1 || !maps.Maps[0].HasAverageVolume))
-            AddPortValidationError(errors, "Reference", "Connect one starting reference with an average map.");
+        if (maps != null && (maps.Maps.Count != 1 ||
+            !(maps.Maps[0].HasHalf1Volume && maps.Maps[0].HasHalf2Volume) && !maps.Maps[0].HasAverageVolume))
+            AddPortValidationError(errors, "Reference", "Connect one starting reference with paired half-maps or an average map.");
         return errors;
+    }
+
+    private int[] SelectedAberrationOrders()
+    {
+        var orders = new List<int>();
+        if (AberrationOrder2 || AberrationOrder4) orders.Add(0);
+        if (AberrationOrder1) orders.Add(1);
+        if (AberrationOrder2) orders.Add(2);
+        if (AberrationOrder3) orders.Add(3);
+        if (AberrationOrder4) orders.Add(4);
+        if (AberrationOrder5) orders.Add(5);
+        return orders.ToArray();
     }
 
     private static readonly HashSet<string> ManagedArguments = new(StringComparer.Ordinal)
@@ -222,6 +277,10 @@ public class BeamRefine3D : Job, IClusterJob
                 errors[nameof(AdditionalArguments)] = $"--{name} is managed by Relay; use the job fields and connections.";
         }
         catch (ArgumentException e) { errors[nameof(AdditionalArguments)] = e.Message; }
+        if (RefineAberrations && SelectedAberrationOrders().Length == 0)
+            errors[nameof(RefineAberrations)] = "Select at least one aberration order.";
+        if (ExtraIterations < -1)
+            errors[nameof(ExtraIterations)] = "Extra iterations must be -1 (automatic) or nonnegative.";
         if (Workers < 1 || Memory < 1 || BatchSize < 1)
             errors[nameof(Workers)] = "Workers, batch size and host memory must be positive.";
         return errors;
@@ -240,20 +299,25 @@ public class BeamRefine3D : Job, IClusterJob
             {
                 BeamLocalPivot.MaskCenter => "mass", BeamLocalPivot.BoundingBox => "bbox", _ => "box-center"
             };
-        if (FitsDefocus) args["fit-defocus"] = "";
-        if (CtfFit is BeamCtfFit.Aberrations or BeamCtfFit.DefocusAndAberrations) args["fit-aberrations"] = "";
+        if (ExtraIterations >= 0) args["extra-iterations"] = ExtraIterations.ToString(CultureInfo.InvariantCulture);
+        if (RefineAberrations)
+            args["aberration-orders"] = string.Join(",", SelectedAberrationOrders());
         var particles = ParticleInputs.Describe(PortsIn["Particles"])
             ?? throw new InvalidOperationException("Connect input particles.");
         var map = PortsIn["Reference"].GetSingleResource<MapList>()?.Maps.Single()
             ?? throw new InvalidOperationException("Connect one starting reference.");
         args["input"] = particles.ParticlesSingleStarPath;
-        args["reference"] = map.AverageVolumePath;
+        if (map.HasHalf1Volume && map.HasHalf2Volume)
+        {
+            args["reference-half-1"] = map.Half1VolumePath;
+            args["reference-half-2"] = map.Half2VolumePath;
+        }
+        else args["reference"] = map.AverageVolumePath;
         args["output"] = BeamDirectory;
         args["project-root"] = Space.RootDirectory;
         if (PortsIn["Mask"].Count > 0)
         {
             args["mask"] = PortsIn["Mask"].GetSingleResource<Mask>().MaskVolumePath;
-            args["dont-align-symmetry"] = "";
         }
         foreach (var (key, value) in BeamWrapper.ParseArguments(AdditionalArguments)) args[key] = value;
         args["show-progress"] = "";
