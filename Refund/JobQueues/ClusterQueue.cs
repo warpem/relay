@@ -104,7 +104,7 @@ public sealed class ClusterQueue : JobQueue
 
         string scriptPath = Path.Combine(job.DirectoryPath, "submit.sh");
         var command = new StringBuilder();
-        command.AppendLine($"cd {job.RunDirectory}\n");
+        command.AppendLine($"cd {JobTools.QuoteArgumentValue(job.RunDirectory)}\n");
         command.Append(job.CommandPrefix);
         command.Append($"{job.CommandName} {JobTools.ComposeArgumentString(job.ComposeCommandArguments())}");
         command.AppendLine(job.CommandSuffix);

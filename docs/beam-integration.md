@@ -1,16 +1,21 @@
 # Beam integration
 
 Particle import accepts RELION STAR or CryoSPARC `.cs` metadata. For CryoSPARC,
-select the primary file, the original project directory, and any passthrough
-files (one path per line). Relay runs `beam import --absolute-paths --check-stacks`
-locally and then uses the existing particle previews. Pixel data
-are referenced in place. Extraction coordinates retain the original micrograph
-frame and remain separate from alignment shifts.
+select the primary `.cs` file, the original project directory, and up to five
+optional passthrough files using separate `.cs` file pickers. RELION has its own
+`.star` picker and an optional project directory (defaults to the STAR file's
+directory). Relay submits `beam import --absolute-paths --check-stacks` for
+either format to a CPU cluster queue requiring the `beam` and `cpu` modules.
+After completion, Relay collects the STAR metadata and generates particle
+previews. Pixel data are referenced in place. Extraction coordinates retain
+the original micrograph frame and remain separate from alignment shifts.
 
-The local Relay process needs the updated `beam` executable on PATH. Refinement
-queues need Beam and its native CPU/CUDA backend, plus the updated Bakery
-package for visualization. The job requests the `beam` software module and
-either `gpu` or `cpu`; configure queue submission templates accordingly. GPU
+Beam is needed on the import/refinement compute nodes; the Relay server does
+not launch Beam. Queue submission templates must load `ml beam` for jobs
+requiring that module. The server still needs Bakery for result visualization
+and access to the shared inputs/results. Refinement queues need Beam and its
+native CPU/CUDA backend. The refinement job requests the `beam` software module
+and either `gpu` or `cpu`; configure queue submission templates accordingly. GPU
 refinement requests one GPU and uses its scheduler-visible `cuda:0` device.
 
 `BeamRefine3D` accepts one or more particle resources, one starting reference,

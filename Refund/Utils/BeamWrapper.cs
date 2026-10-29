@@ -1,9 +1,8 @@
-using System.Diagnostics;
 using System.Text;
 
 namespace Refund.Utils;
 
-/// <summary>Local metadata conversion; refinement runs through the normal cluster queue.</summary>
+/// <summary>Command-line helpers for Beam cluster jobs.</summary>
 public static class BeamWrapper
 {
     internal static Dictionary<string, string> ParseArguments(string arguments)
@@ -41,45 +40,5 @@ public static class BeamWrapper
                 i + 1 < tokens.Count && !tokens[i + 1].StartsWith("--") ? tokens[++i] : "";
         }
         return result;
-    }
-
-    internal static ProcessStartInfo ImportStartInfo(IEnumerable<string> metadataPaths, string projectRoot, string output)
-    {
-        var info = new ProcessStartInfo("beam")
-        {
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true
-        };
-        foreach (string arg in new[] { "import", "--project-root", Path.GetFullPath(projectRoot),
-                     "--output", Path.GetFullPath(output), "--absolute-paths", "--check-stacks", "--input" })
-            info.ArgumentList.Add(arg);
-        foreach (string path in metadataPaths)
-            info.ArgumentList.Add(path);
-        return info;
-    }
-
-    public static void ImportParticles(IEnumerable<string> metadataPaths, string projectRoot, string output,
-        TextWriter logger, string errorPath, CancellationToken token)
-    {
-        token.ThrowIfCancellationRequested();
-        using var process = new Process { StartInfo = ImportStartInfo(metadataPaths, projectRoot, output) };
-        process.Start();
-        using var registration = token.Register(() =>
-        {
-            try { process.Kill(entireProcessTree: true); }
-            catch (InvalidOperationException) { }
-        });
-        var stdout = process.StandardOutput.ReadToEndAsync();
-        var stderr = process.StandardError.ReadToEndAsync();
-        process.WaitForExit();
-        logger.Write(stdout.GetAwaiter().GetResult());
-        string errors = stderr.GetAwaiter().GetResult();
-        File.WriteAllText(errorPath, errors);
-        logger.Flush();
-        token.ThrowIfCancellationRequested();
-        if (process.ExitCode != 0)
-            throw new InvalidOperationException($"Beam particle import failed (exit code {process.ExitCode}): {errors.Trim()}");
     }
 }
