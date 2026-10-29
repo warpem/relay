@@ -24,7 +24,7 @@ public class ImportParticles : Job, IClusterJob
     public override string[] SupportedModules => ["beam", "cpu"];
     public override string[] RequiredModules => ["beam", "cpu"];
     public override int GpuCount => 0;
-    public override int CoreCount => 1;
+    public override int CoreCount => Workers;
     public override int ProcessCount => 1;
     public override int MemoryGb => Memory;
     public override bool IsIterative => false;
@@ -103,6 +103,11 @@ public class ImportParticles : Job, IClusterJob
     public string AdditionalMetadataFile5 { get; set; } = "";
 
     [UiFieldGroup("Compute", 1)]
+    [UiInt("", "Workers", min: 1, max: 64,
+        helpText: "Concurrent particle-stack header reads. More workers can hide shared-filesystem latency.")]
+    [RelayProperty]
+    public int Workers { get; set; } = 8;
+
     [UiInt("", "Host memory", min: 1, max: 4096, unit: "GB")]
     [RelayProperty]
     public int Memory { get; set; } = 8;
@@ -150,6 +155,7 @@ public class ImportParticles : Job, IClusterJob
                     errors[file.Name] = "Select a .cs metadata file or leave this field empty.";
         }
         if (Memory < 1) errors[nameof(Memory)] = "Host memory must be positive.";
+        if (Workers < 1 || Workers > 64) errors[nameof(Workers)] = "Use between 1 and 64 workers.";
         return errors;
     }
 
@@ -169,6 +175,7 @@ public class ImportParticles : Job, IClusterJob
         {
             ["project-root"] = Path.GetFullPath(root, Space.RootDirectory),
             ["output"] = ImportedParticlesPath,
+            ["workers"] = Workers.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["absolute-paths"] = "",
             ["check-stacks"] = ""
         };

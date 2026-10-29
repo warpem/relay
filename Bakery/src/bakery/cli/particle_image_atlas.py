@@ -1,13 +1,13 @@
 from pathlib import Path
 
 import einops
-import mrcfile
 import numpy as np
 import pandas as pd
 import starfile
 import typer
 from matplotlib import pyplot as plt
 
+from ..particle_images import read_particle_images
 from ._cli import cli
 
 
@@ -29,27 +29,7 @@ def particle_image_atlas(
     rng = np.random.default_rng(seed=44)
     image_names = image_names.iloc[rng.choice(len(image_names), size=n_images)]
 
-    # split into index and path
-    df = image_names.str.split('@', expand=True)
-    df.columns = ['index', 'path']
-    df['index'] = df['index'].astype(int) - 1
-
-    # construct a mapping from each image file to a memory mapped array
-    # containing particle image data
-    unique_image_files = df['path'].unique()
-    path_to_image = {
-        image_file: mrcfile.mmap(image_file, mode='r').data
-        for image_file
-        in unique_image_files
-    }
-
-    # get batch of images and transform into to one big images with individual images
-    # arranged in a row
-    particle_images = [
-        path_to_image[image['path']][image['index']]
-        for _, image
-        in df.iterrows()
-    ]
+    particle_images = read_particle_images(image_names)
     particle_image_atlas = einops.rearrange(particle_images, 'b h w -> h (b w)')
 
     # render, ensuring that 1px in image is 1px in rendered output

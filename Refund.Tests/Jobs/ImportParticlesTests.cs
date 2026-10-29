@@ -72,7 +72,7 @@ public class ImportParticlesTests : IDisposable
         Assert.Equal(JobQueueType.CPU, job.QueueType);
         Assert.Equal(new[] { "beam", "cpu" }, job.RequiredModules);
         Assert.Equal(0, job.GpuCount);
-        Assert.Equal(1, job.CoreCount);
+        Assert.Equal(8, job.CoreCount);
         Assert.Equal("beam import", job.CommandName);
         job.FilePath = "/data/particles.star";
         var args = job.ComposeCommandArguments();
@@ -80,6 +80,13 @@ public class ImportParticlesTests : IDisposable
         Assert.Equal(job.ImportedParticlesPath, args["output"]);
         Assert.True(args.ContainsKey("absolute-paths"));
         Assert.True(args.ContainsKey("check-stacks"));
+        Assert.Equal("8", args["workers"]);
+        job.Workers = 16;
+        Assert.Equal(16, job.CoreCount);
+        Assert.Equal("16", job.ComposeCommandArguments()["workers"]);
+        job.Workers = 0;
+        Assert.Contains(nameof(job.Workers), job.ValidateInputs().Keys);
+        job.Workers = 8;
         job.RelionProjectDirectory = "/data/relion_project";
         Assert.Equal(job.RelionProjectDirectory, job.ComposeCommandArguments()["project-root"]);
     }
@@ -117,10 +124,12 @@ public class ImportParticlesTests : IDisposable
         job.AdditionalMetadataFile5 = "/source project/passthrough.cs";
         var queue = new ClusterQueue
         {
-            SubmissionScriptTemplate = "{{cpu}}# cpu import\n{{/cpu}}{{beam}}ml beam\n{{/beam}}{{gpu}}# gpu-only\n{{/gpu}}{{command}}"
+            SubmissionScriptTemplate = "#SBATCH --cpus-per-task {{n_cores}}\n{{cpu}}# cpu import\n{{/cpu}}{{beam}}ml beam\n{{/beam}}{{gpu}}# gpu-only\n{{/gpu}}{{command}}"
         };
         string script = await File.ReadAllTextAsync(await queue.PrepareAndWriteScript(job, Guid.NewGuid()));
         Assert.Contains("ml beam", script);
+        Assert.Contains("#SBATCH --cpus-per-task 8", script);
+        Assert.Contains("--workers \"8\"", script);
         Assert.DoesNotContain("gpu-only", script);
         Assert.Contains("cd \"" + _root + "\"", script);
         Assert.Contains("beam import", script);
@@ -192,6 +201,15 @@ public class ImportParticlesTests : IDisposable
         Assert.Equal("Imported results\n", File.ReadAllText(job.LogFilePath(0)));
         Assert.Equal("warning\n", File.ReadAllText(job.ErrorFilePath));
         Assert.Equal(0, job.LogsAvailableIteration);
+    }
+
+    [Fact]
+    public void CarriageReturnProgressCollapsesToItsLatestUpdate()
+    {
+        var job = NewJob();
+        Write(job.PathStdOut, "Read 50000 particles\n\rChecking: 1/100\rChecking: 50/100\rChecking: 100/100\nImported results\n");
+        job.TrackProgressLogs()!.Invoke();
+        Assert.Equal("Read 50000 particles\nChecking: 100/100\nImported results\n", File.ReadAllText(job.LogFilePath(0)));
     }
 
     [Fact]

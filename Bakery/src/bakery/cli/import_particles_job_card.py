@@ -2,13 +2,13 @@ from pathlib import Path
 from typing import List
 
 import matplotlib
-import mrcfile
 import numpy as np
 import pandas as pd
 import starfile
 import typer
 from matplotlib import pyplot as plt
 
+from ..particle_images import read_particle_images
 from ._cli import cli
 
 
@@ -34,26 +34,7 @@ def import_particles_job_card(
     subset_idx = rng.choice(n_particles_in_star_file, size=n_particle_images)
     image_names = image_names.iloc[subset_idx]
 
-    # split image names into index and path
-    df = image_names.str.split('@', expand=True)
-    df.columns = ['index', 'path']
-    df['index'] = df['index'].astype(int) - 1
-
-    # construct a mapping from each image file to a memory mapped array
-    # containing particle image data
-    unique_image_files = df['path'].unique()
-    path_to_image = {
-        image_file: mrcfile.mmap(image_file, mode='r').data
-        for image_file
-        in unique_image_files
-    }
-
-    # get batch of images
-    particle_image_subset = np.stack([
-        path_to_image[image['path']][image['index']]
-        for _, image
-        in df.iterrows()
-    ]).astype(np.float64)
+    particle_image_subset = np.stack(read_particle_images(image_names)).astype(np.float64)
 
     # normalize
     idx_nonzero = np.abs(particle_image_subset) > 1e-8
