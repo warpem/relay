@@ -61,7 +61,7 @@
     {
         <div @key="_selectedQueue" class="editor-main">
             <div class="script-editor">
-                <span style="font-weight: bold;">Submission script template</span>
+                <span id="queue-submission-script-label" style="font-weight: bold;">Submission script template</span>
                 
                 <div class="variable-chips">
                     Available variables:
@@ -86,6 +86,7 @@
                 </div>
                 
                 <CodeEditor @ref="_submissionScriptEditor" 
+                            LabelledBy="queue-submission-script-label"
                             Value="@_selectedQueue.SubmissionScriptTemplate"
                             ValueExpression="@(() => _selectedQueue.SubmissionScriptTemplate)"
                             ValueChanged="HandleSubmissionScriptTemplateChanged"

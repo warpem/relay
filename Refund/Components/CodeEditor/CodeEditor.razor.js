@@ -86,8 +86,9 @@ function debounce(func, wait) {
  * @param {Object} state - The editor instance state
  */
 function updateContent(value, state) {
-    // Update content with a trailing newline for proper line number rendering
-    const content = (value?.trimEnd() ?? "") + "\n";
+    // Preserve blank lines and indentation so the highlighted layer matches the textarea.
+    // An extra newline keeps the final editable line visible in the pre element.
+    const content = (value ?? "") + "\n";
     state.codeElement.innerHTML = escapeHtml(content);
 
     // Apply syntax highlighting

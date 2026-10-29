@@ -32,6 +32,12 @@ public partial class CodeEditor : InputBase<string>, IAsyncDisposable
     /// Placeholder text to display when the editor is empty.
     /// </summary>
     [Parameter] public string Placeholder { get; set; } = "";
+
+    /// <summary>
+    /// ID of the visible label for the textarea. An explicit label also prevents
+    /// autofill heuristics from treating nearby template variables as field labels.
+    /// </summary>
+    [Parameter] public string? LabelledBy { get; set; }
     
     /// <summary>
     /// Whether the editor is disabled/read-only.
