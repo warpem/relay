@@ -210,7 +210,7 @@ public class BeamRefine3D : Job, IClusterJob
     }
 
     private static readonly HashSet<string> ManagedArguments = new(StringComparer.Ordinal)
-    { "i", "input", "o", "output", "project-root", "resume", "device", "j", "workers", "reference", "reference-half-1", "reference-half-2", "mask" };
+    { "i", "input", "o", "output", "project-root", "resume", "device", "j", "workers", "reference", "reference-half-1", "reference-half-2", "mask", "show-progress", "dont-show-progress" };
 
     public override Dictionary<string, string> ValidateInputs()
     {
@@ -256,7 +256,7 @@ public class BeamRefine3D : Job, IClusterJob
             args["dont-align-symmetry"] = "";
         }
         foreach (var (key, value) in BeamWrapper.ParseArguments(AdditionalArguments)) args[key] = value;
-        args["dont-show-progress"] = "";
+        args["show-progress"] = "";
         return args;
     }
 
@@ -269,14 +269,14 @@ public class BeamRefine3D : Job, IClusterJob
                 File.Exists(IterationFile(i, "half2_class001_unfiltered.mrc")))
             .Order().ToArray();
 
-    private long _stdoutLength = -1;
     public override Action TrackProgressLogs()
     {
         var stderrUpdate = base.TrackProgressLogs();
         if (!File.Exists(PathStdOut)) return stderrUpdate;
-        long length = new FileInfo(PathStdOut).Length;
-        if (length == _stdoutLength && File.Exists(LogFilePath(Math.Max(0, LogsAvailableIteration)))) return stderrUpdate;
-        string[] lines = File.ReadAllText(PathStdOut).Split('\n');
+        // Force-read on final collection too: shared-filesystem length metadata
+        // can lag behind the last progress update. Preserve one current bar line.
+        string[] lines = JobTools.CleanProgressBarLines(
+            File.ReadAllText(PathStdOut).Replace("\r\n", "\n").Split('\n'));
         var starts = new SortedDictionary<int, int> { [0] = 0 };
         for (int index = 0; index < lines.Length; index++)
         {
@@ -289,7 +289,6 @@ public class BeamRefine3D : Job, IClusterJob
             int end = section + 1 < sections.Length ? sections[section + 1].Value : lines.Length;
             JobTools.WriteLogFile(string.Join('\n', lines[sections[section].Value..end]), LogFilePath(sections[section].Key));
         }
-        _stdoutLength = length;
         int latest = starts.Keys.Max();
         return () => { stderrUpdate?.Invoke(); LogsAvailableIteration = latest; };
     }

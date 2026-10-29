@@ -44,6 +44,8 @@ public class BeamRefine3DTests : IDisposable
         Assert.False(args.ContainsKey("ewald"));
         Assert.False(args.ContainsKey("local-angular-range"));
         Assert.False(args.ContainsKey("resume"));
+        Assert.True(args.ContainsKey("show-progress"));
+        Assert.False(args.ContainsKey("dont-show-progress"));
         Assert.False(args.ContainsKey("mask"));
         Assert.Equal(1, job.GpuCount);
         Assert.Equal(1, job.ProcessCount);
@@ -142,6 +144,45 @@ public class BeamRefine3DTests : IDisposable
         Assert.Equal(2, reloaded.VisAvailableIteration);
         Assert.True(reloaded.HasRunToCompletion);
         Assert.Equal(job.LogFilePath(2), reloaded.LogFilePath(2));
+    }
+
+    [Fact]
+    public void LiveProgressIsCollapsedWithinItsIterationAndWarningsStaySeparate()
+    {
+        var job = NewJob();
+        Write(job.PathStdOut, "setup\r\n=== Iteration 1 ===\r\n" +
+            "\rParticles: 10% 10/100 [00:01<00:09, 10particle/s]" +
+            "\rParticles: 50% 50/100 [00:05<00:05, 10particle/s]");
+        Write(job.PathStdErr, "warning\n");
+        job.TrackProgressLogs()!.Invoke();
+        Assert.Equal(1, job.LogsAvailableIteration);
+        Assert.Equal("setup", File.ReadAllText(job.LogFilePath(0)));
+        string first = File.ReadAllText(job.LogFilePath(1));
+        Assert.Contains("50/100 [00:05<00:05, 10particle/s]", first);
+        Assert.DoesNotContain("10/100", first);
+        Assert.DoesNotContain('\r', first);
+        Assert.Equal("warning\n", File.ReadAllText(job.ErrorFilePath));
+
+        File.AppendAllText(job.PathStdOut,
+            "\rParticles: 100% 100/100 [00:10<00:00, 10particle/s]\n" +
+            "=== Iteration 2 ===\n\rParticles: 25% 25/100 [00:01<00:03, 25particle/s]");
+        job.TrackProgressLogs()!.Invoke();
+        Assert.Equal(2, job.LogsAvailableIteration);
+        first = File.ReadAllText(job.LogFilePath(1));
+        Assert.Contains("100/100", first);
+        Assert.DoesNotContain("50/100", first);
+        Assert.DoesNotContain("25/100", first);
+        Assert.Contains("25/100", File.ReadAllText(job.LogFilePath(2)));
+    }
+
+    [Theory]
+    [InlineData("--show-progress")]
+    [InlineData("--dont-show-progress")]
+    public void ProgressRoutingIsManagedByRelay(string argument)
+    {
+        var job = NewJob();
+        job.AdditionalArguments = argument;
+        Assert.Contains(nameof(job.AdditionalArguments), job.ValidateInputs().Keys);
     }
 
     [Fact]
