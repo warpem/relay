@@ -151,6 +151,28 @@ public class ImportParticlesTests : IDisposable
     }
 
     [Fact]
+    public void LogsAreRefreshedAfterEmptyStartupAndWithoutDependingOnFileLength()
+    {
+        var job = NewJob();
+        Write(job.PathStdOut, "");
+        Write(job.PathStdErr, "");
+        job.TrackProgressLogs()!.Invoke();
+        Assert.Equal("", File.ReadAllText(job.LogFilePath(0)));
+
+        Write(job.PathStdOut, "Reading metadata\n");
+        job.TrackProgressLogs()!.Invoke();
+        Assert.Equal("Reading metadata\n", File.ReadAllText(job.LogFilePath(0)));
+
+        // Same length: content collection must not depend on an observed size change.
+        Write(job.PathStdOut, "Imported results\n");
+        Write(job.PathStdErr, "warning\n");
+        job.TrackProgressLogs()!.Invoke();
+        Assert.Equal("Imported results\n", File.ReadAllText(job.LogFilePath(0)));
+        Assert.Equal("warning\n", File.ReadAllText(job.ErrorFilePath));
+        Assert.Equal(0, job.LogsAvailableIteration);
+    }
+
+    [Fact]
     public void MetadataDetectionPreservesPositionsAndResetsFlagsOnReimport()
     {
         var job = NewJob();

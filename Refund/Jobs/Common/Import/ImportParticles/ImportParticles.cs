@@ -197,18 +197,16 @@ public class ImportParticles : Job, IClusterJob
         HasScale = HasScale
     };
 
-    private long _stdoutLength = -1;
-
     public override Action TrackProgressLogs()
     {
         var stderrUpdate = base.TrackProgressLogs();
         if (!File.Exists(PathStdOut)) return stderrUpdate;
-        if (JobTools.HasLogFileChanged(PathStdOut, ref _stdoutLength) || !File.Exists(LogFilePath(0)))
-        {
-            JobTools.WriteLogFile(File.ReadAllText(PathStdOut), LogFilePath(0));
-            return () => { stderrUpdate?.Invoke(); LogsAvailableIteration = 0; };
-        }
-        return stderrUpdate;
+        // Like WarpJob, read stdout on every poll, including the final collection.
+        // Import logs are small, and cached file lengths on cluster filesystems
+        // must not prevent the last output from reaching Relay's own log.
+        var lines = JobTools.CleanProgressBarLines(File.ReadAllText(PathStdOut).Split('\n'));
+        JobTools.WriteLogFile(string.Join('\n', lines), LogFilePath(0));
+        return () => { stderrUpdate?.Invoke(); LogsAvailableIteration = 0; };
     }
 
     public override Action TrackProgressResults()
