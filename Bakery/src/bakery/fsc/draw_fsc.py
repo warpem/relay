@@ -12,7 +12,15 @@ def draw_fsc(
     fsc_values = data.fsc
     
     # plot the FSC curve
-    ax.plot(resolution_inv, fsc_values, color='black')
+    ax.plot(resolution_inv, fsc_values, color='black',
+            label='Gold standard' if data.fsc_unmasked is None else
+                  ('Corrected' if data.fsc_masked is not None else 'Unmasked'))
+    if data.fsc_masked is not None:
+        ax.plot(resolution_inv, data.fsc_unmasked, label='Unmasked', alpha=0.65)
+        ax.plot(resolution_inv, data.fsc_masked, label='Masked', alpha=0.65)
+        if data.fsc_phase_randomized is not None:
+            ax.plot(resolution_inv, data.fsc_phase_randomized, label='Phase randomized', alpha=0.65)
+        ax.legend(fontsize=8)
 
     # add 0.143 threshold line
     ax.axhline(y=0.143, color='red', linestyle='--', alpha=0.7, linewidth=1)
@@ -47,6 +55,11 @@ def draw_fsc(
             resolution_text = f'{highest_res:.1f}'
     
     # add resolution as title
+    if data.fsc_unmasked is not None:
+        # Beam's controller has its own supported-band/crossing policy. Use its
+        # published estimate rather than selecting a different crossing here.
+        resolution_text = (f'{data.estimated_resolution:.1f}'
+                           if data.estimated_resolution is not None else 'unresolved')
     ax.set_title(f'Resolution: {resolution_text}\u2009Å', fontsize=14, pad=10)
 
     # format the x axis labels

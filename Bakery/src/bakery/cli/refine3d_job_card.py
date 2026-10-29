@@ -11,6 +11,7 @@ from matplotlib import pyplot as plt
 
 from ._cli import cli
 from ..orthoslices.slice import take_slice
+from ..fsc.fsc_data_model import FscData
 
 
 @cli.command(no_args_is_help=True, help="map slice and FSC curves from RELION refinement")
@@ -20,7 +21,8 @@ def refine3d_job_card(
     output_file: Path = typer.Option(...),
 ):
     # parse star file for FSC curve
-    star = starfile.read(model_star_file)
+    star = starfile.read(model_star_file, always_dict=True)
+    fsc_data = FscData.from_model_tables(star)
 
     # grab volume slice
     slice = take_slice(mrcfile.mmap(volume_file).data, axis='z', thickness=1)
@@ -28,7 +30,7 @@ def refine3d_job_card(
     # plot...
     fig, axs = plt.subplots(ncols=2, figsize=(2, 1))
     draw_z_slice_panel(ax=axs[0], image=slice)
-    draw_fsc_panel(ax=axs[1], df=star['model_class_1'])
+    draw_fsc_panel(ax=axs[1], df=star['model_class_1'], estimated_resolution=fsc_data.estimated_resolution)
 
     # write output file
     dpi = 2 * 144
@@ -39,7 +41,7 @@ def refine3d_job_card(
     # write PDF with vector FSC curves
     pdf_fig, pdf_axs = plt.subplots(ncols=2, figsize=(8, 4))
     draw_z_slice_panel(ax=pdf_axs[0], image=slice)
-    _draw_fsc_on_axes(pdf_axs[1], star['model_class_1'])
+    _draw_fsc_on_axes(pdf_axs[1], star['model_class_1'], fsc_data.estimated_resolution)
     pdf_fig.tight_layout(pad=0.5)
     pdf_fig.savefig(str(output_file.with_suffix('.pdf')))
     plt.close(pdf_fig)
@@ -62,24 +64,26 @@ def draw_z_slice_panel(
     ax.axis('off')
 
 
-def draw_fsc_panel(ax: matplotlib.axes.Axes, df: pd.DataFrame):
-    fsc_image = _generate_fsc_plot_image(df=df)
+def draw_fsc_panel(ax: matplotlib.axes.Axes, df: pd.DataFrame, estimated_resolution: float | None = None):
+    fsc_image = _generate_fsc_plot_image(df=df, estimated_resolution=estimated_resolution)
     ax.imshow(fsc_image, interpolation='sinc')
     ax.axis('off')
 
 
-def _draw_fsc_on_axes(ax: matplotlib.axes.Axes, df: pd.DataFrame):
+def _draw_fsc_on_axes(ax: matplotlib.axes.Axes, df: pd.DataFrame, estimated_resolution: float | None = None):
     """Draw FSC curves directly on the given axes (vector-compatible)."""
     # prepare data
     resolution_inv = 1 / df['rlnAngstromResolution']
-    fsc_values = df['rlnGoldStandardFsc']
+    fsc_data = FscData.from_model_frame(df)
+    fsc_values = pd.Series(fsc_data.fsc)
 
     # gold standard
     ax.plot(
         resolution_inv,
         fsc_values,
         color='#3d916a',  # seaborn colorblind dark green
-        label='Gold Standard FSC'
+        label='Gold Standard FSC' if fsc_data.fsc_unmasked is None else
+              ('Corrected FSC' if fsc_data.fsc_masked is not None else 'Unmasked FSC')
     )
 
     # add 0.143 threshold line
@@ -116,6 +120,9 @@ def _draw_fsc_on_axes(ax: matplotlib.axes.Axes, df: pd.DataFrame):
             highest_res = df['rlnAngstromResolution'].min()
             label_text = f'{highest_res:.1f}\u2009Å'
 
+    if fsc_data.fsc_unmasked is not None:
+        label_text = f'{estimated_resolution:.1f}\u2009Å' if estimated_resolution is not None else 'unresolved'
+
     ax.text(
         xlim[1] * 0.95,
         1.0,
@@ -146,11 +153,11 @@ def _draw_fsc_on_axes(ax: matplotlib.axes.Axes, df: pd.DataFrame):
     ax.grid(True)
 
 
-def _generate_fsc_plot_image(df: pd.DataFrame):
+def _generate_fsc_plot_image(df: pd.DataFrame, estimated_resolution: float | None = None):
     # render to a file buffer
     with plt.rc_context({'font.size': 12}):
         fig, _ax = plt.subplots(figsize=(4, 4))
-        _draw_fsc_on_axes(_ax, df)
+        _draw_fsc_on_axes(_ax, df, estimated_resolution)
         fig.tight_layout(pad=0.2)
 
         buffer = BytesIO()

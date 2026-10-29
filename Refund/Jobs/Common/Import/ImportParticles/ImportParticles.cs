@@ -9,10 +9,12 @@ using Warp.Tools;
 
 namespace Refund.Jobs.Common.Import.ImportParticles;
 
+public enum ParticleMetadataFormat { Relion, CryoSparc }
+
 /// <summary>
 /// Job for importing particle datasets into the system.
-/// This job handles RELION-style .star files containing particle metadata and references to 
-/// particle image stacks, making them available for further processing and classification.
+/// Accepts RELION STAR or CryoSPARC metadata referencing extracted particle stacks.
+/// CryoSPARC conversion and stack validation are delegated to Beam.
 /// </summary>
 /// <remarks>
 /// Particles are the individual extracted protein/complex images that are used in 3D reconstruction.
@@ -117,16 +119,34 @@ public class ImportParticles : Job, ILocalJob
     #region Parameters
 
     /// <summary>
-    /// Gets or sets the path to the particle star file to be imported.
-    /// Must point to a valid RELION format star file containing particle metadata.
+    /// Gets or sets the primary particle metadata file (.star or .cs).
     /// </summary>
     [UiFieldGroup("Parameters", 0)]
+    [UiEnum("", "Metadata format", typeof(ParticleMetadataFormat))]
+    [RelayProperty]
+    public ParticleMetadataFormat MetadataFormat { get; set; } = ParticleMetadataFormat.Relion;
+
     [UiPath("", "File path",
             SelectionMode.SingleFile,
-            ["*.star", ],
+            ["*.star", "*.cs"],
             helpText: "Path to the particle metadata to be imported.")]
     [RelayProperty]
     public string FilePath { get; set; } = "";
+
+    [UiPath("", "CryoSPARC project directory", SelectionMode.SingleFolder,
+        helpText: "Project directory containing the particle stacks referenced by the .cs metadata.",
+        ConditionalOnField = nameof(MetadataFormat), ConditionalOnValue = ParticleMetadataFormat.CryoSparc)]
+    [RelayProperty]
+    public string CryoSparcProjectDirectory { get; set; } = "";
+
+    [UiText("", "Additional CryoSPARC metadata",
+        helpText: "Optional passthrough .cs files, one path per line. Paths may be relative to the CryoSPARC project directory.",
+        ConditionalOnField = nameof(MetadataFormat), ConditionalOnValue = ParticleMetadataFormat.CryoSparc)]
+    [RelayProperty]
+    public string AdditionalMetadataPaths { get; set; } = "";
+
+    public string[] CryoSparcMetadataPaths => new[] { FilePath }.Concat(
+        AdditionalMetadataPaths.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)).ToArray();
     
     
     #endregion
@@ -140,6 +160,17 @@ public class ImportParticles : Job, ILocalJob
     /// Gets the path where the visualization of imported particles will be stored.
     /// </summary>
     public string VisParticlesPath => Path.Combine(RelayResultsDirectoryPath, "visualization.png");
+
+    internal void DetectMetadata(IEnumerable<string> columns)
+    {
+        var names = columns.ToHashSet();
+        HasAngles = names.Contains("rlnAnglePsi");
+        HasCtf = names.Contains("rlnDefocusU");
+        HasClasses = names.Contains("rlnClassNumber");
+        HasShifts = names.Contains("rlnOriginX") || names.Contains("rlnOriginXAngst");
+        HasPositions = names.Contains("rlnCoordinateX") || names.Contains("rlnCoordinateXAngst");
+        HasScale = names.Contains("rlnScale") || names.Contains("rlnNormCorrection");
+    }
 
     /// <summary>
     /// Initializes a new instance of the ImportParticles job.
@@ -165,12 +196,16 @@ public class ImportParticles : Job, ILocalJob
     public override Dictionary<string, string> ValidateInputs()
     {
         var errors = new Dictionary<string, string>();
-        // var propertyName = nameof(FilePath);
-        // var property = typeof(ImportParticles).GetProperty(propertyName);
-        // var uiPath = property?.GetCustomAttributes(typeof(UiPath), false).FirstOrDefault() as UiPath;
-        // errors[propertyName] = Helper.ValidatePath(FilePath, uiPath?.FileExtensions);
-
-        //TODO: Implement validation for the rest of the parameters
+        string extension = MetadataFormat == ParticleMetadataFormat.CryoSparc ? ".cs" : ".star";
+        if (string.IsNullOrWhiteSpace(FilePath) || !FilePath.EndsWith(extension, StringComparison.OrdinalIgnoreCase))
+            errors[nameof(FilePath)] = $"Select a {extension} particle metadata file.";
+        if (MetadataFormat == ParticleMetadataFormat.CryoSparc)
+        {
+            if (string.IsNullOrWhiteSpace(CryoSparcProjectDirectory))
+                errors[nameof(CryoSparcProjectDirectory)] = "Specify the CryoSPARC project directory.";
+            if (CryoSparcMetadataPaths.Any(path => !path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)))
+                errors[nameof(AdditionalMetadataPaths)] = "Each metadata path must name a .cs file.";
+        }
         return errors;
     }
 
@@ -214,117 +249,117 @@ public class ImportParticles : Job, ILocalJob
                 string stackForVis = null;
                 
                 logger.WriteLine($"Importing particles from {FilePath}");
-                
-                logger.Write("Figuring out image file location and saving the updated table... ");
+
+                if (MetadataFormat == ParticleMetadataFormat.CryoSparc)
                 {
-                    Star tableIn = null;
-                    Star tableOptics = null;
-
-                    // Handle both old-style and new-style (multi-table) STAR files
-                    if (Star.IsMultiTable(FilePath))
-                    {
-                        tableIn = new(FilePath, "particles");
-                        tableOptics = new(FilePath, "optics");
-                    }
-                    else
-                        tableIn = new(FilePath);
-
-                    if (tableIn.RowCount == 0)
-                        throw new Exception("The particle table is empty.");
-
-                    if (!tableIn.HasColumn("rlnImageName"))
-                        throw new Exception("The particle table does not contain the 'rlnImageName' column.");
-
-                    // Auto-detect what metadata is available in the STAR file
-                    if (tableIn.HasColumn("rlnAnglePsi"))
-                        HasAngles = true;
-
-                    if (tableIn.HasColumn("rlnDefocusU"))
-                        HasCtf = true;
-
-                    if (tableIn.HasColumn("rlnClassNumber"))
-                        HasClasses = true;
-
-                    if (tableIn.HasColumn("rlnOriginX") || tableIn.HasColumn("rlnOriginXAngst"))
-                        HasShifts = true;
-
-                    if (tableIn.HasColumn("rlnCoordinateX") || tableIn.HasColumn("rlnCoordinateXAngst"))
-                        HasPositions = true;
-
-                    if (tableIn.HasColumn("rlnScale"))
-                        HasScale = true;
-
-                    string[] columnImageNames = tableIn.GetColumn("rlnImageName");
-                    string originalFolder = Path.GetDirectoryName(FilePath);
-                    string pathCorrection = "";
-
-                    // Try to find the image file in various locations - look up to 3 levels up
-                    // from the STAR file location to find the referenced image stacks
-                    {
-                        string[] parts = columnImageNames[0].Split("@", StringSplitOptions.RemoveEmptyEntries|StringSplitOptions.TrimEntries);
-
-                        if (parts.Length != 2)
-                            throw new Exception($"Expected particle addresses to be in the format 'path@filename', got {columnImageNames[0]} instead.");
-
-                        string fileName = parts[1];
-
-                        if (File.Exists(Path.Combine(originalFolder, fileName)))
-                            pathCorrection = "";
-                        else if (File.Exists(Path.Combine(originalFolder, "..", fileName)))
-                            pathCorrection = "..";
-                        else if (File.Exists(Path.Combine(originalFolder, "..", "..", fileName)))
-                            pathCorrection = Path.Combine("..", "..");
-                        else if (File.Exists(Path.Combine(originalFolder, "..", "..", "..", fileName)))
-                            pathCorrection = Path.Combine("..", "..", "..");
-                        else
-                            throw new Exception($"Could not find the particle file {fileName} up to 3 directory levels above the table location.");
-                        
-                        originalFolder = Path.GetFullPath(Path.Combine(originalFolder, pathCorrection));
-                    }
-                    
-                    // Update all image paths to use absolute paths
-                    Dictionary<string, int> allStackPaths = new();
-                    
-                    for (int i = 0; i < columnImageNames.Length; i++)
-                    {
-                        string[] parts = columnImageNames[i].Split("@", StringSplitOptions.RemoveEmptyEntries|StringSplitOptions.TrimEntries);
-
-                        if (parts.Length != 2)
-                            throw new Exception($"Expected particle addresses to be in the format 'id@filename', got {columnImageNames[i]} instead.");
-
-                        string fileName = parts[1];
-                        string newFileName = Path.GetFullPath(Path.Combine(originalFolder, fileName));
-
-                        columnImageNames[i] = $"{parts[0]}@{newFileName}";
-
-                        if (!allStackPaths.ContainsKey(newFileName))
-                            allStackPaths.Add(newFileName, 0);
-
-                        allStackPaths[newFileName]++;
-                    }
-                    tableIn.SetColumn("rlnImageName", columnImageNames);
-
-                    // Find the stack with the most particles for visualization
-                    int maxStackSize = allStackPaths.Select(kv => kv.Value).Max();
-                    
-                    foreach (var stack in allStackPaths)
-                    {
-                        if (!File.Exists(stack.Key))
-                            throw new Exception($"Could not find the particle file {stack}.");
-                        
-                        if (stack.Value == maxStackSize)
-                            stackForVis = stack.Key;
-                    }
-
-                    // Save the updated STAR file with absolute paths
-                    if (tableOptics != null)
-                        Star.SaveMultitable(ImportedParticlesPath,
-                                            new() { { "optics", tableOptics }, { "particles", tableIn } });
-                    else
-                        Star.SaveMultitable(ImportedParticlesPath,
-                                            new() { { "particles", tableIn } });
+                    BeamWrapper.ImportParticles(CryoSparcMetadataPaths, CryoSparcProjectDirectory,
+                        ImportedParticlesPath, logger, ErrorFilePath, token);
+                    // Beam already resolved and checked the stacks. Keep its complete STAR
+                    // instead of rewriting it with the legacy whitespace-only Warp reader.
+                    var imported = new Refund.Utils.Star.StreamingStar(ImportedParticlesPath, token);
+                    var particles = imported.FindBlock("particles")
+                        ?? throw new InvalidDataException("Beam did not write a particle table.");
+                    if (particles.RowCount == 0)
+                        throw new InvalidDataException("The particle table is empty.");
+                    DetectMetadata(particles.Columns);
                 }
-                logger.WriteLine("Done.");
+                else
+                {
+                    string metadataPath = FilePath;
+                    logger.Write("Figuring out image file location and saving the updated table... ");
+                    {
+                        Star tableIn = null;
+                        Star tableOptics = null;
+
+                        // Handle both old-style and new-style (multi-table) STAR files
+                        if (Star.IsMultiTable(metadataPath))
+                        {
+                            tableIn = new(metadataPath, "particles");
+                            tableOptics = new(metadataPath, "optics");
+                        }
+                        else
+                            tableIn = new(metadataPath);
+
+                        if (tableIn.RowCount == 0)
+                            throw new Exception("The particle table is empty.");
+
+                        if (!tableIn.HasColumn("rlnImageName"))
+                            throw new Exception("The particle table does not contain the 'rlnImageName' column.");
+
+                        DetectMetadata(tableIn.GetColumnNames());
+
+                        string[] columnImageNames = tableIn.GetColumn("rlnImageName");
+                        string originalFolder = Path.GetDirectoryName(metadataPath);
+                        string pathCorrection = "";
+
+                        // Try to find the image file in various locations - look up to 3 levels up
+                        // from the STAR file location to find the referenced image stacks
+                        {
+                            string[] parts = columnImageNames[0].Split("@", StringSplitOptions.RemoveEmptyEntries|StringSplitOptions.TrimEntries);
+
+                            if (parts.Length != 2)
+                                throw new Exception($"Expected particle addresses to be in the format 'path@filename', got {columnImageNames[0]} instead.");
+
+                            string fileName = parts[1];
+
+                            if (File.Exists(Path.Combine(originalFolder, fileName)))
+                                pathCorrection = "";
+                            else if (File.Exists(Path.Combine(originalFolder, "..", fileName)))
+                                pathCorrection = "..";
+                            else if (File.Exists(Path.Combine(originalFolder, "..", "..", fileName)))
+                                pathCorrection = Path.Combine("..", "..");
+                            else if (File.Exists(Path.Combine(originalFolder, "..", "..", "..", fileName)))
+                                pathCorrection = Path.Combine("..", "..", "..");
+                            else
+                                throw new Exception($"Could not find the particle file {fileName} up to 3 directory levels above the table location.");
+                        
+                            originalFolder = Path.GetFullPath(Path.Combine(originalFolder, pathCorrection));
+                        }
+                    
+                        // Update all image paths to use absolute paths
+                        Dictionary<string, int> allStackPaths = new();
+                    
+                        for (int i = 0; i < columnImageNames.Length; i++)
+                        {
+                            string[] parts = columnImageNames[i].Split("@", StringSplitOptions.RemoveEmptyEntries|StringSplitOptions.TrimEntries);
+
+                            if (parts.Length != 2)
+                                throw new Exception($"Expected particle addresses to be in the format 'id@filename', got {columnImageNames[i]} instead.");
+
+                            string fileName = parts[1];
+                            string newFileName = Path.GetFullPath(Path.Combine(originalFolder, fileName));
+
+                            columnImageNames[i] = $"{parts[0]}@{newFileName}";
+
+                            if (!allStackPaths.ContainsKey(newFileName))
+                                allStackPaths.Add(newFileName, 0);
+
+                            allStackPaths[newFileName]++;
+                        }
+                        tableIn.SetColumn("rlnImageName", columnImageNames);
+
+                        // Find the stack with the most particles for visualization
+                        int maxStackSize = allStackPaths.Select(kv => kv.Value).Max();
+                    
+                        foreach (var stack in allStackPaths)
+                        {
+                            if (!File.Exists(stack.Key))
+                                throw new Exception($"Could not find the particle file {stack}.");
+                        
+                            if (stack.Value == maxStackSize)
+                                stackForVis = stack.Key;
+                        }
+
+                        // Save the updated STAR file with absolute paths
+                        if (tableOptics != null)
+                            Star.SaveMultitable(ImportedParticlesPath,
+                                                new() { { "optics", tableOptics }, { "particles", tableIn } });
+                        else
+                            Star.SaveMultitable(ImportedParticlesPath,
+                                                new() { { "particles", tableIn } });
+                    }
+                    logger.WriteLine("Done.");
+                }
 
                 logger.Write("Preparing visualization... ");
                 {

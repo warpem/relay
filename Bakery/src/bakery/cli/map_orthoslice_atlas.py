@@ -76,4 +76,5 @@ def map_orthoslice_atlas(
 def _resize(image: np.ndarray):
     h, w = image.shape
     zoom_factors = (256 / h, 256 / w)
-    return ndimage.zoom(image, zoom_factors, order=3)
+    # Beam may publish float16 MRC maps; SciPy's spline filter requires float32/64.
+    return ndimage.zoom(image.astype(np.float32, copy=False), zoom_factors, order=3)

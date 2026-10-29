@@ -61,6 +61,9 @@ public class JobTaxonomyTests
         ["CreateMask"]             = "Refinement.Masks.Create mask",
         ["PostProcess"]            = "Refinement.Post-process.Post-process",
 
+        // Beam
+        ["BeamRefine3D"]           = "💥 Beam.💥 Refine 3D",
+
         // M
         ["CreatePopulation"]       = "M.Create population",
         ["CreateDataSource"]       = "M.Create data source",
@@ -101,7 +104,7 @@ public class JobTaxonomyTests
     }
 
     [Fact]
-    public void MenuHierarchy_HasFiveTopLevelGroups()
+    public void MenuHierarchy_HasSixTopLevelGroups()
     {
         EnsurePopulated();
 
@@ -111,7 +114,7 @@ public class JobTaxonomyTests
                      .ToArray();
 
         Assert.Equal(
-            new[] { "Common", "Frame-series", "M", "Refinement", "Tilt-series" },
+            new[] { "Common", "Frame-series", "M", "Refinement", "Tilt-series", "💥 Beam" },
             top);
     }
 }

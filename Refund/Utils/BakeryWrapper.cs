@@ -45,6 +45,13 @@ public static class BakeryWrapper
             WorkingDirectory = workingDirectory
         });
 
+    private static void RunArguments(IEnumerable<string> arguments, string workingDirectory = "")
+    {
+        var info = new ProcessStartInfo("bakery") { WorkingDirectory = workingDirectory };
+        foreach (string argument in arguments) info.ArgumentList.Add(argument);
+        RunCommand(info);
+    }
+
     internal static void RunCommand(ProcessStartInfo startInfo)
     {
         ProcessSemaphore.Wait(); // Block if maximum concurrent processes reached
@@ -97,11 +104,8 @@ public static class BakeryWrapper
         int sliceThicknessPx,
         string outputFile)
     {
-        RunCommand(
-            $"map-orthoslice-atlas --volume-file {volumeFile} " +
-            $"--slice-thickness-px {sliceThicknessPx} " +
-            $"--output-file {outputFile}"
-        );
+        RunArguments(["map-orthoslice-atlas", "--volume-file", volumeFile,
+            "--slice-thickness-px", sliceThicknessPx.ToString(), "--output-file", outputFile]);
     }
 
     /// <summary>
@@ -184,11 +188,8 @@ public static class BakeryWrapper
         string outputFile
     )
     {
-        RunCommand(
-            $"fsc --input-type relion_model_star " +
-            $"--metadata-file {starFile} " +
-            $"--output-file {outputFile}"
-        );
+        RunArguments(["fsc", "--input-type", "relion_model_star", "--metadata-file", starFile,
+            "--output-file", outputFile]);
     }
 
     /// <summary>
@@ -272,22 +273,19 @@ public static class BakeryWrapper
         string symmetry = null
     )
     {
-        var command = "orientation-and-fourier-sampling " +
-                      $"--particles-file {particlesFile} " +
-                      "--input-type relion_star_file " +
-                      "--grid-resolution 2 " +
-                      "--colormap chrisluts:I_Orange ";
+        var arguments = new List<string> { "orientation-and-fourier-sampling", "--particles-file", particlesFile,
+            "--input-type", "relion_star_file", "--grid-resolution", "2", "--colormap", "chrisluts:I_Orange" };
 
         if(!String.IsNullOrEmpty(symmetry))
-            command += $"--symmetry {symmetry} ";
+            arguments.AddRange(["--symmetry", symmetry]);
 
         if(!String.IsNullOrEmpty(outputOrientationFile))
-            command += $"--output-orientation-file {outputOrientationFile} ";
+            arguments.AddRange(["--output-orientation-file", outputOrientationFile]);
 
         if(!String.IsNullOrEmpty(outputFourierSamplingFile))
-            command += $"--output-fourier-sampling-file {outputFourierSamplingFile} ";
+            arguments.AddRange(["--output-fourier-sampling-file", outputFourierSamplingFile]);
 
-        RunCommand(command);
+        RunArguments(arguments);
     }
 
     /// <summary>
@@ -600,12 +598,8 @@ public static class BakeryWrapper
         string outputImageFile
     )
     {
-        var command = "refine3d-job-card " +
-                      $"--volume-file {volumeFile} " +
-                      $"--model-star-file {modelStarFile} " +
-                      $"--output-file {outputImageFile} ";
-
-        RunCommand(command);
+        RunArguments(["refine3d-job-card", "--volume-file", volumeFile, "--model-star-file", modelStarFile,
+            "--output-file", outputImageFile]);
     }
 
     /// <summary>
@@ -644,13 +638,12 @@ public static class BakeryWrapper
         string workingDirectory
     )
     {
-        var command = "import-particles-job-card " +
-                      $"--output-file {outputImageFile} ";
+        var arguments = new List<string> { "import-particles-job-card", "--output-file", outputImageFile };
         
         foreach (var file in particleStarFiles)
-            command += $"--particle-star-file \"{file}\" ";
+            arguments.AddRange(["--particle-star-file", file]);
         
-        RunCommand(command, workingDirectory: workingDirectory);
+        RunArguments(arguments, workingDirectory);
     }
     
     public static void TsEtomoJobCard(
