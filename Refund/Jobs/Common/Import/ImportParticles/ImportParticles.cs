@@ -211,18 +211,36 @@ public class ImportParticles : Job, IClusterJob
 
     public override Action TrackProgressResults()
     {
-        if (VisAvailableIteration >= 0 || !File.Exists(PathSuccess)) return null;
+        // Beam publishes this file atomically. It is already complete when it
+        // appears; waiting for the later SUCCESS marker can miss collection at
+        // scheduler completion on a shared filesystem.
+        if (!HasRunToCompletion)
+        {
+            try
+            {
+                // Open rather than gating on File.Exists: close-to-open consistency
+                // refreshes shared-filesystem attributes before STAR indexing.
+                using var published = File.OpenRead(ImportedParticlesPath);
+                var imported = new Refund.Utils.Star.StreamingStar(ImportedParticlesPath, CancellationToken.None);
+                var particles = imported.FindBlock("particles")
+                    ?? throw new InvalidDataException("Beam did not write a particle table.");
+                if (particles.RowCount == 0 || !particles.Columns.Contains("rlnImageName"))
+                    throw new InvalidDataException("Beam did not write a non-empty particle image table.");
+                string[] columns = particles.Columns.ToArray();
+                // Persist capabilities before attempting preview generation. Downstream
+                // jobs must not lose CTF/pose information when a preview is unavailable.
+                return () => { DetectMetadata(columns); HasRunToCompletion = true; };
+            }
+            catch (FileNotFoundException) { return null; }
+            catch (DirectoryNotFoundException) { return null; }
+        }
+        if (VisAvailableIteration >= 0) return null;
         Directory.CreateDirectory(RelayResultsDirectoryPath);
-        var imported = new Refund.Utils.Star.StreamingStar(ImportedParticlesPath, CancellationToken.None);
-        var particles = imported.FindBlock("particles")
-            ?? throw new InvalidDataException("Beam did not write a particle table.");
-        if (particles.RowCount == 0 || !particles.Columns.Contains("rlnImageName"))
-            throw new InvalidDataException("Beam did not write a non-empty particle image table.");
-        string[] columns = particles.Columns.ToArray();
         if (!File.Exists(VisParticlesPath))
             BakeryWrapper.ParticleImageAtlas(Space.RootDirectory, [ImportedParticlesPath], 20, VisParticlesPath);
         if (!File.Exists(VisCard(0)))
             BakeryWrapper.ImportParticlesJobCard([ImportedParticlesPath], VisCard(0), Space.RootDirectory);
-        return () => { DetectMetadata(columns); VisAvailableIteration = 0; };
+        return () => VisAvailableIteration = 0;
     }
+
 }

@@ -4,6 +4,7 @@ using Refund.DataModel;
 using Refund.JobResources;
 using Refund.JobQueues;
 using Refund.Jobs.Common.Import.ImportParticles;
+using Refund.Jobs.Refinement.Refinement3D.BeamRefine3D;
 using Refund.UIFields;
 using Refund.Utils;
 
@@ -135,12 +136,13 @@ public class ImportParticlesTests : IDisposable
         Write(job.VisCard(0), "card");
         Write(job.PathStdOut, "Imported 1 particle\n");
         Write(job.PathStdErr, "warning\n");
-        Assert.Null(job.TrackProgressResults());
-        Write(job.PathSuccess, "");
         job.TrackProgressLogs()!.Invoke();
         job.TrackProgressResults()!.Invoke();
         Assert.True(job.HasPositions);
         Assert.True(job.HasCtf);
+        Assert.True(job.HasRunToCompletion);
+        Assert.Equal(-1, job.VisAvailableIteration);
+        job.TrackProgressResults()!.Invoke();
         Assert.Equal(0, job.VisAvailableIteration);
         Assert.Equal("Imported 1 particle\n", File.ReadAllText(job.LogFilePath(0)));
         Assert.Equal("warning\n", File.ReadAllText(job.ErrorFilePath));
@@ -148,6 +150,26 @@ public class ImportParticlesTests : IDisposable
         var particles = Assert.IsType<ParticleSet>(job.PortsOut["Particles"].GetResource());
         Assert.True(particles.HasPositions);
         Assert.Equal(job.ImportedParticlesPath, particles.ParticlesSingleStarPath);
+    }
+
+    [Fact]
+    public void PublishedMetadataEnablesDownstreamCtfBeforePreviewsOrSuccessMarker()
+    {
+        var job = NewJob();
+        Assert.Null(job.TrackProgressResults());
+        Write(job.ImportedParticlesPath, "data_particles\n\nloop_\n_rlnImageName #1\n_rlnDefocusU #2\n_rlnDefocusV #3\n_rlnDefocusAngle #4\n_rlnAnglePsi #5\n_rlnOriginXAngst #6\n_rlnCoordinateX #7\n1@/data/stack.mrcs 10000 11000 20 30 1 50\n");
+        job.TrackProgressResults()!.Invoke();
+        Assert.True(job.HasCtf);
+        Assert.True(job.HasAngles);
+        Assert.True(job.HasShifts);
+        Assert.True(job.HasPositions);
+        Assert.False(File.Exists(job.PathSuccess));
+        Assert.False(File.Exists(job.VisParticlesPath));
+        Assert.Equal(-1, job.VisAvailableIteration);
+
+        var refine = new BeamRefine3D { Id = 2, Space = job.Space, CtfFit = BeamCtfFit.DefocusAndAberrations, Ewald = BeamEwald.Positive };
+        refine.PortsIn["Particles"].Edges.Add(new Edge { Source = job.PortsOut["Particles"], Target = refine.PortsIn["Particles"] });
+        Assert.DoesNotContain("Particles", refine.ValidatePortInputs().Keys);
     }
 
     [Fact]
