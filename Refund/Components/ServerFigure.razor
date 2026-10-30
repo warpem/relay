@@ -2,21 +2,10 @@
 @inject FileService FileService
 
 <figure class="theme-figure">
-    <figcaption>
-        <span>@Title</span>
-        @if (_downloads.Count > 0)
-        {
-            <details>
-                <summary aria-label="Download @Title">Download</summary>
-                <div class="figure-downloads">
-                    @foreach (var (label, path) in _downloads)
-                    {
-                        <a href="@Url(path)" download="@System.IO.Path.GetFileName(path)">@label</a>
-                    }
-                </div>
-            </details>
-        }
-    </figcaption>
+    @if (ShowTitle)
+    {
+        <figcaption>@Title</figcaption>
+    }
     @if (_imagePath != null)
     {
         <img src="@Url(_imagePath)" alt="@Title" />
@@ -33,22 +22,16 @@
     [Parameter] public string CacheKey { get; set; }
 
     private string _imagePath;
-    private readonly List<(string Label, string Path)> _downloads = new();
+    [Parameter] public bool ShowTitle { get; set; } = true;
 
     protected override void OnParametersSet()
     {
         _imagePath = null;
-        _downloads.Clear();
         if (string.IsNullOrWhiteSpace(ServerPath)) return;
         string svg = System.IO.Path.ChangeExtension(ServerPath, ".svg");
         if (File.Exists(svg)) _imagePath = svg;
         else if (File.Exists(ServerPath)) _imagePath = ServerPath;
-        foreach (var item in new[] {
-            ("SVG · adaptive", svg),
-            ("SVG · light", System.IO.Path.ChangeExtension(ServerPath, ".light.svg")),
-            ("SVG · dark", System.IO.Path.ChangeExtension(ServerPath, ".dark.svg")),
-            ("PNG", System.IO.Path.ChangeExtension(ServerPath, ".png")) })
-            if (File.Exists(item.Item2)) _downloads.Add(item);
+
     }
 
     private string Url(string path) => FileService.GetUrl(path) +

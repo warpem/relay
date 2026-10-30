@@ -12,11 +12,14 @@
 .map-section h3 { font-size: 1rem; margin: 0 0 0.5rem; }
 .map-viewer { height: 480px; width: 100%; }
 .quality-section { display: grid; gap: 1.5rem; }
-.sampling-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.orthoslices { width: 100%; max-width: 960px; align-self: center; }
+.sampling-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 2fr); gap: 1rem; }
 .refine3d-view-container { container-type: inline-size; }
 @container (max-width: 650px) {
     .reconstruction-row { grid-template-columns: minmax(0, 1fr); }
     .map-viewer { height: 360px; }
+    .sampling-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .sampling-row ::deep .theme-figure:last-child { grid-column: 1 / -1; }
 }
 @container (max-width: 440px) {
     .sampling-row { grid-template-columns: minmax(0, 1fr); }

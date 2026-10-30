@@ -12,7 +12,7 @@ public sealed class ServerFigureTests : IDisposable
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "relay figure " + Guid.NewGuid());
 
     [Fact]
-    public async Task PrefersAdaptiveSvgAndOffersFixedDownloads()
+    public async Task PrefersAdaptiveSvgWithoutDownloadControls()
     {
         Directory.CreateDirectory(_directory);
         string png = Path.Combine(_directory, "fsc.png");
@@ -21,9 +21,8 @@ public sealed class ServerFigureTests : IDisposable
         await Render(png, (html, files) =>
         {
             Assert.Contains($"src=\"{files.GetUrl(Path.ChangeExtension(png, ".svg"))}?v=iteration-7\"", html);
-            Assert.Contains("download=\"fsc.light.svg\"", html);
-            Assert.Contains("download=\"fsc.dark.svg\"", html);
-            Assert.Contains("download=\"fsc.png\"", html);
+            Assert.DoesNotContain("<details", html);
+            Assert.DoesNotContain("download=", html);
             Assert.Contains("alt=\"Fourier shell correlation\"", html);
             Assert.Contains("theme-figure", html);
         });

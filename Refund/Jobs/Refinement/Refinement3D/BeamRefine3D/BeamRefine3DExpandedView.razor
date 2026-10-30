@@ -21,7 +21,9 @@ else
         @if (!_showCtf)
         {
             <div id="beam-map-panel" class="figure-panel" role="tabpanel" aria-labelledby="beam-map-tab">
-                <ServerFigure ServerPath="@_job.VisFilteredSlices(Iteration)" Title="Map orthoslices" CacheKey="@CacheKey" />
+                <div class="orthoslices">
+                    <ServerFigure ServerPath="@_job.VisFilteredSlices(Iteration)" Title="Map orthoslices" CacheKey="@CacheKey" />
+                </div>
                 <div class="reconstruction-row">
                     @{
                         string path3dVolume = _job.VisMap3d(Iteration);
@@ -36,17 +38,17 @@ else
                         }
                     }
                     <div class="quality-section">
-                        <ServerFigure ServerPath="@_job.VisFsc(Iteration)" Title="Fourier shell correlation" CacheKey="@CacheKey" />
-                        <div class="sampling-row">
-                            <ServerFigure ServerPath="@_job.VisAngularDistribution(Iteration)" Title="Angular distribution" CacheKey="@CacheKey" />
-                            <ServerFigure ServerPath="@_job.VisFourierSampling(Iteration)" Title="Fourier sampling" CacheKey="@CacheKey" />
-                        </div>
+                        <ServerFigure ServerPath="@_job.VisFsc(Iteration)" Title="Fourier shell correlation" ShowTitle="false" CacheKey="@CacheKey" />
                     </div>
                 </div>
-                @if (_diagnostics?.History == true)
-                {
-                    <ServerFigure ServerPath="@_job.VisHistory(Iteration)" Title="Refinement history" CacheKey="@CacheKey" />
-                }
+                <div class="sampling-row">
+                    <ServerFigure ServerPath="@_job.VisAngularDistribution(Iteration)" Title="Angular distribution" CacheKey="@CacheKey" />
+                    <ServerFigure ServerPath="@_job.VisFourierSampling(Iteration)" Title="Fourier sampling" CacheKey="@CacheKey" />
+                    @if (_diagnostics?.History == true)
+                    {
+                        <ServerFigure ServerPath="@_job.VisHistory(Iteration)" Title="Refinement history" CacheKey="@CacheKey" />
+                    }
+                </div>
             </div>
         }
         else if (_diagnostics?.Ctf is { } ctf)

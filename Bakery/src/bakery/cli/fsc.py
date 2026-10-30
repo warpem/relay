@@ -31,7 +31,7 @@ def fsc(
         raise NotImplementedError(input_type)
 
     # plot...
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(6.4, 3.2), layout="constrained")
     draw_fsc(ax, data=fsc_data, directional_file=directional_fsc_file)
 
     # write output file

@@ -46,8 +46,8 @@ slices, FSC, orientation and Fourier sampling figures. The adaptive `.svg`
 contains light/dark CSS and embedded raster data; Relay sets the embedding
 `color-scheme` from its selected theme, including manual overrides. Density
 pixels and heatmap colors stay unchanged. `.light.svg` and `.dark.svg` contain
-literal colors for stable downloads into other applications. The figure's
-Download menu exposes all available variants, including the original PNG.
+literal colors for stable downloads into other applications. Figures can be saved through the browser image context menu. Fixed-theme
+variants and the original PNG remain available in the job outputs.
 Job-card PNG/PDF generation is unchanged.
 
 Directional FSC's 10–90% band and published directional range/cFAR are included
