@@ -120,6 +120,10 @@ public class BeamRefine3DTests : IDisposable
                 Write(job.IterationFile(i, suffix), "committed");
             foreach (string path in new[] { job.VisCard(i), job.VisFilteredSlices(i), job.VisFsc(i), job.VisAngularDistribution(i), job.VisFourierSampling(i) })
                 Write(path, "visualized");
+            foreach (string path in new[] { job.VisFilteredSlices(i), job.VisFsc(i), job.VisAngularDistribution(i), job.VisFourierSampling(i) })
+                foreach (string extension in new[] { ".svg", ".light.svg", ".dark.svg" })
+                    Write(Path.ChangeExtension(path, extension), "visualized");
+            Write(job.VisDiagnostics(i), "{\"version\":1,\"history\":false,\"ctf\":null}");
         }
         Directory.CreateDirectory(Path.Combine(job.BeamDirectory, ".it003.staging-1"));
         Directory.CreateDirectory(Path.Combine(job.BeamDirectory, "it003"));
@@ -145,6 +149,18 @@ public class BeamRefine3DTests : IDisposable
         Assert.Equal(2, reloaded.VisAvailableIteration);
         Assert.True(reloaded.HasRunToCompletion);
         Assert.Equal(job.LogFilePath(2), reloaded.LogFilePath(2));
+    }
+
+    [Fact]
+    public void FigureCollectionRequiresBothFixedThemeDownloads()
+    {
+        string png = Path.Combine(_root, "fsc.png");
+        Write(png, "png");
+        Write(Path.ChangeExtension(png, ".svg"), "adaptive");
+        Write(Path.ChangeExtension(png, ".light.svg"), "light");
+        Assert.False(BeamRefine3D.FigureFilesReady(png));
+        Write(Path.ChangeExtension(png, ".dark.svg"), "dark");
+        Assert.True(BeamRefine3D.FigureFilesReady(png));
     }
 
     [Fact]

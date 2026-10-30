@@ -13,9 +13,8 @@ def test_orthoslices(tmpdir):
     completed_process = subprocess.run(
         [
             'bakery',
-            'orthoslices',
-            '--layout', 'horizontal',
-            '--slice-thickness-angstroms', '10',
+            'map-orthoslice-atlas',
+            '--slice-thickness-px', '10',
             '--volume-file', f'{volume_file}',
             '--output-file', f'{image_file}',
         ]

@@ -59,6 +59,11 @@ html:has(body:is([data-theme="dark"], [data-theme="system-dark"])) {
     --relay-badge-background: #3b3b3b;
 }
 
+/* SVG <img> media queries inherit the chosen embedding color scheme, including
+   Relay's manual override rather than only the operating-system preference. */
+.theme-figure { color-scheme: light; }
+body:is([data-theme="dark"], [data-theme="system-dark"]) .theme-figure { color-scheme: dark; }
+
 /* V4 normal-density text buttons: 10px sides, 11px between icon and text.
    Leave v5's explicitly requested small/large sizes and icon-only layout intact. */
 fluent-button:not([icon-only]):not([size="small"]):not([size="large"]) {

@@ -1,0 +1,9 @@
+.theme-figure { margin: 0; min-width: 0; width: 100%; }
+figcaption { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; margin-bottom: 0.5rem; }
+figcaption > span { font-weight: 600; }
+img { display: block; width: 100%; height: auto; }
+details { position: relative; flex-shrink: 0; font-size: 0.85rem; }
+summary { cursor: pointer; color: var(--colorNeutralForeground2); }
+.figure-downloads { position: absolute; right: 0; z-index: 5; min-width: 10rem; display: grid; padding: 0.5rem; background: var(--colorNeutralBackground1); border: 1px solid var(--colorNeutralStroke1); border-radius: 4px; }
+.figure-downloads a { padding: 0.4rem; white-space: nowrap; }
+.figure-unavailable { color: var(--colorNeutralForeground2); }

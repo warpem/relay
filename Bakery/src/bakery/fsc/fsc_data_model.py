@@ -13,6 +13,9 @@ class FscData:
     fsc_unmasked: np.ndarray | None = None
     fsc_phase_randomized: np.ndarray | None = None
     estimated_resolution: float | None = None
+    directional_best: float | None = None
+    directional_worst: float | None = None
+    cfar: float | None = None
 
     @classmethod
     def from_relion_postprocess_star(cls, path: Path):
@@ -31,6 +34,14 @@ class FscData:
             resolution = float(classes['rlnEstimatedResolution'].iloc[0])
             if np.isfinite(resolution) and resolution > 0:
                 result.estimated_resolution = resolution
+        if classes is not None:
+            for field, column in [('directional_best', 'rlnDirectionalBestResolution'),
+                                  ('directional_worst', 'rlnDirectionalWorstResolution'),
+                                  ('cfar', 'rlnCylindricalFscAreaRatio')]:
+                if column in classes and len(classes):
+                    value = float(classes[column].iloc[0])
+                    if np.isfinite(value):
+                        setattr(result, field, value)
         return result
 
     @classmethod

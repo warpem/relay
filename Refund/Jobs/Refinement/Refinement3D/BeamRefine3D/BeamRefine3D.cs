@@ -187,6 +187,11 @@ public class BeamRefine3D : Job, IClusterJob
     public string VisAngularDistribution(int i) => Path.Combine(RelayResultsDirectoryPath, $"angles_it{i:D4}.png");
     public string VisFourierSampling(int i) => Path.Combine(RelayResultsDirectoryPath, $"sampling_it{i:D4}.png");
     public string VisMap3d(int i) => IterationFile(i < 0 ? VisAvailableIteration : i, "class001.mrc");
+    public string VisDiagnostics(int i) => Path.Combine(RelayResultsDirectoryPath, $"diagnostics_it{i:D4}.json");
+    public string VisHistory(int i) => Path.Combine(RelayResultsDirectoryPath, $"history_it{i:D4}.svg");
+    public string VisCtf(int i) => Path.Combine(RelayResultsDirectoryPath, $"ctf_it{i:D4}.svg");
+    public string VisCtfGroup(int i, int group) => Path.Combine(RelayResultsDirectoryPath, $"ctf_it{i:D4}_group{group}.svg");
+    public string VisCtfOptics(int i) => Path.Combine(RelayResultsDirectoryPath, $"ctf_it{i:D4}_optics.tsv");
 
     public BeamRefine3D()
     {
@@ -361,23 +366,38 @@ public class BeamRefine3D : Job, IClusterJob
     {
         Directory.CreateDirectory(RelayResultsDirectoryPath);
         int latest = VisAvailableIteration;
+        bool generated = false;
         foreach (int i in CommittedIterations())
         {
-            if (File.Exists(VisCard(i)) && File.Exists(VisFilteredSlices(i)) && File.Exists(VisFsc(i)) &&
-                File.Exists(VisAngularDistribution(i)) && File.Exists(VisFourierSampling(i)))
+            if (File.Exists(VisCard(i)) && FigureFilesReady(VisFilteredSlices(i)) && FigureFilesReady(VisFsc(i)) &&
+                FigureFilesReady(VisAngularDistribution(i)) && FigureFilesReady(VisFourierSampling(i)) && File.Exists(VisDiagnostics(i)))
             { latest = Math.Max(latest, i); continue; }
             // A committed directory contains complete products. Generate Relay-owned files once.
-            BakeryWrapper.MapOrthosliceAtlas(IterationFile(i, "class001.mrc"), 1, VisFilteredSlices(i));
-            BakeryWrapper.FSCFromModelStar(IterationFile(i, "model.star"), VisFsc(i));
-            BakeryWrapper.OrientationAndFourierSamplingHexBin(IterationFile(i, "data.star"),
-                VisAngularDistribution(i), VisFourierSampling(i), Symmetry == "C1" ? null : Symmetry);
-            BakeryWrapper.Refine3DJobCard(IterationFile(i, "class001.mrc"), IterationFile(i, "model.star"), VisCard(i));
+            // Existing PNG-only jobs acquire SVG siblings on their next collection/finalization.
+            if (!FigureFilesReady(VisFilteredSlices(i)))
+                BakeryWrapper.MapOrthosliceAtlas(IterationFile(i, "class001.mrc"), 1, VisFilteredSlices(i), svg: true);
+            if (!FigureFilesReady(VisFsc(i)))
+                BakeryWrapper.FSCFromModelStar(IterationFile(i, "model.star"), VisFsc(i), svg: true,
+                    directionalFscFile: File.Exists(IterationFile(i, "class001_directional_fsc.csv"))
+                        ? IterationFile(i, "class001_directional_fsc.csv") : null);
+            if (!FigureFilesReady(VisAngularDistribution(i)) || !FigureFilesReady(VisFourierSampling(i)))
+                BakeryWrapper.OrientationAndFourierSamplingHexBin(IterationFile(i, "data.star"),
+                    VisAngularDistribution(i), VisFourierSampling(i), Symmetry == "C1" ? null : Symmetry, svg: true);
+            if (!File.Exists(VisCard(i)))
+                BakeryWrapper.Refine3DJobCard(IterationFile(i, "class001.mrc"), IterationFile(i, "model.star"), VisCard(i));
+            if (!File.Exists(VisDiagnostics(i)))
+                BakeryWrapper.BeamRefinementDiagnostics(BeamDirectory, i, RelayResultsDirectoryPath);
+            generated = true;
             latest = i;
         }
         bool finished = File.Exists(PathSuccess) || File.Exists(Path.Combine(BeamDirectory, "RELION_JOB_EXIT_SUCCESS"));
-        if (latest == VisAvailableIteration && finished == HasRunToCompletion) return null;
+        if (!generated && latest == VisAvailableIteration && finished == HasRunToCompletion) return null;
         return () => { VisAvailableIteration = latest; HasRunToCompletion = finished; };
     }
+
+    internal static bool FigureFilesReady(string pngPath) =>
+        new[] { pngPath, Path.ChangeExtension(pngPath, ".svg"),
+            Path.ChangeExtension(pngPath, ".light.svg"), Path.ChangeExtension(pngPath, ".dark.svg") }.All(File.Exists);
 
     public override void FinalizeRun(Action<Job, Action<Job>> updateCallback)
     {

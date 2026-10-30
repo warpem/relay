@@ -9,6 +9,7 @@ import typer
 from cmap import Colormap
 
 from ._cli import cli
+from ..figure_export import save_figure
 from ..spherical_hexbin.utils import (
     generate_rot_grid,
     generate_tilt_grid,
@@ -31,6 +32,7 @@ def orientation_and_fourier_sampling(
     input_type: InputType = typer.Option(...),
     output_orientation_file: Optional[Path] = typer.Option(None),
     output_fourier_sampling_file: Optional[Path] = typer.Option(None),
+    svg: bool = False,
 ):
     """Make hexbin plots of orientation and Fourier sampling distributions.
 
@@ -76,7 +78,8 @@ def orientation_and_fourier_sampling(
         plot_orientation_distribution(
             image=image,
             colormap=colormap,
-            output_file=output_orientation_file
+            output_file=output_orientation_file,
+            svg=svg,
         )
 
     if output_fourier_sampling_file is not None:
@@ -90,7 +93,8 @@ def orientation_and_fourier_sampling(
         plot_fourier_sampling_distribution(
             image=image,
             colormap=colormap,
-            output_file=output_fourier_sampling_file
+            output_file=output_fourier_sampling_file,
+            svg=svg,
         )
 
 
@@ -138,11 +142,12 @@ def generate_orientation_distribution_image(h_counts, idx_inv, tilt_grid):
 def plot_orientation_distribution(
     image: np.ndarray,
     colormap: str,
-    output_file: Path
+    output_file: Path,
+    svg: bool = False,
 ):
     fig, ax = plt.subplots(figsize=(3, 3))
     cmap = Colormap(colormap).to_mpl()
-    cmap.set_bad(color='white')
+    cmap.set_bad(color=(0, 0, 0, 0))
     ax.imshow(image, cmap=cmap, interpolation='sinc', origin='lower', vmin=0)
     ax.set(xticks=[], xticklabels=[], yticks=[], yticklabels=[])
     for spine in ax.spines.values():
@@ -159,7 +164,8 @@ def plot_orientation_distribution(
     polar_ax.patch.set_alpha(0)
 
     plt.tight_layout(pad=0.1)
-    fig.savefig(output_file, dpi=512)
+    save_figure(fig, output_file, svg=svg, dpi=512)
+    plt.close(fig)
 
 
 def generate_fourier_sampling_distribution_image(
@@ -195,10 +201,10 @@ def generate_fourier_sampling_distribution_image(
     return image
 
 
-def plot_fourier_sampling_distribution(image: np.ndarray, colormap, output_file):
+def plot_fourier_sampling_distribution(image: np.ndarray, colormap, output_file, svg: bool = False):
     fig, ax = plt.subplots(figsize=(3, 3))
     cmap = Colormap(colormap).to_mpl()
-    cmap.set_bad(color='white')
+    cmap.set_bad(color=(0, 0, 0, 0))
     ax.imshow(image, cmap=cmap, interpolation='sinc', origin='lower', vmin=0)
     ax.set(xticks=[], xticklabels=[], yticks=[], yticklabels=[])
     for spine in ax.spines.values():
@@ -215,4 +221,5 @@ def plot_fourier_sampling_distribution(image: np.ndarray, colormap, output_file)
     polar_ax.patch.set_alpha(0)
 
     plt.tight_layout(pad=0.1)
-    fig.savefig(output_file, dpi=512)
+    save_figure(fig, output_file, svg=svg, dpi=512)
+    plt.close(fig)

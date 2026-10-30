@@ -1,4 +1,7 @@
 import matplotlib.pyplot
+import numpy as np
+import pandas as pd
+from pathlib import Path
 
 from .fsc_data_model import FscData
 
@@ -6,10 +9,25 @@ from .fsc_data_model import FscData
 def draw_fsc(
     ax: matplotlib.pyplot.Axes,
     data: FscData,
+    directional_file: Path | None = None,
 ) -> matplotlib.pyplot.Axes:
     # prepare data
     resolution_inv = 1 / data.resolution
     fsc_values = data.fsc
+
+    if directional_file is not None:
+        # Beam publishes one FSC per direction and one column per shell. Match
+        # shell indices, not the rounded Angstrom values in CSV column labels.
+        frame = pd.read_csv(directional_file)
+        columns = [c for c in frame if c.startswith('s') and c[1:].split('_')[0].isdigit()]
+        indices = np.array([int(c[1:].split('_')[0]) for c in columns])
+        valid = (indices > 0) & (indices < len(resolution_inv))
+        values = frame.loc[:, np.array(columns)[valid]].to_numpy(dtype=float)
+        if values.size:
+            finite_columns = np.isfinite(values).any(axis=0)
+            band = np.nanquantile(values[:, finite_columns], [.1, .9], axis=0)
+            ax.fill_between(resolution_inv[indices[valid][finite_columns]], *band,
+                            color='#9467bd', alpha=.25, linewidth=0, label='Directional 10–90%')
     
     # plot the FSC curve
     ax.plot(resolution_inv, fsc_values, color='black',
@@ -44,7 +62,7 @@ def draw_fsc(
     
     # calculate resolution for title
     if crossing_resolution is not None:
-        resolution_text = f'{crossing_resolution:.1f}'
+        resolution_text = f'{crossing_resolution:.2f}' if crossing_resolution < 2 else f'{crossing_resolution:.1f}'
     else:
         # check if entire curve is below threshold
         if fsc_values.max() < threshold:
@@ -58,9 +76,14 @@ def draw_fsc(
     if data.fsc_unmasked is not None:
         # Beam's controller has its own supported-band/crossing policy. Use its
         # published estimate rather than selecting a different crossing here.
-        resolution_text = (f'{data.estimated_resolution:.1f}'
+        resolution_text = ((f'{data.estimated_resolution:.2f}' if data.estimated_resolution < 2 else f'{data.estimated_resolution:.1f}')
                            if data.estimated_resolution is not None else 'unresolved')
     ax.set_title(f'Resolution: {resolution_text}\u2009Å', fontsize=14, pad=10)
+    if directional_file is not None and data.directional_best is not None and data.directional_worst is not None:
+        summary = f'Directional: {data.directional_best:.2f}–{data.directional_worst:.2f} Å'
+        if data.cfar is not None:
+            summary += f' · cFAR {data.cfar:.3f}'
+        ax.text(.02, .025, summary, transform=ax.transAxes, fontsize=9)
 
     # format the x axis labels
     def format_xtick(x, pos):

@@ -40,6 +40,38 @@ Beam's published resolution estimate and label its separate FSC curves.
 Raw unfiltered half maps are exposed for downstream post-processing, alongside
 the display map, particles, and refinement mask.
 
+Beam's expanded view leads with full-width orthoslices, followed by the 3D map
+and quality plots. Bakery writes PNGs plus self-contained SVG siblings for the
+slices, FSC, orientation and Fourier sampling figures. The adaptive `.svg`
+contains light/dark CSS and embedded raster data; Relay sets the embedding
+`color-scheme` from its selected theme, including manual overrides. Density
+pixels and heatmap colors stay unchanged. `.light.svg` and `.dark.svg` contain
+literal colors for stable downloads into other applications. The figure's
+Download menu exposes all available variants, including the original PNG.
+Job-card PNG/PDF generation is unchanged.
+
+Directional FSC's 10–90% band and published directional range/cFAR are included
+in the FSC figure when the CSV is present. Resolution titles retain two decimals
+below 2 Å. A static history figure shows map/alignment resolution and particle
+counts. CTF diagnostics become available after Beam publishes a
+`restart_state.ctf_refined_iteration` baseline and a later iteration. Defocus
+corrections are matched by unique particle UID (falling back to unique image
+name), never by row position. Histograms include all matched particles; the
+scatter is explicitly sampled to at most 2,000 particles. Beam-tilt overviews
+include every group, using density bins above 2,000 groups. Coefficient details
+are capped at the 20 largest groups; the complete final optics table is offered
+as TSV. Coefficients are labelled as stored values because fitting can absorb
+lower-order terms into defocus/beam tilt. All of these figures have the same
+adaptive and fixed-theme SVG exports.
+
+Existing PNG-only jobs still display. Their SVGs are generated on the next
+result collection or manual finalization; opening a view does not run Bakery.
+For a standalone figure, the Bakery `fsc`, `map-orthoslice-atlas`, and
+`orientation-and-fourier-sampling` commands accept `--svg` to add SVG siblings
+alongside their requested PNG outputs. Supplying an `.svg` output filename also
+writes the adaptive and two fixed SVGs. Both Relay and Bakery must be updated
+together before collecting Beam results with this version.
+
 Manual finalization accepts the last complete iteration after interruption and
 generates any missing Relay visualizations. A job with no complete iteration
 cannot be finalized. Resume is intentionally not supported.

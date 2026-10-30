@@ -1,9 +1,6 @@
 @inherits Refund.Components.Jobs.ExpandedView.LoadingExpandedViewBase
-@using Microsoft.FluentUI.AspNetCore.Components
 @using Refund.Components
 @using Refund.Components.IsosurfaceViewer
-@using Refund.DataModel
-
 @implements IAsyncDisposable
 
 @if (IsInitializing)
@@ -17,39 +14,72 @@ else if (_job == null)
 else
 {
     <div class="refine3d-view-container">
-        @{
-            string path3dVolume = _job.VisMap3d(ExpandedViewService.CurrentVisIteration);
-            
-            if (!string.IsNullOrWhiteSpace(path3dVolume) && File.Exists(path3dVolume))
-            {
-                <div style="max-width: 500px; max-height: 500px;">
-                    <IsosurfaceViewer MinHeight="500" MinWidth="500" VolumePath="@path3dVolume" />
+        <div class="view-tabs" role="tablist" aria-label="Refinement figures">
+            <button id="beam-map-tab" role="tab" aria-controls="beam-map-panel" aria-selected="@(!_showCtf ? "true" : "false")" @onclick="() => _showCtf = false">Map &amp; resolution</button>
+            <button id="beam-ctf-tab" role="tab" aria-controls="beam-ctf-panel" aria-selected="@(_showCtf ? "true" : "false")" disabled="@(_diagnostics?.Ctf == null)" @onclick="() => _showCtf = true">CTF refinement</button>
+        </div>
+        @if (!_showCtf)
+        {
+            <div id="beam-map-panel" class="figure-panel" role="tabpanel" aria-labelledby="beam-map-tab">
+                <ServerFigure ServerPath="@_job.VisFilteredSlices(Iteration)" Title="Map orthoslices" CacheKey="@CacheKey" />
+                <div class="reconstruction-row">
+                    @{
+                        string path3dVolume = _job.VisMap3d(Iteration);
+                        if (!string.IsNullOrWhiteSpace(path3dVolume) && File.Exists(path3dVolume))
+                        {
+                            <section class="map-section" aria-label="3D reconstruction">
+                                <h3>Reconstruction</h3>
+                                <div class="map-viewer">
+                                    <IsosurfaceViewer MinHeight="360" MinWidth="250" VolumePath="@path3dVolume" />
+                                </div>
+                            </section>
+                        }
+                    }
+                    <div class="quality-section">
+                        <ServerFigure ServerPath="@_job.VisFsc(Iteration)" Title="Fourier shell correlation" CacheKey="@CacheKey" />
+                        <div class="sampling-row">
+                            <ServerFigure ServerPath="@_job.VisAngularDistribution(Iteration)" Title="Angular distribution" CacheKey="@CacheKey" />
+                            <ServerFigure ServerPath="@_job.VisFourierSampling(Iteration)" Title="Fourier sampling" CacheKey="@CacheKey" />
+                        </div>
+                    </div>
                 </div>
-            }
+                @if (_diagnostics?.History == true)
+                {
+                    <ServerFigure ServerPath="@_job.VisHistory(Iteration)" Title="Refinement history" CacheKey="@CacheKey" />
+                }
+            </div>
         }
-        
-        <!-- Orthoslices in horizontal row -->
-        <div class="visualization-section">
-            <MapOrthosliceDisplay MapOrthoslicesPath="@_job.VisFilteredSlices(ExpandedViewService.CurrentVisIteration)"
-                                  RenderedImageSidelengthPx="220"
-                                  BorderWidthPx="0"
-                                  SpacingPx="5"
-                                  IsVerticalLayout="false"/>
-        </div>
-
-        <!-- FSC, Angular Distribution, and Fourier Sampling in a row -->
-        <div class="visualizations-row">
-            <ServerImage CacheKey="@_job.UpdateDate.Ticks.ToString()" ServerPath="@_job.VisFsc(ExpandedViewService.CurrentVisIteration)"
-                         height="250"
-                         class="visualization-item"/>
-
-            <ServerImage CacheKey="@_job.UpdateDate.Ticks.ToString()" ServerPath="@_job.VisAngularDistribution(ExpandedViewService.CurrentVisIteration)"
-                         height="250"
-                         class="visualization-item"/>
-
-            <ServerImage CacheKey="@_job.UpdateDate.Ticks.ToString()" ServerPath="@_job.VisFourierSampling(ExpandedViewService.CurrentVisIteration)"
-                         height="250"
-                         class="visualization-item"/>
-        </div>
+        else if (_diagnostics?.Ctf is { } ctf)
+        {
+            <div id="beam-ctf-panel" class="figure-panel" role="tabpanel" aria-labelledby="beam-ctf-tab">
+                <ServerFigure ServerPath="@_job.VisCtf(Iteration)" Title="CTF refinement" CacheKey="@CacheKey" />
+                <div class="ctf-controls">
+                    @if (ctf.Groups.Count > 0)
+                    {
+                        <label>Optics group
+                            <select @bind="_selectedOpticsGroup">
+                                @foreach (var group in ctf.Groups)
+                                {
+                                    <option value="@group.Id">@group.Id · @group.Particles.ToString("N0") particles</option>
+                                }
+                            </select>
+                        </label>
+                    }
+                    @if (File.Exists(_job.VisCtfOptics(Iteration)))
+                    {
+                        <a href="@FileService.GetUrl(_job.VisCtfOptics(Iteration))" download="ctf-optics.tsv">Download all optics groups (TSV)</a>
+                    }
+                    @if (ctf.GroupCount > ctf.Groups.Count)
+                    {
+                        <span>Detailed figures: @ctf.Groups.Count of @ctf.GroupCount groups (up to the 20 largest). The overview includes all groups.</span>
+                    }
+                </div>
+                @if (ctf.Groups.Count > 0)
+                {
+                    <ServerFigure ServerPath="@_job.VisCtfGroup(Iteration, _selectedOpticsGroup)" Title="Optics-group aberrations" CacheKey="@CacheKey" />
+                    <p class="figure-note">Stored Zernike coefficients before and after CTF fitting. Lower-order terms may be absorbed into defocus or beam tilt during fitting.</p>
+                }
+            </div>
+        }
     </div>
 }

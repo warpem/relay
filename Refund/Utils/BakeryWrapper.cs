@@ -102,10 +102,13 @@ public static class BakeryWrapper
     public static void MapOrthosliceAtlas(
         string volumeFile,
         int sliceThicknessPx,
-        string outputFile)
+        string outputFile,
+        bool svg = false)
     {
-        RunArguments(["map-orthoslice-atlas", "--volume-file", volumeFile,
-            "--slice-thickness-px", sliceThicknessPx.ToString(), "--output-file", outputFile]);
+        var arguments = new List<string> { "map-orthoslice-atlas", "--volume-file", volumeFile,
+            "--slice-thickness-px", sliceThicknessPx.ToString(), "--output-file", outputFile };
+        if (svg) arguments.Add("--svg");
+        RunArguments(arguments);
     }
 
     /// <summary>
@@ -185,12 +188,22 @@ public static class BakeryWrapper
     /// </remarks>
     public static void FSCFromModelStar(
         string starFile,
-        string outputFile
+        string outputFile,
+        bool svg = false,
+        string directionalFscFile = null
     )
     {
-        RunArguments(["fsc", "--input-type", "relion_model_star", "--metadata-file", starFile,
-            "--output-file", outputFile]);
+        var arguments = new List<string> { "fsc", "--input-type", "relion_model_star", "--metadata-file", starFile,
+            "--output-file", outputFile };
+        if (svg) arguments.Add("--svg");
+        if (directionalFscFile != null) arguments.AddRange(["--directional-fsc-file", directionalFscFile]);
+        RunArguments(arguments);
     }
+
+    public static void BeamRefinementDiagnostics(string beamDirectory, int iteration, string outputDirectory) =>
+        RunArguments(["beam-refinement-diagnostics", "--beam-directory", beamDirectory,
+            "--iteration", iteration.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            "--output-directory", outputDirectory]);
 
     /// <summary>
     /// Generates FSC and Guinier plots from a RELION postprocessing star file.
@@ -270,7 +283,8 @@ public static class BakeryWrapper
         string particlesFile,
         string outputOrientationFile = null,
         string outputFourierSamplingFile = null,
-        string symmetry = null
+        string symmetry = null,
+        bool svg = false
     )
     {
         var arguments = new List<string> { "orientation-and-fourier-sampling", "--particles-file", particlesFile,
@@ -285,6 +299,7 @@ public static class BakeryWrapper
         if(!String.IsNullOrEmpty(outputFourierSamplingFile))
             arguments.AddRange(["--output-fourier-sampling-file", outputFourierSamplingFile]);
 
+        if (svg) arguments.Add("--svg");
         RunArguments(arguments);
     }
 

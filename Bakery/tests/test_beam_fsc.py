@@ -55,6 +55,16 @@ class BeamFscTests(unittest.TestCase):
         np.testing.assert_array_equal(data.fsc, [0.8, 0.5, 0.1])
         self.assertIsNone(data.fsc_unmasked)
 
+    def test_sub_two_angstrom_estimates_use_two_decimals(self):
+        from bakery.fsc.draw_fsc import draw_fsc
+        data = FscData.from_model_frame(self.frame())
+        data.estimated_resolution = 1.84037
+        fig, ax = plt.subplots()
+        draw_fsc(ax, data)
+        self.assertIn('1.84', ax.get_title())
+        self.assertEqual(ax.get_xlabel(), 'Resolution (1 / Å)')
+        plt.close(fig)
+
     def test_beam_fsc_and_job_card_render_from_mode12_map(self):
         with tempfile.TemporaryDirectory(prefix='beam fsc ') as directory:
             root = Path(directory)
@@ -70,7 +80,10 @@ class BeamFscTests(unittest.TestCase):
                 ('refine3d-job-card', ['--model-star-file', str(star), '--volume-file', str(volume)]),
             ]:
                 output = root / (command + '.png')
-                result = CliRunner().invoke(cli, [command, *args, '--output-file', str(output)])
+                svg_args = [] if command == 'refine3d-job-card' else ['--svg']
+                result = CliRunner().invoke(cli, [command, *args, '--output-file', str(output), *svg_args])
                 self.assertEqual(result.exit_code, 0, str(result.exception) + result.output)
                 self.assertGreater(output.stat().st_size, 0)
+                for extension in (['.svg', '.light.svg', '.dark.svg'] if svg_args else []):
+                    self.assertTrue(output.with_suffix(extension).exists())
             plt.close('all')
