@@ -35,7 +35,6 @@ public partial class BeamRefine3DExpandedView
     private string CacheKey => _job.UpdateDate.Ticks.ToString();
     private Diagnostics _diagnostics;
     private bool _showCtf;
-    private int _selectedOpticsGroup;
     private int _loadVersion;
 
     private sealed class Diagnostics
@@ -50,13 +49,6 @@ public partial class BeamRefine3DExpandedView
         public int Baseline { get; set; }
         [JsonPropertyName("matched_particles")] public int MatchedParticles { get; set; }
         [JsonPropertyName("group_count")] public int GroupCount { get; set; }
-        public List<OpticsGroup> Groups { get; set; } = [];
-    }
-    private sealed class OpticsGroup
-    {
-        public OpticsGroup() { }
-        public int Id { get; set; }
-        public int Particles { get; set; }
     }
 
     private async Task RefreshDiagnostics()
@@ -77,9 +69,6 @@ public partial class BeamRefine3DExpandedView
         if (version != _loadVersion) return;
         _diagnostics = diagnostics;
         if (diagnostics?.Ctf == null) _showCtf = false;
-        var groups = diagnostics?.Ctf?.Groups;
-        if (groups?.Any(g => g.Id == _selectedOpticsGroup) != true)
-            _selectedOpticsGroup = groups?.FirstOrDefault()?.Id ?? 0;
         await InvokeAsync(StateHasChanged);
     }
 

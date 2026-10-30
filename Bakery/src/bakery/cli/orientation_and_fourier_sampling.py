@@ -160,7 +160,7 @@ def plot_orientation_distribution(
     polar_ax.set_yticklabels(['30°', '60°', '90°'])
     polar_ax.set_rlabel_position(4)
     polar_ax.grid(alpha=0.5)
-    polar_ax.tick_params(axis='both', which='major', labelsize=8)
+    polar_ax.tick_params(axis='both', which='major', labelsize=10)
     polar_ax.patch.set_alpha(0)
 
     plt.tight_layout(pad=0.1)
@@ -217,7 +217,7 @@ def plot_fourier_sampling_distribution(image: np.ndarray, colormap, output_file,
     polar_ax.set_yticklabels(['30°', '60°', '90°'])
     polar_ax.set_rlabel_position(4)
     polar_ax.grid(alpha=0.5)
-    polar_ax.tick_params(axis='both', which='major', labelsize=8)
+    polar_ax.tick_params(axis='both', which='major', labelsize=10)
     polar_ax.patch.set_alpha(0)
 
     plt.tight_layout(pad=0.1)

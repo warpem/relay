@@ -38,7 +38,7 @@ def draw_fsc(
         ax.plot(resolution_inv, data.fsc_masked, label='Masked', alpha=0.65)
         if data.fsc_phase_randomized is not None:
             ax.plot(resolution_inv, data.fsc_phase_randomized, label='Phase randomized', alpha=0.65)
-        ax.legend(fontsize=8)
+        ax.legend(fontsize=10)
 
     # add 0.143 threshold line
     ax.axhline(y=0.143, color='red', linestyle='--', alpha=0.7, linewidth=1)
@@ -83,7 +83,7 @@ def draw_fsc(
         summary = f'Directional: {data.directional_best:.2f}–{data.directional_worst:.2f} Å'
         if data.cfar is not None:
             summary += f' · cFAR {data.cfar:.3f}'
-        ax.text(.02, .025, summary, transform=ax.transAxes, fontsize=9)
+        ax.text(.02, .025, summary, transform=ax.transAxes, fontsize=10)
 
     # format the x axis labels
     def format_xtick(x, pos):

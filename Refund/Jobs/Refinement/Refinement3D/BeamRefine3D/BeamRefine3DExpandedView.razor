@@ -22,7 +22,7 @@ else
         {
             <div id="beam-map-panel" class="figure-panel" role="tabpanel" aria-labelledby="beam-map-tab">
                 <div class="orthoslices">
-                    <ServerFigure ServerPath="@_job.VisFilteredSlices(Iteration)" Title="Map orthoslices" CacheKey="@CacheKey" />
+                    <ServerFigure ServerPath="@_job.VisFilteredSlices(Iteration)" Title="Map orthoslices" MaxWidthEm="68.4" CacheKey="@CacheKey" />
                 </div>
                 <div class="reconstruction-row">
                     @{
@@ -42,11 +42,11 @@ else
                     </div>
                 </div>
                 <div class="sampling-row">
-                    <ServerFigure ServerPath="@_job.VisAngularDistribution(Iteration)" Title="Angular distribution" CacheKey="@CacheKey" />
-                    <ServerFigure ServerPath="@_job.VisFourierSampling(Iteration)" Title="Fourier sampling" CacheKey="@CacheKey" />
+                    <ServerFigure ServerPath="@_job.VisAngularDistribution(Iteration)" Title="Angular distribution" MaxWidthEm="21.6" CacheKey="@CacheKey" />
+                    <ServerFigure ServerPath="@_job.VisFourierSampling(Iteration)" Title="Fourier sampling" MaxWidthEm="21.6" CacheKey="@CacheKey" />
                     @if (_diagnostics?.History == true)
                     {
-                        <ServerFigure ServerPath="@_job.VisHistory(Iteration)" Title="Refinement history" CacheKey="@CacheKey" />
+                        <ServerFigure ServerPath="@_job.VisHistory(Iteration)" Title="Refinement history" MaxWidthEm="39.6" CacheKey="@CacheKey" />
                     }
                 </div>
             </div>
@@ -54,33 +54,8 @@ else
         else if (_diagnostics?.Ctf is { } ctf)
         {
             <div id="beam-ctf-panel" class="figure-panel" role="tabpanel" aria-labelledby="beam-ctf-tab">
-                <ServerFigure ServerPath="@_job.VisCtf(Iteration)" Title="CTF refinement" CacheKey="@CacheKey" />
-                <div class="ctf-controls">
-                    @if (ctf.Groups.Count > 0)
-                    {
-                        <label>Optics group
-                            <select @bind="_selectedOpticsGroup">
-                                @foreach (var group in ctf.Groups)
-                                {
-                                    <option value="@group.Id">@group.Id · @group.Particles.ToString("N0") particles</option>
-                                }
-                            </select>
-                        </label>
-                    }
-                    @if (File.Exists(_job.VisCtfOptics(Iteration)))
-                    {
-                        <a href="@FileService.GetUrl(_job.VisCtfOptics(Iteration))" download="ctf-optics.tsv">Download all optics groups (TSV)</a>
-                    }
-                    @if (ctf.GroupCount > ctf.Groups.Count)
-                    {
-                        <span>Detailed figures: @ctf.Groups.Count of @ctf.GroupCount groups (up to the 20 largest). The overview includes all groups.</span>
-                    }
-                </div>
-                @if (ctf.Groups.Count > 0)
-                {
-                    <ServerFigure ServerPath="@_job.VisCtfGroup(Iteration, _selectedOpticsGroup)" Title="Optics-group aberrations" CacheKey="@CacheKey" />
-                    <p class="figure-note">Stored Zernike coefficients before and after CTF fitting. Lower-order terms may be absorbed into defocus or beam tilt during fitting.</p>
-                }
+                <ServerFigure ServerPath="@_job.VisCtf(Iteration)" Title="CTF refinement" MaxWidthEm="72" CacheKey="@CacheKey" />
+
             </div>
         }
     </div>

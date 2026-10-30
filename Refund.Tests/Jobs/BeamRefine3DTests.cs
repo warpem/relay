@@ -31,6 +31,23 @@ public class BeamRefine3DTests : IDisposable
         input.Edges.Add(new Edge { Source = source, Target = input });
     }
 
+    [Theory]
+    [InlineData("{\"version\":1}", false)]
+    [InlineData("{\"version\":2}", true)]
+    [InlineData("{\"version\":\"2\"}", false)]
+    [InlineData("{}", false)]
+    [InlineData("invalid", false)]
+    public void FigureVersionRejectsStaleOrIncompleteOutputs(string json, bool expected)
+    {
+        string path = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(path, json);
+            Assert.Equal(expected, BeamRefine3D.DiagnosticsAreCurrent(path));
+        }
+        finally { File.Delete(path); }
+    }
+
     [Fact]
     public void GlobalDefaultsUseOneGpuAndAutomaticMasks()
     {
@@ -123,7 +140,7 @@ public class BeamRefine3DTests : IDisposable
             foreach (string path in new[] { job.VisFilteredSlices(i), job.VisFsc(i), job.VisAngularDistribution(i), job.VisFourierSampling(i) })
                 foreach (string extension in new[] { ".svg", ".light.svg", ".dark.svg" })
                     Write(Path.ChangeExtension(path, extension), "visualized");
-            Write(job.VisDiagnostics(i), "{\"version\":1,\"history\":false,\"ctf\":null}");
+            Write(job.VisDiagnostics(i), "{\"version\":2,\"history\":false,\"ctf\":null}");
         }
         Directory.CreateDirectory(Path.Combine(job.BeamDirectory, ".it003.staging-1"));
         Directory.CreateDirectory(Path.Combine(job.BeamDirectory, "it003"));

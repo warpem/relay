@@ -1,7 +1,7 @@
 @using Refund.Services
 @inject FileService FileService
 
-<figure class="theme-figure">
+<figure class="theme-figure" style="max-width: @(MaxWidthEm.ToString(System.Globalization.CultureInfo.InvariantCulture))em">
     @if (ShowTitle)
     {
         <figcaption>@Title</figcaption>
@@ -22,6 +22,8 @@
     [Parameter] public string CacheKey { get; set; }
 
     private string _imagePath;
+    // 10-point chart text becomes 1em at this width (figure inches * 72 / 10).
+    [Parameter] public double MaxWidthEm { get; set; } = 46.08;
     [Parameter] public bool ShowTitle { get; set; } = true;
 
     protected override void OnParametersSet()

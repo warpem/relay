@@ -27,7 +27,7 @@ def test_defocus_matches_uint64_identities_not_row_positions():
     assert match_defocus(before, after).empty
 
 
-def test_group_details_are_bounded_but_all_groups_are_exported(tmp_path, monkeypatch):
+def test_overview_uses_linear_counts_without_coefficient_plots_or_tsv(tmp_path, monkeypatch):
     n = 25
     optics = pd.DataFrame({'rlnOpticsGroup': range(1, n+1), 'rlnBeamTiltX': np.linspace(0, .2, n),
                            'rlnBeamTiltY': np.linspace(.3, .4, n),
@@ -37,14 +37,17 @@ def test_group_details_are_bounded_but_all_groups_are_exported(tmp_path, monkeyp
     writes = []
     def save(fig, path):
         writes.append(path.name)
+        assert len(fig.axes) == 2
+        assert fig.axes[0].get_yscale() == 'linear'
+        assert fig.axes[0].get_ylabel() == 'Particles'
         plt.close(fig)
     monkeypatch.setattr(importlib.import_module('bakery.cli.beam_refinement_diagnostics'), '_save', save)
     result = ctf_figures({'particles': data, 'optics': optics}, {'particles': data, 'optics': optics}, tmp_path, 7, 5)
     assert result['group_count'] == 25
     assert result['matched_particles'] == 25
-    assert len(result['groups']) == 20
-    assert len(writes) == 21  # One overview, bounded group details.
-    assert len(pd.read_csv(tmp_path / 'ctf_it0007_optics.tsv', sep='\t')) == 25
+    assert result['groups'] == []
+    assert len(writes) == 1
+    assert not list(tmp_path.glob('*.tsv'))
 
 
 def test_diagnostics_cli_publishes_manifest_after_static_figures(tmp_path):
@@ -77,7 +80,7 @@ def test_large_optics_overview_aggregates_without_generating_a_panel_per_group(t
     overviews = []
     def save(fig, path):
         overviews.append(path)
-        assert any(isinstance(c, PolyCollection) for c in fig.axes[2].collections)
+        assert any(isinstance(c, PolyCollection) for c in fig.axes[1].collections)
         plt.close(fig)
     monkeypatch.setattr(importlib.import_module('bakery.cli.beam_refinement_diagnostics'), '_save', save)
     result = ctf_figures({}, {'optics': optics}, tmp_path, 7, 5)

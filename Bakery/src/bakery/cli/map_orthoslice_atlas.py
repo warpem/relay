@@ -40,12 +40,12 @@ def map_orthoslice_atlas(
     slices_image = einops.rearrange([xy, xz, yz], 'b h w -> h (b w)')
 
     # plot
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(9.5, 9.5 / 3))
     ax.imshow(slices_image, cmap='gray', interpolation='sinc', origin='lower')
 
     # add labels
-    # Scale with the atlas tile, not a fixed 6 pt label that vanishes in the UI.
-    fontsize = slices_image.shape[0] * 0.06 * 72 / fig.dpi
+    # Match regular chart text independently of the source map dimensions.
+    fontsize = 10
     x, y = 0.04 * 1/3, 0.88
     ax.text(
         x=x, y=y,
@@ -67,7 +67,7 @@ def map_orthoslice_atlas(
         ax.plot([left, right], [.045, .045], transform=ax.transAxes, color='white',
                 linewidth=1.5, gid=f'fixed-scale-{i}')
         ax.text((left+right)/2, .065, f'{length:g} Å', transform=ax.transAxes,
-                color='white', ha='center', fontsize=fontsize*.7, gid=f'fixed-scale-label-{i}')
+                color='white', ha='center', fontsize=fontsize, gid=f'fixed-scale-label-{i}')
 
     ax.text(
         x=x + 1/3, y=y,
@@ -89,8 +89,8 @@ def map_orthoslice_atlas(
     ax.axis('off')
     fig.subplots_adjust(left=0, bottom=0, right=1, top=1)
     h, w = slices_image.shape
-    fig.set_size_inches(h=h / fig.dpi, w=w / fig.dpi)
-    save_figure(fig, output_file, svg=svg, bbox_inches='tight', pad_inches=0, dpi=fig.dpi)
+    fig.set_size_inches(w=9.5, h=9.5 * h / w)
+    save_figure(fig, output_file, svg=svg, bbox_inches='tight', pad_inches=0, dpi=w / 9.5)
     plt.close(fig)
 
 

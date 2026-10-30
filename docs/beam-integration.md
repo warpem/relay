@@ -40,7 +40,7 @@ Beam's published resolution estimate and label its separate FSC curves.
 Raw unfiltered half maps are exposed for downstream post-processing, alongside
 the display map, particles, and refinement mask.
 
-Beam's expanded view leads with full-width orthoslices, followed by the 3D map
+Beam's expanded view leads with left-aligned, width-capped orthoslices, followed by the 3D map
 and quality plots. Bakery writes PNGs plus self-contained SVG siblings for the
 slices, FSC, orientation and Fourier sampling figures. The adaptive `.svg`
 contains light/dark CSS and embedded raster data; Relay sets the embedding
@@ -57,12 +57,18 @@ counts. CTF diagnostics become available after Beam publishes a
 `restart_state.ctf_refined_iteration` baseline and a later iteration. Defocus
 corrections are matched by unique particle UID (falling back to unique image
 name), never by row position. Histograms include all matched particles; the
-scatter is explicitly sampled to at most 2,000 particles. Beam-tilt overviews
-include every group, using density bins above 2,000 groups. Coefficient details
-are capped at the 20 largest groups; the complete final optics table is offered
-as TSV. Coefficients are labelled as stored values because fitting can absorb
-lower-order terms into defocus/beam tilt. All of these figures have the same
-adaptive and fixed-theme SVG exports.
+y axis is linear. Beam-tilt overviews include every group, using density bins
+above 2,000 groups. Coefficient-index bars and the optics TSV export are omitted.
+Beam now exports observed/fitted/residual odd/even phase MRCs and fit masks
+for up to ten optics groups during integrated aberration fitting. Units and
+Fourier sampling are recorded in MRC header labels. Relay does not yet render
+these phase maps. Older jobs need another CTF fit to produce them; saved
+Zernike coefficients cannot reconstruct the observed/residual fields.
+All figures have adaptive and fixed-theme SVG exports. Display width caps map
+10-point figure text to one UI em; narrow containers can shrink them. History is
+5.5 × 3 inches, matching the 3-inch polar figure height without scaling its text.
+Diagnostics version 2 regenerates older figures on collection/finalization.
+
 
 Existing PNG-only jobs still display. Their SVGs are generated on the next
 result collection or manual finalization; opening a view does not run Bakery.
