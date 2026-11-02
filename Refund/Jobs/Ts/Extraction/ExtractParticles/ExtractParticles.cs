@@ -11,6 +11,8 @@ using WarpHelper = Warp.Tools.Helper;
 
 namespace Refund.Jobs.Ts.Extraction.ExtractParticles;
 
+public enum TiltStackFormat { Relion, Beam }
+
 /// <summary>
 /// Job that extracts particles from tilt series as 2D image stacks or 3D volumes.
 /// This is based on the WarpTools ExportParticlesTiltseries command.
@@ -51,6 +53,12 @@ public class ExtractParticles : WarpJobGpu, IClusterJob
     [UiEnum(null, "Particle type", typeof(ExportType), 
             "Output particles as 2D image series or sub-tomograms")]
     public ExportType OutputType { get; set; } = ExportType.Tiltseries;
+
+    [RelayProperty]
+    [UiEnum(null, "Tilt-stack format", typeof(TiltStackFormat),
+        helpText: "Beam exports raw, unpremultiplied images without input normalization. RELION uses CTF-premultiplied images.",
+        ConditionalOnField = nameof(OutputType), ConditionalOnValue = ExportType.Tiltseries)]
+    public TiltStackFormat StackFormat { get; set; } = TiltStackFormat.Relion;
 
     /// <summary>
     /// Pixel size at which to export particles
@@ -114,7 +122,7 @@ public class ExtractParticles : WarpJobGpu, IClusterJob
     /// </summary>
     private ParticleSet GetParticleSetResource(int iter)
     {
-        var result = PortsIn[PortInParticleSet].GetSingleResource<ParticleSet>();
+        var result = PortsIn[PortInParticleSet].GetSingleResource<ParticleSet>()?.Copy();
         if (result == null)
             return null;
         
@@ -164,6 +172,12 @@ public class ExtractParticles : WarpJobGpu, IClusterJob
         else
             result["3d"] = "";
         
+        if (OutputType == ExportType.Tiltseries && StackFormat == TiltStackFormat.Beam)
+        {
+            result["dont_premultiply"] = "";
+            result["dont_normalize_input"] = "";
+        }
+
         // Output parameters
         result["output_star"] = Space.GetRelativePath(Path.Combine(DirectoryPath, "particles.star"));
         result["output_angpix"] = OutputPixelSize.ToString(CultureInfo.InvariantCulture);

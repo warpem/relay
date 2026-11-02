@@ -14,7 +14,9 @@ public static class ParticleInputs
     public static bool NeedsMerge(PortIn port) => port.IsActive() && port.ResourceType == typeof(ParticleSet)
         && port.MaxItems > 1 && port.Edges.Count > 1;
 
-    public static List<Issue> Validate(IReadOnlyList<(string Label, ParticleSet Resource)> inputs)
+    internal static bool UsesWarpMetadata(PortIn port) => port.Job is Jobs.Refinement.Refinement3D.BeamRefine3D.BeamRefine3D;
+
+    public static List<Issue> Validate(IReadOnlyList<(string Label, ParticleSet Resource)> inputs, bool warpMetadata = false)
     {
         var issues = new List<Issue>();
         if (inputs.Count < 2) return issues;
@@ -25,7 +27,7 @@ public static class ParticleInputs
             if (resource == null) continue;
             if (!resource.HasSingleStar)
                 issues.Add(new(i, "Merging requires a single particle STAR file per resource."));
-            if (resource.DataDimensionality == ParticleType.Tiltseries && string.IsNullOrEmpty(resource.TomogramsStarPath))
+            if (!warpMetadata && resource.DataDimensionality == ParticleType.Tiltseries && string.IsNullOrEmpty(resource.TomogramsStarPath))
                 issues.Add(new(i, "Merging tilt-series particles requires tomogram metadata."));
             for (int j = 0; j < i; j++)
             {
@@ -80,9 +82,9 @@ public static class ParticleInputs
         result.ParticlesSingleStarPath = Path.Combine(directory, "particles.star");
         result.ParticlesMultiStarDirectory = "";
         result.ToMultiStarPath = null;
-        result.OptimisationSetStarPath = result.DataDimensionality == ParticleType.Tiltseries
+        result.OptimisationSetStarPath = result.DataDimensionality == ParticleType.Tiltseries && !UsesWarpMetadata(port)
             ? Path.Combine(directory, "optimisation_set.star") : null;
-        result.TomogramsStarPath = result.DataDimensionality == ParticleType.Tiltseries
+        result.TomogramsStarPath = result.DataDimensionality == ParticleType.Tiltseries && !UsesWarpMetadata(port)
             ? Path.Combine(directory, "tomograms.star") : null;
         result.ItemCount = resources.All(r => r.ItemCount.HasValue) ? resources.Sum(r => r.ItemCount.Value) : null;
         result.HasData = resources.All(r => r.HasData);
@@ -108,7 +110,7 @@ public static class ParticleInputs
         foreach (var port in job.PortsIn.Values.Where(NeedsMerge))
         {
             var sources = Sources(port);
-            var issues = Validate(sources);
+            var issues = Validate(sources, UsesWarpMetadata(port));
             if (sources.Any(s => s.Resource == null))
                 throw new InvalidDataException($"{port.Alias}: one or more particle inputs are unavailable.");
             if (issues.Count > 0)
@@ -118,7 +120,7 @@ public static class ParticleInputs
             MergeSlots.Wait(cancellationToken);
             try
             {
-                new ParticleStarMerger(cancellationToken).Merge(sources, temporary, destination, job.Space.RootDirectory);
+                new ParticleStarMerger(cancellationToken).Merge(sources, temporary, destination, job.Space.RootDirectory, warpMetadata: UsesWarpMetadata(port));
                 cancellationToken.ThrowIfCancellationRequested();
                 Directory.CreateDirectory(Path.GetDirectoryName(destination));
                 // Execution preparation resets the job directory before staging. Refuse to

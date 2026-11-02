@@ -81,12 +81,11 @@ public class BeamRefine3DTests : IDisposable
         Assert.Contains("Mask", job.ValidatePortInputs().Keys);
         Connect(job.PortsIn["Mask"], new Mask(Path.Combine(_root, "mask.mrc")));
         job.Regularization = BeamRegularization.Denoise;
-        job.LocalPivot = BeamLocalPivot.BoxCenter;
         var args = job.ComposeCommandArguments();
         Assert.Equal("5", args["local-angular-range"]);
         Assert.Equal("10", args["translation-range"]);
-        Assert.Equal("box-center", args["local-pivot"]);
-        Assert.Equal("0.08", args["denoise-alignment-fsc"]);
+        Assert.False(args.ContainsKey("local-pivot"));
+        Assert.False(args.ContainsKey("denoise-alignment-fsc"));
         Assert.False(args.ContainsKey("dont-align-symmetry"));
         Assert.False(args.ContainsKey("particle-diameter"));
         Assert.Empty(job.ValidatePortInputs());
@@ -104,11 +103,12 @@ public class BeamRefine3DTests : IDisposable
         Assert.Equal(JobQueueType.CPU, job.QueueType);
         Assert.Equal("p-negative", args["ewald"]);
         Assert.True(args.ContainsKey("fit-defocus"));
+        Assert.True(args.ContainsKey("fit-astigmatism"));
         Assert.True(args.ContainsKey("fit-aberrations"));
         Assert.True(args.ContainsKey("defocus-range"));
         job.RefineDefocus = job.RefineAberrations = false;
         Assert.False(job.ComposeCommandArguments().ContainsKey("defocus-range"));
-        foreach (string field in new[] { nameof(job.LocalAngularRange), nameof(job.DenoiseAlignmentFsc), nameof(job.DefocusRange) })
+        foreach (string field in new[] { nameof(job.LocalAngularRange), nameof(job.DefocusRange) })
             Assert.False(Job.IsPropertyVisible(typeof(BeamRefine3D), typeof(BeamRefine3D).GetProperty(field), job.AsReadOnly()));
     }
 
@@ -116,21 +116,28 @@ public class BeamRefine3DTests : IDisposable
     public void CustomOptionsOverrideScientificDefaultsAndPreserveQuotedValues()
     {
         var job = NewJob();
-        job.AdditionalArguments = "--beams 12 --blush-model 'my model.pt' --sharpen-half-maps=0.5 --no-convergence-integrated-fsc";
+        job.AdditionalArguments = "--beams 12 --blush-model 'my model.pt' --sharpen-half-maps=0.5 --fit-phase";
         var args = job.ComposeCommandArguments();
         Assert.Equal("12", args["beams"]);
         Assert.Equal("my model.pt", args["blush-model"]);
         Assert.Equal("0.5", args["sharpen-half-maps"]);
-        Assert.Equal("", args["no-convergence-integrated-fsc"]);
+        Assert.Equal("", args["fit-phase"]);
         job.AdditionalArguments = "--output /different";
         Assert.Contains(nameof(job.AdditionalArguments), job.ValidateInputs().Keys);
         Assert.Throws<ArgumentException>(() => job.ComposeCommandArguments());
     }
 
-    [Fact]
-    public void FinalizationUsesCommittedIterationsAndPersistsLogs()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void FinalizationUsesCommittedIterationsAndPersistsLogs(bool tilt)
     {
         var job = NewJob();
+        if (tilt)
+        {
+            ParticleInputs.Sources(job.PortsIn["Particles"])[0].Resource.DataDimensionality = ParticleType.Tiltseries;
+            Connect(job.PortsIn["TiltSeries"], new TiltSeriesSet { HasMetadata = true, HasCtf = true, LatestMetadataDirectory = "/xml" });
+        }
         foreach (int i in new[] { 1, 2 })
         {
             foreach (string suffix in new[] { "data.star", "model.star", "class001.mrc", "half1_class001_unfiltered.mrc", "half2_class001_unfiltered.mrc" })
@@ -142,6 +149,9 @@ public class BeamRefine3DTests : IDisposable
                     Write(Path.ChangeExtension(path, extension), "visualized");
             Write(job.VisDiagnostics(i), "{\"version\":2,\"history\":false,\"ctf\":null}");
         }
+        if (tilt)
+            foreach (int i in new[] { 1, 2 })
+                Write(Path.Combine(job.IterationMetadataDirectory(i), "TS.xml"), "<TiltSeries />");
         Directory.CreateDirectory(Path.Combine(job.BeamDirectory, ".it003.staging-1"));
         Directory.CreateDirectory(Path.Combine(job.BeamDirectory, "it003"));
         Write(job.PathStdOut, "setup\n=== Iteration 1 ===\nfirst\n=== Iteration 2 ===\nsecond\n");
@@ -246,28 +256,28 @@ public class BeamRefine3DTests : IDisposable
         Assert.False(job.ComposeCommandArguments().ContainsKey("extra-iterations"));
         job.RefineDefocus = true;
         job.RefineAberrations = true;
-        job.AberrationOrder1 = job.AberrationOrder2 = job.AberrationOrder3 = job.AberrationOrder4 = false;
+        job.AberrationOrder3 = job.AberrationOrder4 = false;
         job.AberrationOrder5 = true;
         job.FitMagnification = true;
         job.ExtraIterations = 3;
         job.AlwaysUseAllParticles = true;
-        job.SearchCacheFsc = 0.9m;
         job.PoseMarginalizationTemperature = 0;
         job.DontAlignSymmetry = true;
         var args = job.ComposeCommandArguments();
         Assert.Equal("5", args["aberration-orders"]);
         Assert.True(args.ContainsKey("fit-defocus"));
+        Assert.True(args.ContainsKey("fit-astigmatism"));
         Assert.True(args.ContainsKey("fit-aberrations"));
         Assert.True(args.ContainsKey("fit-magnification"));
         Assert.True(args.ContainsKey("dont-align-symmetry"));
         Assert.True(args.ContainsKey("dont-autotune-particle-count"));
         Assert.Equal("3", args["extra-iterations"]);
-        Assert.Equal("0.9", args["search-cache-fsc"]);
+        Assert.False(args.ContainsKey("search-cache-fsc"));
         Assert.Equal("0", args["pose-marginalization-temperature"]);
         job.AberrationOrder5 = false;
         Assert.Contains(nameof(job.RefineAberrations), job.ValidateInputs().Keys);
         job.AberrationOrder4 = true;
-        Assert.Equal("0,4", job.ComposeCommandArguments()["aberration-orders"]);
+        Assert.Equal("4", job.ComposeCommandArguments()["aberration-orders"]);
     }
 
     [Fact]
@@ -276,7 +286,7 @@ public class BeamRefine3DTests : IDisposable
         var job = NewJob();
         foreach (string name in new[] { nameof(job.CacheDirectory), nameof(job.FitMagnification), nameof(job.Ewald), nameof(job.DontAlignSymmetry) })
             Assert.False(typeof(BeamRefine3D).GetProperty(name)!.GetCustomAttribute<UiFieldBase>()!.IsAdvanced);
-        foreach (string name in new[] { nameof(job.ExtraIterations), nameof(job.SearchCacheFsc), nameof(job.AlwaysUseAllParticles), nameof(job.PoseMarginalizationTemperature) })
+        foreach (string name in new[] { nameof(job.ExtraIterations), nameof(job.AlwaysUseAllParticles), nameof(job.PoseMarginalizationTemperature) })
             Assert.True(typeof(BeamRefine3D).GetProperty(name)!.GetCustomAttribute<UiFieldBase>()!.IsAdvanced);
         Assert.NotNull(typeof(BeamRefine3D).GetProperty(nameof(job.AdditionalArguments))!.GetCustomAttribute<UiString>());
         var order = typeof(BeamRefine3D).GetProperty(nameof(job.AberrationOrder5))!;
@@ -298,6 +308,109 @@ public class BeamRefine3DTests : IDisposable
         var job = NewJob();
         Assert.Throws<InvalidOperationException>(() => job.FinalizeRun((j, action) => action(j)));
         Assert.False(File.Exists(job.PathSuccess));
+    }
+
+    [Fact]
+    public void TiltMetadataIsRequiredOnlyForTiltStacksAndLimitsAreConditional()
+    {
+        var job = NewJob();
+        job.MaxTilts = 12;
+        Assert.False(job.ComposeCommandArguments().ContainsKey("max-tilts"));
+        var field = typeof(BeamRefine3D).GetProperty(nameof(job.MaxTilts))!;
+        Assert.False(Job.IsPropertyVisible(typeof(BeamRefine3D), field, job.AsReadOnly()));
+        Connect(job.PortsIn["TiltSeries"], new TiltSeriesSet { HasMetadata = true, HasCtf = true, LatestMetadataDirectory = "/xml" });
+        Assert.Contains("TiltSeries", job.ValidatePortInputs().Keys);
+        var particles = ParticleInputs.Sources(job.PortsIn["Particles"])[0].Resource;
+        particles.DataDimensionality = ParticleType.Tiltseries;
+        particles.HasCtf = false; // CTF parameters come from XML for this modality.
+        job.RefineDefocus = true;
+        job.Ewald = BeamEwald.Positive;
+        Assert.Empty(job.ValidatePortInputs());
+        var args = job.ComposeCommandArguments();
+        Assert.Equal("/xml", args["metadata-dir"]);
+        Assert.Equal("12", args["max-tilts"]);
+        Assert.True(args.ContainsKey("fit-defocus"));
+        Assert.True(args.ContainsKey("fit-astigmatism"));
+        Assert.False(args.ContainsKey("tilt-damage-threshold"));
+        Assert.True(Job.IsPropertyVisible(typeof(BeamRefine3D), field, job.AsReadOnly()));
+        job.AdditionalArguments = "--metadata-dir /elsewhere";
+        Assert.Contains(nameof(job.AdditionalArguments), job.ValidateInputs().Keys);
+        job.PortsIn["TiltSeries"].Edges.Clear();
+        Assert.Contains("TiltSeries", job.ValidatePortInputs().Keys);
+    }
+
+    [Fact]
+    public void TiltOutputsUseLatestCommitEvenWhenPreviewsAreUnavailableAndCanBeChained()
+    {
+        var job = NewJob();
+        var particles = ParticleInputs.Sources(job.PortsIn["Particles"])[0].Resource;
+        particles.DataDimensionality = ParticleType.Tiltseries;
+        particles.TomogramsStarPath = "/stale/tomograms.star";
+        particles.OptimisationSetStarPath = "/stale/optimisation.star";
+        string inputList = Path.Combine(_root, "processed.json");
+        Write(inputList, "[{\"Path\":\"/data/TS.tomostar\",\"Extra\":123},{\"Path\":\"/data/unused.tomostar\"}]");
+        var source = new TiltSeriesSet { HasMetadata = true, HasCtf = true, LatestMetadataDirectory = "/original", ProcessedItemsJson = inputList };
+        Connect(job.PortsIn["TiltSeries"], source);
+        foreach (int i in new[] { 1, 2 })
+        {
+            foreach (string suffix in new[] { "data.star", "model.star", "class001.mrc", "half1_class001_unfiltered.mrc", "half2_class001_unfiltered.mrc" })
+                Write(job.IterationFile(i, suffix), "committed");
+            Write(Path.Combine(job.IterationMetadataDirectory(i), "TS.xml"), "<TiltSeries />");
+        }
+        Write(job.PathStdOut, "=== Iteration 1 ===\nfirst\n=== Iteration 2 ===\nsecond");
+        job.TrackProgressLogs()!.Invoke();
+        Assert.Equal(2, job.LastCommittedIteration);
+        Assert.Equal(-1, job.VisAvailableIteration);
+        var refined = Assert.IsType<TiltSeriesSet>(job.PortsOut["TiltSeries"].GetResource());
+        Assert.Equal(job.IterationMetadataDirectory(2), refined.LatestMetadataDirectory);
+        Assert.Equal("/original", source.LatestMetadataDirectory);
+        Assert.True(refined.HasReferenceBasedRefinements);
+        using (var json = System.Text.Json.JsonDocument.Parse(File.ReadAllText(refined.ProcessedItemsJson)))
+        {
+            Assert.Equal(1, json.RootElement.GetArrayLength());
+            Assert.Equal(123, json.RootElement[0].GetProperty("Extra").GetInt32());
+        }
+        Assert.Equal("[]", File.ReadAllText(refined.FailedItemsJson));
+        var output = Assert.IsType<ParticleSet>(job.PortsOut["Particles"].GetResource());
+        Assert.Equal(job.IterationFile(2, "data.star"), output.ParticlesSingleStarPath);
+        Assert.Equal(ParticleType.Tiltseries, output.DataDimensionality);
+        Assert.Null(output.TomogramsStarPath);
+        Assert.Null(output.OptimisationSetStarPath);
+        Assert.Equal(job.IterationMetadataDirectory(1), Assert.IsType<TiltSeriesSet>(job.PortsOut["TiltSeries"].GetResource(1)).LatestMetadataDirectory);
+        var next = NewJob();
+        next.PortsIn["Particles"].Edges.Clear();
+        Connect(next.PortsIn["Particles"], output);
+        Connect(next.PortsIn["TiltSeries"], refined);
+        Assert.Empty(next.ValidatePortInputs());
+        Assert.Equal(output.ParticlesSingleStarPath, next.ComposeCommandArguments()["input"]);
+        Assert.Equal(refined.LatestMetadataDirectory, next.ComposeCommandArguments()["metadata-dir"]);
+    }
+
+    [Fact]
+    public void TiltStagingMergesWithoutRelionSidecarsAndChecksRawStacksAndXmlNames()
+    {
+        var job = NewJob();
+        var particles = ParticleInputs.Sources(job.PortsIn["Particles"])[0].Resource;
+        particles.DataDimensionality = ParticleType.Tiltseries;
+        string metadata = Path.Combine(_root, "xml");
+        Connect(job.PortsIn["TiltSeries"], new TiltSeriesSet { HasMetadata = true, HasCtf = true, LatestMetadataDirectory = metadata });
+        string star = "data_optics\nloop_\n_rlnOpticsGroup\n_rlnOpticsGroupName\n_rlnCtfDataAreCtfPremultiplied\n1 optics 0\n\ndata_particles\nloop_\n_rlnOpticsGroup\n_rlnTomoName\n_rlnImageName\n1 TS stack.mrcs\n";
+        Write(particles.ParticlesSingleStarPath, star);
+        string second = Path.Combine(_root, "second.star");
+        Write(second, star);
+        Connect(job.PortsIn["Particles"], new ParticleSet { HasData = true, HasCtf = true, DataDimensionality = ParticleType.Tiltseries, ParticlesSingleStarPath = second });
+        Assert.Empty(job.ValidatePortInputs());
+        Write(Path.Combine(metadata, "TS.xml"), "<TiltSeries />");
+        job.Stage(CancellationToken.None);
+        var merged = ParticleInputs.Describe(job.PortsIn["Particles"]);
+        Assert.True(File.Exists(merged.ParticlesSingleStarPath));
+        Assert.Null(merged.TomogramsStarPath);
+        Assert.Contains("2 TS stack.mrcs", File.ReadAllText(merged.ParticlesSingleStarPath));
+        File.Delete(Path.Combine(metadata, "TS.xml"));
+        Assert.Throws<FileNotFoundException>(() => job.Stage());
+        Write(Path.Combine(metadata, "TS.xml"), "<TiltSeries />");
+        Write(second, star.Replace("1 optics 0", "1 optics 1"));
+        Assert.Contains("Re-extract", Assert.Throws<InvalidDataException>(() => job.Stage()).Message);
     }
 
     private static void Write(string path, string text)

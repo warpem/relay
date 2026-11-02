@@ -284,7 +284,8 @@ public static class BakeryWrapper
         string outputOrientationFile = null,
         string outputFourierSamplingFile = null,
         string symmetry = null,
-        bool svg = false
+        bool svg = false,
+        string projectionDirectionsFile = null
     )
     {
         var arguments = new List<string> { "orientation-and-fourier-sampling", "--particles-file", particlesFile,
@@ -299,6 +300,8 @@ public static class BakeryWrapper
         if(!String.IsNullOrEmpty(outputFourierSamplingFile))
             arguments.AddRange(["--output-fourier-sampling-file", outputFourierSamplingFile]);
 
+        if (projectionDirectionsFile != null)
+            arguments.AddRange(["--projection-directions-file", projectionDirectionsFile]);
         if (svg) arguments.Add("--svg");
         RunArguments(arguments);
     }

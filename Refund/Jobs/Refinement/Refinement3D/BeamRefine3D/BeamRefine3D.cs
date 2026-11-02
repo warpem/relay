@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Refund.Components.FileBrowser;
 using Refund.DataModel;
@@ -7,6 +8,7 @@ using Refund.DataModel.ReadOnly;
 using Refund.JobResources;
 using Refund.UIFields;
 using Refund.Utils;
+using Refund.Utils.Star;
 using Warp;
 using Warp.Tools;
 
@@ -16,7 +18,6 @@ public enum BeamAlignment { Global, Local }
 public enum BeamRegularization { FSC, Denoise, Blush }
 public enum BeamDevice { GPU, CPU }
 public enum BeamEwald { Off, Positive, Negative }
-public enum BeamLocalPivot { MaskCenter, BoundingBox, BoxCenter }
 
 /// <summary>Single-device Beam refinement. Only committed iterations are exposed to Relay.</summary>
 [GenerateReadOnly]
@@ -60,10 +61,6 @@ public class BeamRefine3D : Job, IClusterJob
         helpText: "FSC uses independent half-map filtering. Denoise trains a Noise2Noise model. Blush requires Beam's external Blush installation.")]
     [RelayProperty] public BeamRegularization Regularization { get; set; } = BeamRegularization.FSC;
 
-    [UiDecimal("denoise-alignment-fsc", "Denoising alignment FSC", min: 0.01, max: 0.99, stepSize: 0.01,
-        isAdvanced: true, ConditionalOnField = nameof(Regularization), ConditionalOnValue = BeamRegularization.Denoise)]
-    [RelayProperty] public decimal DenoiseAlignmentFsc { get; set; } = 0.08m;
-
     [UiInt("", "Extra iterations", min: -1, max: 100, isAdvanced: true,
         helpText: "Iterations after convergence. -1 uses Beam's default: 0 for global refinement, 2 for local refinement.")]
     [RelayProperty] public int ExtraIterations { get; set; } = -1;
@@ -93,10 +90,6 @@ public class BeamRefine3D : Job, IClusterJob
         ConditionalOnField = nameof(Alignment), ConditionalOnValue = BeamAlignment.Local)]
     [RelayProperty] public decimal LocalTranslationRange { get; set; } = 10;
 
-    [UiEnum("", "Local rotation pivot", typeof(BeamLocalPivot), isAdvanced: true,
-        ConditionalOnField = nameof(Alignment), ConditionalOnValue = BeamAlignment.Local)]
-    [RelayProperty] public BeamLocalPivot LocalPivot { get; set; } = BeamLocalPivot.MaskCenter;
-
     [UiBool("recenter-local-search", "Recenter local searches", isAdvanced: true,
         helpText: "Center each new search on the preceding iteration's best pose.",
         ConditionalOnField = nameof(Alignment), ConditionalOnValue = BeamAlignment.Local)]
@@ -106,16 +99,20 @@ public class BeamRefine3D : Job, IClusterJob
         ConditionalOnField = nameof(Alignment), ConditionalOnValue = BeamAlignment.Local)]
     [RelayProperty] public bool LocalGaussianPriors { get; set; }
 
-    [UiDecimal("search-cache-fsc", "Search cache FSC", min: 0, max: 2, stepSize: 0.01,
-        isAdvanced: true, helpText: "Minimum reference agreement for reusing global-search candidates; values above 1 disable reuse.",
-        ConditionalOnField = nameof(Alignment), ConditionalOnValue = BeamAlignment.Global)]
-    [RelayProperty] public decimal SearchCacheFsc { get; set; } = 0.95m;
-
     [UiInt("beams", "Alignment candidates", min: 1, max: 64, isAdvanced: true)]
     [RelayProperty] public int Beams { get; set; } = 20;
 
+    [UiIntNullable("max-tilts", "Maximum tilts", min: 1, max: 1000,
+        helpText: "Use at most this many visible tilts per particle, selected by lowest accumulated dose.",
+        ConditionalOnField = nameof(IsTiltSeries), ConditionalOnValue = true)]
+    [RelayProperty] public int? MaxTilts { get; set; }
+
+    public bool IsTiltSeries => ParticleInputs.Sources(PortsIn["Particles"])
+        .Any(s => s.Resource?.DataDimensionality == ParticleType.Tiltseries);
+
     [UiFieldGroup("CTF", 2)]
-    [UiBool("fit-defocus", "Refine defocus")]
+    [UiBool("fit-defocus", "Refine defocus",
+        helpText: "Jointly refine defocus and astigmatism. Astigmatism is shared per micrograph for single-tilt data, or per physical tilt for tilt-series data.")]
     [RelayProperty] public bool RefineDefocus { get; set; }
 
     [UiDecimal("defocus-range", "Defocus search range", min: 1, max: 10000, unit: "Å", isAdvanced: true,
@@ -128,17 +125,8 @@ public class BeamRefine3D : Job, IClusterJob
 
     [UiFieldGroup("Aberrations", 3)]
     [UiBool("fit-aberrations", "Refine aberrations",
-        helpText: "Fit only the selected radial orders. Even-order fits also include a constant phase offset.")]
+        helpText: "Fit only the selected higher-order aberrations; defocus, astigmatism and image shifts use their dedicated settings.")]
     [RelayProperty] public bool RefineAberrations { get; set; }
-
-    [UiBool("", "1st order (image shifts)",
-        ConditionalOnField = nameof(RefineAberrations), ConditionalOnValue = true)]
-    [RelayProperty] public bool AberrationOrder1 { get; set; } = true;
-
-    [UiBool("", "2nd order (defocus, astigmatism)",
-        helpText: "Even-order fits also include the constant phase-offset term.",
-        ConditionalOnField = nameof(RefineAberrations), ConditionalOnValue = true)]
-    [RelayProperty] public bool AberrationOrder2 { get; set; } = true;
 
     [UiBool("", "3rd order (beam tilt/coma, trefoil)",
         ConditionalOnField = nameof(RefineAberrations), ConditionalOnValue = true)]
@@ -152,7 +140,7 @@ public class BeamRefine3D : Job, IClusterJob
         ConditionalOnField = nameof(RefineAberrations), ConditionalOnValue = true)]
     [RelayProperty] public bool AberrationOrder5 { get; set; }
 
-    [UiBool("fit-magnification", "Refine anisotropic magnification")]
+    [UiBool("fit-magnification", "Refine magnification")]
     [RelayProperty] public bool FitMagnification { get; set; }
 
     [UiFieldGroup("Compute", 4)]
@@ -175,10 +163,16 @@ public class BeamRefine3D : Job, IClusterJob
     [RelayProperty] public string CacheDirectory { get; set; } = "";
 
     [UiString("", "Additional arguments", isAdvanced: true,
-        helpText: "Additional Beam options, e.g. --convergence-relative-improvement 0.005. Values may be quoted. Input/output paths, device, workers and resume are managed by Relay.")]
+        helpText: "Additional Beam options, e.g. --ctf-min-resolution 30. Values may be quoted. Input/output paths, device, workers and resume are managed by Relay.")]
     [RelayProperty] public string AdditionalArguments { get; set; } = "";
 
+    [RelayProperty, Clearable] public int LastCommittedIteration { get; set; } = -1;
     [RelayProperty, Clearable] public bool HasRunToCompletion { get; set; }
+
+    private int OutputIteration(int iteration) => iteration < 0 ? Math.Max(LastCommittedIteration, VisAvailableIteration) : iteration;
+    public string IterationMetadataDirectory(int iteration) => Path.Combine(BeamDirectory, $"it{OutputIteration(iteration):D3}", "warp_metadata");
+    public string TiltProcessedItems(int iteration) => Path.Combine(RelayResultsDirectoryPath, $"tilt_series_it{OutputIteration(iteration):D4}.json");
+    public string TiltFailedItems => Path.Combine(RelayResultsDirectoryPath, "tilt_series_failed.json");
 
     public string BeamDirectory => Path.Combine(DirectoryPath, "beam");
     public string IterationFile(int iteration, string suffix) => Path.Combine(BeamDirectory,
@@ -198,13 +192,15 @@ public class BeamRefine3D : Job, IClusterJob
         {
             ["Particles"] = new(this, typeof(ParticleSet), "Particles", "Particles", 1, int.MaxValue),
             ["Reference"] = new(this, typeof(MapList), "Reference", "Reference", 1, 1),
-            ["Mask"] = new(this, typeof(Mask), "Mask", "Mask", 0, 1)
+            ["Mask"] = new(this, typeof(Mask), "Mask", "Mask", 0, 1),
+            ["TiltSeries"] = new(this, typeof(TiltSeriesSet), "TiltSeries", "Tilt-series metadata", 0, 1)
         });
         PortsOut = new(new Dictionary<string, PortOut>
         {
             ["Particles"] = new(this, typeof(ParticleSet), "Particles", "Particles", GetParticles),
             ["Reference"] = new(this, typeof(MapList), "Reference", "Refined map", GetMaps),
-            ["Mask"] = new(this, typeof(Mask), "Mask", "Refinement mask", GetMask)
+            ["Mask"] = new(this, typeof(Mask), "Mask", "Refinement mask", GetMask),
+            ["TiltSeries"] = new(this, typeof(TiltSeriesSet), "TiltSeries", "Refined tilt-series metadata", GetTiltSeries)
         });
     }
 
@@ -212,17 +208,19 @@ public class BeamRefine3D : Job, IClusterJob
     {
         var result = ParticleInputs.Describe(PortsIn["Particles"])?.Copy();
         if (result == null) return null;
-        result.ParticlesSingleStarPath = IterationFile(iteration < 0 ? VisAvailableIteration : iteration, "data.star");
+        result.ParticlesSingleStarPath = IterationFile(OutputIteration(iteration), "data.star");
         result.ParticlesMultiStarDirectory = "";
         result.ToMultiStarPath = null;
+        result.TomogramsStarPath = result.OptimisationSetStarPath = null;
         result.ItemCount = null;
         result.HasAngles = result.HasShifts = result.HasScale = true;
+        if (IsTiltSeries) result.HasCtf = true;
         return result;
     }
 
     private MapList GetMaps(int iteration)
     {
-        int i = iteration < 0 ? VisAvailableIteration : iteration;
+        int i = OutputIteration(iteration);
         return new MapList([new Map(
             half1VolumePath: IterationFile(i, "half1_class001_unfiltered.mrc"),
             half2VolumePath: IterationFile(i, "half2_class001_unfiltered.mrc"),
@@ -232,7 +230,21 @@ public class BeamRefine3D : Job, IClusterJob
     }
 
     private Mask GetMask(int iteration) =>
-        new(IterationFile(iteration < 0 ? VisAvailableIteration : iteration, "mask_refinement.mrc"));
+        new(IterationFile(OutputIteration(iteration), "mask_refinement.mrc"));
+
+    private TiltSeriesSet GetTiltSeries(int iteration)
+    {
+        if (!IsTiltSeries) return null;
+        var result = PortsIn["TiltSeries"].GetSingleResource<TiltSeriesSet>()?.Copy();
+        if (result == null) return null;
+        result.LatestMetadataDirectory = IterationMetadataDirectory(iteration);
+        result.HasMetadata = true;
+        result.HasReferenceBasedRefinements = true;
+        result.ProcessedItemsJson = TiltProcessedItems(iteration);
+        result.FailedItemsJson = TiltFailedItems;
+        result.ItemCount = null;
+        return result;
+    }
 
     public override Dictionary<string, List<string>> ValidatePortInputs()
     {
@@ -240,13 +252,20 @@ public class BeamRefine3D : Job, IClusterJob
         foreach (var source in ParticleInputs.Sources(PortsIn["Particles"]))
             if (source.Resource is { } particles)
             {
-                if (!particles.HasData || !particles.HasSingleStar || particles.DataDimensionality != ParticleType.Image)
-                    AddPortValidationError(errors, "Particles", "Beam requires extracted 2D particles in a single STAR file.");
+                if (!particles.HasData || !particles.HasSingleStar || particles.DataDimensionality is not (ParticleType.Image or ParticleType.Tiltseries))
+                    AddPortValidationError(errors, "Particles", "Beam requires extracted single-tilt images or particle tilt stacks in a single STAR file.");
                 if (Alignment == BeamAlignment.Local && (!particles.HasAngles || !particles.HasShifts))
                     AddPortValidationError(errors, "Particles", "Local refinement requires existing orientations and shifts.");
-                if ((RefineDefocus || RefineAberrations || FitMagnification || Ewald != BeamEwald.Off) && !particles.HasCtf)
+                if ((RefineDefocus || RefineAberrations || FitMagnification || Ewald != BeamEwald.Off) && !IsTiltSeries && !particles.HasCtf)
                     AddPortValidationError(errors, "Particles", "CTF refinement and Ewald correction require particle CTF metadata.");
             }
+        var tiltSeries = PortsIn["TiltSeries"].GetSingleResource<TiltSeriesSet>();
+        if (IsTiltSeries && (tiltSeries == null || !tiltSeries.HasMetadata || string.IsNullOrEmpty(tiltSeries.LatestMetadataDirectory)))
+            AddPortValidationError(errors, "TiltSeries", "Particle tilt stacks require tilt-series XML metadata.");
+        if (IsTiltSeries && tiltSeries is { HasCtf: false })
+            AddPortValidationError(errors, "TiltSeries", "Tilt-series metadata must contain CTF estimates.");
+        if (!IsTiltSeries && PortsIn["TiltSeries"].Count > 0)
+            AddPortValidationError(errors, "TiltSeries", "Connect tilt-series metadata only for particle tilt stacks.");
         if (Alignment == BeamAlignment.Local && PortsIn["Mask"].Count == 0)
             AddPortValidationError(errors, "Mask", "Local refinement requires a mask.");
         var maps = PortsIn["Reference"].GetSingleResource<MapList>();
@@ -259,9 +278,6 @@ public class BeamRefine3D : Job, IClusterJob
     private int[] SelectedAberrationOrders()
     {
         var orders = new List<int>();
-        if (AberrationOrder2 || AberrationOrder4) orders.Add(0);
-        if (AberrationOrder1) orders.Add(1);
-        if (AberrationOrder2) orders.Add(2);
         if (AberrationOrder3) orders.Add(3);
         if (AberrationOrder4) orders.Add(4);
         if (AberrationOrder5) orders.Add(5);
@@ -269,7 +285,7 @@ public class BeamRefine3D : Job, IClusterJob
     }
 
     private static readonly HashSet<string> ManagedArguments = new(StringComparer.Ordinal)
-    { "i", "input", "o", "output", "project-root", "resume", "device", "j", "workers", "reference", "reference-half-1", "reference-half-2", "mask", "show-progress", "dont-show-progress" };
+    { "i", "input", "o", "output", "project-root", "resume", "device", "j", "workers", "reference", "reference-half-1", "reference-half-2", "mask", "metadata-dir", "show-progress", "dont-show-progress" };
 
     public override Dictionary<string, string> ValidateInputs()
     {
@@ -283,6 +299,7 @@ public class BeamRefine3D : Job, IClusterJob
         catch (ArgumentException e) { errors[nameof(AdditionalArguments)] = e.Message; }
         if (RefineAberrations && SelectedAberrationOrders().Length == 0)
             errors[nameof(RefineAberrations)] = "Select at least one aberration order.";
+        if (MaxTilts is < 1) errors[nameof(MaxTilts)] = "Maximum tilts must be positive or empty.";
         if (ExtraIterations < -1)
             errors[nameof(ExtraIterations)] = "Extra iterations must be -1 (automatic) or nonnegative.";
         if (Workers < 1 || Memory < 1 || BatchSize < 1)
@@ -298,14 +315,13 @@ public class BeamRefine3D : Job, IClusterJob
         args["regularization"] = Regularization.ToString().ToLowerInvariant();
         args["device"] = Device == BeamDevice.GPU ? "cuda:0" : "cpu";
         if (Ewald != BeamEwald.Off) args["ewald"] = Ewald == BeamEwald.Positive ? "p-positive" : "p-negative";
-        if (Alignment == BeamAlignment.Local)
-            args["local-pivot"] = LocalPivot switch
-            {
-                BeamLocalPivot.MaskCenter => "mass", BeamLocalPivot.BoundingBox => "bbox", _ => "box-center"
-            };
         if (ExtraIterations >= 0) args["extra-iterations"] = ExtraIterations.ToString(CultureInfo.InvariantCulture);
         if (RefineAberrations)
             args["aberration-orders"] = string.Join(",", SelectedAberrationOrders());
+        if (RefineDefocus) args["fit-astigmatism"] = "";
+        if (IsTiltSeries)
+            args["metadata-dir"] = PortsIn["TiltSeries"].GetSingleResource<TiltSeriesSet>()?.LatestMetadataDirectory
+                ?? throw new InvalidOperationException("Connect tilt-series metadata.");
         var particles = ParticleInputs.Describe(PortsIn["Particles"])
             ?? throw new InvalidOperationException("Connect input particles.");
         var map = PortsIn["Reference"].GetSingleResource<MapList>()?.Maps.Single()
@@ -328,13 +344,74 @@ public class BeamRefine3D : Job, IClusterJob
         return args;
     }
 
+    public override void Stage()
+    {
+        base.Stage();
+        if (!IsTiltSeries) return;
+        string metadata = PortsIn["TiltSeries"].GetSingleResource<TiltSeriesSet>().LatestMetadataDirectory;
+        var names = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var source in ParticleInputs.Sources(PortsIn["Particles"]))
+        {
+            var star = new StreamingStar(source.Resource.ParticlesSingleStarPath, CancellationToken.None);
+            var optics = star.FindBlock("optics") ?? throw new InvalidDataException("Tilt particles require optics metadata.");
+            int premultiplied = optics.Columns.IndexOf("rlnCtfDataAreCtfPremultiplied");
+            if (premultiplied < 0) throw new InvalidDataException("Tilt stacks must declare whether their CTF is premultiplied.");
+            star.ReadRows(optics, row =>
+            {
+                if (StreamingStar.Value(row[premultiplied]) != "0")
+                    throw new InvalidDataException("Re-extract tilt stacks using the Beam export mode: raw, unpremultiplied images.");
+            }, CancellationToken.None);
+            var particles = star.FindBlock("particles") ?? star.FindBlock("")
+                ?? throw new InvalidDataException("Particle STAR has no particle table.");
+            int column = particles.Columns.IndexOf("rlnTomoName");
+            if (column < 0) throw new InvalidDataException("Particle tilt stacks require rlnTomoName.");
+            star.ReadRows(particles, row =>
+            {
+                string name = StreamingStar.Value(row[column]);
+                string basename = TiltSeriesBasename(name);
+                if (names.TryGetValue(basename, out string previous) && previous != name)
+                    throw new InvalidDataException($"Tilt-series names '{previous}' and '{name}' resolve to the same XML file.");
+                names[basename] = name;
+            }, CancellationToken.None);
+            star.EnsureUnchanged();
+        }
+        foreach (string name in names.Keys)
+            if (!File.Exists(Path.Combine(metadata, name + ".xml")))
+                throw new FileNotFoundException($"Missing tilt-series metadata for {name}.", Path.Combine(metadata, name + ".xml"));
+    }
+
+    private static string TiltSeriesBasename(string path) => Path.GetFileNameWithoutExtension(path?.Replace('\\', '/'));
+
+    private void CollectTiltSeriesItems(int iteration)
+    {
+        string metadata = IterationMetadataDirectory(iteration);
+        var names = Directory.EnumerateFiles(metadata, "*.xml").Select(Path.GetFileNameWithoutExtension).ToHashSet(StringComparer.Ordinal);
+        var input = PortsIn["TiltSeries"].GetSingleResource<TiltSeriesSet>();
+        JsonArray items;
+        if (!string.IsNullOrEmpty(input.ProcessedItemsJson) && File.Exists(input.ProcessedItemsJson))
+        {
+            var source = JsonNode.Parse(File.ReadAllText(input.ProcessedItemsJson)).AsArray();
+            items = new JsonArray(source.Where(item => names.Contains(TiltSeriesBasename(item?["Path"]?.GetValue<string>())))
+                .Select(item => item.DeepClone()).ToArray());
+            if (items.Count != names.Count)
+                throw new InvalidDataException("Published tilt-series metadata does not match the connected processed-series list.");
+        }
+        else
+            items = new JsonArray(names.Order().Select(name => (JsonNode)new JsonObject
+                { ["Path"] = Path.Combine(input.DataSet?.DataDirectory ?? "", name + ".tomostar") }).ToArray());
+        Directory.CreateDirectory(RelayResultsDirectoryPath);
+        File.WriteAllText(TiltProcessedItems(iteration), items.ToJsonString());
+        File.WriteAllText(TiltFailedItems, "[]");
+    }
+
     internal int[] CommittedIterations() => !Directory.Exists(BeamDirectory) ? [] :
         Directory.EnumerateDirectories(BeamDirectory).Select(Path.GetFileName)
             .Where(name => Regex.IsMatch(name!, @"^it\d{3,}$"))
             .Select(name => int.Parse(name!.AsSpan(2), CultureInfo.InvariantCulture))
             .Where(i => File.Exists(IterationFile(i, "data.star")) && File.Exists(IterationFile(i, "model.star")) &&
                 File.Exists(IterationFile(i, "class001.mrc")) && File.Exists(IterationFile(i, "half1_class001_unfiltered.mrc")) &&
-                File.Exists(IterationFile(i, "half2_class001_unfiltered.mrc")))
+                File.Exists(IterationFile(i, "half2_class001_unfiltered.mrc")) &&
+                (!IsTiltSeries || Directory.Exists(IterationMetadataDirectory(i))))
             .Order().ToArray();
 
     public override Action TrackProgressLogs()
@@ -358,7 +435,11 @@ public class BeamRefine3D : Job, IClusterJob
             JobTools.WriteLogFile(string.Join('\n', lines[sections[section].Value..end]), LogFilePath(sections[section].Key));
         }
         int latest = starts.Keys.Max();
-        return () => { stderrUpdate?.Invoke(); LogsAvailableIteration = latest; };
+        int committed = CommittedIterations().DefaultIfEmpty(-1).Max();
+        if (IsTiltSeries)
+            foreach (int i in CommittedIterations())
+                if (!File.Exists(TiltProcessedItems(i))) CollectTiltSeriesItems(i);
+        return () => { stderrUpdate?.Invoke(); LogsAvailableIteration = latest; LastCommittedIteration = committed; };
     }
 
     public override Action TrackProgressResults()
@@ -366,8 +447,10 @@ public class BeamRefine3D : Job, IClusterJob
         Directory.CreateDirectory(RelayResultsDirectoryPath);
         int latest = VisAvailableIteration;
         bool generated = false;
+        int committed = CommittedIterations().DefaultIfEmpty(-1).Max();
         foreach (int i in CommittedIterations())
         {
+            if (IsTiltSeries && !File.Exists(TiltProcessedItems(i))) CollectTiltSeriesItems(i);
             bool currentFigures = DiagnosticsAreCurrent(VisDiagnostics(i));
             if (currentFigures && File.Exists(VisCard(i)) && FigureFilesReady(VisFilteredSlices(i)) && FigureFilesReady(VisFsc(i)) &&
                 FigureFilesReady(VisAngularDistribution(i)) && FigureFilesReady(VisFourierSampling(i)) && File.Exists(VisDiagnostics(i)))
@@ -382,7 +465,8 @@ public class BeamRefine3D : Job, IClusterJob
                         ? IterationFile(i, "class001_directional_fsc.csv") : null);
             if (!currentFigures || !FigureFilesReady(VisAngularDistribution(i)) || !FigureFilesReady(VisFourierSampling(i)))
                 BakeryWrapper.OrientationAndFourierSamplingHexBin(IterationFile(i, "data.star"),
-                    VisAngularDistribution(i), VisFourierSampling(i), Symmetry == "C1" ? null : Symmetry, svg: true);
+                    VisAngularDistribution(i), VisFourierSampling(i), Symmetry == "C1" ? null : Symmetry, svg: true,
+                    projectionDirectionsFile: IsTiltSeries ? IterationFile(i, "projection_directions.npy") : null);
             if (!File.Exists(VisCard(i)))
                 BakeryWrapper.Refine3DJobCard(IterationFile(i, "class001.mrc"), IterationFile(i, "model.star"), VisCard(i));
             if (!currentFigures)
@@ -391,8 +475,8 @@ public class BeamRefine3D : Job, IClusterJob
             latest = i;
         }
         bool finished = File.Exists(PathSuccess) || File.Exists(Path.Combine(BeamDirectory, "RELION_JOB_EXIT_SUCCESS"));
-        if (!generated && latest == VisAvailableIteration && finished == HasRunToCompletion) return null;
-        return () => { VisAvailableIteration = latest; HasRunToCompletion = finished; };
+        if (!generated && latest == VisAvailableIteration && finished == HasRunToCompletion && committed == LastCommittedIteration) return null;
+        return () => { VisAvailableIteration = latest; LastCommittedIteration = committed; HasRunToCompletion = finished; };
     }
 
     internal static bool DiagnosticsAreCurrent(string path)

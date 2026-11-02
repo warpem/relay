@@ -35,7 +35,7 @@ internal sealed class ParticleStarMerger(CancellationToken cancellationToken)
     private const long MetadataBudget = 64 * 1024 * 1024;
 
     public void Merge(IReadOnlyList<(string Label, ParticleSet Resource)> resources,
-        string directory, string finalDirectory, string rootDirectory)
+        string directory, string finalDirectory, string rootDirectory, bool warpMetadata = false)
     {
         foreach (var (label, resource) in resources)
         {
@@ -52,7 +52,7 @@ internal sealed class ParticleStarMerger(CancellationToken cancellationToken)
                     block.Name = "particles";
                 if (!RequireBlock(input.Particles, "particles").IsLoop)
                     throw new InvalidDataException($"{input.Particles.Path}: data_particles must be a loop.");
-                if (resource.DataDimensionality == ParticleType.Tiltseries)
+                if (resource.DataDimensionality == ParticleType.Tiltseries && !warpMetadata)
                 {
                     input.Tomograms = new StreamingStar(resource.TomogramsStarPath, cancellationToken);
                     if (!string.IsNullOrEmpty(resource.OptimisationSetStarPath))

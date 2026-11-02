@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import typer
 from cmap import Colormap
+from scipy.spatial.transform import Rotation
 
 from ._cli import cli
 from ..figure_export import save_figure
@@ -33,6 +34,7 @@ def orientation_and_fourier_sampling(
     output_orientation_file: Optional[Path] = typer.Option(None),
     output_fourier_sampling_file: Optional[Path] = typer.Option(None),
     svg: bool = False,
+    projection_directions_file: Optional[Path] = typer.Option(None),
 ):
     """Make hexbin plots of orientation and Fourier sampling distributions.
 
@@ -83,6 +85,18 @@ def orientation_and_fourier_sampling(
         )
 
     if output_fourier_sampling_file is not None:
+        if projection_directions_file is not None:
+            directions = np.load(projection_directions_file, allow_pickle=False)
+            if directions.ndim != 2 or directions.shape[1] != 3 or not np.isfinite(directions).all():
+                raise ValueError('Projection directions must be a finite N×3 array')
+            if not np.allclose(np.linalg.norm(directions, axis=1), 1., atol=1e-3):
+                raise ValueError('Projection directions must be unit vectors')
+            if symmetry is not None:
+                directions = np.einsum('sij,nj->sni', Rotation.create_group(symmetry).as_matrix(),
+                                       directions).reshape(-1, 3)
+            directions = np.where(directions[:, 2:3] < 0, -directions, directions)
+            h_to_count = count_particles_per_h3_cell(xyz_to_cell(directions, res=grid_resolution))
+            h_cells, h_cell_counts, idx_inv = find_cell_count_to_image_mapping(h_grid, h_to_count)
         image = generate_fourier_sampling_distribution_image(
             h_cells=h_cells,
             h_cell_counts=h_cell_counts,

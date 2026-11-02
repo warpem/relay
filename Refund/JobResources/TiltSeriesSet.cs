@@ -4,6 +4,8 @@ namespace Refund.JobResources;
 
 public class TiltSeriesSet : Resource
 {
+    public TiltSeriesSet Copy() => (TiltSeriesSet)MemberwiseClone();
+
     public DataSetTs DataSet { get; set; }
 
     public bool HasMetadata { get; set; } = false;

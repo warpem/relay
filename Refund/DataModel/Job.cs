@@ -618,7 +618,7 @@ public abstract class Job : RelayBase, IFolderContent
         foreach (var port in PortsIn.Values.Where(ParticleInputs.NeedsMerge))
         {
             var sources = ParticleInputs.Sources(port);
-            foreach (var issue in ParticleInputs.Validate(sources))
+            foreach (var issue in ParticleInputs.Validate(sources, ParticleInputs.UsesWarpMetadata(port)))
                 AddPortValidationError(errors, port.Name, $"{sources[issue.SourceIndex].Label}: {issue.Message}");
         }
         return errors;

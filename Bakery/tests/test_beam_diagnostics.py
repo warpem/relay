@@ -100,3 +100,58 @@ def test_directional_band_matches_shell_indices_not_rounded_csv_labels(tmp_path)
     np.testing.assert_allclose(np.unique(band[:, 0]), 1/np.array([10.123, 5.234]))
     assert 'Directional 10–90%' in ax.collections[0].get_label()
     plt.close(fig)
+
+
+def test_tilt_diagnostics_use_xml_parameters_and_observation_ctf_baseline(tmp_path):
+    beam, output = tmp_path/'beam', tmp_path/'out'
+    for i in (1, 2):
+        folder = beam/f'it{i:03d}'
+        (folder/'warp_metadata').mkdir(parents=True)
+        starfile.write({'model_classes': pd.DataFrame({'rlnEstimatedResolution': [4/i]})},
+                       folder/f'run_it{i:03d}_model.star')
+        starfile.write({'particles': pd.DataFrame({'rlnTomoName': ['TS']})},
+                       folder/f'run_it{i:03d}_data.star')
+        # Reverse node order in the later file to exercise coordinate matching.
+        nodes = [(0, .1*i), (1, .2*i)]
+        if i == 2:
+            nodes.reverse()
+        xml = '<TiltSeries><GridCTF Width="1" Height="1" Depth="2">' + ''.join(
+            f'<Node X="0" Y="0" Z="{z}" Value="{v}"/>' for z, v in nodes)
+        xml += '</GridCTF><GridCTFDefocusDelta Width="1" Height="1" Depth="2">'
+        xml += '<Node X="0" Y="0" Z="0" Value="0.01"/><Node X="0" Y="0" Z="1" Value="0.02"/>'
+        (folder/'warp_metadata/TS.xml').write_text(xml+'</GridCTFDefocusDelta></TiltSeries>')
+    (beam/'it002/manifest.json').write_text(json.dumps({'restart_state': {'observation': {
+        'kind': 'tilt_series', 'metadata': {'ctf_state': {'first_fit_iteration': 1}}}}}))
+    result = CliRunner().invoke(cli, ['beam-refinement-diagnostics', '--beam-directory', str(beam),
+                                     '--iteration', '2', '--output-directory', str(output)])
+    assert result.exit_code == 0, result.output + str(result.exception)
+    manifest = json.loads((output/'diagnostics_it0002.json').read_text())
+    assert manifest['history']
+    assert manifest['ctf']['matched_particles'] == 2
+    assert manifest['ctf']['group_count'] == 1
+    for suffix in ('.svg', '.light.svg', '.dark.svg'):
+        assert (output/('ctf_it0002'+suffix)).exists()
+
+
+def test_fourier_sampling_uses_physical_views_but_orientation_plot_uses_particles(tmp_path, monkeypatch):
+    module = importlib.import_module('bakery.cli.orientation_and_fourier_sampling')
+    source = tmp_path/'particles.star'
+    starfile.write({'particles': pd.DataFrame({'rlnAngleRot': [0., 0.], 'rlnAngleTilt': [0., 0.]})}, source)
+    normals = tmp_path/'directions.npy'
+    np.save(normals, np.array([[1., 0, 0], [0, 1., 0], [0, 0, 1.]]))
+    orientation_counts, sampling_counts = [], []
+    monkeypatch.setattr(module, 'generate_orientation_distribution_image',
+                        lambda **kw: orientation_counts.append(kw['h_counts'].sum()))
+    monkeypatch.setattr(module, 'generate_fourier_sampling_distribution_image',
+                        lambda **kw: sampling_counts.append(kw['h_cell_counts'].sum()))
+    monkeypatch.setattr(module, 'plot_orientation_distribution', lambda **kw: None)
+    monkeypatch.setattr(module, 'plot_fourier_sampling_distribution', lambda **kw: None)
+    result = CliRunner().invoke(cli, ['orientation-and-fourier-sampling', '--particles-file', str(source),
+                                     '--grid-resolution', '1', '--colormap', 'viridis',
+                                     '--input-type', 'relion_star_file',
+                                     '--output-orientation-file', str(tmp_path/'angles.svg'),
+                                     '--output-fourier-sampling-file', str(tmp_path/'sampling.svg'),
+                                     '--projection-directions-file', str(normals)])
+    assert result.exit_code == 0, result.output + str(result.exception)
+    assert orientation_counts == [2]
+    assert sampling_counts == [3]

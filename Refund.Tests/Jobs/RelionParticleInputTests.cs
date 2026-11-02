@@ -15,6 +15,20 @@ public class RelionParticleInputTests
     private const string Root = "/tmp/relay-particle-input-tests";
 
     [Theory]
+    [InlineData(TiltStackFormat.Relion, ExportType.Tiltseries, false)]
+    [InlineData(TiltStackFormat.Beam, ExportType.Tiltseries, true)]
+    [InlineData(TiltStackFormat.Beam, ExportType.Subtomograms, false)]
+    public void BeamExtractionUsesRawUnnormalizedTiltStacksOnly(TiltStackFormat format, ExportType export, bool raw)
+    {
+        var job = new ExtractParticles { OutputType = export, StackFormat = format };
+        ConnectInputs(job, ParticleType.Tiltseries);
+        var args = job.ComposeCommandArguments();
+        Assert.Equal(raw, args.ContainsKey("dont_premultiply"));
+        Assert.Equal(raw, args.ContainsKey("dont_normalize_input"));
+        Assert.Equal(export == ExportType.Tiltseries, args.ContainsKey("2d"));
+    }
+
+    [Theory]
     [InlineData(ParticleType.Image)]
     [InlineData(ParticleType.Tomogram)]
     [InlineData(ParticleType.Tiltseries)]
