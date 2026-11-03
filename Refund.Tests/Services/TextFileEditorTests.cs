@@ -27,6 +27,22 @@ public sealed class TextFileEditorTests : IDisposable
     }
 
     [Theory]
+    [InlineData(0)]
+    [InlineData(150000)]
+    public async Task JobLogsWithTerminalControlsOpenAndRoundTripWithoutChangingTheirContents(int prefixLength)
+    {
+        string path = Path.Combine(root, "std.out");
+        string text = new string('a', prefixLength) + "\n\u001b[32mRunning\u001b[0m\n10%\b\b\b20%\r30%\a\v\n";
+        await File.WriteAllTextAsync(path, text);
+        var document = await service.DescribeAsync(Ticket(path));
+        var ticket = Ticket(path, document.Encoding);
+        Assert.Equal(text, await Read(ticket));
+        Assert.True(Refund.Components.FileBrowser.FilePreview.IsPlainTextFile(path));
+        await Save(ticket, text);
+        Assert.Equal(Encoding.UTF8.GetBytes(text), await File.ReadAllBytesAsync(path));
+    }
+
+    [Theory]
     [InlineData("space.relay")]
     [InlineData("legacy.space")]
     public async Task ConnectedSpaceCannotBeOpenedOrSavedUsingAnOlderTicket(string name)

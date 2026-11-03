@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Components;
+using Refund.Services;
 
 namespace Refund.Components.FileBrowser;
 
@@ -184,7 +185,7 @@ public partial class FilePreview : ComponentBase
             int readChars = reader.Read(buffer, 0, buffer.Length);
             string contentSample = new string(buffer, 0, readChars);
 
-            bool isBinary = contentSample.Any(c => char.IsControl(c) && !char.IsWhiteSpace(c) && c != '\r' && c != '\n');
+            bool isBinary = contentSample.Any(TextFileEditorService.IsUnsupportedControl);
             return !isBinary;
         }
         catch

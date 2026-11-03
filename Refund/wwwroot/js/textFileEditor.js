@@ -59,7 +59,9 @@ function upload(token, blob, antiforgeryToken, signal, progress) {
 }
 
 async function download(token, file, signal, progress) {
-    const response = await fetch(api(token, '/content'), { signal, credentials: 'same-origin', cache: 'no-store' });
+    const incompleteDownload = cause => new Error('The file download was interrupted. Check Relay’s server log for file encoding or content errors, then retry.', { cause });
+    const response = await fetch(api(token, '/content'), { signal, credentials: 'same-origin', cache: 'no-store' })
+        .catch(error => { throw signal.aborted ? error : incompleteDownload(error); });
     if (!response.ok) {
         const result = await response.json().catch(() => ({}));
         throw new Error(result.error || `Loading failed (${response.status}).`);
@@ -79,6 +81,8 @@ async function download(token, file, signal, progress) {
         }
         chunks.push(decoder.decode());
         return chunks.join('');
+    } catch (error) {
+        throw signal.aborted ? error : incompleteDownload(error);
     } finally { reader.releaseLock(); }
 }
 

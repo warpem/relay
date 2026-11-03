@@ -28,3 +28,8 @@ mode, and checks that the saved file has its original size and the edited first
 byte. It deliberately makes `model.getValue()` throw to catch accidental whole-file
 serialization. The server-side tests separately exercise 100 MiB streams,
 encoding/BOM preservation and failure cleanup.
+
+Run `node log-file.test.mjs` against the harness to check job logs containing ANSI
+terminal controls and diagnostics for interrupted downloads. Set `EDITOR_TEST_LOG`
+to a local log file path when starting the harness to test that file; the harness
+copies it into its temporary directory and never changes the original fixture.

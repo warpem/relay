@@ -18,6 +18,9 @@ string root = Path.Combine(Path.GetTempPath(), "relay-editor-harness-" + Guid.Ne
 Directory.CreateDirectory(root);
 string input = Path.Combine(root, "input.json");
 await File.WriteAllTextAsync(input, "{\r\n  \"hello\": \"world\"\r\n}\r\n", new System.Text.UTF8Encoding(true));
+string logFixture = Environment.GetEnvironmentVariable("EDITOR_TEST_LOG");
+if (!string.IsNullOrEmpty(logFixture)) File.Copy(logFixture, Path.Combine(root, "std.out"));
+else await File.WriteAllTextAsync(Path.Combine(root, "std.out"), new string('a', 150000) + "\n\u001b[A\rProgress: 50%\n");
 // Representative wide STAR-style rows, generated in bounded chunks.
 int largeMiB = int.TryParse(Environment.GetEnvironmentVariable("EDITOR_TEST_MIB"), out int configured) ? configured : 100;
 await using (var large = File.Create(Path.Combine(root, "large.star")))
@@ -42,7 +45,8 @@ app.MapGet("/sign-in", async (HttpContext context) =>
 });
 app.MapGet("/", (TextFileEditorService files, HttpContext context) =>
 {
-    string path = context.Request.Query.ContainsKey("large") ? Path.Combine(root, "large.star") : input;
+    string path = context.Request.Query.ContainsKey("large") ? Path.Combine(root, "large.star") :
+        context.Request.Query.ContainsKey("log") ? Path.Combine(root, "std.out") : input;
     string token = files.CreateTicket(path, root, "alice");
     return Results.Content($$"""
         <!DOCTYPE html><html><head><title>Relay editor test</title></head><body>

@@ -32,6 +32,10 @@ paths across all projects, resolves symlinks, and is checked again before replac
 the destination, including for editor sessions opened before a space was connected.
 Disconnected space files remain editable.
 
+Terminal controls commonly emitted by job logs (ANSI escapes, backspaces, bells,
+and whitespace controls) are preserved as text. They are not interpreted as a
+terminal. Binary controls such as NUL and invalid Unicode encodings remain rejected.
+
 Files of 20 MiB or more open in plain-text mode with costly editor features disabled.
 The client still holds the full Monaco model in memory. Downloads decode streamed
 UTF-8 chunks; saves encode Monaco snapshot chunks into an upload Blob, avoiding

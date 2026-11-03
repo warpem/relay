@@ -10,7 +10,8 @@ namespace Relay.Controllers;
 [Route("api/text-editor")]
 [Authorize(AuthenticationSchemes = CookieAuthenticationDefaults.AuthenticationScheme)]
 [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
-public sealed class TextFileEditorController(TextFileEditorService files, IAntiforgery antiforgery) : ControllerBase
+public sealed class TextFileEditorController(TextFileEditorService files, IAntiforgery antiforgery,
+    ILogger<TextFileEditorController> logger) : ControllerBase
 {
     public record DestinationRequest(string Path);
 
@@ -34,7 +35,12 @@ public sealed class TextFileEditorController(TextFileEditorService files, IAntif
         var ticket = files.OpenTicket(token, User.Identity?.Name);
         Response.ContentType = "text/plain; charset=utf-8";
         Response.Headers["X-Content-Type-Options"] = "nosniff";
-        await files.CopyContentAsync(ticket, Response.Body, cancellation);
+        try { await files.CopyContentAsync(ticket, Response.Body, cancellation); }
+        catch (Exception ex) when (!cancellation.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "Unable to stream text editor file {FilePath}", ticket.Path);
+            throw;
+        }
         return new EmptyResult();
     });
 

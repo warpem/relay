@@ -153,9 +153,14 @@ public sealed class TextFileEditorService(IDataProtectionProvider protection, Fu
     private static void ValidateText(ReadOnlySpan<char> content)
     {
         foreach (char c in content)
-            if (char.IsControl(c) && c is not ('\t' or '\r' or '\n' or '\f'))
+            if (IsUnsupportedControl(c))
                 throw new InvalidDataException("This file contains binary or unsupported control characters.");
     }
+
+    // Job logs commonly contain ANSI escapes, backspaces and bells from terminal progress output.
+    // Preserve them as text; Monaco does not execute them as terminal commands.
+    internal static bool IsUnsupportedControl(char c) => char.IsControl(c) && !char.IsWhiteSpace(c) &&
+        c is not ('\u001b' or '\b' or '\a');
 
     private static (Encoding Encoding, int Skip, string Name) DetectEncoding(ReadOnlySpan<byte> bytes)
     {
