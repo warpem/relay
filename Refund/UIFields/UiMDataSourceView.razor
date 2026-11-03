@@ -5,13 +5,13 @@
 
 @if (AdditionalData is List<MDataSource> { Count: > 0 } sources)
 {
-    <FluentRadioGroup Class="borderless"
+    <FluentRadioGroup TValue="int?" Class="borderless"
                       @bind-Value:get="ValueT" @bind-Value:set="SetValueTAsync"
                       Orientation="Orientation.Vertical"
                       Disabled="@IsDisabled">
         @foreach (var source in sources)
         {
-            <FluentRadio Value="@sources.IndexOf(source)" Label="@source.Name" />
+            <FluentRadio TValue="int?" Value="@sources.IndexOf(source)" Label="@source.Name" />
         }
     </FluentRadioGroup>
 }

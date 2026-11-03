@@ -3,13 +3,13 @@
 
 @if (AdditionalData is List<MSpecies> { Count: > 0 } species)
 {
-    <FluentRadioGroup Class="borderless"
+    <FluentRadioGroup TValue="int?" Class="borderless"
                       @bind-Value:get="ValueT" @bind-Value:set="SetValueTAsync"
                       Orientation="Orientation.Vertical"
                       Disabled="@IsDisabled">
         @foreach (var s in species)
         {
-            <FluentRadio Value="@species.IndexOf(s)" Label="@s.Name" />
+            <FluentRadio TValue="int?" Value="@species.IndexOf(s)" Label="@s.Name" />
         }
     </FluentRadioGroup>
 }
