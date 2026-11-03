@@ -73,7 +73,12 @@ builder.Services.AddControllersWithViews().AddRazorRuntimeCompilation();
 
 // Add file service for secure file access
 builder.Services.AddSingleton<FileService>();
-builder.Services.AddSingleton<TextFileEditorService>();
+builder.Services.AddSingleton(sp => new TextFileEditorService(
+    sp.GetRequiredService<IDataProtectionProvider>(),
+    () => sp.GetRequiredService<DataManager>().Projects
+        .SelectMany(project => project.Spaces)
+        .Select(space => Path.Combine(space.RootDirectory, "space.relay"))
+        .ToArray()));
 
 // Register application configuration
 var relayOptions = new RelayConfiguration();

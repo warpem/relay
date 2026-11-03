@@ -7,8 +7,13 @@ namespace Refund.Tests.Services;
 public sealed class TextFileEditorTests : IDisposable
 {
     private readonly string root = Path.Combine(Path.GetTempPath(), "relay-editor-tests-" + Guid.NewGuid().ToString("N"));
-    private readonly TextFileEditorService service = new(new EphemeralDataProtectionProvider());
-    public TextFileEditorTests() => Directory.CreateDirectory(root);
+    private readonly HashSet<string> connectedSpacePaths = [];
+    private readonly TextFileEditorService service;
+    public TextFileEditorTests()
+    {
+        Directory.CreateDirectory(root);
+        service = new(new EphemeralDataProtectionProvider(), () => connectedSpacePaths.ToArray());
+    }
     public void Dispose() => Directory.Delete(root, true);
     private TextFileEditorService.Ticket Ticket(string path, string? encoding = null) =>
         service.OpenTicket(service.CreateTicket(path, root, "alice", encoding), "alice");
@@ -19,6 +24,73 @@ public sealed class TextFileEditorTests : IDisposable
         using var result = new MemoryStream();
         await service.CopyContentAsync(ticket, result);
         return Encoding.UTF8.GetString(result.ToArray());
+    }
+
+    [Theory]
+    [InlineData("space.relay")]
+    [InlineData("legacy.space")]
+    public async Task ConnectedSpaceCannotBeOpenedOrSavedUsingAnOlderTicket(string name)
+    {
+        string path = Path.Combine(root, name);
+        await File.WriteAllTextAsync(path, "original");
+        var ticket = Ticket(path, "utf8");
+        connectedSpacePaths.Add(path);
+        Assert.True(service.IsConnectedSpaceFile(path));
+        Assert.Throws<UnauthorizedAccessException>(() => Ticket(path));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.DescribeAsync(ticket));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => Read(ticket));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => Save(ticket, "bad"));
+        Assert.Equal("original", await File.ReadAllTextAsync(path));
+        connectedSpacePaths.Clear();
+        Assert.False(service.IsConnectedSpaceFile(path));
+        await Save(Ticket(path, "utf8"), "disconnected");
+        Assert.Equal("disconnected", await File.ReadAllTextAsync(path));
+    }
+
+    [Fact]
+    public async Task SaveAsCannotTargetConnectedSpaceButOtherFilesRemainEditable()
+    {
+        string connected = Path.Combine(root, "space.relay");
+        string other = Path.Combine(root, "other.space");
+        await File.WriteAllTextAsync(connected, "connected");
+        await File.WriteAllTextAsync(other, "other");
+        var staleDestination = Ticket(connected, "utf8");
+        connectedSpacePaths.Add(connected);
+        var ticket = Ticket(other, "utf8");
+        Assert.Throws<UnauthorizedAccessException>(() => service.PrepareDestination(ticket, "space.relay"));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => Save(staleDestination, "bad"));
+        await Save(ticket, "allowed");
+        Assert.Equal("connected", await File.ReadAllTextAsync(connected));
+        Assert.Equal("allowed", await File.ReadAllTextAsync(other));
+    }
+
+    [Fact]
+    public async Task ConnectingSpaceDuringUploadPreventsReplacementAndCleansUp()
+    {
+        string path = Path.Combine(root, "space.relay");
+        await File.WriteAllTextAsync(path, "original");
+        var ticket = Ticket(path, "utf8");
+        using var input = new GeneratedTextStream(100000, onRead: () => connectedSpacePaths.Add(path));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.SaveAsync(ticket, input));
+        Assert.Equal("original", await File.ReadAllTextAsync(path));
+        Assert.Empty(Directory.GetFiles(root, ".relay-edit-*"));
+    }
+
+    [Fact]
+    public async Task ConnectedSpaceProtectionResolvesRelativePathsAndSymbolicLinks()
+    {
+        string path = Path.Combine(root, "space.relay");
+        await File.WriteAllTextAsync(path, "original");
+        connectedSpacePaths.Add(Path.Combine(root, ".", "space.relay"));
+        Assert.True(service.IsConnectedSpaceFile(path));
+        if (OperatingSystem.IsWindows()) return;
+        string alias = Path.Combine(root, "innocent.txt");
+        File.CreateSymbolicLink(alias, path);
+        Assert.True(service.IsConnectedSpaceFile(alias));
+        Assert.Throws<UnauthorizedAccessException>(() => Ticket(alias));
+        string directoryAlias = Path.Combine(root, "alias");
+        Directory.CreateSymbolicLink(directoryAlias, root);
+        Assert.True(service.IsConnectedSpaceFile(Path.Combine(directoryAlias, "space.relay")));
     }
 
     [Theory]
@@ -168,7 +240,7 @@ public sealed class TextFileEditorTests : IDisposable
     }
 
     // Produces data on demand; cannot seek and never holds a full document in memory.
-    private sealed class GeneratedTextStream(long length, long failAfter = long.MaxValue) : Stream
+    private sealed class GeneratedTextStream(long length, long failAfter = long.MaxValue, Action? onRead = null) : Stream
     {
         private long position;
         public int LargestRead { get; private set; }
@@ -179,6 +251,7 @@ public sealed class TextFileEditorTests : IDisposable
         public override long Position { get => position; set => throw new NotSupportedException(); }
         public override int Read(byte[] buffer, int offset, int count)
         {
+            onRead?.Invoke();
             if (position >= failAfter) throw new IOException("Simulated disconnected upload.");
             int read = (int)Math.Min(count, length - position);
             buffer.AsSpan(offset, read).Fill((byte)'a');

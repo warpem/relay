@@ -34,8 +34,13 @@ public partial class FileBrowser : ComponentBase, IAsyncDisposable
     private IJSObjectReference editorModule;
     private DotNetObjectReference<FileBrowser> editorReference;
     private string EditorError;
+    private bool IsSelectedConnectedSpaceFile => SelectedItems.Count == 1 && !SelectedItems[0].IsDirectory &&
+        EditorService?.IsConnectedSpaceFile(SelectedItems[0].Path) == true;
+    private string EditButtonTitle => IsSelectedConnectedSpaceFile
+        ? TextFileEditorService.ConnectedSpaceMessage : "Edit text file (up to 512 MiB)";
     private bool CanEditSelectedFile => EditorSession?.IsAuthenticated == true && SelectedItems.Count == 1 &&
         !SelectedItems[0].IsDirectory && File.Exists(SelectedItems[0].Path) &&
+        !IsSelectedConnectedSpaceFile &&
         SelectedItems[0].SizeInByte <= TextFileEditorService.MaximumBytes && FilePreview.IsPlainTextFile(SelectedItems[0].Path);
 
     private async Task EditSelectedFileAsync()

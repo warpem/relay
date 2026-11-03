@@ -6,9 +6,10 @@ using Microsoft.AspNetCore.DataProtection;
 namespace Refund.Services;
 
 /// <summary>Grants user-bound editing access and streams text between files and HTTP.</summary>
-public sealed class TextFileEditorService(IDataProtectionProvider protection)
+public sealed class TextFileEditorService(IDataProtectionProvider protection, Func<IEnumerable<string>> connectedSpacePaths = null)
 {
     public const long MaximumBytes = 512L * 1024 * 1024;
+    public const string ConnectedSpaceMessage = "This file represents a space currently connected in Relay and cannot be edited.";
     private readonly IDataProtector protector = protection.CreateProtector("Relay.TextFileEditor.v2");
 
     public record Ticket(string Path, string Root, string User, DateTimeOffset Expires, string Encoding = null);
@@ -19,7 +20,23 @@ public sealed class TextFileEditorService(IDataProtectionProvider protection)
         if (string.IsNullOrEmpty(user)) throw new UnauthorizedAccessException();
         root = ResolvePath(Path.GetFullPath(string.IsNullOrEmpty(root) ? "/" : root));
         path = CheckedPath(path, root);
+        EnsureEditable(path);
         return protector.Protect(JsonSerializer.Serialize(new Ticket(path, root, user, DateTimeOffset.UtcNow.AddHours(8), encoding)));
+    }
+
+    public bool IsConnectedSpaceFile(string path)
+    {
+        if (connectedSpacePaths == null) return false;
+        string resolved = ResolvePath(Path.GetFullPath(path));
+        var comparison = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+            ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        return connectedSpacePaths().Any(connected =>
+            string.Equals(resolved, ResolvePath(Path.GetFullPath(connected)), comparison));
+    }
+
+    private void EnsureEditable(string path)
+    {
+        if (IsConnectedSpaceFile(path)) throw new UnauthorizedAccessException(ConnectedSpaceMessage);
     }
 
     public Ticket OpenTicket(string token, string user)
@@ -36,6 +53,7 @@ public sealed class TextFileEditorService(IDataProtectionProvider protection)
     public async Task<Document> DescribeAsync(Ticket ticket, CancellationToken cancellation = default)
     {
         string path = CheckedPath(ticket.Path, ticket.Root);
+        EnsureEditable(path);
         await using var stream = OpenRead(path);
         CheckSize(stream.Length);
         byte[] prefix = new byte[4];
@@ -52,7 +70,9 @@ public sealed class TextFileEditorService(IDataProtectionProvider protection)
     /// <summary>Transcodes incrementally to UTF-8; no full-file byte array or string is allocated.</summary>
     public async Task CopyContentAsync(Ticket ticket, Stream destination, CancellationToken cancellation = default)
     {
-        await using var source = OpenRead(CheckedPath(ticket.Path, ticket.Root));
+        string path = CheckedPath(ticket.Path, ticket.Root);
+        EnsureEditable(path);
+        await using var source = OpenRead(path);
         CheckSize(source.Length);
         var encoding = EncodingByName(ticket.Encoding);
         source.Position = encoding.GetPreamble().Length;
@@ -64,8 +84,10 @@ public sealed class TextFileEditorService(IDataProtectionProvider protection)
 
     public (string Path, bool Exists) PrepareDestination(Ticket ticket, string destination)
     {
+        EnsureEditable(ticket.Path);
         if (string.IsNullOrWhiteSpace(destination)) throw new ArgumentException("Enter a destination file path.");
         string path = CheckedPath(Path.GetFullPath(destination, Path.GetDirectoryName(ticket.Path)!), ticket.Root);
+        EnsureEditable(path);
         if (!Directory.Exists(Path.GetDirectoryName(path))) throw new DirectoryNotFoundException();
         if (Directory.Exists(path)) throw new ArgumentException("Choose a file name, rather than a folder.");
         return (path, File.Exists(path));
@@ -76,6 +98,7 @@ public sealed class TextFileEditorService(IDataProtectionProvider protection)
     {
         if (ticket.Encoding == null) throw new InvalidDataException("Load the file before saving it.");
         string path = CheckedPath(ticket.Path, ticket.Root);
+        EnsureEditable(path);
         string temporary = Path.Combine(Path.GetDirectoryName(path)!, $".relay-edit-{Guid.NewGuid():N}.tmp");
         try
         {
@@ -97,6 +120,7 @@ public sealed class TextFileEditorService(IDataProtectionProvider protection)
                 if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(temporary, File.GetUnixFileMode(path));
             }
             cancellation.ThrowIfCancellationRequested();
+            EnsureEditable(path);
             File.Move(temporary, path, overwrite: true);
         }
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
@@ -173,7 +197,7 @@ public sealed class TextFileEditorService(IDataProtectionProvider protection)
             resolved = Path.Combine(resolved, part);
             FileSystemInfo info = Directory.Exists(resolved) ? new DirectoryInfo(resolved) : new FileInfo(resolved);
             if (info.LinkTarget != null)
-                resolved = info.ResolveLinkTarget(true)?.FullName ?? throw new IOException("Cannot resolve symbolic link.");
+                resolved = ResolvePath(info.ResolveLinkTarget(true)?.FullName ?? throw new IOException("Cannot resolve symbolic link."));
         }
         return resolved;
     }

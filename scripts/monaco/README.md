@@ -26,6 +26,12 @@ mode bits. Save always overwrites, including external edits or deletion; there
 are no file hashes or version checks. Save As confirms existing destinations before
 preparing or transferring the upload.
 
+Files backing currently connected Relay spaces (`space.relay`) cannot be edited
+or selected as Save As destinations. Protection uses the live connected-space
+paths across all projects, resolves symlinks, and is checked again before replacing
+the destination, including for editor sessions opened before a space was connected.
+Disconnected space files remain editable.
+
 Files of 20 MiB or more open in plain-text mode with costly editor features disabled.
 The client still holds the full Monaco model in memory. Downloads decode streamed
 UTF-8 chunks; saves encode Monaco snapshot chunks into an upload Blob, avoiding
