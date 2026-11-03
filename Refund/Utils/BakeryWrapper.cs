@@ -190,13 +190,15 @@ public static class BakeryWrapper
         string starFile,
         string outputFile,
         bool svg = false,
-        string directionalFscFile = null
+        string directionalFscFile = null,
+        int classNumber = 1
     )
     {
         var arguments = new List<string> { "fsc", "--input-type", "relion_model_star", "--metadata-file", starFile,
             "--output-file", outputFile };
         if (svg) arguments.Add("--svg");
         if (directionalFscFile != null) arguments.AddRange(["--directional-fsc-file", directionalFscFile]);
+        if (classNumber != 1) arguments.AddRange(["--class-number", classNumber.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
         RunArguments(arguments);
     }
 
@@ -285,7 +287,8 @@ public static class BakeryWrapper
         string outputFourierSamplingFile = null,
         string symmetry = null,
         bool svg = false,
-        string projectionDirectionsFile = null
+        string projectionDirectionsFile = null,
+        int? classNumber = null
     )
     {
         var arguments = new List<string> { "orientation-and-fourier-sampling", "--particles-file", particlesFile,
@@ -300,6 +303,7 @@ public static class BakeryWrapper
         if(!String.IsNullOrEmpty(outputFourierSamplingFile))
             arguments.AddRange(["--output-fourier-sampling-file", outputFourierSamplingFile]);
 
+        if (classNumber.HasValue) arguments.AddRange(["--class-number", classNumber.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
         if (projectionDirectionsFile != null)
             arguments.AddRange(["--projection-directions-file", projectionDirectionsFile]);
         if (svg) arguments.Add("--svg");
@@ -564,16 +568,11 @@ public static class BakeryWrapper
         if(classNumbers.Length != volumeFiles.Length)
             throw new Exception("need same number of class numbers as volume files");
         
-        var command = "class3d-job-card " +
-                      $"--output-file {outputImageFile} ";
-
+        var arguments = new List<string> { "class3d-job-card", "--output-file", outputImageFile };
         for (int i = 0; i < volumeFiles.Length; i++)
-        {
-            command += $"--volume-file {volumeFiles[i]} ";
-            command += $"--class-number {classNumbers[i].ToString()} ";
-        }
-
-        RunCommand(command);
+            arguments.AddRange(["--volume-file", volumeFiles[i], "--class-number",
+                classNumbers[i].ToString(System.Globalization.CultureInfo.InvariantCulture)]);
+        RunArguments(arguments);
     }
     
     /// <summary>

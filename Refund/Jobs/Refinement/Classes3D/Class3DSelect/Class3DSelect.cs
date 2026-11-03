@@ -219,7 +219,8 @@ public class Class3DSelect : Job, ILocalJob
         PortsIn = new(new Dictionary<string, PortIn>
         {
             [portInParticles.Name] = portInParticles,
-            [portInMaps.Name] = portInMaps
+            [portInMaps.Name] = portInMaps,
+            ["TiltSeries"] = new(this, typeof(TiltSeriesSet), "TiltSeries", "Tilt-series metadata", 0, 1)
         });
 
         var portOutSelectedParticles = new PortOut(this, typeof(ParticleSet), 
@@ -232,7 +233,9 @@ public class Class3DSelect : Job, ILocalJob
         PortsOut = new(new Dictionary<string, PortOut>
         {
             [portOutSelectedParticles.Name] = portOutSelectedParticles,
-            [portOutSelectedMaps.Name] = portOutSelectedMaps
+            [portOutSelectedMaps.Name] = portOutSelectedMaps,
+            ["TiltSeries"] = new(this, typeof(TiltSeriesSet), "TiltSeries", "Tilt-series metadata",
+                _ => PortsIn["TiltSeries"].GetSingleResource<TiltSeriesSet>(SelectedIteration)?.Copy())
         });
     }
     
@@ -250,13 +253,13 @@ public class Class3DSelect : Job, ILocalJob
     /// </remarks>
     private Resource GetSelectedParticlesResource(int iter)
     {
-        ParticleSet result = PortsIn["Particles"].GetSingleResource<ParticleSet>(SelectedIteration);
+        ParticleSet result = PortsIn["Particles"].GetSingleResource<ParticleSet>(SelectedIteration)?.Copy();
         if (result == null)
             return null;
 
         result.ParticlesSingleStarPath = ResSelectedDataStarFile;
         result.ItemCount = null;
-        result.OptimisationSetStarPath = result.DataDimensionality == ParticleType.Tiltseries
+        result.OptimisationSetStarPath = result.DataDimensionality == ParticleType.Tiltseries && !string.IsNullOrEmpty(result.OptimisationSetStarPath)
             ? ResSelectedOptimisationSetStarFile
             : null;
 
@@ -277,8 +280,11 @@ public class Class3DSelect : Job, ILocalJob
     {
         List<Map> maps = new();
 
+        var sourceMaps = PortsIn["Maps"].GetSingleResource<MapList>(SelectedIteration);
         foreach (int c in SelectedClasses)
-            maps.Add(new Map(averageVolumePath: ResSelectedClassFile(c),
+            maps.Add(new Map(half1VolumePath: sourceMaps?.Maps[c - 1].Half1VolumePath,
+                             half2VolumePath: sourceMaps?.Maps[c - 1].Half2VolumePath,
+                             averageVolumePath: ResSelectedClassFile(c),
                              visualizationPaths: new()
                              {
                                  { Map.VisTypes.OrthoSlices, VisFilteredSlices(c) },
@@ -316,7 +322,7 @@ public class Class3DSelect : Job, ILocalJob
             try
             {
                 Job parentJob = GetParents().First();
-                if (parentJob is not (Class3D.Class3D or InitialReference))
+                if (parentJob is not (Class3D.Class3D or InitialReference or BeamClass3D.BeamClass3D))
                     throw new Exception("Parent job is not a 3D classification-like job");
                 
                 ParticleSet resourceParticles = PortsIn[PortInParticles].GetSingleResource<ParticleSet>(SelectedIteration);
@@ -465,7 +471,7 @@ public class Class3DSelect : Job, ILocalJob
                 
                 #region Tomo optimization set
                 {
-                    if (resourceParticles.DataDimensionality == ParticleType.Tiltseries)
+                    if (resourceParticles.DataDimensionality == ParticleType.Tiltseries && !string.IsNullOrEmpty(resourceParticles.OptimisationSetStarPath))
                     {
                         logger.WriteLine("Adapting optimisation_set.star...");
 

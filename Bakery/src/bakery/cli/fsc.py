@@ -22,11 +22,12 @@ def fsc(
     output_file: Path = typer.Option(...),
     svg: bool = False,
     directional_fsc_file: Path | None = None,
+    class_number: int = 1,
 ):
     if input_type == InputType.relion_postprocess_star:
         fsc_data = FscData.from_relion_postprocess_star(metadata_file)
     elif input_type == InputType.relion_model_star:
-        fsc_data = FscData.from_relion_refine3d_model_star(metadata_file)
+        fsc_data = FscData.from_relion_refine3d_model_star(metadata_file, class_number)
     else:
         raise NotImplementedError(input_type)
 

@@ -5,6 +5,7 @@ from typing import Optional
 import einops
 import matplotlib.pyplot as plt
 import numpy as np
+import starfile
 import typer
 from cmap import Colormap
 from scipy.spatial.transform import Rotation
@@ -35,6 +36,7 @@ def orientation_and_fourier_sampling(
     output_fourier_sampling_file: Optional[Path] = typer.Option(None),
     svg: bool = False,
     projection_directions_file: Optional[Path] = typer.Option(None),
+    class_number: Optional[int] = None,
 ):
     """Make hexbin plots of orientation and Fourier sampling distributions.
 
@@ -56,7 +58,13 @@ def orientation_and_fourier_sampling(
     c.f. https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.transform.Rotation.create_group.html
     """
     # find h3 indices for particle z vectors (and their symmetry mates)
-    rot, tilt = parse_input_file(particles_file, input_type)
+    if class_number is None:
+        rot, tilt = parse_input_file(particles_file, input_type)
+    else:
+        particles = starfile.read(particles_file, always_dict=True)['particles']
+        selected = particles.loc[particles['rlnClassNumber'] == class_number]
+        rot = selected['rlnAngleRot'].to_numpy(copy=True)
+        tilt = selected['rlnAngleTilt'].to_numpy(copy=True)
     rot, tilt = normalize_orientations(rot, tilt)
     rotation_matrices = rottilt_to_rotation_matrix(rot, tilt)
     if symmetry is not None:

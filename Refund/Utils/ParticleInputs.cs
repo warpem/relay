@@ -14,7 +14,7 @@ public static class ParticleInputs
     public static bool NeedsMerge(PortIn port) => port.IsActive() && port.ResourceType == typeof(ParticleSet)
         && port.MaxItems > 1 && port.Edges.Count > 1;
 
-    internal static bool UsesWarpMetadata(PortIn port) => port.Job is Jobs.Refinement.Refinement3D.BeamRefine3D.BeamRefine3D;
+    internal static bool UsesWarpMetadata(PortIn port) => port.Job is Jobs.Refinement.Refinement3D.BeamRefine3D.BeamParticleJob;
 
     public static List<Issue> Validate(IReadOnlyList<(string Label, ParticleSet Resource)> inputs, bool warpMetadata = false)
     {

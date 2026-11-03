@@ -22,16 +22,16 @@ class FscData:
         raise NotImplementedError()
 
     @classmethod
-    def from_relion_refine3d_model_star(cls, path: Path):
+    def from_relion_refine3d_model_star(cls, path: Path, class_number: int = 1):
         star = starfile.read(path, always_dict=True)
-        return cls.from_model_tables(star)
+        return cls.from_model_tables(star, class_number)
 
     @classmethod
-    def from_model_tables(cls, star):
-        result = cls.from_model_frame(star['model_class_1'])
+    def from_model_tables(cls, star, class_number: int = 1):
+        result = cls.from_model_frame(star[f'model_class_{class_number}'])
         classes = star.get('model_classes')
         if result.fsc_unmasked is not None and classes is not None and 'rlnEstimatedResolution' in classes:
-            resolution = float(classes['rlnEstimatedResolution'].iloc[0])
+            resolution = float(classes['rlnEstimatedResolution'].iloc[class_number - 1])
             if np.isfinite(resolution) and resolution > 0:
                 result.estimated_resolution = resolution
         if classes is not None:
@@ -39,7 +39,7 @@ class FscData:
                                   ('directional_worst', 'rlnDirectionalWorstResolution'),
                                   ('cfar', 'rlnCylindricalFscAreaRatio')]:
                 if column in classes and len(classes):
-                    value = float(classes[column].iloc[0])
+                    value = float(classes[column].iloc[class_number - 1])
                     if np.isfinite(value):
                         setattr(result, field, value)
         return result

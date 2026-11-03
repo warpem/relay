@@ -1,0 +1,53 @@
+@inherits Refund.Components.Jobs.ExpandedView.LoadingExpandedViewBase
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Refund.Components
+@using Refund.Components.IsosurfaceViewer
+@implements IAsyncDisposable
+
+@if (IsInitializing)
+{
+    <Refund.Components.Jobs.ExpandedView.ExpandedViewLoading />
+}
+else if (_job == null)
+{
+    <span>No job available to display.</span>
+}
+else
+{
+    <div style="display: flex; flex-direction: column; gap: 1rem; overflow: auto;">
+        <FluentButton OnClick="ExportClasses" Disabled="@(!_selectedClasses.Any())" Appearance="ButtonAppearance.Primary">
+            Export selection
+        </FluentButton>
+        <p>Class FSC is a diagnostic. Refine selected particles independently to estimate final resolution.</p>
+        <div class="scroll-container" style="display: flex; overflow: auto; gap: 1rem;">
+            @for (int c = 0; c < _job.NClasses; c++)
+            {
+                int currentClass = c;
+                string selectedStyle = _selectedClasses.Contains(c) ? "border-color: var(--colorBrandBackground);" : "";
+                <div class="main-frame" style="padding: 0.5rem; min-width: 240px; @selectedStyle" @onclick="() => SetSelected(currentClass)">
+                    <div style="display: flex; justify-content: space-between;">
+                        <span>#@(c + 1)</span>
+                        @if (_class3DModels is { } stats && stats.Length > c)
+                        {
+                            <span>@(stats[c].Resolution is { } r ? $"{r:F1} Å" : "?? Å")</span>
+                            <span>@(stats[c].Distribution is { } p ? $"{p * 100:F1} %" : "?? %")</span>
+                        }
+                    </div>
+                    @if (File.Exists(_job.VisMap3d(_expandedViewService.CurrentVisIteration, c + 1)))
+                    {
+                        <IsosurfaceViewer MinWidth="240" MinHeight="250" MiniMode="true"
+                            VolumePath="@_job.VisMap3d(_expandedViewService.CurrentVisIteration, c + 1)" />
+                    }
+                    <ServerFigure ServerPath="@_job.VisFilteredSlices(_expandedViewService.CurrentVisIteration, c + 1)"
+                        Title="Map orthoslices" MaxWidthEm="18" CacheKey="@_job.UpdateDate.Ticks.ToString()" />
+                    <ServerFigure ServerPath="@_job.VisFsc(_expandedViewService.CurrentVisIteration, c + 1)"
+                        Title="Class FSC" MaxWidthEm="18" CacheKey="@_job.UpdateDate.Ticks.ToString()" />
+                    <ServerFigure ServerPath="@_job.VisAngularDistribution(_expandedViewService.CurrentVisIteration, c + 1)"
+                        Title="Angular distribution" MaxWidthEm="18" CacheKey="@_job.UpdateDate.Ticks.ToString()" />
+                    <ServerFigure ServerPath="@_job.VisFourierSampling(_expandedViewService.CurrentVisIteration, c + 1)"
+                        Title="Fourier sampling" MaxWidthEm="18" CacheKey="@_job.UpdateDate.Ticks.ToString()" />
+                </div>
+            }
+        </div>
+    </div>
+}
