@@ -93,3 +93,11 @@ server value updates. Related upstream reports:
 
 - https://github.com/microsoft/fluentui-blazor/issues/5137
 - https://github.com/microsoft/fluentui-blazor/issues/5250
+
+## Beam classification layout
+
+`npm run test:beam-layout` runs an isolated browser check using the classification
+CSS, viewport markup, and actual isosurface viewer module. It checks eight class
+cards at multiple window sizes and device pixel ratios, including stable canvas
+and document dimensions. It does not need a Relay server or particle data.
+`PLAYWRIGHT_MODULE` and `CHROMIUM_EXECUTABLE` can select existing installations.

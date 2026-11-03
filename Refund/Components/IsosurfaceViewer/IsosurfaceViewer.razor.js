@@ -254,11 +254,12 @@ function createUI(state) {
 
     // Canvas container — theme-aware background shows through transparent WebGL
     const canvasContainer = document.createElement('div');
-    canvasContainer.style.cssText = 'flex:1; position:relative; overflow:hidden; background:var(--colorNeutralBackground1);';
+    canvasContainer.style.cssText = 'flex:1; min-width:0; min-height:0; position:relative; overflow:hidden; background:var(--colorNeutralBackground1);';
     c.appendChild(canvasContainer);
 
     const canvas = document.createElement('canvas');
-    canvas.style.cssText = 'width:100%; height:100%; display:block;';
+    // Drawing-buffer dimensions must never contribute to the flex item's intrinsic size.
+    canvas.style.cssText = 'position:absolute; inset:0; width:100%; height:100%; display:block;';
     canvasContainer.appendChild(canvas);
     state.canvas = canvas;
 
@@ -1070,8 +1071,11 @@ function resizeCanvas(state) {
     const parent = canvas.parentElement;
     if (!parent) return;
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.round(parent.clientWidth * dpr);
-    canvas.height = Math.round(parent.clientHeight * dpr);
+    const width = Math.round(parent.clientWidth * dpr);
+    const height = Math.round(parent.clientHeight * dpr);
+    if (canvas.width === width && canvas.height === height) return;
+    canvas.width = width;
+    canvas.height = height;
     setupPickFBO(state);
 }
 

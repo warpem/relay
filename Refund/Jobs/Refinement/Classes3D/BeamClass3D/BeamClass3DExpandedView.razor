@@ -14,17 +14,17 @@ else if (_job == null)
 }
 else
 {
-    <div style="display: flex; flex-direction: column; gap: 1rem; overflow: auto;">
+    <div class="classification-view">
         <FluentButton OnClick="ExportClasses" Disabled="@(!_selectedClasses.Any())" Appearance="ButtonAppearance.Primary">
             Export selection
         </FluentButton>
         <p>Class FSC is a diagnostic. Refine selected particles independently to estimate final resolution.</p>
-        <div class="scroll-container" style="display: flex; overflow: auto; gap: 1rem;">
+        <div class="scroll-container">
             @for (int c = 0; c < _job.NClasses; c++)
             {
                 int currentClass = c;
                 string selectedStyle = _selectedClasses.Contains(c) ? "border-color: var(--colorBrandBackground);" : "";
-                <div class="main-frame" style="padding: 0.5rem; min-width: 240px; @selectedStyle" @onclick="() => SetSelected(currentClass)">
+                <div class="main-frame" style="@selectedStyle" @onclick="() => SetSelected(currentClass)">
                     <div style="display: flex; justify-content: space-between;">
                         <span>#@(c + 1)</span>
                         @if (_class3DModels is { } stats && stats.Length > c)
@@ -35,8 +35,10 @@ else
                     </div>
                     @if (File.Exists(_job.VisMap3d(_expandedViewService.CurrentVisIteration, c + 1)))
                     {
-                        <IsosurfaceViewer MinWidth="240" MinHeight="250" MiniMode="true"
-                            VolumePath="@_job.VisMap3d(_expandedViewService.CurrentVisIteration, c + 1)" />
+                        <div class="map-viewport">
+                            <IsosurfaceViewer MinWidth="240" MinHeight="250" MiniMode="true"
+                                VolumePath="@_job.VisMap3d(_expandedViewService.CurrentVisIteration, c + 1)" />
+                        </div>
                     }
                     <ServerFigure ServerPath="@_job.VisFilteredSlices(_expandedViewService.CurrentVisIteration, c + 1)"
                         Title="Map orthoslices" MaxWidthEm="18" CacheKey="@_job.UpdateDate.Ticks.ToString()" />
