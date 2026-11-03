@@ -59,7 +59,7 @@ public class BeamClass3D : BeamParticleJob
 
     public string ReferenceList(int half) => Path.Combine(DirectoryPath, $"references_half{half}.star");
     public string VisFilteredSlices(int i, int c) => Figure(i, c, "slices", "png");
-    public string VisFsc(int i, int c) => Figure(i, c, "fsc", "png");
+    public string VisFsc(int i, int c) => Figure(i, c, "fsc_column", "png");
     public string VisAngularDistribution(int i, int c) => Figure(i, c, "angles", "png");
     public string VisFourierSampling(int i, int c) => Figure(i, c, "sampling", "png");
     public string VisMap3d(int i, int c) => IterationFile(OutputIteration(i), $"class{c:D3}.mrc");
@@ -196,7 +196,7 @@ public class BeamClass3D : BeamParticleJob
                     BakeryWrapper.MapOrthosliceAtlas(VisMap3d(i, c), 1, VisFilteredSlices(i, c), svg: true);
                 if (!BeamRefine3D.FigureFilesReady(VisFsc(i, c)))
                     BakeryWrapper.FSCFromModelStar(IterationFile(i, "model.star"), VisFsc(i, c), svg: true,
-                        directionalFscFile: IterationFile(i, $"class{c:D3}_directional_fsc.csv"), classNumber: c);
+                        directionalFscFile: IterationFile(i, $"class{c:D3}_directional_fsc.csv"), classNumber: c, compact: true);
                 if (!BeamRefine3D.FigureFilesReady(VisAngularDistribution(i, c)) || !BeamRefine3D.FigureFilesReady(VisFourierSampling(i, c)))
                     BakeryWrapper.OrientationAndFourierSamplingHexBin(IterationFile(i, "data.star"), VisAngularDistribution(i, c),
                         VisFourierSampling(i, c), Symmetry == "C1" ? null : Symmetry, svg: true,

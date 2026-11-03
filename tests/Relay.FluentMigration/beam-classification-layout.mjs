@@ -59,8 +59,8 @@ try {
         for (const snapshot of snapshots) {
             assert.ok(snapshot.height < 2000);
             assert.ok(snapshot.viewports.every(height => height === 250));
-            assert.ok(snapshot.cards.every(width => width === 288));
-            assert.ok(snapshot.canvases.every(([width, height]) => width > 0 && width < 600 && height > 0 && height <= 500));
+            assert.ok(snapshot.cards.every(width => width === 368));
+            assert.ok(snapshot.canvases.every(([width, height]) => width > 0 && width < 750 && height > 0 && height <= 500));
         }
         assert.deepEqual(errors, []);
         console.log(`Stable eight-class layout at DPR ${deviceScaleFactor}: ${snapshots.at(-1).height}px document height`);

@@ -23,6 +23,7 @@ def fsc(
     svg: bool = False,
     directional_fsc_file: Path | None = None,
     class_number: int = 1,
+    compact: bool = False,
 ):
     if input_type == InputType.relion_postprocess_star:
         fsc_data = FscData.from_relion_postprocess_star(metadata_file)
@@ -32,8 +33,8 @@ def fsc(
         raise NotImplementedError(input_type)
 
     # plot...
-    fig, ax = plt.subplots(figsize=(6.4, 3.2), layout="constrained")
-    draw_fsc(ax, data=fsc_data, directional_file=directional_fsc_file)
+    fig, ax = plt.subplots(figsize=(3.9, 3.38) if compact else (6.4, 3.2), layout="constrained")
+    draw_fsc(ax, data=fsc_data, directional_file=directional_fsc_file, compact=compact)
 
     # write output file
     dpi = 300

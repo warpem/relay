@@ -18,14 +18,13 @@ else
         <FluentButton OnClick="ExportClasses" Disabled="@(!_selectedClasses.Any())" Appearance="ButtonAppearance.Primary">
             Export selection
         </FluentButton>
-        <p>Class FSC is a diagnostic. Refine selected particles independently to estimate final resolution.</p>
         <div class="scroll-container">
             @for (int c = 0; c < _job.NClasses; c++)
             {
                 int currentClass = c;
                 string selectedStyle = _selectedClasses.Contains(c) ? "border-color: var(--colorBrandBackground);" : "";
                 <div class="main-frame" style="@selectedStyle" @onclick="() => SetSelected(currentClass)">
-                    <div style="display: flex; justify-content: space-between;">
+                    <div class="class-header">
                         <span>#@(c + 1)</span>
                         @if (_class3DModels is { } stats && stats.Length > c)
                         {
@@ -40,14 +39,14 @@ else
                                 VolumePath="@_job.VisMap3d(_expandedViewService.CurrentVisIteration, c + 1)" />
                         </div>
                     }
-                    <ServerFigure ServerPath="@_job.VisFilteredSlices(_expandedViewService.CurrentVisIteration, c + 1)"
-                        Title="Map orthoslices" MaxWidthEm="18" CacheKey="@_job.UpdateDate.Ticks.ToString()" />
+                    <MapOrthosliceDisplay MapOrthoslicesPath="@_job.VisFilteredSlices(_expandedViewService.CurrentVisIteration, c + 1)"
+                        RenderedImageSidelengthPx="340" BorderWidthPx="0" SpacingPx="4" IsVerticalLayout />
                     <ServerFigure ServerPath="@_job.VisFsc(_expandedViewService.CurrentVisIteration, c + 1)"
-                        Title="Class FSC" MaxWidthEm="18" CacheKey="@_job.UpdateDate.Ticks.ToString()" />
+                        Title="Class FSC" ShowTitle="false" MaxWidthEm="23" CacheKey="@_job.UpdateDate.Ticks.ToString()" />
                     <ServerFigure ServerPath="@_job.VisAngularDistribution(_expandedViewService.CurrentVisIteration, c + 1)"
-                        Title="Angular distribution" MaxWidthEm="18" CacheKey="@_job.UpdateDate.Ticks.ToString()" />
+                        Title="Angular distribution" MaxWidthEm="23" CacheKey="@_job.UpdateDate.Ticks.ToString()" />
                     <ServerFigure ServerPath="@_job.VisFourierSampling(_expandedViewService.CurrentVisIteration, c + 1)"
-                        Title="Fourier sampling" MaxWidthEm="18" CacheKey="@_job.UpdateDate.Ticks.ToString()" />
+                        Title="Fourier sampling" MaxWidthEm="23" CacheKey="@_job.UpdateDate.Ticks.ToString()" />
                 </div>
             }
         </div>

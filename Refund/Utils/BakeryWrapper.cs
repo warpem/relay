@@ -191,7 +191,8 @@ public static class BakeryWrapper
         string outputFile,
         bool svg = false,
         string directionalFscFile = null,
-        int classNumber = 1
+        int classNumber = 1,
+        bool compact = false
     )
     {
         var arguments = new List<string> { "fsc", "--input-type", "relion_model_star", "--metadata-file", starFile,
@@ -199,6 +200,7 @@ public static class BakeryWrapper
         if (svg) arguments.Add("--svg");
         if (directionalFscFile != null) arguments.AddRange(["--directional-fsc-file", directionalFscFile]);
         if (classNumber != 1) arguments.AddRange(["--class-number", classNumber.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
+        if (compact) arguments.Add("--compact");
         RunArguments(arguments);
     }
 

@@ -10,6 +10,7 @@ def draw_fsc(
     ax: matplotlib.pyplot.Axes,
     data: FscData,
     directional_file: Path | None = None,
+    compact: bool = False,
 ) -> matplotlib.pyplot.Axes:
     # prepare data
     resolution_inv = 1 / data.resolution
@@ -27,7 +28,7 @@ def draw_fsc(
             finite_columns = np.isfinite(values).any(axis=0)
             band = np.nanquantile(values[:, finite_columns], [.1, .9], axis=0)
             ax.fill_between(resolution_inv[indices[valid][finite_columns]], *band,
-                            color='#9467bd', alpha=.25, linewidth=0, label='Directional 10–90%')
+                            color='#9467bd', alpha=.25, linewidth=0, label='10–90% band' if compact else 'Directional 10–90%')
     
     # plot the FSC curve
     ax.plot(resolution_inv, fsc_values, color='black',
@@ -37,8 +38,12 @@ def draw_fsc(
         ax.plot(resolution_inv, data.fsc_unmasked, label='Unmasked', alpha=0.65)
         ax.plot(resolution_inv, data.fsc_masked, label='Masked', alpha=0.65)
         if data.fsc_phase_randomized is not None:
-            ax.plot(resolution_inv, data.fsc_phase_randomized, label='Phase randomized', alpha=0.65)
-        ax.legend(fontsize=10)
+            ax.plot(resolution_inv, data.fsc_phase_randomized, label='Phase rand.' if compact else 'Phase randomized', alpha=0.65)
+        if not compact:
+            ax.legend(fontsize=10)
+    if compact:
+        # Render at the actual class-column width instead of shrinking a wide chart.
+        ax.legend(fontsize=8, loc='upper right', framealpha=0.85)
 
     # add 0.143 threshold line
     ax.axhline(y=0.143, color='red', linestyle='--', alpha=0.7, linewidth=1)
@@ -78,12 +83,15 @@ def draw_fsc(
         # published estimate rather than selecting a different crossing here.
         resolution_text = ((f'{data.estimated_resolution:.2f}' if data.estimated_resolution < 2 else f'{data.estimated_resolution:.1f}')
                            if data.estimated_resolution is not None else 'unresolved')
-    ax.set_title(f'Resolution: {resolution_text}\u2009Å', fontsize=14, pad=10)
+    if not compact:
+        ax.set_title(f'Resolution: {resolution_text}\u2009Å', fontsize=14, pad=10)
     if directional_file is not None and data.directional_best is not None and data.directional_worst is not None:
         summary = f'Directional: {data.directional_best:.2f}–{data.directional_worst:.2f} Å'
         if data.cfar is not None:
             summary += f' · cFAR {data.cfar:.3f}'
-        ax.text(.02, .025, summary, transform=ax.transAxes, fontsize=10)
+        if compact:
+            summary = summary.replace('Directional: ', '').replace(' · ', '\n')
+        ax.text(.02, .025, summary, transform=ax.transAxes, fontsize=8 if compact else 10)
 
     # format the x axis labels
     def format_xtick(x, pos):
@@ -94,10 +102,13 @@ def draw_fsc(
         return label
 
     ax.xaxis.set_major_formatter(format_xtick)
+    if compact:
+        from matplotlib.ticker import MaxNLocator
+        ax.xaxis.set_major_locator(MaxNLocator(4))
 
     # add titles to axes
     ax.set(
-        ylabel='Fourier shell correlation',
+        ylabel='FSC' if compact else 'Fourier shell correlation',
         xlabel='Resolution (1 / Å)',
     )
 
