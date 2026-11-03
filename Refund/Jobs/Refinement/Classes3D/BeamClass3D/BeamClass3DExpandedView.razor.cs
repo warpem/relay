@@ -1,3 +1,5 @@
+using Refund.Jobs.Refinement.InitialModel.BeamInit3D;
+using Refund.Jobs.Refinement.Refinement3D.BeamRefine3D;
 using Refund.Jobs.Refinement.Classes3D.Class3D;
 using System.Text.Json;
 using Microsoft.AspNetCore.Components;
@@ -14,7 +16,18 @@ public partial class BeamClass3DExpandedView
     [Inject] private INotificationService _toastService { get; set; }
     [Inject] private DataManager _dataManager { get; set; }
     [Inject] private RelaySession _session { get; set; }
-    private ReadOnlyBeamClass3D _job;
+    private ReadOnlyBeamParticleJob _job;
+    private int NClasses => _job switch { ReadOnlyBeamClass3D c => c.NClasses, ReadOnlyBeamInit3D i => i.NClasses, _ => 0 };
+    private int Iteration => _expandedViewService.CurrentVisIteration;
+    private bool HasFsc => _job is ReadOnlyBeamClass3D;
+    private bool CanExport => _job is ReadOnlyBeamClass3D || _job is ReadOnlyBeamInit3D i && i.IsFinalUpdate(Iteration);
+    private bool ShowSampling => HasFsc || CanExport;
+    private string VisMap3d(int iteration, int c) => _job switch { ReadOnlyBeamClass3D j => j.VisMap3d(iteration, c), ReadOnlyBeamInit3D i => i.VisMap3d(iteration, c), _ => null };
+    private string VisFilteredSlices(int iteration, int c) => _job switch { ReadOnlyBeamClass3D j => j.VisFilteredSlices(iteration, c), ReadOnlyBeamInit3D i => i.VisFilteredSlices(iteration, c), _ => null };
+    private string VisFsc(int iteration, int c) => _job switch { ReadOnlyBeamClass3D j => j.VisFsc(iteration, c), ReadOnlyBeamInit3D i => null, _ => null };
+    private string VisAngularDistribution(int iteration, int c) => _job switch { ReadOnlyBeamClass3D j => j.VisAngularDistribution(iteration, c), ReadOnlyBeamInit3D i => i.VisAngularDistribution(iteration, c), _ => null };
+    private string VisFourierSampling(int iteration, int c) => _job switch { ReadOnlyBeamClass3D j => j.VisFourierSampling(iteration, c), ReadOnlyBeamInit3D i => i.VisFourierSampling(iteration, c), _ => null };
+    private string VisClassStats(int iteration) => _job switch { ReadOnlyBeamClass3D c => c.VisClassStats(iteration), ReadOnlyBeamInit3D i => i.VisClassStats(iteration), _ => null };
     private Class3DModel[] _class3DModels;
     private readonly HashSet<int> _selectedClasses = new();
     protected override async Task InitializeViewAsync()
@@ -30,9 +43,9 @@ public partial class BeamClass3DExpandedView
     private async Task HandleJobChanged(ReadOnlyJob job)
     {
         // Check if this is a Class3D job
-        if (job is ReadOnlyBeamClass3D class3D)
+        if (job is ReadOnlyBeamClass3D or ReadOnlyBeamInit3D)
         {
-            _job = class3D;
+            _job = (ReadOnlyBeamParticleJob)job;
             _selectedClasses.Clear();
             UpdateData();
         }
@@ -62,10 +75,10 @@ public partial class BeamClass3DExpandedView
         try
         {
             // Load class statistics from the JSON file if it exists
-            if (File.Exists(_job.VisClassStats(_expandedViewService.CurrentVisIteration)))
+            if (File.Exists(VisClassStats(_expandedViewService.CurrentVisIteration)))
             {
                 _class3DModels = JsonSerializer.Deserialize<Class3DModel[]>(
-                    File.ReadAllText(_job.VisClassStats(_expandedViewService.CurrentVisIteration)));
+                    File.ReadAllText(VisClassStats(_expandedViewService.CurrentVisIteration)));
             }
             else
             {
@@ -89,7 +102,7 @@ public partial class BeamClass3DExpandedView
     {
         try
         {
-            if (_job == null)
+            if (_job == null || !CanExport)
                 return;
 
             // Create a Class3DSelect job with the selected classes

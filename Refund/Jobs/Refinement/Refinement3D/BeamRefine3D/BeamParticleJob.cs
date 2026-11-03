@@ -29,24 +29,30 @@ public abstract class BeamParticleJob : Job, IClusterJob
     public override int MemoryGb => Memory;
     public override string CommandSuffix => $" && touch {JobTools.QuoteArgumentValue(PathSuccess)}";
 
+    public virtual bool SupportsAlignment => true;
+    public bool UsesGlobalSearch => SupportsAlignment && Alignment == BeamAlignment.Global;
+    public bool UsesLocalSearch => SupportsAlignment && Alignment == BeamAlignment.Local;
+    public bool ShowParticleDiameter => !SupportsAlignment || UsesGlobalSearch;
+
     [UiFieldGroup("Reference", 0)]
-    [UiEnum("", "Alignment", typeof(BeamAlignment), helpText: "Global searches all orientations. Local searches around existing particle poses and requires a mask.")]
+    [UiEnum("", "Alignment", typeof(BeamAlignment), helpText: "Global searches all orientations. Local searches around existing particle poses and requires a mask.",
+        ConditionalOnField = nameof(SupportsAlignment), ConditionalOnValue = true)]
     [RelayProperty] public BeamAlignment Alignment { get; set; } = BeamAlignment.Global;
 
     [UiSymmetry("symmetry", "Symmetry")]
     [RelayProperty] public string Symmetry { get; set; } = "C1";
 
     [UiDecimal("initial-resolution", "Initial low-pass", min: 1, max: 1000, unit: "Å",
-        helpText: "Low-pass applied to the starting reference.")]
+        helpText: "Initial low-pass resolution.")]
     [RelayProperty] public decimal InitialResolution { get; set; } = 40;
 
     [UiInt("particle-diameter", "Particle diameter", min: 1, max: 10000, unit: "Å",
-        ConditionalOnField = nameof(Alignment), ConditionalOnValue = BeamAlignment.Global)]
+        ConditionalOnField = nameof(ShowParticleDiameter), ConditionalOnValue = true)]
     [RelayProperty] public int ParticleDiameter { get; set; } = 200;
 
     [UiBool("dont-align-symmetry", "Don't align symmetry",
         helpText: "Leave the starting reference frame unchanged. Otherwise Beam transforms both the reference and connected mask.",
-        ConditionalOnField = nameof(Alignment), ConditionalOnValue = BeamAlignment.Global)]
+        ConditionalOnField = nameof(UsesGlobalSearch), ConditionalOnValue = true)]
     [RelayProperty] public bool DontAlignSymmetry { get; set; }
 
     [UiFieldGroup("Alignment", 1)]
@@ -56,27 +62,28 @@ public abstract class BeamParticleJob : Job, IClusterJob
 
     [UiFieldGroup("Alignment", 1)]
     [UiDecimal("local-angular-range", "Local angular range", min: 0.1, max: 60, stepSize: 0.1, unit: "°",
-        ConditionalOnField = nameof(Alignment), ConditionalOnValue = BeamAlignment.Local)]
+        ConditionalOnField = nameof(UsesLocalSearch), ConditionalOnValue = true)]
     [RelayProperty] public decimal LocalAngularRange { get; set; } = 5;
 
     [UiDecimal("translation-range", "Translation range", min: 0.1, max: 1000, unit: "Å",
-        ConditionalOnField = nameof(Alignment), ConditionalOnValue = BeamAlignment.Global)]
+        ConditionalOnField = nameof(UsesGlobalSearch), ConditionalOnValue = true)]
     [RelayProperty] public decimal TranslationRange { get; set; } = 40;
 
     [UiDecimal("translation-range", "Local translation range", min: 0.1, max: 1000, unit: "Å",
-        ConditionalOnField = nameof(Alignment), ConditionalOnValue = BeamAlignment.Local)]
+        ConditionalOnField = nameof(UsesLocalSearch), ConditionalOnValue = true)]
     [RelayProperty] public decimal LocalTranslationRange { get; set; } = 10;
 
     [UiBool("recenter-local-search", "Recenter local searches", isAdvanced: true,
         helpText: "Center each new search on the preceding iteration's best pose.",
-        ConditionalOnField = nameof(Alignment), ConditionalOnValue = BeamAlignment.Local)]
+        ConditionalOnField = nameof(UsesLocalSearch), ConditionalOnValue = true)]
     [RelayProperty] public bool RecenterLocalSearch { get; set; }
 
     [UiBool("local-gaussian-priors", "Gaussian local priors", isAdvanced: true,
-        ConditionalOnField = nameof(Alignment), ConditionalOnValue = BeamAlignment.Local)]
+        ConditionalOnField = nameof(UsesLocalSearch), ConditionalOnValue = true)]
     [RelayProperty] public bool LocalGaussianPriors { get; set; }
 
-    [UiInt("beams", "Alignment candidates", min: 1, max: 64, isAdvanced: true)]
+    [UiInt("beams", "Alignment candidates", min: 1, max: 64, isAdvanced: true,
+        ConditionalOnField = nameof(SupportsAlignment), ConditionalOnValue = true)]
     [RelayProperty] public int Beams { get; set; } = 20;
 
     [UiIntNullable("max-tilts", "Maximum tilts", min: 1, max: 1000,
@@ -107,14 +114,14 @@ public abstract class BeamParticleJob : Job, IClusterJob
     [RelayProperty] public string CacheDirectory { get; set; } = "";
 
     [UiString("", "Additional arguments", isAdvanced: true,
-        helpText: "Additional Beam options, e.g. --ctf-min-resolution 30. Values may be quoted. Input/output paths, device, workers and resume are managed by Relay.")]
+        helpText: "Additional Beam command options. Values may be quoted. Input/output paths, device, workers and resume are managed by Relay.")]
     [RelayProperty] public string AdditionalArguments { get; set; } = "";
 
     [RelayProperty, Clearable] public int LastCommittedIteration { get; set; } = -1;
     [RelayProperty, Clearable] public bool HasRunToCompletion { get; set; }
 
     protected int OutputIteration(int iteration) => iteration < 0 ? Math.Max(LastCommittedIteration, VisAvailableIteration) : iteration;
-    public string IterationMetadataDirectory(int iteration) => Path.Combine(BeamDirectory, $"it{OutputIteration(iteration):D3}", "warp_metadata");
+    public virtual string IterationMetadataDirectory(int iteration) => Path.Combine(BeamDirectory, $"it{OutputIteration(iteration):D3}", "warp_metadata");
     public string TiltProcessedItems(int iteration) => Path.Combine(RelayResultsDirectoryPath, $"tilt_series_it{OutputIteration(iteration):D4}.json");
     public string TiltFailedItems => Path.Combine(RelayResultsDirectoryPath, "tilt_series_failed.json");
 
@@ -179,7 +186,7 @@ public abstract class BeamParticleJob : Job, IClusterJob
             {
                 if (!particles.HasData || !particles.HasSingleStar || particles.DataDimensionality is not (ParticleType.Image or ParticleType.Tiltseries))
                     AddPortValidationError(errors, "Particles", "Beam requires extracted single-tilt images or particle tilt stacks in a single STAR file.");
-                if (Alignment == BeamAlignment.Local && (!particles.HasAngles || !particles.HasShifts))
+                if (UsesLocalSearch && (!particles.HasAngles || !particles.HasShifts))
                     AddPortValidationError(errors, "Particles", "Local alignment requires existing orientations and shifts.");
             }
         var tiltSeries = PortsIn["TiltSeries"].GetSingleResource<TiltSeriesSet>();
@@ -189,7 +196,7 @@ public abstract class BeamParticleJob : Job, IClusterJob
             AddPortValidationError(errors, "TiltSeries", "Tilt-series metadata must contain CTF estimates.");
         if (!IsTiltSeries && PortsIn["TiltSeries"].Count > 0)
             AddPortValidationError(errors, "TiltSeries", "Connect tilt-series metadata only for particle tilt stacks.");
-        if (Alignment == BeamAlignment.Local && PortsIn["Mask"].Count == 0)
+        if (UsesLocalSearch && PortsIn["Mask"].Count == 0)
             AddPortValidationError(errors, "Mask", "Local alignment requires a mask.");
         return errors;
     }
@@ -229,7 +236,7 @@ public abstract class BeamParticleJob : Job, IClusterJob
         AddRunArguments(args);
         args["output"] = BeamDirectory;
         args["project-root"] = Space.RootDirectory;
-        if (PortsIn["Mask"].Count > 0)
+        if (PortsIn.TryGetValue("Mask", out var maskPort) && maskPort.Count > 0)
         {
             args["mask"] = PortsIn["Mask"].GetSingleResource<Mask>().MaskVolumePath;
         }
@@ -298,13 +305,21 @@ public abstract class BeamParticleJob : Job, IClusterJob
         File.WriteAllText(TiltFailedItems, "[]");
     }
 
-    internal int[] CommittedIterations() => !Directory.Exists(BeamDirectory) ? [] :
+    internal virtual int[] CommittedIterations() => !Directory.Exists(BeamDirectory) ? [] :
         Directory.EnumerateDirectories(BeamDirectory).Select(Path.GetFileName)
             .Where(name => Regex.IsMatch(name!, @"^it\d{3,}$"))
             .Select(name => int.Parse(name!.AsSpan(2), CultureInfo.InvariantCulture))
             .Where(i => RequiredIterationFiles(i).All(File.Exists) &&
                 (!IsTiltSeries || Directory.Exists(IterationMetadataDirectory(i))))
             .Order().ToArray();
+
+    protected virtual int? LogIteration(string line)
+    {
+        var match = Regex.Match(line, @"^=== Iteration (\d+) ===$");
+        return match.Success ? int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture) : null;
+    }
+
+    protected virtual bool HasPublishedTiltMetadata(int iteration) => Directory.Exists(IterationMetadataDirectory(iteration));
 
     public override Action TrackProgressLogs()
     {
@@ -317,8 +332,8 @@ public abstract class BeamParticleJob : Job, IClusterJob
         var starts = new SortedDictionary<int, int> { [0] = 0 };
         for (int index = 0; index < lines.Length; index++)
         {
-            var match = Regex.Match(lines[index].Trim(), @"^=== Iteration (\d+) ===$");
-            if (match.Success) starts[int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture)] = index;
+            int? iteration = LogIteration(lines[index].Trim());
+            if (iteration.HasValue) starts[iteration.Value] = index;
         }
         var sections = starts.ToArray();
         for (int section = 0; section < sections.Length; section++)
@@ -330,7 +345,7 @@ public abstract class BeamParticleJob : Job, IClusterJob
         int committed = CommittedIterations().DefaultIfEmpty(-1).Max();
         if (IsTiltSeries)
             foreach (int i in CommittedIterations())
-                if (!File.Exists(TiltProcessedItems(i))) CollectTiltSeriesItems(i);
+                if (HasPublishedTiltMetadata(i) && !File.Exists(TiltProcessedItems(i))) CollectTiltSeriesItems(i);
         return () => { stderrUpdate?.Invoke(); LogsAvailableIteration = latest; LastCommittedIteration = committed; };
     }
 

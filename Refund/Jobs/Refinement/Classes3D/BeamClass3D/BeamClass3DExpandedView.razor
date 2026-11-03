@@ -15,38 +15,51 @@ else if (_job == null)
 else
 {
     <div class="classification-view">
-        <FluentButton OnClick="ExportClasses" Disabled="@(!_selectedClasses.Any())" Appearance="ButtonAppearance.Primary">
+        <FluentButton OnClick="ExportClasses" Disabled="@(!CanExport || !_selectedClasses.Any())" Appearance="ButtonAppearance.Primary">
             Export selection
         </FluentButton>
         <div class="scroll-container">
-            @for (int c = 0; c < _job.NClasses; c++)
+            @for (int c = 0; c < NClasses; c++)
             {
                 int currentClass = c;
                 string selectedStyle = _selectedClasses.Contains(c) ? "border-color: var(--colorBrandBackground);" : "";
                 <div class="main-frame" style="@selectedStyle" @onclick="() => SetSelected(currentClass)">
                     <div class="class-header">
-                        <span>#@(c + 1)</span>
+                        <span class="class-id">#@(c + 1)</span>
                         @if (_class3DModels is { } stats && stats.Length > c)
                         {
-                            <span>@(stats[c].Resolution is { } r ? $"{r:F1} Å" : "?? Å")</span>
-                            <span>@(stats[c].Distribution is { } p ? $"{p * 100:F1} %" : "?? %")</span>
+                            @if (HasFsc)
+                            {
+                                <span class="class-resolution">@(stats[c].Resolution is { } r ? $"{r:F1} Å" : "?? Å")</span>
+                            }
+                            @if (HasFsc || stats[c].Distribution.HasValue)
+                            {
+                                <span class="class-distribution">@(stats[c].Distribution is { } p ? $"{p * 100:F1} %" : "?? %")</span>
+                            }
                         }
                     </div>
-                    @if (File.Exists(_job.VisMap3d(_expandedViewService.CurrentVisIteration, c + 1)))
+                    @if (File.Exists(VisMap3d(_expandedViewService.CurrentVisIteration, c + 1)))
                     {
                         <div class="map-viewport">
                             <IsosurfaceViewer MinWidth="240" MinHeight="250" MiniMode="true"
-                                VolumePath="@_job.VisMap3d(_expandedViewService.CurrentVisIteration, c + 1)" />
+                                VolumePath="@VisMap3d(_expandedViewService.CurrentVisIteration, c + 1)" />
                         </div>
                     }
-                    <MapOrthosliceDisplay MapOrthoslicesPath="@_job.VisFilteredSlices(_expandedViewService.CurrentVisIteration, c + 1)"
+                    <MapOrthosliceDisplay MapOrthoslicesPath="@VisFilteredSlices(_expandedViewService.CurrentVisIteration, c + 1)"
                         RenderedImageSidelengthPx="340" BorderWidthPx="0" SpacingPx="4" IsVerticalLayout />
-                    <ServerFigure ServerPath="@_job.VisFsc(_expandedViewService.CurrentVisIteration, c + 1)"
+                    @if (HasFsc)
+                    {
+                    <ServerFigure ServerPath="@VisFsc(_expandedViewService.CurrentVisIteration, c + 1)"
                         Title="Class FSC" ShowTitle="false" MaxWidthEm="23" CacheKey="@_job.UpdateDate.Ticks.ToString()" />
-                    <ServerFigure ServerPath="@_job.VisAngularDistribution(_expandedViewService.CurrentVisIteration, c + 1)"
+                    }
+                    @if (ShowSampling)
+                    {
+                    <ServerFigure ServerPath="@VisAngularDistribution(_expandedViewService.CurrentVisIteration, c + 1)"
                         Title="Angular distribution" MaxWidthEm="23" CacheKey="@_job.UpdateDate.Ticks.ToString()" />
-                    <ServerFigure ServerPath="@_job.VisFourierSampling(_expandedViewService.CurrentVisIteration, c + 1)"
+                    <ServerFigure ServerPath="@VisFourierSampling(_expandedViewService.CurrentVisIteration, c + 1)"
                         Title="Fourier sampling" MaxWidthEm="23" CacheKey="@_job.UpdateDate.Ticks.ToString()" />
+                    }
+
                 </div>
             }
         </div>

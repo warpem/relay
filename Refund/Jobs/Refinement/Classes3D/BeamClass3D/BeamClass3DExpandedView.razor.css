@@ -75,5 +75,5 @@
     white-space: nowrap;
     font-weight: 600;
 }
-.class-header > :nth-child(2) { text-align: center; }
-.class-header > :last-child { text-align: right; }
+.class-resolution { grid-column: 2; text-align: center; }
+.class-distribution { grid-column: 3; text-align: right; }

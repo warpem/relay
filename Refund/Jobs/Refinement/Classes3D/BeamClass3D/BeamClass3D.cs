@@ -53,6 +53,10 @@ public class BeamClass3D : BeamParticleJob
     [UiInt("iterations", "Iterations", min: 1, max: 10000)]
     [RelayProperty] public int Iterations { get; set; } = 25;
 
+    [UiInt("working-box", "Box size", min: 16, max: 4096, stepSize: 2, unit: "px",
+        helpText: "Even working box size, capped at the input box. Fourier cropping preserves the field of view and coarsens the pixel size.")]
+    [RelayProperty] public int WorkingBox { get; set; } = 128;
+
     [UiEnum("", "Regularization", typeof(BeamClassificationRegularization),
         helpText: "Denoise trains one Noise2Noise network across all usable classes. Class FSC is a controller diagnostic; refine selected particles independently for a final resolution estimate.")]
     [RelayProperty] public BeamClassificationRegularization Regularization { get; set; } = BeamClassificationRegularization.FSC;
@@ -93,6 +97,7 @@ public class BeamClass3D : BeamParticleJob
     {
         var errors = base.ValidateInputs();
         if (NClasses < 2) errors[nameof(ClassCount)] = "Classification requires at least two classes.";
+        if (WorkingBox < 16 || WorkingBox % 2 != 0) errors[nameof(WorkingBox)] = "Box size must be even and at least 16 pixels.";
         if (Iterations < 1) errors[nameof(Iterations)] = "Iterations must be positive.";
         if (!errors.ContainsKey(nameof(AdditionalArguments)) && BeamWrapper.ParseArguments(AdditionalArguments).ContainsKey("classes"))
             errors[nameof(AdditionalArguments)] = "Use the classification type and number of classes fields to set --classes.";

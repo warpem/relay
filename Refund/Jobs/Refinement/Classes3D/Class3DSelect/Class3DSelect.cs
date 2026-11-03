@@ -322,7 +322,7 @@ public class Class3DSelect : Job, ILocalJob
             try
             {
                 Job parentJob = GetParents().First();
-                if (parentJob is not (Class3D.Class3D or InitialReference or BeamClass3D.BeamClass3D))
+                if (parentJob is not (Class3D.Class3D or InitialReference or BeamClass3D.BeamClass3D or InitialModel.BeamInit3D.BeamInit3D))
                     throw new Exception("Parent job is not a 3D classification-like job");
                 
                 ParticleSet resourceParticles = PortsIn[PortInParticles].GetSingleResource<ParticleSet>(SelectedIteration);
@@ -397,6 +397,7 @@ public class Class3DSelect : Job, ILocalJob
                 #endregion
                 
                 #region model.star
+                if (!string.IsNullOrEmpty(resourceClasses.Model))
                 {
                     logger.WriteLine("Copying model tables... ");
                     {

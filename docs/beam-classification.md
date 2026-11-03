@@ -18,7 +18,8 @@ classified particles, per-class maps with independent half-maps, and a snapshot
 of tilt-series metadata. Exporting selected classes preserves half-maps and
 forwards the metadata resource, allowing downstream Beam refinement.
 
-Controls cover fixed iteration count (default 25), FSC/denoise regularization,
+Controls cover fixed iteration count (default 25), working box size (default 128
+pixels), FSC/denoise regularization,
 global/local alignment, symmetry, starting resolution, search ranges, batch
 size and compute resources. Local alignment requires poses and a mask. Advanced
 controls and the single-line additional arguments field follow refinement.
