@@ -69,3 +69,27 @@
     font-size: 0.875rem;
     margin-top: 0.5rem;
 }
+
+.file-edit-link {
+    display: flex;
+    align-items: center;
+    column-gap: 0.25rem;
+    padding: 0;
+    border: 0;
+    border-radius: 2px;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.file-edit-link:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.file-edit-link:focus-visible {
+    outline: 2px solid var(--colorBrandStroke1, #0f6cbd);
+    outline-offset: 2px;
+}

@@ -18,6 +18,7 @@
 
                 @if (!item.IsDirectory)
                 {
+                    @EditAction
                     <DownloadableLine Downloadable="@(new Downloadable("Download file", "", item.Path))" />
                 }
             </p>

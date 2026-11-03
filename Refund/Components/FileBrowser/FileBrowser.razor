@@ -28,10 +28,6 @@
         <div class="toolbar-left">
             <FluentButton Id="@ControlId("buttonCreateFolder")" Title="Create folder" IconEnd="@IconCreateFolder" OnClick="CreateFolderAsync" Disabled="@(!IsCurrentFolderWritable)" />
             <FluentButton Id="@ControlId("buttonUpload")" Title="Upload file" Style="margin-left: 4px;" IconEnd="@IconUploadFile" OnClick="StartFileUpload" Disabled="@(!IsCurrentFolderWritable || filesBeingUploaded.Any())" />
-            @if (EditorService != null)
-            {
-                <FluentButton Title="@EditButtonTitle" Style="margin-left: 10px;" OnClick="EditSelectedFileAsync" Disabled="@(!CanEditSelectedFile)">Edit</FluentButton>
-            }
             <FluentButton Id="@ControlId("buttonRename")" Title="Rename" Style="margin-left: 10px;" IconEnd="@IconRename" OnClick="RenameItem" Disabled="@(!CanRenameItem)" />
             <FluentButton Id="@ControlId("buttonDelete")" Title="Delete" Style="margin-left: 4px;" IconEnd="@IconDelete" OnClick="ShowDeleteConfirmation" Disabled="@(!CanDeleteItem)" />
         </div>
@@ -80,7 +76,18 @@
         }
         @if (SelectedItems.Any() && SelectedItems.Any(item => !item.IsDirectory))
         {
-            <DetailsColumn Items="SelectedItems.Where(item => !item.IsDirectory).ToList()" />
+            <DetailsColumn Items="SelectedItems.Where(item => !item.IsDirectory).ToList()">
+                <EditAction>
+                    @if (EditorService != null)
+                    {
+                        <button type="button" class="file-edit-link" title="@EditButtonTitle"
+                                @onclick="EditSelectedFileAsync" disabled="@(!CanEditSelectedFile)">
+                            <FluentIcon Value="@IconEditFile" />
+                            <span>Edit file</span>
+                        </button>
+                    }
+                </EditAction>
+            </DetailsColumn>
         }
     </div>
 

@@ -34,6 +34,7 @@ public partial class FileBrowser : ComponentBase, IAsyncDisposable
     private IJSObjectReference editorModule;
     private DotNetObjectReference<FileBrowser> editorReference;
     private string EditorError;
+    private readonly Icon IconEditFile = new Icons.Regular.Size16.Edit();
     private bool IsSelectedConnectedSpaceFile => SelectedItems.Count == 1 && !SelectedItems[0].IsDirectory &&
         EditorService?.IsConnectedSpaceFile(SelectedItems[0].Path) == true;
     private string EditButtonTitle => IsSelectedConnectedSpaceFile

@@ -14,6 +14,9 @@ public partial class DetailsColumn : ComponentBase
     [Parameter] 
     public List<FileSystemItem> Items { get; set; }
 
+    [Parameter]
+    public RenderFragment EditAction { get; set; }
+
     /// <summary>
     /// Converts a file size in bytes to a human-readable string with appropriate units.
     /// Formats the size in B, KB, MB, or GB with one decimal place for better readability.
