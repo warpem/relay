@@ -1,0 +1,57 @@
+.relay-text-editor {
+    --editor-bg: #fff;
+    --editor-fg: #242424;
+    --editor-border: #d1d1d1;
+    --editor-toolbar: #f5f5f5;
+    position: fixed;
+    inset: 0;
+    margin: 0;
+    width: 100vw;
+    height: 100dvh;
+    max-width: none;
+    max-height: none;
+    padding: 0;
+    border: 0;
+    background: var(--editor-bg);
+    color: var(--editor-fg);
+    font: 14px/1.4 system-ui, sans-serif;
+}
+.relay-text-editor[open] { display: flex; flex-direction: column; }
+.relay-text-editor.dark { --editor-bg: #1e1e1e; --editor-fg: #eee; --editor-border: #555; --editor-toolbar: #252526; color-scheme: dark; }
+.relay-text-editor::backdrop { background: #0008; }
+.relay-text-editor header, .relay-text-editor footer, .relay-text-editor .editor-save-as {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    background: var(--editor-toolbar);
+    border-bottom: 1px solid var(--editor-border);
+    flex-shrink: 0;
+}
+.relay-text-editor .editor-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.relay-text-editor .editor-dirty { font-size: 12px; color: #bd8500; }
+.relay-text-editor button, .relay-text-editor input {
+    font: inherit; padding: 5px 10px; border: 1px solid var(--editor-border);
+    border-radius: 4px; background: var(--editor-bg); color: var(--editor-fg);
+}
+.relay-text-editor button { cursor: pointer; white-space: nowrap; }
+.relay-text-editor button:hover:not(:disabled) { border-color: #479ef5; }
+.relay-text-editor button:disabled { opacity: .5; cursor: default; }
+.relay-text-editor :focus-visible { outline: 2px solid #479ef5; outline-offset: 2px; }
+.relay-text-editor .editor-save-as { flex-wrap: wrap; }
+.relay-text-editor .editor-save-as[hidden] { display: none; }
+.relay-text-editor .editor-save-as label { display: flex; align-items: center; gap: 10px; flex: 1; }
+.relay-text-editor input { flex: 1; min-width: 100px; }
+.relay-text-editor small { flex-basis: 100%; }
+.relay-text-editor .editor-status { padding: 5px 16px; font-size: 12px; flex-shrink: 0; }
+.relay-text-editor .editor-status.error { color: #d13438; }
+.relay-text-editor.dark .editor-status.error { color: #ff8585; }
+.relay-text-editor .editor-surface { flex: 1; min-height: 0; min-width: 0; }
+.relay-text-editor footer { justify-content: space-between; border-top: 1px solid var(--editor-border); border-bottom: 0; font-size: 12px; }
+@media (max-width: 700px) {
+    .relay-text-editor header { flex-wrap: wrap; }
+    .relay-text-editor .editor-path { flex-basis: 70%; }
+    .relay-text-editor footer { flex-wrap: wrap; }
+}
+.relay-text-editor .editor-progress { width: calc(100% - 32px); margin: 0 16px 6px; height: 6px; flex-shrink: 0; accent-color: #479ef5; }
+.relay-text-editor .editor-progress[hidden] { display: none; }

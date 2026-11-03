@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Refund/Services/TextFileEditorService.cs" Link="TextFileEditorService.cs" />
+    <Compile Include="../../Relay/Controllers/TextFileEditorController.cs" Link="TextFileEditorController.cs" />
+  </ItemGroup>
+</Project>

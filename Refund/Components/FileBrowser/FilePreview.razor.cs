@@ -174,7 +174,7 @@ public partial class FilePreview : ComponentBase
     /// <summary>
     /// Determines whether a file is a plain text file by examining its content.
     /// </summary>
-    private bool IsPlainTextFile(string path)
+    internal static bool IsPlainTextFile(string path)
     {
         try
         {

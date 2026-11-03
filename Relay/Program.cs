@@ -73,6 +73,7 @@ builder.Services.AddControllersWithViews().AddRazorRuntimeCompilation();
 
 // Add file service for secure file access
 builder.Services.AddSingleton<FileService>();
+builder.Services.AddSingleton<TextFileEditorService>();
 
 // Register application configuration
 var relayOptions = new RelayConfiguration();

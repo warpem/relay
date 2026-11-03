@@ -6,6 +6,8 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Extensions.Logging;
 using Microsoft.FluentUI.AspNetCore.Components;
 using Microsoft.JSInterop;
+using Refund.Services;
+using Refund.Services.Core.Session;
 using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons;
 
 namespace Refund.Components.FileBrowser;
@@ -24,6 +26,43 @@ public partial class FileBrowser : ComponentBase, IAsyncDisposable
     
     [Inject]
     private ILogger<FileBrowser> Logger { get; set; } = default!;
+
+    [Inject] private IServiceProvider Services { get; set; } = default!;
+    // Hosts that only use Refund's file picker need not provide editor endpoints or authentication.
+    private TextFileEditorService EditorService => Services.GetService(typeof(TextFileEditorService)) as TextFileEditorService;
+    private RelaySession EditorSession => Services.GetService(typeof(RelaySession)) as RelaySession;
+    private IJSObjectReference editorModule;
+    private DotNetObjectReference<FileBrowser> editorReference;
+    private string EditorError;
+    private bool CanEditSelectedFile => EditorSession?.IsAuthenticated == true && SelectedItems.Count == 1 &&
+        !SelectedItems[0].IsDirectory && File.Exists(SelectedItems[0].Path) &&
+        SelectedItems[0].SizeInByte <= TextFileEditorService.MaximumBytes && FilePreview.IsPlainTextFile(SelectedItems[0].Path);
+
+    private async Task EditSelectedFileAsync()
+    {
+        if (!CanEditSelectedFile) return;
+        try
+        {
+            EditorError = null;
+            string token = EditorService.CreateTicket(SelectedItems[0].Path, TopLevelFolder, EditorSession.User.Username);
+            editorModule ??= await JSRuntime.InvokeAsync<IJSObjectReference>("import", "./_content/Refund/js/textFileEditor.js");
+            editorReference ??= DotNetObjectReference.Create(this);
+            await editorModule.InvokeVoidAsync("open", _controlPrefix, token, EditorSession.ColorTheme == ColorTheme.Dark, editorReference);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JSException)
+        {
+            EditorError = ex.Message;
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnTextEditorClosed(bool saved)
+    {
+        if (!saved) return;
+        SelectedItems = SelectedItems.Where(item => File.Exists(item.Path)).Select(item => new FileSystemItem(item.Path)).ToList();
+        foreach (var level in FolderLevels) level.RefreshTrigger++;
+        await InvokeAsync(StateHasChanged);
+    }
 
     #region Parameters
 
@@ -1374,6 +1413,12 @@ public partial class FileBrowser : ComponentBase, IAsyncDisposable
     {
         try
         {
+            if (editorModule != null)
+            {
+                await editorModule.InvokeVoidAsync("dispose", _controlPrefix);
+                await editorModule.DisposeAsync();
+            }
+            editorReference?.Dispose();
             // Clean up JavaScript interop resources
             if (_module != null)
                 await _module.DisposeAsync();
