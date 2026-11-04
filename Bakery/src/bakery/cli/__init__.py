@@ -38,3 +38,4 @@ from .beam_refinement_diagnostics import beam_refinement_diagnostics
 import matplotlib
 
 matplotlib.use('Agg')
+from .beam_class2d_figures import beam_class2d_figures

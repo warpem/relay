@@ -57,6 +57,8 @@ public partial class Class2DSelection
     [Parameter]
     public int[] ClassIds { get; set; }
 
+    [Parameter] public string[] ClassLabels { get; set; }
+
     /// <summary>
     /// Array of estimated resolution values for each class, in Angstroms.
     /// Used for information display and optional sorting.

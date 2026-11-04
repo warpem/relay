@@ -399,6 +399,14 @@ public static class BakeryWrapper
         RunCommand(command, workingDirectory);
     }
 
+    /// <summary>Compile a portable Beam 2D snapshot into saved class and PCA figures.</summary>
+    public static void BeamClass2DFigures(string snapshotDirectory, string outputDirectory, int iteration)
+    {
+        RunCommand("beam-class2d-figures " +
+            $"--snapshot-directory {JobTools.QuoteArgumentValue(snapshotDirectory)} " +
+            $"--output-directory {JobTools.QuoteArgumentValue(outputDirectory)} --iteration {iteration}");
+    }
+
     /// <summary>
     /// Creates an atlas of 2D class averages from a RELION Class2D job.
     /// </summary>
@@ -414,7 +422,7 @@ public static class BakeryWrapper
     )
     {
         var command = "class2d-image-atlas " +
-                      $"--images-mrcs-file {class2dMrcsFile} " +
+                      $"--images-mrcs-file {JobTools.QuoteArgumentValue(class2dMrcsFile)} " +
                       $"--output-file \"{outputImageFile}\" ";
 
         RunCommand(command);
@@ -449,7 +457,7 @@ public static class BakeryWrapper
 
         // generate command
         var command = "class2d-job-card " +
-                      $"--images-mrcs-file {classImagesMrcsFile} " +
+                      $"--images-mrcs-file {JobTools.QuoteArgumentValue(classImagesMrcsFile)} " +
                       $"--output-file \"{outputImageFile}\" ";
         
         for (int i = 0; i < imageIndices.Length; i++)

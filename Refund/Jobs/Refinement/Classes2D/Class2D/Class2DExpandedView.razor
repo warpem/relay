@@ -20,17 +20,21 @@ else
                       Class="job-card-button mr-2">Clear all</FluentButton>
         <FluentButton Appearance="ButtonAppearance.Outline"
                       OnClick="SelectAll"
-                      Disabled="@(_nClassesSelected == _job.NClasses)"
+                      Disabled="@(_nClassesSelected == NClasses)"
                       Class="job-card-button mr-2">Select all</FluentButton>
         <FluentButton Class="job-card-button job-card-button-accent mr-8"
                       OnClick="@SaveSelectionState"
-                      Disabled="@(_nClassesSelected == 0)"
+                      Disabled="@(_nClassesSelected == 0 || !CanExport)"
                       Appearance="ButtonAppearance.Primary">Export selection from final iteration</FluentButton>
     </div>
 
-    <Class2DSelection @ref="_class2DSelectionComponent"
-                      ClassAtlasImagePath=@(_job.VisClassAtlas(_expandedViewService.CurrentVisIteration))
-                      NImagesInFile="@_job.NClasses"
+    @if (Beam != null && !CanExport)
+    {
+        <p>Class selection becomes available after final particle assignment.</p>
+    }
+    <Class2DSelection @key="(Beam != null ? ClassAtlas : null)" @ref="_class2DSelectionComponent"
+                      ClassAtlasImagePath=@ClassAtlas
+                      NImagesInFile="@NClasses"
                       ClassPositionsInAtlas=@_classNumbers
                       ClassIds=@_classIdx
                       ClassResolutions=@_classResolutions
@@ -41,5 +45,23 @@ else
                       BorderColorSelected="#fd7e14"
                       BorderWidthPx="4"
                       OnSelectionChanged="@SelectionChanged"/>
+    @if (Beam != null && _pcaCount > 0)
+    {
+        <h4 class="mt-4">Principal components</h4>
+        <p>Mean followed by signed components from the latest PCA discovery fit.</p>
+        <Class2DSelection @key="Beam.VisPcaAtlas(Iteration)"
+                          ClassAtlasImagePath="@Beam.VisPcaAtlas(Iteration)"
+                          NImagesInFile="@(_pcaCount + 1)"
+                          ClassPositionsInAtlas="@Enumerable.Range(1, _pcaCount + 1).ToArray()"
+                          ClassLabels="@PcaLabels" AllowSorting="false" SelectionIsMutable="false"
+                          RenderedImageSidelengthPx="128" SpacingPx="6" BorderColorUnselected="transparent" />
+    }
+    @if (Beam != null && _embeddingCount > 0)
+    {
+        <h4 class="mt-4">PCA discovery sample</h4>
+        <p>@_embeddingCount.ToString("N0") sampled particles; colors show discovery groups. Up to 20,000 points are plotted.</p>
+        <Refund.Components.ServerFigure ServerPath="@Beam.VisEmbeddings(Iteration)" Title="Particle embeddings" ShowTitle="false" MaxWidthEm="32" />
+    }
+
 }
 }

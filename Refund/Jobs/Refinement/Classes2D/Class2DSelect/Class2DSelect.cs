@@ -234,7 +234,7 @@ public class Class2DSelect : Job, ILocalJob
     /// </remarks>
     private Resource GetSelectedParticlesResource(int iter)
     {
-        ParticleSet result = PortsIn["Particles"].GetSingleResource<ParticleSet>();
+        ParticleSet result = PortsIn["Particles"].GetSingleResource<ParticleSet>()?.Copy();
         if (result == null)
             return null;
 
@@ -269,7 +269,7 @@ public class Class2DSelect : Job, ILocalJob
     /// </remarks>
     private Resource GetUnselectedParticlesResource(int iter)
     {
-        ParticleSet result = PortsIn["Particles"].GetSingleResource<ParticleSet>();
+        ParticleSet result = PortsIn["Particles"].GetSingleResource<ParticleSet>()?.Copy();
         if (result == null)
             return null;
 
@@ -318,7 +318,7 @@ public class Class2DSelect : Job, ILocalJob
             {
                 // Verify parent job is a 2D classification
                 Job ParentJob = GetParents().First();
-                if (ParentJob is not Class2D.Class2D)
+                if (ParentJob is not Class2D.Class2D and not BeamClass2D.BeamClass2D)
                     throw new Exception("Parent job is not a 2D classification job");
                 
                 // Get input resources

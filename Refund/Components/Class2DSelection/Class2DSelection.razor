@@ -39,10 +39,10 @@ parent div.
                     <div class="border-overlay-@(guid) @(selectedClasses.Contains(c) ? "selected" : "")"
                          @onclick="() => ToggleSelection(c)">
                     </div>
-                    @if (ClassIds != null)
+                    @if (ClassIds != null || ClassLabels != null)
                     {
                         <span style="position: absolute; left: 7px; top: 3px; color: white;">
-                            #@ClassIds[i]
+                            @(ClassLabels != null ? ClassLabels[i] : $"#{ClassIds[i]}")
                         </span>
                     }
                     @if (ClassResolutions != null)
