@@ -72,7 +72,9 @@ def latlng_to_xyz(lat: np.ndarray, lng: np.ndarray) -> np.ndarray:
 
 
 def xyz_to_latlng(xyz: np.ndarray):
-    lat = np.arcsin(xyz[..., 2])
+    # Float32 rotation products can produce nominal unit vectors with |z| > 1.
+    # atan2 uses the full direction, tolerates norm drift, and stays finite at poles.
+    lat = np.arctan2(xyz[..., 2], np.hypot(xyz[..., 0], xyz[..., 1]))
     lng = np.arctan2(xyz[..., 1], xyz[..., 0])
     return np.rad2deg(lat), np.rad2deg(lng)
 
