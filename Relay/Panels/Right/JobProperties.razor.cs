@@ -39,6 +39,8 @@ public partial class JobProperties : ComponentBase, IDisposable
     /// </summary>
     private List<GroupEventSubscription> _subscriptions = new();
 
+    private bool _disposed;
+
     /// <summary>
     /// The currently selected iteration for viewing job results.
     /// </summary>
@@ -145,11 +147,16 @@ public partial class JobProperties : ComponentBase, IDisposable
     /// Handles updates to a job's data, refreshing results and the UI.
     /// </summary>
     /// <param name="args">Event arguments containing the updated job</param>
-    private async Task HandleJobUpdated(GroupEventArgs<ReadOnlyJob> args)
+    private Task HandleJobUpdated(GroupEventArgs<ReadOnlyJob> args) => InvokeAsync(() =>
     {
+        // Notifications run on background queues. Keep collection changes on the
+        // renderer's dispatcher so they cannot race with tab content rendering.
+        if (_disposed || Jobs?.Contains(args.Object) != true)
+            return;
+
         UpdateResults();
-        await InvokeAsync(StateHasChanged);
-    }
+        StateHasChanged();
+    });
 
     /// <summary>
     /// Updates the lists of available results and downloadable resources.
@@ -410,6 +417,7 @@ public partial class JobProperties : ComponentBase, IDisposable
     /// </summary>
     public void Dispose()
     {
+        _disposed = true;
         foreach (var sub in _subscriptions)
             sub.Unsubscribe();
         _subscriptions.Clear();

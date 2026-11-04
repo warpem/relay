@@ -62,6 +62,49 @@ public sealed class JobPropertiesTests
         Assert.Contains("second-job-note", await harness.HtmlAsync());
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task BackgroundUpdatesWaitForRenderingAndSkipDisposedPanels(bool dispose)
+    {
+        await using var harness = await Harness.CreateAsync();
+        await harness.ShowAsync(harness.First);
+        var panel = harness.Activator.Properties!;
+        var iterations = (List<int>)typeof(JobProperties)
+            .GetField("_iterationsWithResults", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(panel)!;
+        var update = typeof(JobProperties)
+            .GetMethod("HandleJobUpdated", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        Task? pendingUpdate = null;
+
+        await harness.Renderer.Dispatcher.InvokeAsync(() =>
+        {
+            iterations.Add(17);
+            using var enumerator = iterations.GetEnumerator();
+            Assert.True(enumerator.MoveNext());
+            using var queued = new ManualResetEventSlim();
+            // Hold the dispatcher as a render would while a notification arrives.
+            var background = Task.Run(() =>
+            {
+                try
+                {
+                    pendingUpdate = (Task)update.Invoke(panel, new object[] { new GroupEventArgs<ReadOnlyJob>(harness.First) })!;
+                }
+                finally
+                {
+                    queued.Set();
+                }
+            });
+            Assert.True(queued.Wait(TimeSpan.FromSeconds(5)));
+            background.GetAwaiter().GetResult();
+            Assert.False(pendingUpdate!.IsCompleted);
+            Assert.False(enumerator.MoveNext());
+            if (dispose) panel.Dispose();
+        });
+
+        await pendingUpdate!.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(dispose, iterations.Contains(17));
+    }
+
     private sealed class Harness : IAsyncDisposable
     {
         private readonly string _directory = Path.Combine(Path.GetTempPath(), "relay-properties-" + Guid.NewGuid().ToString("N"));
@@ -160,11 +203,13 @@ public sealed class JobPropertiesTests
         public IServiceProvider Services { get; set; } = null!;
         public Host? Host { get; private set; }
         public FluentTabs? Tabs { get; private set; }
+        public JobProperties? Properties { get; private set; }
         public IComponent CreateInstance(Type type)
         {
             var component = (IComponent)ActivatorUtilities.CreateInstance(Services, type);
             if (component is Host host) Host = host;
             if (component is FluentTabs tabs) Tabs = tabs;
+            if (component is JobProperties properties) Properties = properties;
             return component;
         }
     }
