@@ -11,11 +11,11 @@ particle tilt stacks, or a tilt-series metadata resource. Beam's CLI also accept
 CryoSPARC files directly; in Relay those go through particle import.
 
 Normal settings are the final number of classes (64), training updates (60),
-training particles per class (100), learning rate (0.2), optional final
+final full-data passes (2), training particles per class (100), learning rate (0.2), optional final
 subclassification, particle diameter (200 Å), working box (64 px), regularization (FRC or Denoise),
 translation range (100 Å), compute device, CPU workers, host memory, and optional
 particle scratch directory. The even working box must not exceed the input box.
-Advanced settings cover initial classes, full-data passes, peripheral class
+Advanced settings cover initial classes, peripheral class
 ratio, angular sampling, pose marginalization, CTF before the first peak,
 soft/hard reconstruction assignments, PCA rank and sample cap, discovery interval,
 compute batch size, and denoising training steps. Other options can be supplied
@@ -60,13 +60,14 @@ Each atomic `beam/snapshots/itNNN` directory contains:
 - `snapshot.json`: update number, counts, and final-assignment availability.
 
 Relay compiles atlases, class statistics, the embedding figure, and per-snapshot
-stdout into its `.relay` directory. Stderr is collected using the same mechanism
+stdout into its `.relay` directory. Relay requests `--show-progress`; carriage-return
+bars are collapsed to one current line when the logs are compiled. Stderr is collected using the same mechanism
 as other cluster jobs. Opening a finished expanded view reads these saved files;
 it does not load Beam checkpoints or import PyTorch.
 
 ## Current CLI and Relay mapping
 
-There are **49 functional options**, plus `--help`. `classify2d` is an alias for
+There are **51 functional options**, plus `--help`. `classify2d` is an alias for
 `class2d`. The following surface was read from Beam's parser during integration.
 Defaults are Beam defaults; Relay uses GPU mode by default instead of CPU.
 
@@ -93,7 +94,7 @@ Defaults are Beam defaults; Relay uses GPU mode by default instead of CPU.
 | `--pca-iterations` | `300` | Additional arguments |
 | `--coverage-interval` | `5` | Additional arguments |
 | `--discovery-interval` | `10` | Advanced: Updates between PCA rebuilds |
-| `--final-iterations` | `1` | Advanced: Final full-data passes |
+| `--final-iterations` | `2` | Final full-data passes |
 | `--denoise-initial-steps` | `10000` | Advanced: Initial denoising steps (Denoise only) |
 | `--denoise-steps` | `1000` | Advanced: Denoising steps per update (Denoise only) |
 | `--denoise-minimum-classes` | `8` | Additional arguments |
@@ -121,3 +122,5 @@ Defaults are Beam defaults; Relay uses GPU mode by default instead of CPU.
 | `--maximum-particles` | `unset` | Additional arguments |
 | `--dry-run` | `False` | Not allowed in Relay jobs |
 | `--quiet` | `False` | Not allowed in Relay jobs |
+| `--show-progress` | `auto` | Managed by Relay: enabled on stdout |
+| `--dont-show-progress` | `auto` | Not allowed in Relay jobs |

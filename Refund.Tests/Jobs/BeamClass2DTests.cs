@@ -37,7 +37,7 @@ public class BeamClass2DTests : IDisposable
         Assert.Contains("beam", job.RequiredModules);
         Assert.DoesNotContain("denoise", args.Keys);
         Assert.DoesNotContain("denoise-initial-steps", args.Keys);
-        Assert.DoesNotContain("show-progress", args.Keys); // Not a class2d option.
+        Assert.Contains("show-progress", args.Keys);
         Assert.DoesNotContain("reference", args.Keys);
         job.Regularization = Beam2DRegularization.Denoise;
         job.Device = BeamDevice.CPU;
@@ -54,6 +54,7 @@ public class BeamClass2DTests : IDisposable
     [InlineData("--workers 32")]
     [InlineData("--output /elsewhere")]
     [InlineData("--quiet")]
+    [InlineData("--dont-show-progress")]
     [InlineData("--dry-run")]
     public void CustomArgumentsCannotBreakJobCollection(string custom)
     {
@@ -87,7 +88,7 @@ public class BeamClass2DTests : IDisposable
         Assert.Equal(4L, job.PortsOut["Templates"].GetResource().ItemCount);
         Snapshot(job, 2, 7, true);
         Write(Path.Combine(job.BeamDirectory, "particles.star"), "data_particles");
-        Write(job.PathStdOut, "setup\nclass2d: snapshot 1: batch 10\nold\rnew\nclass2d: snapshot 2: batch 20; final assignments available\nfinished");
+        Write(job.PathStdOut, "setup\n=== Snapshot 1 ===\nold\rnew\nPublishing snapshot 1: batch 10\n=== Snapshot 2 ===\nFinal assignment progress\nPublishing snapshot 2: batch 20; final assignments available\nfinished");
         Write(job.PathStdErr, "warning");
         job.FinalizeRun((_, action) => action(job));
         Assert.Equal(2, job.VisAvailableIteration);
@@ -99,6 +100,7 @@ public class BeamClass2DTests : IDisposable
         Assert.Equal("/particles.star", _particles.ParticlesSingleStarPath);
         Assert.Equal(7L, job.PortsOut["Templates"].GetResource().ItemCount);
         Assert.Contains("new", File.ReadAllText(job.LogFilePath(1)));
+        Assert.Contains("Final assignment progress", File.ReadAllText(job.LogFilePath(2)));
         Assert.DoesNotContain("old", File.ReadAllText(job.LogFilePath(1)));
         Assert.Equal("warning", File.ReadAllText(job.ErrorFilePath));
         var clone = Assert.IsType<BeamClass2D>(Job.CreateFromPolymorphicJson(Job.ToPolymorphicJson(job), job.Space, new List<User>().AsReadOnly()));

@@ -66,8 +66,8 @@ public class BeamClass2D : Job, IClusterJob
     [RelayProperty] public int DenoiseSteps { get; set; } = 1000;
     [UiInt("initial-classes", "Initial classes", min: 1, max: 10000, isAdvanced: true)]
     [RelayProperty] public int InitialClasses { get; set; } = 4;
-    [UiInt("final-iterations", "Final full-data passes", min: 1, max: 100, isAdvanced: true)]
-    [RelayProperty] public int FinalIterations { get; set; } = 1;
+    [UiInt("final-iterations", "Final full-data passes", min: 1, max: 100)]
+    [RelayProperty] public int FinalIterations { get; set; } = 2;
     [UiDecimal("peripheral-class-ratio", "Peripheral classes per regular class", min: 0, max: 2, stepSize: 0.1, isAdvanced: true,
         helpText: "Reserve part of the class total for unusual particles. Zero disables peripheral classes.")]
     [RelayProperty] public decimal PeripheralClassRatio { get; set; } = 1;
@@ -162,7 +162,7 @@ public class BeamClass2D : Job, IClusterJob
     }
 
     private static readonly HashSet<string> Managed = new(StringComparer.Ordinal)
-    { "i", "input", "o", "output", "project-root", "device", "j", "workers", "resume", "dry-run", "quiet", "help" };
+    { "i", "input", "o", "output", "project-root", "device", "j", "workers", "resume", "dry-run", "quiet", "help", "show-progress", "dont-show-progress" };
     public override Dictionary<string, string> ValidateInputs()
     {
         var errors = base.ValidateInputs();
@@ -203,6 +203,7 @@ public class BeamClass2D : Job, IClusterJob
         args["input"] = ParticleInputs.Describe(PortsIn["Particles"])?.ParticlesSingleStarPath
             ?? throw new InvalidOperationException("Connect particles.");
         args["output"] = BeamDirectory; args["project-root"] = Space.RootDirectory;
+        args["show-progress"] = "";
         args["reconstruction-assignments"] = ReconstructionAssignments.ToString().ToLowerInvariant();
         if (Regularization == Beam2DRegularization.Denoise) args["denoise"] = "";
         foreach (var (name, value) in BeamWrapper.ParseArguments(AdditionalArguments)) args[name] = value;
@@ -235,8 +236,12 @@ public class BeamClass2D : Job, IClusterJob
         var starts = new SortedDictionary<int, int> { [0] = 0 };
         for (int j = 0; j < lines.Length; j++)
         {
-            var match = Regex.Match(lines[j], @"^class2d: snapshot (\d+):");
-            if (match.Success) starts[int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture)] = j;
+            var heading = Regex.Match(lines[j], @"^=== Snapshot (\d+) ===$");
+            var published = Regex.Match(lines[j], @"^(?:class2d: snapshot |Publishing snapshot )(\d+):");
+            if (heading.Success)
+                starts[int.Parse(heading.Groups[1].Value, CultureInfo.InvariantCulture)] = j;
+            else if (published.Success)
+                starts.TryAdd(int.Parse(published.Groups[1].Value, CultureInfo.InvariantCulture), j);
         }
         var sections = starts.ToArray();
         for (int j = 0; j < sections.Length; j++)
