@@ -148,14 +148,32 @@ Defaults are Beam defaults; Relay uses GPU mode by default instead of CPU.
 The shared class display fetches MRC stacks directly through the server file API
 and decodes them in one shared Web Worker using Relay's MRC reader. It creates
 individual PNG blob previews for classes, signed principal components, parent
-comparisons and subclasses. Blazor handles labels/selection only: no image arrays
-or base64 payloads pass through .NET. Selected/unselected RELION and Beam class
+comparisons and subclasses. JavaScript owns the whole class control: labels,
+sorting, keyboard/mouse selection, bulk selection and contrast. Blazor supplies
+metadata and receives selected image numbers; no image arrays or base64 payloads
+pass through .NET. Selected/unselected RELION and Beam class
 views use the same renderer.
 
-Each class uses its own 0.5th percentile as black and maximum as white. Signed
-PCA images use a symmetric 99.5th absolute-percentile range with zero at mid-gray.
+A two-handle percentile slider adjusts black and white independently per image,
+with a reset to the existing defaults: 0.5th percentile to maximum for classes,
+and symmetric 99.5th absolute-percentile magnitude for signed PCA images (zero at
+mid-gray). Signed percentiles use the symmetric distribution of pixel magnitudes.
+Both handles support keyboard input and cannot cross. Contrast changes reuse the
+loaded stack and cached sorted pixels in the worker; stale render requests are
+ignored and preview caches are bounded. Sorting and contrast never call .NET.
+Selection callbacks contain only selected image numbers and a generation that
+lets explicit external bulk selection supersede pending callbacks.
 MRC row zero is displayed at the bottom, matching previous origin='lower' plots.
 Stacks are shared across views while needed; requests and blob URLs are released
 on source changes/disposal. Errors and download progress are shown in the view.
 The browser never paints a wide, whole-stack background texture, so existing
 large class banks can display without regenerating their saved outputs.
+
+Subclass metadata is passed to the same control. Parent tiles have an expand
+button and show their selected-child count. One comparison panel opens below the
+parent's row, displaying the parent and its children at the normal image size.
+Child stacks load only when expanded, follow the shared contrast window, and are
+released when closed. Selections persist across panels; global bulk selection
+also includes collapsed parents. Parent selections and subclass selections remain
+separate for export. Live updates remap selected children by parent/local index
+if their IDs in the combined export stack shift as other parents finish.

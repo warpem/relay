@@ -108,3 +108,6 @@ and document dimensions. It does not need a Relay server or particle data.
 shared fetches, sorting, error messages and disposal. It accepts the same
 `PLAYWRIGHT_MODULE` / `CHROMIUM_EXECUTABLE` overrides as the layout test;
 `CLASS2D_TEST_STACK` optionally adds a real 150-class stack to the run.
+
+The class renderer check also covers browser sorting, keyboard and bulk selection,
+contrast handles, lazy subclass panels, combined export ID remapping and disposal.

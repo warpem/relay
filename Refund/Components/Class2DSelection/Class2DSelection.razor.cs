@@ -1,158 +1,71 @@
+using System.Text.Json;
 using Microsoft.JSInterop;
 using Refund.Services;
 using Microsoft.AspNetCore.Components;
-using Microsoft.FluentUI.AspNetCore.Components;
-using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons;
 
 namespace Refund.Components.Class2DSelection;
 
-/// <summary>
-/// Displays and selects classes from an MRC stack rendered in a client-side worker.
-/// Enables users to visualize, sort, and select class averages generated from 2D classification jobs.
-/// 
-/// This component is primarily used within the Class2DExpandedView to display classification results
-/// and provide an interactive interface for researchers to select promising particle classes for
-/// further processing. The component maintains selection state that can be accessed by parent components
-/// to create downstream jobs based on class selections.
-/// </summary>
+/// <summary>Metadata bridge to the JavaScript class grid. Pixel buffers and UI state stay in the browser.</summary>
 public partial class Class2DSelection : IAsyncDisposable
 {
     [Inject] private IJSRuntime JsRuntime { get; set; }
     [Inject] private FileService FileService { get; set; }
 
-    /// <summary>Server path of the MRC stack; pixel data is fetched and rendered only in JavaScript.</summary>
     [Parameter, EditorRequired] public string MrcStackPath { get; set; }
+    [Parameter] public Class2DSubclassGroup[] Subclasses { get; set; } = [];
     [Parameter] public bool SignedContrast { get; set; }
-    /// <summary>One-based image numbers, independent of the displayed/sorted class labels.</summary>
+    /// <summary>One-based image numbers, independent of the displayed class IDs.</summary>
     [Parameter, EditorRequired] public int[] ImageNumbers { get; set; }
-
-    /// <summary>
-    /// Array of class IDs, used for identification and sorting.
-    /// 
-    /// In Class2DExpandedView, this is populated from a deserialized JSON file containing
-    /// class statistics, using: 
-    /// <code>class2DModels.Select(m => m.Id).ToArray()</code>
-    /// </summary>
-    [Parameter]
-    public int[] ClassIds { get; set; }
-
+    [Parameter] public int[] ClassIds { get; set; }
     [Parameter] public string[] ClassLabels { get; set; }
+    [Parameter] public float[] ClassResolutions { get; set; }
+    [Parameter] public float[] ClassSizes { get; set; }
+    [Parameter] public required int RenderedImageSidelengthPx { get; set; }
+    [Parameter] public required int SpacingPx { get; set; }
+    [Parameter] public int BorderWidthPx { get; set; } = 2;
+    [Parameter] public string BorderColorUnselected { get; set; } = "transparent";
+    [Parameter] public string BorderColorSelected { get; set; } = "mediumpurple";
+    [Parameter] public bool AllowSorting { get; set; } = true;
+    [Parameter] public Action OnSelectionChanged { get; set; }
+    [Parameter] public bool SelectionIsMutable { get; set; } = true;
 
-    /// <summary>
-    /// Array of estimated resolution values for each class, in Angstroms.
-    /// Used for information display and optional sorting.
-    /// 
-    /// In Class2DExpandedView, this is populated from class metadata using:
-    /// <code>class2DModels.Select(m => m.Resolution.Value).ToArray()</code>
-    /// when Resolution values are available in the class statistics file.
-    /// </summary>
-    [Parameter]
-    public float[] ClassResolutions { get; set; }
-
-    /// <summary>
-    /// Array of estimated class sizes or distribution percentages.
-    /// Used for information display and optional sorting.
-    /// 
-    /// In Class2DExpandedView, this is populated from class metadata using:
-    /// <code>class2DModels.Select(m => m.Distribution.Value).ToArray()</code>
-    /// when Distribution values are available. These values represent the percentage
-    /// of particles that belong to each class, displayed as percentages in the UI.
-    /// </summary>
-    [Parameter]
-    public float[] ClassSizes { get; set; }
-
-    /// <summary>
-    /// Size in pixels for each rendered class image.
-    /// Controls the display size of each thumbnail.
-    /// 
-    /// Typically set to 128 pixels in Class2DExpandedView to provide a detailed
-    /// but compact display of multiple class averages.
-    /// </summary>
-    [Parameter]
-    public required int RenderedImageSidelengthPx { get; set; }
-
-    /// <summary>
-    /// Spacing between class images in pixels.
-    /// Controls the grid layout density.
-    /// 
-    /// Typically set to 6 pixels in Class2DExpandedView.
-    /// </summary>
-    [Parameter]
-    public required int SpacingPx { get; set; }
-
-    /// <summary>
-    /// Width of the border around each class image in pixels.
-    /// Used to highlight selection state.
-    /// 
-    /// Typically set to 4 pixels in Class2DExpandedView for clear visual distinction.
-    /// </summary>
-    [Parameter]
-    public int BorderWidthPx { get; set; } = 2;
-
-    /// <summary>
-    /// CSS color for the border of unselected class images.
-    /// 
-    /// Typically set to "transparent" in Class2DExpandedView to hide the border
-    /// around unselected classes.
-    /// </summary>
-    [Parameter]
-    public string BorderColorUnselected { get; set; } = "transparent";
-
-    /// <summary>
-    /// CSS color for the border of selected class images.
-    /// 
-    /// Typically set to "#fd7e14" (orange) in Class2DExpandedView to highlight 
-    /// selected classes with a prominent border.
-    /// </summary>
-    [Parameter]
-    public string BorderColorSelected { get; set; } = "mediumpurple";
-
-    /// <summary>
-    /// Whether to display sorting options for the class images.
-    /// When true, enables sorting by ID, resolution, or size.
-    /// 
-    /// This is enabled by default in Class2DExpandedView to help researchers
-    /// identify the most promising classes based on different metrics.
-    /// </summary>
-    [Parameter]
-    public bool AllowSorting { get; set; } = true;
-
-    /// <summary>
-    /// Callback invoked when the selection state changes.
-    /// Parent components can use this to react to selection changes.
-    /// 
-    /// In Class2DExpandedView, this calls a SelectionChanged method that updates
-    /// a count of selected classes and refreshes the UI to update action button states.
-    /// </summary>
-    [Parameter]
-    public Action OnSelectionChanged { get; set; }
-
-    /// <summary>
-    /// Controls whether the selection state can be modified by user interaction.
-    /// When false, the component becomes read-only.
-    /// </summary>
-    [Parameter]
-    public bool SelectionIsMutable { get; set; } = true;
-
-    private Guid guid = Guid.NewGuid();
-
-    /// <summary>
-    /// Set of 1-indexed class indices that are currently selected.
-    /// This is the core state that tracks which classes are selected.
-    /// 
-    /// In Class2DExpandedView, this is accessed directly through a component reference to:
-    /// - Clear all selections: <code>_class2DSelectionComponent.selectedClasses.Clear()</code>
-    /// - Add all selections: <code>_class2DSelectionComponent.selectedClasses.Add(classNumber)</code>
-    /// - Get selected count: <code>_class2DSelectionComponent.selectedClasses.Count</code>
-    /// - Create selection jobs: <code>selectedClasses.Order().ToArray()</code>
-    /// </summary>
-    public HashSet<int> selectedClasses = new();
-
+    private HashSet<int> _selectedClasses = new();
+    public IReadOnlySet<int> SelectedClasses => _selectedClasses;
+    private HashSet<int> _selectedSubclasses = new();
+    public IReadOnlySet<int> SelectedSubclasses => _selectedSubclasses;
+    private long _selectionVersion;
+    private readonly string _id = $"class2d-{Guid.NewGuid()}";
     private ElementReference _root;
+    private DotNetObjectReference<Class2DSelection> _callback;
     private Task<IJSObjectReference> _moduleTask;
     private bool _disposed;
     private string _previousPath;
     private string _interopError;
+    private string _lastOptions;
+
+    /// <summary>Explicit external selection changes supersede any pending browser callbacks.</summary>
+    public void SetSelection(IEnumerable<int> classes)
+    {
+        _selectedClasses = classes.ToHashSet();
+        _selectionVersion++;
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public void ReceiveSelection(int[] classes, long version)
+    {
+        if (_disposed || !SelectionIsMutable || version != _selectionVersion) return;
+        _selectedClasses = classes.Intersect(ImageNumbers ?? []).ToHashSet();
+        OnSelectionChanged?.Invoke();
+    }
+
+    [JSInvokable]
+    public void ReceiveSubclassSelection(int[] classes, long version)
+    {
+        if (_disposed || !SelectionIsMutable || version != _selectionVersion) return;
+        _selectedSubclasses = classes.Intersect(Subclasses.SelectMany(g => g.Classes.Select(c => c.Id))).ToHashSet();
+        OnSelectionChanged?.Invoke();
+    }
 
     protected override void OnParametersSet()
     {
@@ -166,12 +79,35 @@ public partial class Class2DSelection : IAsyncDisposable
         if (_disposed || _interopError != null) return;
         try
         {
+            _callback ??= DotNetObjectReference.Create(this);
             _moduleTask ??= JsRuntime.InvokeAsync<IJSObjectReference>("import",
                 "./_content/Refund/Components/Class2DSelection/Class2DSelection.razor.js").AsTask();
             var module = await _moduleTask;
             if (_disposed) return;
-            var url = string.IsNullOrWhiteSpace(MrcStackPath) ? null : FileService.GetUrl(MrcStackPath);
-            await module.InvokeVoidAsync("update", _root, url, SignedContrast);
+            var options = new
+            {
+                url = string.IsNullOrWhiteSpace(MrcStackPath) ? null : FileService.GetUrl(MrcStackPath),
+                signed = SignedContrast,
+                items = (ImageNumbers ?? []).Select((number, i) => new
+                {
+                    number, id = ClassIds?[i] ?? number,
+                    label = ClassLabels?[i] ?? (ClassIds != null ? $"#{ClassIds[i]}" : null),
+                    resolution = ClassResolutions?[i], size = ClassSizes?[i]
+                }).ToArray(),
+                subclasses = Subclasses.Select(g => new
+                {
+                    parentId = g.ParentId, url = g.Classes.Length == 0 ? null : FileService.GetUrl(g.MrcStackPath),
+                    items = g.Classes, reason = g.Reason
+                }).ToArray(),
+                imageSize = RenderedImageSidelengthPx, spacing = SpacingPx,
+                borderWidth = BorderWidthPx, borderColor = BorderColorUnselected, selectedColor = BorderColorSelected,
+                allowSorting = AllowSorting, mutable = SelectionIsMutable,
+                selectionVersion = _selectionVersion
+            };
+            var key = JsonSerializer.Serialize(options);
+            if (_lastOptions == key) return;
+            await module.InvokeVoidAsync("update", _root, options, _callback, _selectedClasses.ToArray());
+            _lastOptions = key;
         }
         catch (JSDisconnectedException) { }
         catch (JSException error)
@@ -184,149 +120,22 @@ public partial class Class2DSelection : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         _disposed = true;
-        if (_moduleTask == null) return;
         try
         {
-            var module = await _moduleTask;
-            await module.InvokeVoidAsync("dispose", $"class2d-images-{guid}");
-            await module.DisposeAsync();
+            if (_moduleTask != null)
+            {
+                var module = await _moduleTask;
+                await module.InvokeVoidAsync("dispose", _id);
+                await module.DisposeAsync();
+            }
         }
         catch (JSDisconnectedException) { }
         catch (JSException) { }
         catch (TaskCanceledException) { }
+        finally { _callback?.Dispose(); }
     }
-
-    /// <summary>
-    /// Toggles the selection state of a class image when clicked.
-    /// Adds or removes the class from the selected set and triggers the selection changed event.
-    /// 
-    /// This is the primary interaction point for researchers to select which classes
-    /// to include in downstream processing. Selected classes can later be exported to 
-    /// create a new Class2DSelect job that filters particles based on these selections.
-    /// </summary>
-    /// <param name="classNumber">The 1-indexed class number to toggle</param>
-    private void ToggleSelection(int classNumber)
-    {
-        if(!SelectionIsMutable)
-        {
-            return;
-        }
-
-        if(selectedClasses.Contains(classNumber))
-        {
-            selectedClasses.Remove(classNumber);
-        }
-        else
-        {
-            selectedClasses.Add(classNumber);
-        }
-
-        OnSelectionChanged?.Invoke();
-
-        StateHasChanged();
-    }
-
-    #region Sorting
-    /// <summary>
-    /// Available options for sorting class images.
-    /// These options correspond to the different metadata available for each class.
-    /// 
-    /// Sorting helps researchers identify the most promising classes based on different
-    /// criteria such as resolution (quality) or size (particle distribution).
-    /// </summary>
-    private static List<SelectOption<string>> SortOptions { get; } = new()
-    {
-        new SelectOption<string> { Value = "ID", Text = "ID" },
-        new SelectOption<string> { Value = "Resolution", Text = "Resolution" },
-        new SelectOption<string> { Value = "Size", Text = "Size" }
-    };
-
-    /// <summary>
-    /// Currently selected sort option.
-    /// </summary>
-    private SelectOption<string> SelectedSortOption = SortOptions.First();
-    
-    /// <summary>
-    /// Gets the current sort option value for use in sorting logic.
-    /// </summary>
-    private string SortOption => SelectedSortOption.Value;
-    
-    /// <summary>
-    /// Determines the sort direction (ascending or descending).
-    /// </summary>
-    private bool SortIsAscending { get; set; } = true;
-
-    /// <summary>
-    /// Icon to display when sort is ascending.
-    /// </summary>
-    private Icon IconSortAscending = new Icons.Regular.Size20.ArrowSortUpLines();
-    
-    /// <summary>
-    /// Icon to display when sort is descending.
-    /// </summary>
-    private Icon IconSortDescending = new Icons.Regular.Size20.ArrowSortDownLines();
-    
-    /// <summary>
-    /// Gets the appropriate sort icon based on current sort direction.
-    /// </summary>
-    private Icon IconSort => SortIsAscending ? IconSortAscending : IconSortDescending;
-
-    /// <summary>
-    /// Toggles between ascending and descending sort direction.
-    /// </summary>
-    private void ToggleSortDirection()
-    {
-        SortIsAscending = !SortIsAscending;
-    }
-
-    /// <summary>
-    /// Handles sort option selection changes from the dropdown.
-    /// </summary>
-    /// <param name="e">The newly selected sort option</param>
-    private void OnSortOptionChanged(SelectOption<string> e)
-    {
-        SelectedSortOption = e;
-    }
-
-    /// <summary>
-    /// Calculates the sorted order of class indices based on the current sort criteria and direction.
-    /// This is used to determine the display order of class images in the grid.
-    /// 
-    /// Sorting by resolution is particularly useful in cryo-EM workflows as it helps
-    /// researchers quickly identify the highest-quality class averages, which often
-    /// correspond to the best-resolved structural features.
-    /// </summary>
-    /// <returns>
-    /// Array of indices representing the sorted order of classes.
-    /// These indices correspond to positions in the ImageNumbers array.
-    /// </returns>
-    private int[] ClassOrderSorted()
-    {
-        var indices = Enumerable.Range(0, ImageNumbers.Length).ToArray();
-
-        if(SortOption == "ID" && ClassIds != null)
-        {
-            return (SortIsAscending
-                ? indices.OrderBy(i => ClassIds[i])
-                : indices.OrderByDescending(i => ClassIds[i])).ToArray();
-        }
-
-        if(SortOption == "Resolution" && ClassResolutions != null)
-        {
-            return (SortIsAscending
-                ? indices.OrderBy(i => ClassResolutions[i])
-                : indices.OrderByDescending(i => ClassResolutions[i])).ToArray();
-        }
-
-        if(SortOption == "Size" && ClassSizes != null)
-        {
-            return (SortIsAscending
-                ? indices.OrderBy(i => ClassSizes[i])
-                : indices.OrderByDescending(i => ClassSizes[i])).ToArray();
-        }
-
-        // If no metadata for sorting is available, just use the original order or reverse it
-        return SortIsAscending ? indices : indices.Reverse().ToArray();
-    }
-    #endregion
 }
+
+/// <summary>Subclass IDs refer to the combined export stack; Numbers index their parent's stack.</summary>
+public sealed record Class2DImageMetadata(int Number, int Id, string Label, float? Resolution, float? Size);
+public sealed record Class2DSubclassGroup(int ParentId, string MrcStackPath, Class2DImageMetadata[] Classes, string Reason = null);
