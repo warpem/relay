@@ -90,7 +90,7 @@ Job.PopulateStatic();
 
 // Register core data services
 // DataManager is the central repository for all application data
-builder.Services.AddSingleton<DataManager>(new DataManager(relayOptions));
+builder.Services.AddSingleton<DataManager>(new DataManager(relayOptions, cli.DropUnloadableSpaces));
 
 // SecurityTokenService manages security tokens for user registration
 builder.Services.AddSingleton<SecurityTokenService>();

@@ -212,27 +212,37 @@ public class Project : RelayBase
     /// Each space is read from its file path stored in SpacePaths.
     /// </summary>
     /// <param name="users">Collection of users to resolve references to owners and members</param>
-    public void LoadSpaces(ReadOnlyCollection<User> users)
+    /// <param name="dropUnloadableSpaces">Remove spaces that fail to load instead of throwing.</param>
+    public void LoadSpaces(ReadOnlyCollection<User> users, bool dropUnloadableSpaces = false)
     {
         _spaces.Clear();
 
         foreach (var path in SpacePaths.ToArray())
         {
-            if (!File.Exists(path))
+            try
             {
-                Log.ForContext<Project>().Warning("Space file not found, removing from project {ProjectId}: {SpacePath}", Id, path);
-                SpacePaths.Remove(path);
-                continue;
-            }
+                var space = new Space { Project = this };
+                var spaceJson = JsonNode.Parse(File.ReadAllText(path))
+                    ?? throw new InvalidDataException("Space file contains no JSON object.");
+                space.ReadFromJson(spaceJson, users);
 
-            var space = new Space { Project = this };
-            var spaceJson = JsonNode.Parse(File.ReadAllText(path));
-            space.ReadFromJson(spaceJson, users);
+                if (space.Id < 0)
+                    throw new InvalidDataException($"Space has invalid ID {space.Id}.");
 
-            if (space.Id >= 0)
                 AddSpace(space);
-            else
-                Log.ForContext<Project>().Error("Couldn't load Space from path {SpacePath} in project {ProjectId}", path, Id);
+            }
+            catch (Exception ex)
+            {
+                if (!dropUnloadableSpaces)
+                    throw new InvalidOperationException(
+                        $"Couldn't load space from '{path}' in project {Id} ('{Alias}'). " +
+                        "Relay cannot start. Restore access to the space or use --drop-unloadable-spaces " +
+                        "to start and remove unloadable spaces from their projects. Subsequent saves will persist these removals.", ex);
+
+                Log.ForContext<Project>().Warning(ex,
+                    "Dropping unloadable space from project {ProjectId}: {SpacePath}. Subsequent project saves will persist this removal.", Id, path);
+                SpacePaths.Remove(path);
+            }
         }
     }
 

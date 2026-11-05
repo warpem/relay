@@ -254,7 +254,8 @@ public partial class DataManager
     /// for data persistence and job queue monitoring.
     /// </summary>
     /// <param name="config">The application configuration containing paths to data storage files</param>
-    public DataManager(RelayConfiguration config)
+    /// <param name="dropUnloadableSpaces">Allow startup by removing spaces that fail to load.</param>
+    public DataManager(RelayConfiguration config, bool dropUnloadableSpaces = false)
     {
         // Initialize and load user repository first, as other entities reference users
         _userRepository = new UserRepository(config.UsersPath);
@@ -262,7 +263,7 @@ public partial class DataManager
 
         // Initialize and load data repository with projects, spaces, and jobs
         _dataRepository = new DataRepository(config.ProjectsPath);
-        _dataRepository.LoadAll(_userRepository.Users);
+        _dataRepository.LoadAll(_userRepository.Users, dropUnloadableSpaces);
 
         _queueRepository = new QueueRepository(
             config.QueuesPath,

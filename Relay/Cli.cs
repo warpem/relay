@@ -9,4 +9,7 @@ namespace Relay;
 /// </summary>
 public class Cli
 {
+    [Option("drop-unloadable-spaces", Default = false,
+        HelpText = "Start even if spaces cannot be loaded, removing them from their projects. Subsequent saves will persist these removals.")]
+    public bool DropUnloadableSpaces { get; set; }
 }

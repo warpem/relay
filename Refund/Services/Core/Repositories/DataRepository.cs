@@ -106,13 +106,15 @@ public class DataRepository : IDisposable
     /// <summary>
     /// Loads all projects and their spaces from persistent storage.
     /// </summary>
-    public void LoadAll(ReadOnlyCollection<User> users)
+    /// <param name="users">Users to resolve references from.</param>
+    /// <param name="dropUnloadableSpaces">Remove spaces that fail to load instead of throwing.</param>
+    public void LoadAll(ReadOnlyCollection<User> users, bool dropUnloadableSpaces = false)
     {
         lock (_saveLock)
         {
             LoadProjects(users);
             foreach (var project in _projects)
-                project.LoadSpaces(users);
+                project.LoadSpaces(users, dropUnloadableSpaces);
         }
     }
 

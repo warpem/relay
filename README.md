@@ -91,6 +91,18 @@ dotnet run --project Relay
 
 Relay will start on `http://localhost:5001` by default.
 
+If any space cannot be loaded (for example, because its filesystem is unavailable or its file is corrupt), Relay refuses to start and reports the project and space path. Restore access to the space before restarting.
+
+To intentionally recover by dropping spaces that cannot be loaded, run:
+
+```bash
+dotnet /path/to/publish/Relay.dll --drop-unloadable-spaces
+# During development:
+dotnet run --project Relay -- --drop-unloadable-spaces
+```
+
+This logs each dropped space and starts with the remaining spaces. Subsequent project saves persist the removals in the projects file.
+
 ## Deploy (Linux server)
 
 A management script is provided at `scripts/relay.sh`. It expects an environment file at `~/relay/relay.env` (or the path in `$RELAY_ENV_FILE`).
