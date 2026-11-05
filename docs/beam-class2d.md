@@ -25,7 +25,9 @@ quiet, help, and dry-run are managed by Relay.
 ## Displays and output resources
 
 Beam publishes a snapshot at each discovery block boundary, at the end of
-training, and after final assignment. Snapshot numbers are consecutive; they are
+training, and after each final full-data pass. Every full-data pass has its own
+log section and visualization snapshot, including class populations. Snapshot
+numbers are consecutive; they are
 not training-update numbers. Class identities may change during training.
 
 The expanded view reuses RELION's sortable class grid and final class-selection

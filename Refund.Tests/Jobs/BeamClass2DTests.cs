@@ -108,6 +108,30 @@ public class BeamClass2DTests : IDisposable
         Assert.True(clone.CanExport(2));
     }
 
+    [Fact]
+    public void EachFullDataPassAdvancesVisualizationsAndKeepsItsOwnLog()
+    {
+        var job = NewJob();
+        Snapshot(job, 1, 4, false);
+        job.TrackProgressResults()!();
+        Snapshot(job, 2, 4, false);
+        job.TrackProgressResults()!();
+        Assert.Equal(2, job.VisAvailableIteration);
+        Assert.Null(job.PortsOut["Particles"].GetResource());
+        Snapshot(job, 3, 4, true);
+        job.TrackProgressResults()!();
+        Assert.Equal(3, job.VisAvailableIteration);
+        Assert.False(job.CanExport(3)); // Final STAR is not published yet.
+        Write(Path.Combine(job.BeamDirectory, "particles.star"), "data_particles");
+        job.TrackProgressResults()!();
+        Assert.True(job.CanExport(3));
+        Write(job.PathStdOut, "=== Snapshot 2 ===\nFull-data pass 1 / 2\nPublishing snapshot 2: full-data pass 1 / 2\n=== Snapshot 3 ===\nFull-data pass 2 / 2\nPublishing snapshot 3: full-data pass 2 / 2");
+        job.TrackProgressLogs()!();
+        Assert.Contains("Full-data pass 1 / 2", File.ReadAllText(job.LogFilePath(2)));
+        Assert.DoesNotContain("Full-data pass 2 / 2", File.ReadAllText(job.LogFilePath(2)));
+        Assert.Contains("Full-data pass 2 / 2", File.ReadAllText(job.LogFilePath(3)));
+    }
+
     private static void Snapshot(BeamClass2D job, int i, int count, bool final)
     {
         Write(Path.Combine(job.SnapshotDirectory(i), "snapshot.json"), JsonSerializer.Serialize(new
