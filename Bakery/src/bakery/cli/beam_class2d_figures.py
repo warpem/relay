@@ -24,7 +24,7 @@ def image_atlas(images, output, *, signed=False):
             scale = max(float(np.quantile(np.abs(image), .995)), 1e-20)
             normalized.append(np.clip(image / scale * .5 + .5, 0, 1))
         else:
-            low, high = np.quantile(image, [.005, .995])
+            low, high = np.quantile(image, .005), image.max()
             normalized.append(np.clip((image - low) / max(high - low, 1e-20), 0, 1))
     plt.imsave(output, np.concatenate(normalized, axis=1), cmap='gray', vmin=0, vmax=1, origin='lower')
 
