@@ -27,9 +27,7 @@
 .relay-class2d .class2d-selection { font-size:13px; }
 .relay-class2d .class2d-selection button:disabled { opacity:0.5; cursor:default; }
 .relay-class2d .class2d-card { position:relative; flex:none; }
-.relay-class2d .class2d-card.expanded { outline:2px solid var(--selected-color); border-radius:10px; }
 .relay-class2d .class2d-expand { position:absolute; right:4px; bottom:4px; color:white; background:#222c; border:1px solid #aaa; border-radius:4px; padding:1px 5px; font:inherit; font-size:12px; cursor:pointer; }
-.relay-class2d .class2d-expand[aria-expanded="true"] { background:var(--selected-color); }
 .relay-class2d .class2d-subclass-tools { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:4px 0; font-size:13px; }
 .relay-class2d .class2d-subclass-tools button, .relay-class2d .class2d-panel-heading button { color:inherit; background:transparent; border:1px solid #888; border-radius:4px; padding:3px 8px; font:inherit; cursor:pointer; }
 .relay-class2d .class2d-subclass-tools button:disabled { opacity:0.5; cursor:default; }

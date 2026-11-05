@@ -57,7 +57,7 @@ try {
     await page.goto(`http://127.0.0.1:${server.address().port}`);await page.waitForFunction(()=>window.ready);
     const loaded = async (id,n)=>page.waitForFunction(({id,n})=>{
         const e=document.getElementById(id); const images=[...e.querySelectorAll('img')];
-        return images.length===n&&images.every(i=>i.complete&&i.naturalWidth>0)&&e.querySelector('[data-image-status]').textContent==='';
+        return images.length===n&&images.every(i=>i.complete&&i.naturalWidth>0)&&e.querySelector('[data-image-status]').textContent===''&&e.getAttribute('aria-busy')!=='true';
     },{id,n});
     await page.evaluate(()=>mount('classes','/float.mrcs',Array.from({length:150},(_,i)=>i)));
     await loaded('classes',150);
@@ -93,6 +93,7 @@ try {
     assert.equal(await page.locator('#classes [data-image-number="2"]').getAttribute('aria-pressed'),'true');
     assert.equal(await page.locator('#classes [data-image-number="1"]').getAttribute('aria-pressed'),'false');
     assert.equal(await page.evaluate(()=>selections.length),2);
+    const gridTop=await page.locator('#classes > .class2d-grid').evaluate(e=>e.getBoundingClientRect().top);
     const oldPreview=await page.locator('#classes img[data-image-index="0"]').getAttribute('src');
     // Rapid changes must show only the latest worker generation; no fetch or .NET callback.
     await page.evaluate(()=>{
@@ -101,7 +102,8 @@ try {
         for(let i=0;i<10;i++){b.value=i;b.dispatchEvent(new Event('input'))}
         b.value=30;b.dispatchEvent(new Event('input'));w.value=90;w.dispatchEvent(new Event('input'));
     });
-    await page.waitForFunction(old=>document.querySelector('#classes img[data-image-index="0"]').src!==old&&document.querySelector('#classes [data-image-status]').textContent==='',oldPreview);
+    await page.waitForFunction(old=>document.querySelector('#classes img[data-image-index="0"]').src!==old&&document.querySelector('#classes').getAttribute('aria-busy')==='false',oldPreview);
+    assert.equal(await page.locator('#classes > .class2d-grid').evaluate(e=>e.getBoundingClientRect().top),gridTop,'Contrast must not shift the grid');
     assert.equal(requests.get('/float.mrcs'),1,'Contrast must reuse the decoded stack');
     assert.equal(await page.evaluate(()=>selections.length),2,'Contrast never sends pixels or UI events to .NET');
     const changed=await page.evaluate(async()=>{const i=document.querySelector('#classes img[data-image-index="0"]');await i.decode();const c=document.createElement('canvas');c.width=c.height=8;const x=c.getContext('2d');x.drawImage(i,0,0);return [...x.getImageData(0,0,8,8).data]});
@@ -148,6 +150,7 @@ try {
     await page.locator('#hierarchy [aria-label="Show subclasses for class 1"]').click();
     await loaded('hierarchy-subclasses',4);
     assert.equal(requests.get('/sub-a.mrcs'),1);
+    assert.equal(await page.locator('#hierarchy .class2d-card').first().evaluate(e=>getComputedStyle(e).outlineStyle),'none','Open parents have no selection-like outline');
     assert.equal(await page.locator('#hierarchy .class2d-panel').count(),1);
     assert.equal(await page.locator('#hierarchy-subclasses .class2d-toolbar').isVisible(),false);
     await page.locator('#hierarchy-subclasses [data-image-number="3"]').click();
@@ -172,7 +175,7 @@ try {
     const childFetches=requests.get('/sub-a.mrcs');
     const childUrl=await page.locator('#hierarchy-subclasses img').first().getAttribute('src');
     await page.evaluate(()=>{const w=document.querySelector('#hierarchy > .class2d-toolbar [aria-label="White percentile"]');w.value=90;w.dispatchEvent(new Event('input'))});
-    await page.waitForFunction(old=>document.querySelector('#hierarchy-subclasses img').src!==old&&document.querySelector('#hierarchy-subclasses [data-image-status]').textContent==='',childUrl);
+    await page.waitForFunction(old=>document.querySelector('#hierarchy-subclasses img').src!==old&&document.querySelector('#hierarchy-subclasses').getAttribute('aria-busy')==='false',childUrl);
     assert.equal(requests.get('/sub-a.mrcs'),childFetches,'Expanded children share the parent contrast without refetching');
     await page.locator('#hierarchy > .class2d-subclass-tools button',{hasText:'Select all subclasses'}).click();
     await page.waitForFunction(()=>selections.at(-1)?.selection.length===6);

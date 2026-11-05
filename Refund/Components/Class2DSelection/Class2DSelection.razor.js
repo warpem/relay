@@ -23,8 +23,11 @@ function ensureWorker() {
                 if (state.parentPreview && item?.number === data.index + 1) state.parentPreview.src = url;
             }
             if (old) URL.revokeObjectURL(old);
-        } else if (data.type === 'done') status(state, '');
-        else if (data.type === 'error') status(state, `Unable to load class images: ${data.message}`);
+        } else if (data.type === 'done') { status(state, ''); state.root.setAttribute('aria-busy', 'false'); }
+        else if (data.type === 'error') {
+            status(state, `Unable to load class images: ${data.message}`);
+            state.root.setAttribute('aria-busy', 'false');
+        }
     };
     worker.onerror = event => {
         for (const state of requests.values()) status(state, `Unable to load class images: ${event.message}`);
@@ -48,7 +51,8 @@ function renderImages(state) {
     refreshPanel(state);
     ensureWorker();
     requests.set(state.id, state);
-    status(state, state.urls.size ? 'Updating contrast…' : 'Loading class images…');
+    state.root.setAttribute('aria-busy', 'true');
+    status(state, state.urls.size ? '' : 'Loading class images…');
     worker.postMessage({ type: 'render', id: state.id, generation: state.generation, url, signed,
         indices: items.map(item => item.number - 1), low: state.low, high: state.high });
 }
@@ -119,7 +123,6 @@ function closePanel(state) {
     state.panel.remove();
     state.expandedParent = null;
     for (const card of state.cards.values()) {
-        card.classList.remove('expanded');
         card.querySelector('.class2d-expand')?.setAttribute('aria-expanded', 'false');
     }
     applySelection(state);
@@ -167,7 +170,6 @@ function openPanel(state, parentId) {
     state.expandedParent = parentId;
     const item = state.options.items.find(i => i.id === parentId);
     const card = state.cards.get(item.number);
-    card.classList.add('expanded');
     card.querySelector('.class2d-expand').setAttribute('aria-expanded', 'true');
     const heading = element('div', 'class2d-panel-heading');
     heading.append(element('span', null, `Parent #${parentId} · subclasses`));
@@ -271,7 +273,8 @@ function create(root) {
             else state.high = Math.max(Number(input.value), state.low + 0.05);
             showRange(state);
             state.generation++; // Immediately ignore previews from an older contrast request.
-            status(state, 'Updating contrast…');
+            state.root.setAttribute('aria-busy', 'true');
+            status(state, '');
             clearTimeout(state.timer);
             state.timer = setTimeout(() => renderImages(state), 60);
         };

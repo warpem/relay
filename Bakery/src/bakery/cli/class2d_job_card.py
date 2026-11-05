@@ -21,19 +21,10 @@ def class2d_job_card(
     if len(image_indices) != len(image_labels):
         raise ValueError("please provide same number of labels and image indices")
 
-    # read images
-    class2d_images = mrcfile.mmap(images_mrcs_file).data
-
-    # get class images and labels
-    idx_subset = np.asarray(image_indices)
-    images = class2d_images[idx_subset]
+    # Only load the requested classes; each gets its own contrast below.
+    with mrcfile.mmap(images_mrcs_file) as stack:
+        images = stack.data[np.asarray(image_indices)]
     n_images = len(images)
-
-    # normalize
-    idx_nonzero = np.abs(images) > 1e-8
-    n_nonzero = np.sum(idx_nonzero)
-    normalized_l2_norm = np.linalg.norm(images[idx_nonzero]) / np.sqrt(n_nonzero)
-    images = images / normalized_l2_norm
 
     # setup plot
     n_rows, n_cols = 3, 6
@@ -53,6 +44,7 @@ def class2d_job_card(
     plt.tight_layout(pad=0.1)
     fig.savefig(output_file, dpi=2 * 144, transparent=True)
     fig.savefig(str(output_file.with_suffix('.pdf')), dpi=2 * 144, transparent=True)
+    plt.close(fig)
 
 
 def draw_z_slice_panel(
@@ -60,17 +52,21 @@ def draw_z_slice_panel(
     image: np.ndarray,
     label: str,
 ):
-    # draw image, image==0 at 25% gray
-    std_scale = 5
+    # Match the class viewer: independent 0.5th-percentile to maximum contrast.
     ax.imshow(
         image,
         cmap="gray",
         origin="lower",
         interpolation='sinc',
         interpolation_stage='data',
-        vmin=-0.25 * std_scale,
-        vmax=0.75 * std_scale,
+        vmin=float(np.quantile(image, 0.005)),
+        vmax=float(np.max(image)),
     )
+
+    # Zoom to the central two-thirds while retaining contrast from the full class.
+    height, width = image.shape
+    ax.set_xlim(width / 6 - 0.5, width * 5 / 6 - 0.5)
+    ax.set_ylim(height / 6 - 0.5, height * 5 / 6 - 0.5)
 
     # add label
     fontsize = 4
