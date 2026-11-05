@@ -37,8 +37,23 @@ PCA sample, not all particles or final class assignments; colors identify the
 sample's discovery groups. At most 20,000 sample points are drawn.
 
 Optional subclassification writes four fixed-pose subclasses per regular parent
-under `beam/subclasses/`. The class grid, output resources and selection continue
-to use the parent class bank.
+under `beam/subclasses/`. The expanded view displays completed groups beside their
+parent average as they become available, with within-parent percentages and
+resolution estimates. Skipped parents show the reason supplied by Beam.
+
+The original particle/template outputs and selection retain the parent bank.
+Separate **Subclass particles** and **Subclasses** outputs contain the completed
+subclass collection. Child classes receive consecutive collection IDs, while
+`rlnBeamParentClassNumber` preserves the parent identity in particle metadata.
+The grouped view maps local child selections to those collection IDs and uses
+the existing class-selection job for export. Export is enabled after
+subclassification completes; manual finalization of an interrupted run makes
+completed parent groups selectable. Peripheral or skipped parents are absent
+from the subclass particle collection.
+
+Subclass atlases, statistics, group metadata, and the selection MRC/STAR files
+are compiled once into `.relay/subclasses/`; opening the finished view does not
+parse Beam's subclass summaries or load PyTorch checkpoints.
 
 Final particles retain source stack paths, sampling and coordinates, and acquire
 class labels and in-plane shifts. A 2D psi angle is not advertised as a fitted 3D

@@ -45,6 +45,49 @@ else
                       BorderColorSelected="#fd7e14"
                       BorderWidthPx="4"
                       OnSelectionChanged="@SelectionChanged"/>
+    @if (ShowSubclasses)
+    {
+        <h4 class="mt-4">Subclassification</h4>
+        <p>Subclasses are grouped by parent. Percentages are relative to that parent.</p>
+        <div class="d-flex flex-wrap pb-2" style="gap: 8px;">
+            <FluentButton OnClick="ClearSubclasses" Disabled="@(_selectedSubclassCount == 0)">Clear subclasses</FluentButton>
+            <FluentButton OnClick="SelectAllSubclasses" Disabled="@(_subclassGroups.All(g => g.Classes.Length == 0))">Select all subclasses</FluentButton>
+            <FluentButton OnClick="SaveSubclassSelection" Appearance="ButtonAppearance.Primary"
+                          Disabled="@(!Beam.SubclassSelectionAvailable || _selectedSubclassCount == 0)">Export subclass selection</FluentButton>
+        </div>
+        @if (!Beam.SubclassSelectionAvailable && !Beam.SubclassesCollectedToCompletion)
+        {
+            <p>Completed parents appear as they finish. Export becomes available when subclassification finishes or the job is finalized.</p>
+        }
+        @foreach (var group in _subclassGroups)
+        {
+            <div @key="group.ParentId" class="mt-3">
+                <div>Parent #@group.ParentId</div>
+                @if (group.Classes.Length == 0)
+                {
+                    <p>@group.Reason</p>
+                }
+                else
+                {
+                    <div class="d-flex flex-wrap" style="gap: 16px; align-items: flex-start;">
+                        <Class2DSelection ClassAtlasImagePath="@Beam.VisSubclassParentAtlas(group.ParentId)" NImagesInFile="1"
+                                          ClassPositionsInAtlas="@(new[] { 1 })"
+                                          ClassLabels="@(new[] { $"Parent {group.ParentId}" })"
+                                          AllowSorting="false" SelectionIsMutable="false" RenderedImageSidelengthPx="128" />
+                        <Class2DSelection @ref="_subclassSelections[group.ParentId]"
+                                          ClassAtlasImagePath="@Beam.VisSubclassAtlas(group.ParentId)"
+                                          NImagesInFile="@group.Classes.Length" AllowSorting="false"
+                                          ClassPositionsInAtlas="@Enumerable.Range(1, group.Classes.Length).ToArray()"
+                                          ClassIds="@group.Classes.Select(c => c.Id).ToArray()"
+                                          ClassSizes="@group.Classes.Select(c => c.Distribution ?? 0).ToArray()"
+                                          ClassResolutions="@(group.Classes.All(c => c.Resolution.HasValue) ? group.Classes.Select(c => c.Resolution.Value).ToArray() : null)"
+                                          RenderedImageSidelengthPx="128" BorderColorSelected="#fd7e14"
+                                          OnSelectionChanged="SubclassSelectionChanged" />
+                    </div>
+                }
+            </div>
+        }
+    }
     @if (Beam != null && _pcaCount > 0)
     {
         <h4 class="mt-4">Principal components</h4>

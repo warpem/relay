@@ -399,6 +399,15 @@ public static class BakeryWrapper
         RunCommand(command, workingDirectory);
     }
 
+    /// <summary>Compile completed subclass groups and optional selection resources.</summary>
+    public static void BeamClass2DSubclasses(string beamDirectory, string sourceManifest, string outputDirectory, bool finalize)
+    {
+        var args = new List<string> { "beam-class2d-subclasses", "--beam-directory", beamDirectory,
+            "--source-manifest", sourceManifest, "--output-directory", outputDirectory };
+        if (finalize) args.Add("--finalize");
+        RunArguments(args);
+    }
+
     /// <summary>Compile a portable Beam 2D snapshot into saved class and PCA figures.</summary>
     public static void BeamClass2DFigures(string snapshotDirectory, string outputDirectory, int iteration)
     {

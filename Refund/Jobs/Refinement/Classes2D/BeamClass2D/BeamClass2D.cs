@@ -7,6 +7,7 @@ using Refund.DataModel.ReadOnly;
 using Refund.JobResources;
 using Refund.Jobs.Refinement.Refinement3D.BeamRefine3D;
 using Refund.UIFields;
+using Refund.Jobs.Refinement.Classes2D.Class2D;
 using Refund.Utils;
 using Warp;
 using Warp.Tools;
@@ -48,7 +49,7 @@ public class BeamClass2D : Job, IClusterJob
         helpText: "Class reconstruction update rate in (0, 1].")]
     [RelayProperty] public decimal LearningRate { get; set; } = 0.2m;
     [UiBool("subclassify", "Subclassify final classes",
-        helpText: "After final assignment, split each regular class into four fixed-pose subclasses. Beam saves these separately under subclasses/; the class grid and selection use the parent classes.")]
+        helpText: "After final assignment, split each regular class into four fixed-pose subclasses. Completed subclasses appear grouped by parent, with separate subclass particle and template outputs.")]
     [RelayProperty] public bool Subclassify { get; set; }
     [UiInt("particle-diameter", "Particle diameter", min: 1, max: 10000, unit: "Å",
         helpText: "Enclose the entire particle. Class and PCA masks taper outside this diameter.")]
@@ -116,6 +117,14 @@ public class BeamClass2D : Job, IClusterJob
     public string VisPcaAtlas(int i) => Path.Combine(RelayResultsDirectoryPath, $"pca_it{i:D4}.png");
     public string VisPcaInfo(int i) => Path.Combine(RelayResultsDirectoryPath, $"pca_info_it{i:D4}.json");
     public string VisEmbeddings(int i) => Path.Combine(RelayResultsDirectoryPath, $"embedding_it{i:D4}.svg");
+    [RelayProperty, Clearable] public int SubclassGroupsAvailableCount { get; set; }
+    [RelayProperty, Clearable] public bool SubclassesCollectedToCompletion { get; set; }
+    [RelayProperty, Clearable] public bool SubclassSelectionAvailable { get; set; }
+    public string SubclassResultsDirectory => Path.Combine(RelayResultsDirectoryPath, "subclasses");
+    public string VisSubclassGroups => Path.Combine(SubclassResultsDirectory, "groups.json");
+    public string VisSubclassParentAtlas(int parent) => Path.Combine(SubclassResultsDirectory, $"parent-{parent:D3}", "parent.png");
+    public string VisSubclassAtlas(int parent) => Path.Combine(SubclassResultsDirectory, $"parent-{parent:D3}", "classes.png");
+
     public bool CanExport(int i) => FinalAssignmentIteration > 0 && i == FinalAssignmentIteration;
 
     public BeamClass2D()
@@ -124,7 +133,9 @@ public class BeamClass2D : Job, IClusterJob
         PortsOut = new(new Dictionary<string, PortOut>
         {
             ["Particles"] = new(this, typeof(ParticleSet), "Particles", "Particles", GetParticles),
-            ["Templates"] = new(this, typeof(TemplateSet), "Templates", "2D Classes", GetTemplates)
+            ["Templates"] = new(this, typeof(TemplateSet), "Templates", "2D Classes", GetTemplates),
+            ["SubclassParticles"] = new(this, typeof(ParticleSet), "SubclassParticles", "Subclass particles", GetSubclassParticles),
+            ["SubclassTemplates"] = new(this, typeof(TemplateSet), "SubclassTemplates", "Subclasses", GetSubclassTemplates)
         });
     }
 
@@ -150,6 +161,61 @@ public class BeamClass2D : Job, IClusterJob
         using var stats = JsonDocument.Parse(File.ReadAllText(VisClassStats(i)));
         return new TemplateSet(Path.Combine(SnapshotDirectory(i), "model.star"),
             Path.Combine(SnapshotDirectory(i), "classes.mrcs"), VisClassStats(i), stats.RootElement.GetArrayLength());
+    }
+
+    private Resource GetSubclassParticles(int i)
+    {
+        if (!SubclassSelectionAvailable || (i >= 0 && !CanExport(i))) return null;
+        var result = GetParticles(-1) as ParticleSet;
+        if (result == null) return null;
+        result.ParticlesSingleStarPath = Path.Combine(SubclassResultsDirectory, "particles.star");
+        result.ItemCount = null;
+        return result;
+    }
+
+    private Resource GetSubclassTemplates(int i)
+    {
+        if (!SubclassSelectionAvailable || (i >= 0 && !CanExport(i))) return null;
+        string statsPath = Path.Combine(SubclassResultsDirectory, "stats.json");
+        using var stats = JsonDocument.Parse(File.ReadAllText(statsPath));
+        return new TemplateSet(Path.Combine(SubclassResultsDirectory, "model.star"),
+            Path.Combine(SubclassResultsDirectory, "classes.mrcs"), statsPath, stats.RootElement.GetArrayLength());
+    }
+
+    internal Action CollectSubclassResults(bool finalize = false, Action<string, string, string, bool> render = null)
+    {
+        string path = Path.Combine(BeamDirectory, "subclasses", "summary.json");
+        if (!File.Exists(path)) return null;
+        JsonDocument summary;
+        try { summary = JsonDocument.Parse(File.ReadAllText(path)); }
+        catch (JsonException) { return null; } // Beam may currently be publishing its next parent.
+        using (summary)
+        {
+            var records = summary.RootElement.GetProperty("parents").EnumerateArray().ToArray();
+            bool complete = finalize || summary.RootElement.GetProperty("status").GetString() == "complete";
+            if (records.Length == SubclassGroupsAvailableCount && File.Exists(VisSubclassGroups) &&
+                (!complete || SubclassesCollectedToCompletion)) return null;
+            int completedParents = 0;
+            foreach (var record in records.Where(r => r.GetProperty("status").GetString() == "complete"))
+            {
+                int parent = record.GetProperty("parent_class").GetInt32();
+                string directory = Path.Combine(BeamDirectory, "subclasses", $"parent-{parent:D3}");
+                if (!new[] { "classes_display.mrcs", "particles.star", "summary.json" }.All(f => File.Exists(Path.Combine(directory, f))))
+                    return null;
+                completedParents++;
+            }
+            Directory.CreateDirectory(SubclassResultsDirectory);
+            string source = Path.Combine(SubclassResultsDirectory, "source.json");
+            File.WriteAllText(source, summary.RootElement.GetRawText());
+            (render ?? BakeryWrapper.BeamClass2DSubclasses)(BeamDirectory, source, SubclassResultsDirectory, complete);
+            bool available = complete && completedParents > 0;
+            return () =>
+            {
+                SubclassGroupsAvailableCount = records.Length;
+                SubclassesCollectedToCompletion = complete;
+                SubclassSelectionAvailable = available;
+            };
+        }
     }
 
     public override Dictionary<string, List<string>> ValidatePortInputs()
@@ -267,8 +333,9 @@ public class BeamClass2D : Job, IClusterJob
                     Enumerable.Range(0, info.ClassCount).ToArray(), Enumerable.Range(1, info.ClassCount).Select(c => c.ToString()).ToArray(), VisCard(i));
             latest = i;
         }
-        return latest == VisAvailableIteration && final == FinalAssignmentIteration ? null :
-            () => { VisAvailableIteration = latest; FinalAssignmentIteration = final; };
+        var subclasses = CollectSubclassResults();
+        return latest == VisAvailableIteration && final == FinalAssignmentIteration && subclasses == null ? null :
+            () => { VisAvailableIteration = latest; FinalAssignmentIteration = final; subclasses?.Invoke(); };
     }
 
     public override void FinalizeRun(Action<Job, Action<Job>> updateCallback)
@@ -276,8 +343,17 @@ public class BeamClass2D : Job, IClusterJob
         if (!CommittedIterations().Any()) throw new InvalidOperationException("Beam has no complete snapshot to finalize.");
         if (TrackProgressLogs() is { } logs) updateCallback(this, _ => logs());
         if (TrackProgressResults() is { } figures) updateCallback(this, _ => figures());
+        if (CollectSubclassResults(finalize: true) is { } subclasses) updateCallback(this, _ => subclasses());
     }
 }
 
 public enum Beam2DRegularization { FRC, Denoise }
 public enum Beam2DAssignments { Soft, Hard }
+
+public sealed class BeamSubclassGroup
+{
+    public int ParentId { get; set; }
+    public int FirstClass { get; set; }
+    public Class2DModel[] Classes { get; set; } = [];
+    public string Reason { get; set; }
+}

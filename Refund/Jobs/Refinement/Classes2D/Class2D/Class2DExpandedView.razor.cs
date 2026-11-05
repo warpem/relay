@@ -29,6 +29,11 @@ public partial class Class2DExpandedView : IDisposable
     private int _embeddingCount;
     private string[] PcaLabels => new[] { "Mean" }.Concat(Enumerable.Range(1, _pcaCount).Select(i => $"PC {i}")).ToArray();
     private int _displayedIteration = -1;
+    private BeamSubclassGroup[] _subclassGroups = [];
+    private readonly Dictionary<int, Class2DSelection> _subclassSelections = new();
+    private int _selectedSubclassCount;
+    private bool ShowSubclasses => Beam != null && Beam.CanExport(Iteration) && _subclassGroups.Length > 0;
+
     private Class2DSelection _class2DSelectionComponent;
     private int _nClassesSelected;
     private int[] _classNumbers;
@@ -49,6 +54,9 @@ public partial class Class2DExpandedView : IDisposable
         if (job is ReadOnlyClass2D or ReadOnlyBeamClass2D)
         {
             _job = job;
+            _subclassGroups = [];
+            _subclassSelections.Clear();
+            _selectedSubclassCount = 0;
             _classNumbers = [];
             _nClassesSelected = 0;
             UpdateData();
@@ -61,29 +69,33 @@ public partial class Class2DExpandedView : IDisposable
         await InvokeAsync(StateHasChanged);
     }
 
-    private async Task HandleJobUpdated()
+    private Task HandleJobUpdated() => InvokeAsync(() =>
     {
         UpdateData();
-        await InvokeAsync(StateHasChanged);
-    }
+        StateHasChanged();
+    });
 
-    private async Task HandleIterationChanged(int iteration)
-    {
-        UpdateData();
-        await InvokeAsync(StateHasChanged);
-    }
+    private Task HandleIterationChanged(int iteration) => HandleJobUpdated();
 
     private void UpdateData()
     {
         if (_job == null)
             return;
 
+        _subclassGroups = [];
+        if (Beam != null && File.Exists(Beam.VisSubclassGroups))
+        {
+            try { _subclassGroups = JsonSerializer.Deserialize<BeamSubclassGroup[]>(File.ReadAllText(Beam.VisSubclassGroups)) ?? []; }
+            catch (JsonException) { }
+        }
         _pcaCount = _embeddingCount = 0;
         _classIdx = null; _classResolutions = _classSizes = null;
         _classNumbers = _job is ReadOnlyClass2D relion ? Enumerable.Range(1, relion.NClasses).ToArray() : [];
         if (Beam != null && _displayedIteration != Iteration)
         {
             _class2DSelectionComponent?.selectedClasses.Clear();
+            _subclassSelections.Clear();
+            _selectedSubclassCount = 0;
             _nClassesSelected = 0;
             _displayedIteration = Iteration;
         }
@@ -155,6 +167,51 @@ public partial class Class2DExpandedView : IDisposable
         {
             _ = _toastService.ShowErrorToastAsync($"Failed to create selection: {ex.Message}");
         }
+    }
+
+    private void SubclassSelectionChanged()
+    {
+        _selectedSubclassCount = _subclassSelections.Values.Sum(c => c.selectedClasses.Count);
+        StateHasChanged();
+    }
+
+    private void ClearSubclasses()
+    {
+        foreach (var component in _subclassSelections.Values) component.selectedClasses.Clear();
+        _selectedSubclassCount = 0;
+    }
+
+    private void SelectAllSubclasses()
+    {
+        foreach (var group in _subclassGroups)
+            if (_subclassSelections.TryGetValue(group.ParentId, out var component))
+                foreach (int child in Enumerable.Range(1, group.Classes.Length)) component.selectedClasses.Add(child);
+        SubclassSelectionChanged();
+    }
+
+    private async Task SaveSubclassSelection()
+    {
+        if (!ShowSubclasses || !Beam.SubclassSelectionAvailable) return;
+        try
+        {
+            var selected = _subclassGroups.Where(g => _subclassSelections.ContainsKey(g.ParentId))
+                .SelectMany(g => _subclassSelections[g.ParentId].selectedClasses.Select(c => g.FirstClass + c - 1)).Order().ToArray();
+            if (selected.Length == 0) return;
+            var all = _subclassGroups.SelectMany(g => Enumerable.Range(g.FirstClass, g.Classes.Length));
+            var selection = new Class2DSelect.Class2DSelect
+            {
+                SelectedClasses = selected,
+                UnselectedClasses = all.Except(selected).Order().ToArray()
+            };
+            var view = _session.View ?? throw new Exception("Current view not found");
+            var created = await _dataManager.CreateJob(_session.User, view, selection.TypeGuid, selection)
+                ?? throw new Exception("Failed to create selection job");
+            await _dataManager.CreateEdge(_job.Space, _job.PortsOut["SubclassParticles"], created.PortsIn["Particles"]);
+            await _dataManager.CreateEdge(_job.Space, _job.PortsOut["SubclassTemplates"], created.PortsIn["Templates"]);
+            await _dataManager.QueueLocalJob(_session.User, created);
+            _ = _toastService.ShowSuccessToastAsync($"Created subclass selection from {_job.QualifiedName}");
+        }
+        catch (Exception error) { _ = _toastService.ShowErrorToastAsync($"Failed to create subclass selection: {error.Message}"); }
     }
 
     private void ClearAll()

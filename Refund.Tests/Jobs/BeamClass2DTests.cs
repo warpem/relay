@@ -132,6 +132,55 @@ public class BeamClass2DTests : IDisposable
         Assert.Contains("Full-data pass 2 / 2", File.ReadAllText(job.LogFilePath(3)));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SubclassGroupsCollectIncrementallyAndExposeSeparateSelectionResources(bool manualFinalization)
+    {
+        var job = NewJob(); job.FinalAssignmentIteration = 3;
+        Write(Path.Combine(job.BeamDirectory, "particles.star"), "parent particles");
+        string summary = Path.Combine(job.BeamDirectory, "subclasses", "summary.json");
+        foreach (string file in new[] { "summary.json", "particles.star", "classes_display.mrcs" })
+            Write(Path.Combine(job.BeamDirectory, "subclasses", "parent-001", file), "complete");
+        string Running() => JsonSerializer.Serialize(new { status = "running", parents = new[] { new { parent_class = 1, status = "complete" } } });
+        Write(summary, Running());
+        int calls = 0;
+        void Compile(string beam, string source, string target, bool complete)
+        {
+            calls++;
+            Assert.Equal(job.BeamDirectory, beam);
+            Assert.Equal(job.SubclassResultsDirectory, target);
+            Assert.Contains("parent_class", File.ReadAllText(source));
+            Write(job.VisSubclassGroups, "[]");
+            if (complete)
+            {
+                Write(Path.Combine(target, "stats.json"), "[{\"Id\":1},{\"Id\":2},{\"Id\":3},{\"Id\":4}]");
+                foreach (var file in new[] { "particles.star", "classes.mrcs", "model.star" }) Write(Path.Combine(target, file), "compiled");
+            }
+        }
+        job.CollectSubclassResults(render: Compile)!();
+        Assert.Equal(1, job.SubclassGroupsAvailableCount);
+        Assert.False(job.SubclassSelectionAvailable);
+        Assert.Null(job.PortsOut["SubclassParticles"].GetResource());
+        Assert.Null(job.CollectSubclassResults(render: Compile));
+        Assert.Equal(1, calls);
+        Write(summary, "{"); // A partially written older Beam manifest is retried.
+        Assert.Null(job.CollectSubclassResults(render: Compile));
+        Write(summary, manualFinalization ? Running() : Running().Replace("running", "complete"));
+        job.CollectSubclassResults(finalize: manualFinalization, render: Compile)!();
+        Assert.Equal(2, calls);
+        Assert.True(job.SubclassesCollectedToCompletion);
+        Assert.True(job.SubclassSelectionAvailable);
+        var particles = Assert.IsType<ParticleSet>(job.PortsOut["SubclassParticles"].GetResource());
+        Assert.Equal(Path.Combine(job.SubclassResultsDirectory, "particles.star"), particles.ParticlesSingleStarPath);
+        Assert.False(particles.HasAngles);
+        Assert.Equal("/particles.star", _particles.ParticlesSingleStarPath);
+        var templates = Assert.IsType<TemplateSet>(job.PortsOut["SubclassTemplates"].GetResource());
+        Assert.Equal(4L, templates.ItemCount);
+        Assert.Equal(Path.Combine(job.SubclassResultsDirectory, "classes.mrcs"), templates.TemplateMrcPath);
+        Assert.Null(job.CollectSubclassResults(render: Compile));
+    }
+
     private static void Snapshot(BeamClass2D job, int i, int count, bool final)
     {
         Write(Path.Combine(job.SnapshotDirectory(i), "snapshot.json"), JsonSerializer.Serialize(new
