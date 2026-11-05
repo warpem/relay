@@ -366,12 +366,6 @@ public class Class2DSelect : Job, ILocalJob
                     
                     #region Visualize - Generate image atlases for classes
                     
-                    // Create tasks for visualization generation to run in parallel
-                    Task TaskSelected = Task.Run(() => BakeryWrapper.Class2DImageAtlas(ResSelectedClassesFile,
-                                                                                      VisSelectedClassAtlas));
-                    Task TaskUnselected = Task.Run(() => BakeryWrapper.Class2DImageAtlas(ResUnselectedClassesFile,
-                                                                                        VisUnselectedClassAtlas));
-
                     // Create job card visualization showing selected classes
                     Task TaskCard = Task.Run(() => BakeryWrapper.Class2DJobCard(
                         classImagesMrcsFile: ResSelectedClassesFile,
@@ -381,7 +375,7 @@ public class Class2DSelect : Job, ILocalJob
                     );
                     
                     // Wait for all visualization tasks to complete
-                    Task.WaitAll(TaskSelected, TaskUnselected, TaskCard);
+                    TaskCard.GetAwaiter().GetResult();
                     
                     #endregion
                 }

@@ -10,7 +10,6 @@ import starfile
 import typer
 
 from ._cli import cli
-from .beam_class2d_figures import image_atlas
 
 
 def atomic_json(path, value):
@@ -44,19 +43,8 @@ def beam_class2d_subclasses(
         count = int(summary['class_count'])
         target = output_directory / f'parent-{parent:03d}'
         target.mkdir(exist_ok=True)
-        atlas = target / 'classes.png'
-        parent_image = target / 'parent.png'
-        if not parent_image.exists():
-            with mrcfile.mmap(beam_directory / 'classes_display.mrcs') as parent_stack:
-                if not 1 <= parent <= len(parent_stack.data):
-                    raise ValueError('Parent class is outside the final class bank')
-                image_atlas(parent_stack.data[parent-1:parent], parent_image)
         stats_path = target / 'stats.json'
-        if not atlas.exists() or not stats_path.exists():
-            images = mrcfile.read(source / 'classes_display.mrcs')
-            if len(images) != count:
-                raise ValueError(f'Subclass image count mismatch for parent {parent}')
-            image_atlas(images, atlas)
+        if not stats_path.exists():
             counts = np.asarray(summary['occupancies'], dtype=float)
             if len(counts) != count or not np.isfinite(counts).all() or np.any(counts < 0):
                 raise ValueError(f'Invalid subclass populations for parent {parent}')

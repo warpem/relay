@@ -12,22 +12,6 @@ from ._cli import cli
 from ..figure_export import save_figure
 
 
-def image_atlas(images, output, *, signed=False):
-    images = np.asarray(images, dtype=np.float32)
-    if images.ndim != 3 or not np.isfinite(images).all():
-        raise ValueError('Image atlas requires a finite stack of square images')
-    # Independent robust contrast keeps weak components visible. Signed PCs share
-    # a zero midpoint; no offsets are removed from their exported scientific data.
-    normalized = []
-    for image in images:
-        if signed:
-            scale = max(float(np.quantile(np.abs(image), .995)), 1e-20)
-            normalized.append(np.clip(image / scale * .5 + .5, 0, 1))
-        else:
-            low, high = np.quantile(image, .005), image.max()
-            normalized.append(np.clip((image - low) / max(high - low, 1e-20), 0, 1))
-    plt.imsave(output, np.concatenate(normalized, axis=1), cmap='gray', vmin=0, vmax=1, origin='lower')
-
 
 @cli.command(no_args_is_help=True)
 def beam_class2d_figures(
@@ -45,13 +29,11 @@ def beam_class2d_figures(
             return float(v) if v is not None and np.isfinite(v) else None
         stats.append(dict(Id=int(i)+1, Resolution=value('rlnEstimatedResolution'),
                           Distribution=value('rlnClassDistribution')))
-    image_atlas(mrcfile.read(snapshot_directory / 'classes.mrcs'), output_directory / f'classes_{tag}.png')
     info = dict(PrincipalComponentCount=0, EmbeddingParticleCount=0)
     components = snapshot_directory / 'principal_components.mrcs'
     if components.exists():
-        images = mrcfile.read(components)
-        info['PrincipalComponentCount'] = len(images) - 1
-        image_atlas(images, output_directory / f'pca_{tag}.png', signed=True)
+        with mrcfile.open(components, header_only=True) as stack:
+            info['PrincipalComponentCount'] = int(stack.header.nz) - 1
     embeddings = snapshot_directory / 'embeddings.npz'
     if embeddings.exists():
         with np.load(embeddings, allow_pickle=False) as data:

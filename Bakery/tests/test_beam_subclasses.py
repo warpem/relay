@@ -49,14 +49,13 @@ class BeamSubclassFigureTests(unittest.TestCase):
             self.assertFalse((target / 'particles.star').exists())
             groups = json.loads((target / 'groups.json').read_text())
             self.assertEqual(groups[0]['FirstClass'], 1)
-            self.assertTrue((target / 'parent-001/parent.png').exists())
             self.assertEqual(groups[1]['Classes'], [])
             self.assertEqual(groups[1]['Reason'], skipped['reason'])
             self.assertEqual(groups[0]['Classes'][2]['Distribution'], 3/8)
-            mtime = (target / 'parent-001/classes.png').stat().st_mtime_ns
+            mtime = (target / 'parent-001/stats.json').stat().st_mtime_ns
             source.write_text(json.dumps(dict(status='complete', parents=[three, skipped, one])))
             self.invoke(beam, source, target, finalize=True)
-            self.assertEqual((target / 'parent-001/classes.png').stat().st_mtime_ns, mtime)
+            self.assertEqual((target / 'parent-001/stats.json').stat().st_mtime_ns, mtime)
             groups = json.loads((target / 'groups.json').read_text())
             self.assertEqual([g['ParentId'] for g in groups], [1, 2, 3])
             self.assertEqual(groups[2]['FirstClass'], 5)

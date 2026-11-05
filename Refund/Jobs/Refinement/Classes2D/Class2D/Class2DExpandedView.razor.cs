@@ -23,7 +23,7 @@ public partial class Class2DExpandedView : IDisposable
     private int Iteration => _expandedViewService.CurrentVisIteration;
     private bool CanExport => Beam == null || Beam.CanExport(Iteration);
     private int NClasses => _classNumbers?.Length ?? 0;
-    private string ClassAtlas => Beam?.VisClassAtlas(Iteration) ?? ((ReadOnlyClass2D)_job).VisClassAtlas(Iteration);
+    private string ClassStack => Beam?.ClassStack(Iteration) ?? ((ReadOnlyClass2D)_job).ResClassesFile(Iteration);
     private string ClassStats => Beam?.VisClassStats(Iteration) ?? ((ReadOnlyClass2D)_job).VisClassStats(Iteration);
     private int _pcaCount;
     private int _embeddingCount;

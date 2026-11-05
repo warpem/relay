@@ -9,7 +9,6 @@ import numpy as np
 import pandas as pd
 import starfile
 from typer.testing import CliRunner
-from matplotlib import image as mpl_image
 
 from bakery.cli import cli
 
@@ -38,11 +37,8 @@ class BeamClass2DFigureTests(unittest.TestCase):
             self.assertEqual(json.loads((output / 'pca_info_it0002.json').read_text()),
                              {'PrincipalComponentCount': 1, 'EmbeddingParticleCount': 2})
             self.assertTrue((output / 'embedding_it0002.light.svg').is_file())
-            atlas = mpl_image.imread(output / 'pca_it0002.png')
-            self.assertEqual(atlas.shape[:2], (16, 32))
-            signed = atlas[:, 16:, 0]
-            self.assertLess(signed.min(), .1)
-            self.assertGreater(signed.max(), .9)
+            self.assertFalse((output / 'pca_it0002.png').exists())
+            self.assertFalse((output / 'classes_it0002.png').exists())
 
     def test_snapshot_without_pca_or_occupancies_still_renders_classes(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -54,4 +50,4 @@ class BeamClass2DFigureTests(unittest.TestCase):
             self.assertEqual(result.exit_code, 0, result.output + str(result.exception))
             stats = json.loads((root / 'relay/stats_it0001.json').read_text())
             self.assertIsNone(stats[0]['Distribution'])
-            self.assertTrue((root / 'relay/classes_it0001.png').is_file())
+            self.assertFalse((root / 'relay/classes_it0001.png').exists())

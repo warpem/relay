@@ -101,3 +101,10 @@ CSS, viewport markup, and actual isosurface viewer module. It checks eight class
 cards at multiple window sizes and device pixel ratios, including stable canvas
 and document dimensions. It does not need a Relay server or particle data.
 `PLAYWRIGHT_MODULE` and `CHROMIUM_EXECUTABLE` can select existing installations.
+
+
+`npm run test:class2d-mrc` exercises the shared MRC worker and image tiles with
+150 classes, float32/float16/int16 stacks, signed contrast, vertical orientation,
+shared fetches, sorting, error messages and disposal. It accepts the same
+`PLAYWRIGHT_MODULE` / `CHROMIUM_EXECUTABLE` overrides as the layout test;
+`CLASS2D_TEST_STACK` optionally adds a real 150-class stack to the run.

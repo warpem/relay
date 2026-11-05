@@ -112,6 +112,9 @@ public class BeamClass2D : Job, IClusterJob
     [RelayProperty, Clearable] public int FinalAssignmentIteration { get; set; } = -1;
     public string BeamDirectory => Path.Combine(DirectoryPath, "beam");
     public string SnapshotDirectory(int i) => Path.Combine(BeamDirectory, "snapshots", $"it{i:D3}");
+    public string ClassStack(int i) => Path.Combine(SnapshotDirectory(i), "classes.mrcs");
+    public string PrincipalComponentsStack(int i) => Path.Combine(SnapshotDirectory(i), "principal_components.mrcs");
+    public string SubclassStack(int parent) => Path.Combine(BeamDirectory, "subclasses", $"parent-{parent:D3}", "classes_display.mrcs");
     public string VisClassAtlas(int i) => Path.Combine(RelayResultsDirectoryPath, $"classes_it{i:D4}.png");
     public string VisClassStats(int i) => Path.Combine(RelayResultsDirectoryPath, $"stats_it{i:D4}.json");
     public string VisPcaAtlas(int i) => Path.Combine(RelayResultsDirectoryPath, $"pca_it{i:D4}.png");
@@ -323,10 +326,9 @@ public class BeamClass2D : Job, IClusterJob
         {
             var info = ReadSnapshot(i);
             if (info.Final && File.Exists(Path.Combine(BeamDirectory, "particles.star"))) final = i;
-            bool hasPca = File.Exists(Path.Combine(SnapshotDirectory(i), "principal_components.mrcs"));
             bool hasEmbedding = File.Exists(Path.Combine(SnapshotDirectory(i), "embeddings.npz"));
-            if (!File.Exists(VisClassAtlas(i)) || !File.Exists(VisClassStats(i)) ||
-                !File.Exists(VisPcaInfo(i)) || (hasPca && !File.Exists(VisPcaAtlas(i))) || (hasEmbedding && !File.Exists(VisEmbeddings(i))))
+            if (!File.Exists(VisClassStats(i)) || !File.Exists(VisPcaInfo(i)) ||
+                (hasEmbedding && !File.Exists(VisEmbeddings(i))))
                 BakeryWrapper.BeamClass2DFigures(SnapshotDirectory(i), RelayResultsDirectoryPath, i);
             if (!File.Exists(VisCard(i)))
                 BakeryWrapper.Class2DJobCard(Path.Combine(SnapshotDirectory(i), "classes.mrcs"),

@@ -32,10 +32,9 @@ else
     {
         <p>Class selection becomes available after final particle assignment.</p>
     }
-    <Class2DSelection @key="(Beam != null ? ClassAtlas : null)" @ref="_class2DSelectionComponent"
-                      ClassAtlasImagePath=@ClassAtlas
-                      NImagesInFile="@NClasses"
-                      ClassPositionsInAtlas=@_classNumbers
+    <Class2DSelection @key="(Beam != null ? ClassStack : null)" @ref="_class2DSelectionComponent"
+                      MrcStackPath=@ClassStack
+                      ImageNumbers=@_classNumbers
                       ClassIds=@_classIdx
                       ClassResolutions=@_classResolutions
                       ClassSizes=@_classSizes
@@ -70,14 +69,14 @@ else
                 else
                 {
                     <div class="d-flex flex-wrap" style="gap: 16px; align-items: flex-start;">
-                        <Class2DSelection ClassAtlasImagePath="@Beam.VisSubclassParentAtlas(group.ParentId)" NImagesInFile="1"
-                                          ClassPositionsInAtlas="@(new[] { 1 })"
+                        <Class2DSelection MrcStackPath="@ClassStack"
+                                          ImageNumbers="@(new[] { group.ParentId })"
                                           ClassLabels="@(new[] { $"Parent {group.ParentId}" })"
                                           AllowSorting="false" SelectionIsMutable="false" RenderedImageSidelengthPx="128" />
                         <Class2DSelection @ref="_subclassSelections[group.ParentId]"
-                                          ClassAtlasImagePath="@Beam.VisSubclassAtlas(group.ParentId)"
-                                          NImagesInFile="@group.Classes.Length" AllowSorting="false"
-                                          ClassPositionsInAtlas="@Enumerable.Range(1, group.Classes.Length).ToArray()"
+                                          MrcStackPath="@Beam.SubclassStack(group.ParentId)"
+                                          AllowSorting="false"
+                                          ImageNumbers="@Enumerable.Range(1, group.Classes.Length).ToArray()"
                                           ClassIds="@group.Classes.Select(c => c.Id).ToArray()"
                                           ClassSizes="@group.Classes.Select(c => c.Distribution ?? 0).ToArray()"
                                           ClassResolutions="@(group.Classes.All(c => c.Resolution.HasValue) ? group.Classes.Select(c => c.Resolution.Value).ToArray() : null)"
@@ -92,10 +91,9 @@ else
     {
         <h4 class="mt-4">Principal components</h4>
         <p>Mean followed by signed components from the latest PCA discovery fit.</p>
-        <Class2DSelection @key="Beam.VisPcaAtlas(Iteration)"
-                          ClassAtlasImagePath="@Beam.VisPcaAtlas(Iteration)"
-                          NImagesInFile="@(_pcaCount + 1)"
-                          ClassPositionsInAtlas="@Enumerable.Range(1, _pcaCount + 1).ToArray()"
+        <Class2DSelection @key="Beam.PrincipalComponentsStack(Iteration)"
+                          MrcStackPath="@Beam.PrincipalComponentsStack(Iteration)" SignedContrast="true"
+                          ImageNumbers="@Enumerable.Range(1, _pcaCount + 1).ToArray()"
                           ClassLabels="@PcaLabels" AllowSorting="false" SelectionIsMutable="false"
                           RenderedImageSidelengthPx="128" SpacingPx="6" BorderColorUnselected="transparent" />
     }

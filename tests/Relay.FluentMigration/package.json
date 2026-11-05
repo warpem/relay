@@ -5,7 +5,10 @@
   "scripts": {
     "test": "node checks.mjs",
     "test:bindings": "node --test numeric-steps.test.mjs && node input-bindings.mjs",
-    "test:beam-layout": "node beam-classification-layout.mjs"
+    "test:beam-layout": "node beam-classification-layout.mjs",
+    "test:class2d-mrc": "node class2d-mrc.mjs"
   },
-  "devDependencies": { "playwright": "1.56.1" }
+  "devDependencies": {
+    "playwright": "1.56.1"
+  }
 }

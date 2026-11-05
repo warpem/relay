@@ -505,7 +505,7 @@ public class Class2D : RelionJob, IClusterJob
     /// </summary>
     /// <param name="i">The iteration number</param>
     /// <returns>Path to the class averages MRC file</returns>
-    private string ResClassesFile(int i) => Path.Combine(DirectoryPath, 
+    public string ResClassesFile(int i) => Path.Combine(DirectoryPath,
                                                          $"run_it{(i * ResultsEveryNIterations):D3}_classes.mrcs");
     
     /// <summary>
@@ -823,17 +823,9 @@ public class Class2D : RelionJob, IClusterJob
                 break;
             
             // Generate visualizations for iterations that don't have them yet
-            if (!File.Exists(VisClassAtlas(ires)))
+            if (!File.Exists(VisClassStats(ires)) || !File.Exists(VisCard(ires)))
             {
                 List<Task> VisTasks = new();
-
-                // Task 1: Generate class average atlas visualization
-                VisTasks.Add(Task.Run(() =>
-                {
-                    if (File.Exists(ResClassesFile(ires)))
-                        BakeryWrapper.Class2DImageAtlas(ResClassesFile(ires),
-                                                        VisClassAtlas(ires));
-                }));
 
                 // Task 2: Extract and process class statistics from model star file
                 VisTasks.Add(Task.Run(() =>
@@ -913,6 +905,7 @@ public class Class2D : RelionJob, IClusterJob
                 MaxResultsExist = ires;
                 break;
             }
+            MaxResultsExist = ires;
         }
 
         bool ReportUpdate = MaxResultsExist > VisAvailableIteration;

@@ -1,18 +1,9 @@
-@* Component for displaying Class2D image atlases generated in Bakery
-
-Class2D image atlases contain square images in one long row, example below... 
-                      +-----+-----+-----+-----+                                  
-                      |     |     |     |     |                                  
-                      |     |     |     |     |                                  
-                      +-----+-----+-----+-----+                                  
-This component renders a set of 2D classes as a grid of individual divs that fill the
-parent div.
- - `ClassNumbersToDisplay` is an ordered list of 1-indexed class numbers to be displayed
- - `SourceImageSidelengthPx` is the sidelength of images in the atlas in pixels
- - `RenderedImageSidelengthPx` is the sidelength of the rendered images in pixels
- - `Spacing` is the spacing between images in the rendered grid in pixels
-*@
-<div style="display: flex; flex-direction: column; align-items: start;">
+<div @ref="_root" id="class2d-images-@guid" style="display: flex; flex-direction: column; align-items: start;">
+    <div data-image-status role="status" aria-live="polite"></div>
+    @if (_interopError != null)
+    {
+        <p>Unable to load class images: @_interopError</p>
+    }
     @if (AllowSorting)
     {
         <div class="toolbar">
@@ -26,16 +17,15 @@ parent div.
             <FluentButton Title="Switch sort direction" OnClick="ToggleSortDirection" IconEnd="@IconSort"/>
         </div>
     }
-    @if (ClassPositionsInAtlas != null)
+    @if (ImageNumbers != null)
     {
         <div class="class2d-image-grid-@(guid)">
             @foreach (var i in ClassOrderSorted())
             {
-                int c = ClassPositionsInAtlas[i];
+                int c = ImageNumbers[i];
             
-                <div class="class2d-image-container-@(guid)">
-                    <div class="class2d-image-tile-@(guid)"
-                         style="@GetTileStyle(c)"/>
+                <div @key="c" class="class2d-image-container-@(guid)">
+                    <img class="class2d-image-tile-@(guid)" data-image-index="@(c - 1)" alt="Class image @c" />
                     <div class="border-overlay-@(guid) @(selectedClasses.Contains(c) ? "selected" : "")"
                          @onclick="() => ToggleSelection(c)">
                     </div>
@@ -76,10 +66,6 @@ parent div.
         flex-wrap: wrap;
     }
 
-    .class2d-image-tile-@(guid) {
-        background-image: url(@($"{classAtlasImageUrl}"));
-    }
-
     .class2d-image-container-@(guid) {
         position: relative;
         margin: @($"{SpacingPx / 2}px");
@@ -91,11 +77,12 @@ parent div.
     .class2d-image-tile-@(guid) {
         width: 100%;
         height: 100%;
-        background-size: @($"{NImagesInFile * RenderedImageSidelengthPx}px {RenderedImageSidelengthPx}px");
-        background-position: center;
+        object-fit: contain;
         display: block;
         border-radius: 10px;
     }
+
+    .class2d-image-tile-@(guid):not([src]) { visibility: hidden; }
 
     .border-overlay-@(guid) {
         position: absolute;

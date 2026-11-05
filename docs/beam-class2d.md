@@ -51,7 +51,7 @@ subclassification completes; manual finalization of an interrupted run makes
 completed parent groups selectable. Peripheral or skipped parents are absent
 from the subclass particle collection.
 
-Subclass atlases, statistics, group metadata, and the selection MRC/STAR files
+Subclass statistics, group metadata, and the selection MRC/STAR files
 are compiled once into `.relay/subclasses/`; opening the finished view does not
 parse Beam's subclass summaries or load PyTorch checkpoints.
 
@@ -76,7 +76,7 @@ Each atomic `beam/snapshots/itNNN` directory contains:
   belong to the current PCA discovery sample.
 - `snapshot.json`: update number, counts, and final-assignment availability.
 
-Relay compiles atlases, class statistics, the embedding figure, and per-snapshot
+Relay compiles class statistics, the embedding figure, and per-snapshot
 stdout into its `.relay` directory. Relay requests `--show-progress`; carriage-return
 bars are collapsed to one current line when the logs are compiled. Stderr is collected using the same mechanism
 as other cluster jobs. Opening a finished expanded view reads these saved files;
@@ -141,3 +141,21 @@ Defaults are Beam defaults; Relay uses GPU mode by default instead of CPU.
 | `--quiet` | `False` | Not allowed in Relay jobs |
 | `--show-progress` | `auto` | Managed by Relay: enabled on stdout |
 | `--dont-show-progress` | `auto` | Not allowed in Relay jobs |
+
+
+## Client-side image rendering
+
+The shared class display fetches MRC stacks directly through the server file API
+and decodes them in one shared Web Worker using Relay's MRC reader. It creates
+individual PNG blob previews for classes, signed principal components, parent
+comparisons and subclasses. Blazor handles labels/selection only: no image arrays
+or base64 payloads pass through .NET. Selected/unselected RELION and Beam class
+views use the same renderer.
+
+Each class uses its own 0.5th percentile as black and maximum as white. Signed
+PCA images use a symmetric 99.5th absolute-percentile range with zero at mid-gray.
+MRC row zero is displayed at the bottom, matching previous origin='lower' plots.
+Stacks are shared across views while needed; requests and blob URLs are released
+on source changes/disposal. Errors and download progress are shown in the view.
+The browser never paints a wide, whole-stack background texture, so existing
+large class banks can display without regenerating their saved outputs.

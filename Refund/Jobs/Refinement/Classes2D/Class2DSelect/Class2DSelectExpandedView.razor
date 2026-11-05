@@ -15,9 +15,8 @@ else
 { 
     <h5>Selected:</h5>
     <div>
-        <Class2DSelection ClassAtlasImagePath=@(_job.VisSelectedClassAtlas)
-                          NImagesInFile="_job.SelectedClasses.Length"
-                          ClassPositionsInAtlas=@(Enumerable.Range(1, _job.SelectedClasses.Length).ToArray())
+        <Class2DSelection MrcStackPath=@(_job.ResSelectedClassesFile)
+                          ImageNumbers=@(Enumerable.Range(1, _job.SelectedClasses.Length).ToArray())
                           ClassIds=@_selectedClassIdx
                           ClassResolutions=@_selectedClassResolutions
                           ClassSizes=@_selectedClassSizes
@@ -31,9 +30,8 @@ else
     
     <h5 style="margin-top: 30px;">Unselected:</h5>
     <div>
-        <Class2DSelection ClassAtlasImagePath=@(_job.VisUnselectedClassAtlas)
-                          NImagesInFile="_job.UnselectedClasses.Length"
-                          ClassPositionsInAtlas=@(Enumerable.Range(1, _job.UnselectedClasses.Length).ToArray())
+        <Class2DSelection MrcStackPath=@(_job.ResUnselectedClassesFile)
+                          ImageNumbers=@(Enumerable.Range(1, _job.UnselectedClasses.Length).ToArray())
                           ClassIds=@_unselectedClassIdx
                           ClassResolutions=@_unselectedClassResolutions
                           ClassSizes=@_unselectedClassSizes
