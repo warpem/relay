@@ -14,7 +14,7 @@ using Warp.Tools;
 namespace Refund.Jobs.Refinement.Classes3D.BeamClass3D;
 
 public enum BeamClassificationType { Unsupervised, Supervised }
-public enum BeamClassificationRegularization { FSC, Denoise }
+public enum BeamClassificationRegularization { FSC, Denoise, Blush }
 
 [GenerateReadOnly]
 public class BeamClass3D : BeamParticleJob
@@ -58,7 +58,7 @@ public class BeamClass3D : BeamParticleJob
     [RelayProperty] public int WorkingBox { get; set; } = 128;
 
     [UiEnum("", "Regularization", typeof(BeamClassificationRegularization),
-        helpText: "Denoise trains one Noise2Noise network across all usable classes. Class FSC is a controller diagnostic; refine selected particles independently for a final resolution estimate.")]
+        helpText: "Denoise trains one Noise2Noise network across all usable classes. Blush uses RELION's pretrained denoiser and requires Beam's external Blush installation. Class FSC is a controller diagnostic; refine selected particles independently for a final resolution estimate.")]
     [RelayProperty] public BeamClassificationRegularization Regularization { get; set; } = BeamClassificationRegularization.FSC;
 
     public string ReferenceList(int half) => Path.Combine(DirectoryPath, $"references_half{half}.star");
