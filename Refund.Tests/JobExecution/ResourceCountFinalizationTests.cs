@@ -64,6 +64,44 @@ public class ResourceCountFinalizationTests : IDisposable
         await operations.ShutdownAsync(CancellationToken.None);
     }
 
+    [Theory]
+    [InlineData(ExecutionOutcome.Failed)]
+    [InlineData(ExecutionOutcome.Canceled)]
+    [InlineData(ExecutionOutcome.Interrupted)]
+    [InlineData(ExecutionOutcome.Succeeded)]
+    public async Task FinalizationCapturesStderrEvenWhenTheJobOverridesLogTracking(ExecutionOutcome outcome)
+    {
+        var job = CreateJob();
+        Directory.CreateDirectory(job.DirectoryPath);
+        await File.WriteAllTextAsync(job.PathStdErr, "Traceback: missing solvent mask\n");
+        var operations = Operations(job);
+
+        await operations.FinalizeAsync(Attempt(), outcome, CancellationToken.None);
+        await job.WriteToErrorLog("FAILED, compute-node");
+
+        Assert.Equal("Traceback: missing solvent mask\nFAILED, compute-node" + Environment.NewLine,
+            await File.ReadAllTextAsync(job.ErrorFilePath));
+        await operations.ShutdownAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task FinalStderrCollectionBypassesAnUnchangedCachedLength()
+    {
+        var job = CreateJob();
+        Directory.CreateDirectory(job.DirectoryPath);
+        await File.WriteAllTextAsync(job.PathStdErr, "first error\n");
+        job.CollectStandardErrorLog()!();
+        // Simulate an unchanged cached length even though the content now differs.
+        await File.WriteAllTextAsync(job.PathStdErr, "final error\n");
+        Assert.Null(job.CollectStandardErrorLog());
+        var operations = Operations(job);
+
+        await operations.FinalizeAsync(Attempt(), ExecutionOutcome.Failed, CancellationToken.None);
+
+        Assert.Equal("final error\n", await File.ReadAllTextAsync(job.ErrorFilePath));
+        await operations.ShutdownAsync(CancellationToken.None);
+    }
+
     [Fact]
     public async Task Preparation_DiscardsCountsBeforeStagingANewRun()
     {

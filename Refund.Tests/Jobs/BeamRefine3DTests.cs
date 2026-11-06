@@ -298,8 +298,32 @@ public class BeamRefine3DTests : IDisposable
         job.DontAlignSymmetry = true;
         Assert.True(job.ComposeCommandArguments().ContainsKey("dont-align-symmetry"));
         job.VisAvailableIteration = 1;
+        Directory.CreateDirectory(Path.GetDirectoryName(job.IterationFile(1, "mask_refinement.mrc"))!);
+        File.WriteAllText(job.IterationFile(1, "mask_refinement.mrc"), "mask");
         var mask = Assert.IsType<Mask>(job.PortsOut["Mask"].GetResource());
         Assert.Equal(job.IterationFile(1, "mask_refinement.mrc"), mask.MaskVolumePath);
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public void MaskOutputsUseTheExistingIterationMaskOrPreparedMask(bool automatic, bool prepared)
+    {
+        var job = NewJob();
+        job.VisAvailableIteration = 9;
+        string autoPath = job.IterationFile(9, "mask_refinement.mrc");
+        string preparedPath = Path.Combine(job.BeamDirectory, "run_mask.mrc");
+        Directory.CreateDirectory(Path.GetDirectoryName(autoPath)!);
+        if (automatic) File.WriteAllText(autoPath, "automatic mask");
+        if (prepared) File.WriteAllText(preparedPath, "prepared mask");
+        string? expected = automatic ? autoPath : prepared ? preparedPath : null;
+
+        var mask = job.PortsOut["Mask"].GetResource() as Mask;
+        Assert.Equal(expected, mask?.MaskVolumePath);
+        var maps = Assert.IsType<MapList>(job.PortsOut["Reference"].GetResource());
+        Assert.Equal(expected, maps.Maps.Single().MaskVolumePath);
     }
 
     [Fact]

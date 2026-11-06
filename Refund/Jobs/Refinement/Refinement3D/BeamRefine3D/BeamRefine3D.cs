@@ -104,8 +104,14 @@ public class BeamRefine3D : BeamParticleJob
             fscStarPath: IterationFile(i, "model.star"), isAbsoluteScale: true)], IterationFile(i, "model.star"));
     }
 
-    private Mask GetMask(int iteration) =>
-        new(IterationFile(OutputIteration(iteration), "mask_refinement.mrc"));
+    private Mask GetMask(int iteration)
+    {
+        string automatic = IterationFile(OutputIteration(iteration), "mask_refinement.mrc");
+        if (File.Exists(automatic)) return new Mask(automatic);
+        // Explicit masks are prepared (including reference-frame transforms) once per job.
+        string prepared = Path.Combine(BeamDirectory, "run_mask.mrc");
+        return File.Exists(prepared) ? new Mask(prepared) : null;
+    }
 
     public override Dictionary<string, List<string>> ValidatePortInputs()
     {

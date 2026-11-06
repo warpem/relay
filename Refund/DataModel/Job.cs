@@ -1736,7 +1736,11 @@ public abstract class Job : RelayBase, IFolderContent
     // Tracking length (not content hash) is enough: std.err is append-only.
     private long _stdErrMirroredLength = -1;
 
-    public virtual Action TrackProgressLogs()
+    public virtual Action TrackProgressLogs() => CollectStandardErrorLog();
+
+    // Final collection must bypass cached file lengths: shared-filesystem metadata
+    // can lag behind the process's last stderr write.
+    internal Action CollectStandardErrorLog(bool force = false)
     {
         // Ensure results directory exists
         JobTools.EnsureResultsDirectory(RelayResultsDirectoryPath);
@@ -1750,7 +1754,7 @@ public abstract class Job : RelayBase, IFolderContent
             // a consistent, complete copy. Using the file length as a cheap change-guard
             // avoids a redundant write+event on every tick when nothing has changed.
             long currentLength = new FileInfo(PathStdErr).Length;
-            if (currentLength == _stdErrMirroredLength)
+            if (!force && currentLength == _stdErrMirroredLength)
                 return null;
 
             string fullErrors = File.ReadAllText(PathStdErr);

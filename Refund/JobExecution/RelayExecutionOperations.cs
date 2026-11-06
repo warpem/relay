@@ -128,6 +128,10 @@ public sealed class RelayExecutionOperations : IExecutionOperations
         CancellationToken cancellationToken)
     {
         var job = FindJob(attempt);
+        // Always capture the final stderr, including for jobs whose progress-log
+        // override does not call the base collector or fails before producing results.
+        if (job.CollectStandardErrorLog(force: true) is { } errors)
+            await _updateJob(job, _ => errors());
         if (attempt.Purpose == ExecutionPurpose.FinalizeOnly)
         {
             await job.WriteToLifecycleLog("Finalizing job");
