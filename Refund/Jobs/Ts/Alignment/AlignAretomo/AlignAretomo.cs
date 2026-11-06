@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -217,6 +218,6 @@ public class AlignAretomo : WarpJobGpu, IClusterJob
 
 public enum AretomoVersion
 {
-    AreTomo2,
-    AreTomo3
+    [Display(Name = "AreTomo 2")] AreTomo2,
+    [Display(Name = "AreTomo 3")] AreTomo3
 }

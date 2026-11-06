@@ -1,4 +1,5 @@
-﻿using System.Globalization;
+using System.ComponentModel.DataAnnotations;
+using System.Globalization;
 using System.Text.Json;
 using Refund.DataModel;
 using Refund.DataModel.ReadOnly;
@@ -1466,12 +1467,12 @@ public enum Class3DAlignmentType
     /// <summary>
     /// Searches the entire angular space (adjusted for symmetry)
     /// </summary>
-    Global = 0,
+    [Display(Name = "Global search")] Global = 0,
 
     /// <summary>
     /// Searches only a small angular range around the previous iteration's best orientation
     /// </summary>
-    Local = 1
+    [Display(Name = "Local search")] Local = 1
 }
 
 /// <summary>

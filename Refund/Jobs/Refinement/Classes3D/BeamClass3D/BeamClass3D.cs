@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using System.Globalization;
 using System.Text.Json;
 using Refund.DataModel;
@@ -14,7 +15,18 @@ using Warp.Tools;
 namespace Refund.Jobs.Refinement.Classes3D.BeamClass3D;
 
 public enum BeamClassificationType { Unsupervised, Supervised }
-public enum BeamClassificationRegularization { FSC, Denoise, Blush }
+public enum BeamClassificationRegularization
+{
+    [Display(Name = "FSC filtering")] FSC,
+    [Display(Name = "Noise2Noise denoising")] Denoise,
+    [Display(Name = "Blush denoising")] Blush
+}
+public enum BeamClassificationParticleSchedule
+{
+    [Display(Name = "Quadratic ramp-up")] Quadratic,
+    [Display(Name = "Step to full set")] Step,
+    [Display(Name = "Full set throughout")] Full
+}
 
 [GenerateReadOnly]
 public class BeamClass3D : BeamParticleJob
@@ -61,6 +73,23 @@ public class BeamClass3D : BeamParticleJob
         helpText: "Denoise trains one Noise2Noise network across all usable classes. Blush uses RELION's pretrained denoiser and requires Beam's external Blush installation. Class FSC is a controller diagnostic; refine selected particles independently for a final resolution estimate.")]
     [RelayProperty] public BeamClassificationRegularization Regularization { get; set; } = BeamClassificationRegularization.FSC;
 
+    [UiFieldGroup("Particle schedule", 0)]
+    [UiEnum("", "Particle schedule", typeof(BeamClassificationParticleSchedule),
+        helpText: "Quadratic ramp-up grows the particle subset each iteration. Step keeps the initial count until the final full-set iterations. Full set throughout uses all particles every iteration.")]
+    [RelayProperty] public BeamClassificationParticleSchedule ParticleSchedule { get; set; } = BeamClassificationParticleSchedule.Quadratic;
+
+    public bool UsesParticleSubset => ParticleSchedule != BeamClassificationParticleSchedule.Full;
+
+    [UiInt("initial-particles", "Initial particles", min: 1, max: int.MaxValue,
+        helpText: "Initial total particle count across both halves. Capped at the available data; must be at least four times the number of classes.",
+        ConditionalOnField = nameof(UsesParticleSubset), ConditionalOnValue = true)]
+    [RelayProperty] public int InitialParticles { get; set; } = 100_000;
+
+    [UiInt("full-set-iterations", "Final full-set iterations", min: 1, max: 10000,
+        helpText: "Number of final iterations using all particles. If this covers the entire run, every iteration uses the full set.",
+        ConditionalOnField = nameof(UsesParticleSubset), ConditionalOnValue = true)]
+    [RelayProperty] public int FullSetIterations { get; set; } = 3;
+
     public string ReferenceList(int half) => Path.Combine(DirectoryPath, $"references_half{half}.star");
     public string VisFilteredSlices(int i, int c) => Figure(i, c, "slices", "png");
     public string VisFsc(int i, int c) => Figure(i, c, "fsc_column", "png");
@@ -99,6 +128,10 @@ public class BeamClass3D : BeamParticleJob
         if (NClasses < 2) errors[nameof(ClassCount)] = "Classification requires at least two classes.";
         if (WorkingBox < 16 || WorkingBox % 2 != 0) errors[nameof(WorkingBox)] = "Box size must be even and at least 16 pixels.";
         if (Iterations < 1) errors[nameof(Iterations)] = "Iterations must be positive.";
+        if (UsesParticleSubset && (InitialParticles < 1 || InitialParticles < 4L * NClasses))
+            errors[nameof(InitialParticles)] = "Initial particles must be at least four times the number of classes.";
+        if (UsesParticleSubset && FullSetIterations < 1)
+            errors[nameof(FullSetIterations)] = "Final full-set iterations must be positive.";
         if (!errors.ContainsKey(nameof(AdditionalArguments)) && BeamWrapper.ParseArguments(AdditionalArguments).ContainsKey("classes"))
             errors[nameof(AdditionalArguments)] = "Use the classification type and number of classes fields to set --classes.";
         return errors;
@@ -107,6 +140,7 @@ public class BeamClass3D : BeamParticleJob
     protected override void AddRunArguments(Dictionary<string, string> args)
     {
         args["classes"] = NClasses.ToString(CultureInfo.InvariantCulture);
+        args["particle-schedule"] = ParticleSchedule.ToString().ToLowerInvariant();
         args["regularization"] = Regularization.ToString().ToLowerInvariant();
     }
 

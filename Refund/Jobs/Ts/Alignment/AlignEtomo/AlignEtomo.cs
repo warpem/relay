@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -209,6 +210,6 @@ public class AlignEtomo : WarpJobGpu, IClusterJob
 
 public enum EtomoMode
 {
-    Patches,
-    Fiducials
+    [Display(Name = "Patch tracking")] Patches,
+    [Display(Name = "Fiducial tracking")] Fiducials
 }

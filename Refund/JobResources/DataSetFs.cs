@@ -1,4 +1,5 @@
-﻿using Refund.DataModel;
+using System.ComponentModel.DataAnnotations;
+using Refund.DataModel;
 using Warp;
 
 namespace Refund.JobResources;
@@ -151,6 +152,6 @@ public class DataSetFs : Resource
 
 public enum EerGroupingMode
 {
-    NumberOfGroups,
-    GroupExposure
+    [Display(Name = "Number of groups")] NumberOfGroups,
+    [Display(Name = "Exposure per group")] GroupExposure
 }

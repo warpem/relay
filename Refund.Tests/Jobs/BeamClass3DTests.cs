@@ -36,6 +36,7 @@ public class BeamClass3DTests : IDisposable
         Assert.Equal("4", args["classes"]);
         Assert.Equal("25", args["iterations"]);
         Assert.Equal("fsc", args["regularization"]);
+        Assert.Equal(BeamClassificationParticleSchedule.Quadratic, job.ParticleSchedule);
         Assert.Equal("8", args["workers"]);
         Assert.Equal(8, job.CoreCount);
         Assert.Equal(1, job.GpuCount);
@@ -49,6 +50,56 @@ public class BeamClass3DTests : IDisposable
         Assert.Equal(job.ReferenceList(2), args["reference-half-2"]);
         Assert.Equal(BeamClassificationType.Unsupervised, job.ClassificationType);
         Assert.Equal(1, job.PortsIn["Reference"].MaxItems);
+    }
+
+    [Theory]
+    [InlineData(BeamClassificationParticleSchedule.Quadratic, "quadratic")]
+    [InlineData(BeamClassificationParticleSchedule.Step, "step")]
+    [InlineData(BeamClassificationParticleSchedule.Full, "full")]
+    public void ParticleSchedulesUseBeamNamesAndHideUnusedSubsetFields(BeamClassificationParticleSchedule schedule, string argument)
+    {
+        var job = NewJob();
+        job.ParticleSchedule = schedule;
+        // Full-set processing ignores saved subset settings, as Beam does.
+        if (schedule == BeamClassificationParticleSchedule.Full)
+            job.InitialParticles = job.FullSetIterations = 0;
+        var args = job.ComposeCommandArguments();
+        Assert.Equal(argument, args["particle-schedule"]);
+        foreach (string property in new[] { nameof(job.InitialParticles), nameof(job.FullSetIterations) })
+            Assert.Equal(schedule != BeamClassificationParticleSchedule.Full,
+                Job.IsPropertyVisible(typeof(BeamClass3D), typeof(BeamClass3D).GetProperty(property)!, job.AsReadOnly()));
+        if (schedule == BeamClassificationParticleSchedule.Full)
+        {
+            Assert.DoesNotContain("initial-particles", args.Keys);
+            Assert.DoesNotContain("full-set-iterations", args.Keys);
+        }
+        else
+        {
+            Assert.Equal("100000", args["initial-particles"]);
+            Assert.Equal("3", args["full-set-iterations"]);
+        }
+    }
+
+    [Fact]
+    public void ParticleScheduleSettingsRoundTripAndValidateLikeBeam()
+    {
+        var job = NewJob();
+        job.ParticleSchedule = BeamClassificationParticleSchedule.Step;
+        job.InitialParticles = 2_000;
+        job.FullSetIterations = 5;
+        var restored = NewJob();
+        restored.ReadFromJson(job.ToJson());
+        Assert.Equal(BeamClassificationParticleSchedule.Step, restored.ParticleSchedule);
+        Assert.Equal("step", restored.ComposeCommandArguments()["particle-schedule"]);
+        Assert.Equal("2000", restored.ComposeCommandArguments()["initial-particles"]);
+        Assert.Equal("5", restored.ComposeCommandArguments()["full-set-iterations"]);
+        restored.InitialParticles = 4 * restored.ClassCount - 1;
+        Assert.Contains(nameof(restored.InitialParticles), restored.ValidateInputs().Keys);
+        restored.InitialParticles = 4 * restored.ClassCount;
+        restored.FullSetIterations = 0;
+        Assert.Contains(nameof(restored.FullSetIterations), restored.ValidateInputs().Keys);
+        restored.FullSetIterations = restored.Iterations + 1; // Beam uses all particles throughout.
+        Assert.Empty(restored.ValidateInputs());
     }
 
     [Fact]

@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -349,8 +350,16 @@ public class BeamClass2D : Job, IClusterJob
     }
 }
 
-public enum Beam2DRegularization { FRC, Denoise }
-public enum Beam2DAssignments { Soft, Hard }
+public enum Beam2DRegularization
+{
+    [Display(Name = "FRC filtering")] FRC,
+    [Display(Name = "Noise2Noise denoising")] Denoise
+}
+public enum Beam2DAssignments
+{
+    [Display(Name = "Soft (probabilistic)")] Soft,
+    [Display(Name = "Hard (best class)")] Hard
+}
 
 public sealed class BeamSubclassGroup
 {

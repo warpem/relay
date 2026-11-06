@@ -1,4 +1,7 @@
-﻿namespace Refund.UIFields;
+using System.ComponentModel.DataAnnotations;
+using System.Reflection;
+
+namespace Refund.UIFields;
 
 /// <summary>
 /// Field attribute for enumeration values. Renders as a dropdown selection list in the UI.
@@ -20,6 +23,11 @@ public class UiEnum : UiFieldBase
     /// and their string representations.
     /// </summary>
     public Type EnumType;
+
+    /// <summary>Display annotations affect labels only; enum names remain the option values.</summary>
+    public string GetOptionLabel(string name) =>
+        EnumType.GetField(name)?.GetCustomAttribute<DisplayAttribute>()?.GetName() ?? name;
+
     
     /// <summary>
     /// Gets the Blazor component type used to render this field (UiEnumView)

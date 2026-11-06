@@ -81,3 +81,23 @@ together before collecting Beam results with this version.
 Manual finalization accepts the last complete iteration after interruption and
 generates any missing Relay visualizations. A job with no complete iteration
 cannot be finalized. Resume is intentionally not supported.
+
+## 3D classification particle schedules
+
+Beam class3d exposes its particle schedule under Particle schedule:
+
+| Relay option | CLI value |
+| --- | --- |
+| Quadratic ramp-up (default) | `--particle-schedule quadratic` |
+| Step to full set | `--particle-schedule step` |
+| Full set throughout | `--particle-schedule full` |
+
+Subset schedules expose Initial particles (`--initial-particles`, default 100,000
+across both halves) and Final full-set iterations (`--full-set-iterations`, default
+3). Both fields are hidden and omitted for Full set throughout. Initial particles
+must be at least four times the class count. A full-set iteration count covering
+the whole run makes every iteration use all particles, matching Beam.
+
+Dropdown labels use standard enum-member `[Display(Name = "...")]` annotations;
+see [enum option labels](ui-enum-labels.md). Saved enum names and CLI values stay
+unchanged.

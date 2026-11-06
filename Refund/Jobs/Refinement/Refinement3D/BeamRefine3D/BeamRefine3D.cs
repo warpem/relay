@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -14,8 +15,17 @@ using Warp.Tools;
 
 namespace Refund.Jobs.Refinement.Refinement3D.BeamRefine3D;
 
-public enum BeamAlignment { Global, Local }
-public enum BeamRegularization { FSC, Denoise, Blush }
+public enum BeamAlignment
+{
+    [Display(Name = "Global search")] Global,
+    [Display(Name = "Local search")] Local
+}
+public enum BeamRegularization
+{
+    [Display(Name = "FSC filtering")] FSC,
+    [Display(Name = "Noise2Noise denoising")] Denoise,
+    [Display(Name = "Blush denoising")] Blush
+}
 public enum BeamDevice { GPU, CPU }
 public enum BeamEwald { Off, Positive, Negative }
 

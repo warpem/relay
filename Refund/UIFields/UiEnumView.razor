@@ -1,4 +1,4 @@
-﻿@namespace Refund.UIFields
+@namespace Refund.UIFields
 @inherits UiFieldViewBase
 
 <FluentSelect TOption="SelectOption<string>" TValue="string" @bind-Value:get="ValueT" @bind-Value:set="SetValueTAsync"
@@ -17,5 +17,5 @@
 
     private Task SetValueTAsync(string value) => SetValueAsync(Enum.Parse(FieldDescriptionT.EnumType, value));
 
-    private List<SelectOption<string>> Options => FieldDescriptionT.EnumType.GetEnumNames().Select(e => new SelectOption<string>() { Value = e, Text = e }).ToList();
+    private List<SelectOption<string>> Options => FieldDescriptionT.EnumType.GetEnumNames().Select(e => new SelectOption<string>() { Value = e, Text = FieldDescriptionT.GetOptionLabel(e) }).ToList();
 }

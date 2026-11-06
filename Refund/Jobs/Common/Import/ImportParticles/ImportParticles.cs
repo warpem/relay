@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using Refund.Components.FileBrowser;
 using Refund.DataModel;
 using Refund.DataModel.ReadOnly;
@@ -8,7 +9,11 @@ using Warp.Tools;
 
 namespace Refund.Jobs.Common.Import.ImportParticles;
 
-public enum ParticleMetadataFormat { Relion, CryoSparc }
+public enum ParticleMetadataFormat
+{
+    [Display(Name = "RELION")] Relion,
+    [Display(Name = "cryoSPARC")] CryoSparc
+}
 
 /// <summary>Convert particle metadata with Beam on a CPU queue and collect Relay previews.</summary>
 [GenerateReadOnly]

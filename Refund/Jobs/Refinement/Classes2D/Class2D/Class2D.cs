@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using System.Globalization;
 using System.Text.Json;
 using Refund.DataModel;
@@ -930,13 +931,13 @@ public enum Class2DAlgorithm
     /// Variable metric gradient descent with adaptive moments - Default in RELION 4.0+.
     /// Significantly faster than EM on large datasets with comparable results.
     /// </summary>
-    VDAM = 0,
+    [Display(Name = "VDAM (gradient descent)")] VDAM = 0,
     
     /// <summary>
     /// Expectation-Maximization - Traditional algorithm used in earlier RELION versions.
     /// Can be more stable for difficult datasets but is computationally more expensive.
     /// </summary>
-    EM = 1
+    [Display(Name = "Expectation maximization (EM)")] EM = 1
 }
 
 /// <summary>

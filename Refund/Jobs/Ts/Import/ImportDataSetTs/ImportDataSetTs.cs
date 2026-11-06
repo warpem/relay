@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using System.Globalization;
 using Refund.Components.FileBrowser;
 using Refund.DataModel;
@@ -221,6 +222,6 @@ public class ImportDataSetTs : WarpJob, IClusterJob
 
 public enum TiltZeroMode
 {
-    ManualOffset,
-    AutoZero
+    [Display(Name = "Manual offset")] ManualOffset,
+    [Display(Name = "Automatic zeroing")] AutoZero
 }

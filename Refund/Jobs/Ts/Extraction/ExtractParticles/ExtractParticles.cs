@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using System.Globalization;
 using System.Text.Json;
 using Refund.DataModel;
@@ -11,7 +12,11 @@ using WarpHelper = Warp.Tools.Helper;
 
 namespace Refund.Jobs.Ts.Extraction.ExtractParticles;
 
-public enum TiltStackFormat { Relion, Beam }
+public enum TiltStackFormat
+{
+    [Display(Name = "RELION")] Relion,
+    Beam
+}
 
 /// <summary>
 /// Job that extracts particles from tilt series as 2D image stacks or 3D volumes.
@@ -285,6 +290,6 @@ public class ExtractParticles : WarpJobGpu, IClusterJob
 
 public enum ExportType
 {
-    Tiltseries,
+    [Display(Name = "Tilt series")] Tiltseries,
     Subtomograms
 }

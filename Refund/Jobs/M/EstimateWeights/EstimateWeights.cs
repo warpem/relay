@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using Refund.DataModel;
 using Refund.DataModel.ReadOnly;
 using Refund.JobResources;
@@ -221,7 +222,7 @@ public class EstimateWeights : WarpJob, IClusterJob
 
 public enum WeightEstimationMode
 {
-    Regular,
-    Spatial,
-    Reset
+    [Display(Name = "Per tilt / tilt series")] Regular,
+    [Display(Name = "Spatially varying")] Spatial,
+    [Display(Name = "Reset weights")] Reset
 }

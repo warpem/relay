@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using System.Globalization;
 using Refund.DataModel;
 using Refund.DataModel.ReadOnly;
@@ -296,14 +297,14 @@ public class ModifySpecies : LocalJob, ILocalJob
 
 public enum EwaldSign
 {
-    Unchanged,
+    [Display(Name = "Keep current value")] Unchanged,
     Negative,
     Positive
 }
 
 public enum NullableBool
 {
-    Unchanged,
-    True,
-    False
+    [Display(Name = "Keep current value")] Unchanged,
+    [Display(Name = "Yes")] True,
+    [Display(Name = "No")] False
 }
