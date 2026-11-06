@@ -25,7 +25,7 @@ public class BeamInit3D : BeamParticleJob
     public override string CommandName => "beam init3d";
     public override bool SupportsAlignment => false;
     public override Type ExpandedViewType => typeof(BeamClass3DExpandedView);
-    public override int2 CardSquareCount { get => new(Math.Clamp(NClasses, 2, 5), 1); set { } }
+    public override int2 CardSquareCount { get => Class3DCardLayout.SquareCount(NClasses); set { } }
 
     [UiFieldGroup("Initial model", -1)]
     [UiInt("classes", "Number of classes", min: 1, max: 1000)]

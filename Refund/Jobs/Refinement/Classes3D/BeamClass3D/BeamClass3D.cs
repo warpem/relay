@@ -26,7 +26,7 @@ public class BeamClass3D : BeamParticleJob
     public override string TypeDescription => "Supervised or unsupervised 3D classification of images or particle tilt series with Beam";
     public override string CommandName => "beam class3d";
     public override Type ExpandedViewType => typeof(BeamClass3DExpandedView);
-    public override int2 CardSquareCount { get => new(Math.Clamp(NClasses, 2, 5), 1); set { } }
+    public override int2 CardSquareCount { get => Class3DCardLayout.SquareCount(NClasses); set { } }
 
     private BeamClassificationType _classificationType;
     [UiFieldGroup("Classification", -1)]
@@ -213,7 +213,7 @@ public class BeamClass3D : BeamParticleJob
             }
             if (!File.Exists(VisCard(i))) BakeryWrapper.Class3DJobCard(
                 Enumerable.Range(1, NClasses).Take(20).Select(c => VisMap3d(i, c)).ToArray(),
-                Enumerable.Range(1, NClasses).Take(20).ToArray(), VisCard(i));
+                Enumerable.Range(1, NClasses).Take(20).ToArray(), VisCard(i), IterationFile(i, "model.star"));
             latest = i;
         }
         int committed = CommittedIterations().DefaultIfEmpty(-1).Max();

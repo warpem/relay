@@ -15,15 +15,7 @@ public class Refine : WarpJobGpu, IClusterJob
     {
         get
         {
-            //if (!PortsIn[PortInPopulation].IsConnected)
-            //    return new int2(2, 1);
-
-            var nClasses = Math.Max(1, SpeciesCount);// PortsIn[PortInPopulation].GetSingleResource<MPopulation>().Species.Count;
-
-            if (nClasses <= 5)
-                return new int2(Math.Max(2, nClasses), 1);
-            else
-                return new int2(Math.Min(5, (nClasses + 3) / 4), 1);
+            return Class3DCardLayout.SquareCount(Math.Max(1, SpeciesCount));
         }
         set { }
     }

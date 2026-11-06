@@ -12,6 +12,7 @@ import typer
 from matplotlib import pyplot as plt
 
 from ._cli import cli
+from .class3d_job_card import class_grid
 from ..orthoslices.slice import take_slice
 
 
@@ -101,18 +102,8 @@ def _plot_multiple_species(species_folders: list, output_file: Path):
     """Plot multiple species as xy slices only with resolution labels."""
     n_species = len(species_folders)
     
-    # determine grid layout (following class3d-job-card logic)
-    if n_species <= 5:
-        n_rows, n_cols = 1, n_species
-    elif 5 < n_species <= 8:
-        n_rows, n_cols = 2, 4
-    elif 8 < n_species <= 12:
-        n_rows, n_cols = 2, 6
-    elif 12 < n_species <= 16:
-        n_rows, n_cols = 2, 8
-    elif 16 < n_species <= 20:
-        n_rows, n_cols = 2, 10
-    
+    n_rows, n_cols = class_grid(n_species)
+
     aspect_ratio = n_cols / n_rows
     
     # collect volume slices and resolution values

@@ -35,12 +35,7 @@ public class InitialReference : RelionJob, IClusterJob
     {
         get
         {
-            var nClasses = NClasses;
-
-            if (nClasses <= 5)
-                return new int2(Math.Max(2, nClasses), 1);
-            else
-                return new int2(Math.Min(5, (nClasses + 3) / 4), 1);
+            return Class3DCardLayout.SquareCount(NClasses);
         }
         set { }
     }
@@ -616,7 +611,8 @@ public class InitialReference : RelionJob, IClusterJob
                                                                                                .Select(m => m.AverageVolumePath)
                                                                                                .ToArray(),
                                                                                   classNumbers: Enumerable.Range(start: 1, count: NClasses).Take(20).ToArray(),
-                                                                                  outputImageFile: VisCard(ires))
+                                                                                  outputImageFile: VisCard(ires),
+                                                                                  modelStarFile: ResModelStarFile(ires))
                                      ));
 
                 Task.WaitAll(visTasks.ToArray());

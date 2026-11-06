@@ -549,23 +549,9 @@ public static class BakeryWrapper
     public static void InitialReference3DJobCard(
         string[] volumeFiles,
         int[] classNumbers,
-        string outputImageFile
-    )
-    {
-        if(classNumbers.Length != volumeFiles.Length)
-            throw new Exception("need same number of class numbers as volume files");
-        
-        var command = "initial-reference-3d-job-card " +
-                      $"--output-file {outputImageFile} ";
-
-        for (int i = 0; i < volumeFiles.Length; i++)
-        {
-            command += $"--volume-file {volumeFiles[i]} ";
-            command += $"--class-number {classNumbers[i].ToString()} ";
-        }
-
-        RunCommand(command);
-    }
+        string outputImageFile,
+        string modelStarFile = null
+    ) => Class3DJobCard(volumeFiles, classNumbers, outputImageFile, modelStarFile);
 
     /// <summary>
     /// Creates a job card visualization for 3D classification results.
@@ -581,7 +567,8 @@ public static class BakeryWrapper
     public static void Class3DJobCard(
         string[] volumeFiles,
         int[] classNumbers,
-        string outputImageFile
+        string outputImageFile,
+        string modelStarFile = null
     )
     {
         if(classNumbers.Length != volumeFiles.Length)
@@ -591,6 +578,8 @@ public static class BakeryWrapper
         for (int i = 0; i < volumeFiles.Length; i++)
             arguments.AddRange(["--volume-file", volumeFiles[i], "--class-number",
                 classNumbers[i].ToString(System.Globalization.CultureInfo.InvariantCulture)]);
+        if (!string.IsNullOrEmpty(modelStarFile) && File.Exists(modelStarFile))
+            arguments.AddRange(["--model-star-file", modelStarFile]);
         RunArguments(arguments);
     }
     

@@ -201,18 +201,16 @@
             @if (job.Status != JobStatus.Building)
             {
                 <FluentTab Id="job-parameters" Header="Parameters" Style="padding: 0.5rem 0; height: 100%;">
-                    <div style="height: 100%; overflow-y: auto;">
-                        <JobPortDisplay Job="@job"
-                                        IsDisabled="true"
-                                        GetPortErrors="@GetNoPortErrors"
-                                        OnEdgeRemoved="@HandleEdgeRemoved" />
-                        
-                        <JobParameterDisplay Job="@job"
-                                             IsDisabled="true"
-                                             ShowAdvanced="true"
-                                             GetError="@GetNoError"
-                                             ValueChanged="@HandleParameterChanged"/>
-                    </div>
+                    <JobPortDisplay Job="@job"
+                                    IsDisabled="true"
+                                    GetPortErrors="@GetNoPortErrors"
+                                    OnEdgeRemoved="@HandleEdgeRemoved" />
+
+                    <JobParameterDisplay Job="@job"
+                                         IsDisabled="true"
+                                         ShowAdvanced="true"
+                                         GetError="@GetNoError"
+                                         ValueChanged="@HandleParameterChanged"/>
                 </FluentTab>
             }
 

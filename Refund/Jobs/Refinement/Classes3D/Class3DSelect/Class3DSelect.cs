@@ -72,12 +72,7 @@ public class Class3DSelect : Job, ILocalJob
     {
         get
         {
-            var nClasses = NClasses;
-
-            if (nClasses <= 5)
-                return new int2(Math.Max(2, nClasses), 1);
-            else
-                return new int2(Math.Min(5, (nClasses + 3) / 4), 1);
+            return Class3DCardLayout.SquareCount(NClasses);
         }
         set { }
     }
@@ -377,7 +372,8 @@ public class Class3DSelect : Job, ILocalJob
                     BakeryWrapper.Class3DJobCard(
                         volumeFiles: selectedMaps.Take(20).Select(m => m.AverageVolumePath).ToArray(),
                         classNumbers: SelectedClasses.Take(20).ToArray(),
-                        outputImageFile: VisCard(0)
+                        outputImageFile: VisCard(0),
+                        modelStarFile: resourceClasses.Model
                     );
 
                     // Copy and filter class statistics

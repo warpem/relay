@@ -108,12 +108,7 @@ public class Class3D : RelionJob, IClusterJob, IPooledJob, IPoolStatus
     {
         get
         {
-            var nClasses = NClasses;
-
-            if (nClasses <= 5)
-                return new int2(Math.Max(2, nClasses), 1);
-            else
-                return new int2(Math.Min(5, (nClasses + 3) / 4), 1);
+            return Class3DCardLayout.SquareCount(NClasses);
         }
         set { }
     }
@@ -1434,7 +1429,7 @@ public class Class3D : RelionJob, IClusterJob, IPooledJob, IPoolStatus
                                                                                            .Range(start: 1, count: NClasses)
                                                                                            .Take(20)
                                                                                            .ToArray(),
-                                                                                       VisCard(ires))));
+                                                                                       VisCard(ires), ResModelStarFile(ires))));
 
                 // Wait for all visualization tasks to complete
                 Task.WaitAll(VisTasks.ToArray());
