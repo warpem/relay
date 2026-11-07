@@ -33,6 +33,8 @@ public class BeamClass3DTests : IDisposable
         var job = NewJob();
         var args = job.ComposeCommandArguments();
         Assert.Equal("beam class3d", job.CommandName);
+        Assert.False(job.SkipAlignment);
+        Assert.DoesNotContain("skip-alignment", args.Keys);
         Assert.Equal("4", args["classes"]);
         Assert.Equal("25", args["iterations"]);
         Assert.Equal("fsc", args["regularization"]);
@@ -136,6 +138,54 @@ public class BeamClass3DTests : IDisposable
         Assert.Equal(nameof(job.ClassificationType), field.ConditionalOnField);
         Assert.Equal(BeamClassificationType.Unsupervised, field.ConditionalOnValue);
         Assert.DoesNotContain(Job.TypeUiFields[typeof(BeamClass3D)].Keys, p => p.Name == "RefineDefocus");
+    }
+
+    [Theory]
+    [InlineData(ParticleType.Image)]
+    [InlineData(ParticleType.Tiltseries)]
+    public void SkipAlignmentUsesFixedPosesAndHidesSavedSearchSettings(ParticleType modality)
+    {
+        var job = NewJob();
+        var particles = ParticleInputs.Sources(job.PortsIn["Particles"])[0].Resource;
+        particles.DataDimensionality = modality;
+        if (modality == ParticleType.Tiltseries)
+            Connect(job.PortsIn["TiltSeries"], new TiltSeriesSet { HasMetadata = true, HasCtf = true, LatestMetadataDirectory = "/xml" });
+        job.Alignment = BeamAlignment.Local;
+        job.RecenterLocalSearch = job.LocalGaussianPriors = job.DontAlignSymmetry = true;
+        job.SkipAlignment = true;
+
+        Assert.Empty(job.ValidatePortInputs()); // No mask required for fixed poses.
+        var args = job.ComposeCommandArguments();
+        Assert.Contains("skip-alignment", args.Keys);
+        foreach (string argument in new[] { "local-angular-range", "translation-range", "recenter-local-search", "local-gaussian-priors", "beams", "dont-align-symmetry", "pose-marginalization-temperature" })
+            Assert.DoesNotContain(argument, args.Keys);
+        foreach (string property in new[] { nameof(job.Alignment), nameof(job.LocalAngularRange), nameof(job.TranslationRange), nameof(job.LocalTranslationRange), nameof(job.RecenterLocalSearch), nameof(job.LocalGaussianPriors), nameof(job.Beams), nameof(job.DontAlignSymmetry), nameof(job.PoseMarginalizationTemperature) })
+            Assert.False(Job.IsPropertyVisible(typeof(BeamClass3D), typeof(BeamClass3D).GetProperty(property)!, job.AsReadOnly()));
+        if (modality == ParticleType.Tiltseries) Assert.Equal("/xml", args["metadata-dir"]);
+
+        var restored = NewJob();
+        restored.ReadFromJson(job.ToJson());
+        Assert.True(restored.SkipAlignment);
+        Assert.False(restored.SupportsAlignment);
+        job.SkipAlignment = false;
+        Connect(job.PortsIn["Mask"], new Mask("/mask.mrc"));
+        Assert.Empty(job.ValidatePortInputs());
+        Assert.DoesNotContain("skip-alignment", job.ComposeCommandArguments().Keys);
+        Assert.Contains("local-angular-range", job.ComposeCommandArguments().Keys);
+    }
+
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    public void SkipAlignmentRequiresBothAnglesAndShifts(bool angles, bool shifts)
+    {
+        var job = NewJob();
+        job.SkipAlignment = true;
+        var particles = ParticleInputs.Sources(job.PortsIn["Particles"])[0].Resource;
+        particles.HasAngles = angles;
+        particles.HasShifts = shifts;
+        Assert.Contains("Particles", job.ValidatePortInputs().Keys);
     }
 
     [Fact]

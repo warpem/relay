@@ -101,3 +101,16 @@ the whole run makes every iteration use all particles, matching Beam.
 Dropdown labels use standard enum-member `[Display(Name = "...")]` annotations;
 see [enum option labels](ui-enum-labels.md). Saved enum names and CLI values stay
 unchanged.
+
+
+## 3D classification without alignment
+
+Class3d's Skip alignment switch passes `--skip-alignment` and uses the supplied
+particle Euler angles and shifts for classification and reconstruction. Input
+particles must advertise both angles and shifts. It supports image particles and
+particle tilt stacks; tilt stacks still require their tilt-series metadata.
+A connected mask is optional. Alignment mode, search ranges, local priors,
+recentering, alignment candidates, symmetry-frame alignment and pose
+marginalization temperature are hidden and omitted while this switch is enabled.
+Saved search settings are preserved when alignment is re-enabled. Particle
+diameter remains available for automatic masking.

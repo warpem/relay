@@ -37,6 +37,7 @@ public class BeamClass3D : BeamParticleJob
     public override string TypeNameShort => "💥 Class3D";
     public override string TypeDescription => "Supervised or unsupervised 3D classification of images or particle tilt series with Beam";
     public override string CommandName => "beam class3d";
+    public override bool SupportsAlignment => !SkipAlignment;
     public override Type ExpandedViewType => typeof(BeamClass3DExpandedView);
     public override int2 CardSquareCount { get => Class3DCardLayout.SquareCount(NClasses); set { } }
 
@@ -61,6 +62,10 @@ public class BeamClass3D : BeamParticleJob
 
     [UiStatic("", "Number of classes", ConditionalOnField = nameof(ClassificationType), ConditionalOnValue = BeamClassificationType.Supervised)]
     public int NClasses => ClassificationType == BeamClassificationType.Unsupervised ? ClassCount : ReferenceMaps().Count;
+
+    [UiBool("skip-alignment", "Skip alignment",
+        helpText: "Classify and reconstruct using the input particle orientations and shifts without searching or updating poses. Requires existing angles and shifts; a mask is optional.")]
+    [RelayProperty] public bool SkipAlignment { get; set; }
 
     [UiInt("iterations", "Iterations", min: 1, max: 10000)]
     [RelayProperty] public int Iterations { get; set; } = 25;
@@ -112,6 +117,10 @@ public class BeamClass3D : BeamParticleJob
     public override Dictionary<string, List<string>> ValidatePortInputs()
     {
         var errors = base.ValidatePortInputs();
+        if (SkipAlignment)
+            foreach (var source in ParticleInputs.Sources(PortsIn["Particles"]))
+                if (source.Resource is { } particles && (!particles.HasAngles || !particles.HasShifts))
+                    AddPortValidationError(errors, "Particles", "Classification without alignment requires existing orientations and shifts.");
         var maps = ReferenceMaps();
         if (maps.Count > 0 && ClassificationType == BeamClassificationType.Unsupervised && maps.Count != 1)
             AddPortValidationError(errors, "Reference", "Unsupervised classification requires exactly one starting map.");

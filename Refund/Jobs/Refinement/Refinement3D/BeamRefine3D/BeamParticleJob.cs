@@ -57,7 +57,8 @@ public abstract class BeamParticleJob : Job, IClusterJob
 
     [UiFieldGroup("Alignment", 1)]
     [UiDecimal("pose-marginalization-temperature", "Pose marginalization temperature", min: 0, max: 100,
-        stepSize: 0.1, isAdvanced: true, helpText: "Scales the pose posterior covariance; 0 uses only the best pose.")]
+        stepSize: 0.1, isAdvanced: true, helpText: "Scales the pose posterior covariance; 0 uses only the best pose.",
+        ConditionalOnField = nameof(SupportsAlignment), ConditionalOnValue = true)]
     [RelayProperty] public decimal PoseMarginalizationTemperature { get; set; } = 1;
 
     [UiFieldGroup("Alignment", 1)]
