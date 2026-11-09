@@ -111,3 +111,9 @@ shared fetches, sorting, error messages and disposal. It accepts the same
 
 The class renderer check also covers browser sorting, keyboard and bulk selection,
 contrast handles, lazy subclass panels, combined export ID remapping and disposal.
+
+`npm run test:micrograph` checks the client micrograph worker and viewer: selected
+MRC plane range requests, float32/float16/int16 decoding, extended headers,
+servers that ignore Range, image/mask orientation, STAR coordinates, zoom,
+overlays, rapid navigation, clearing, errors and disposal. It uses the same
+`PLAYWRIGHT_MODULE` / `CHROMIUM_EXECUTABLE` overrides as the other browser checks.

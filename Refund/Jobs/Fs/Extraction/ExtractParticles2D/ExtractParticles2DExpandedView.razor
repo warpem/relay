@@ -24,8 +24,8 @@ else if (_allThumbnails != null && _allThumbnails.Any())
         @if (_selectedThumbnail != null)
         {
             <div class="viewer-container">
-                <MicrographViewer Width="768" 
-                                  Height="768"
+                <MicrographViewer MinWidth="768"
+                                  MinHeight="768"
                                   MicrographPath="@(_job.ResAverageFile(_selectedName))"
                                   ThumbnailPath="@(_job.VisThumbnail(_selectedName))"
                                   ParticleStarPath="@(_job.ResParticlesStar(_selectedName))"

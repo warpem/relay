@@ -13,3 +13,30 @@
     margin-left: 8px;
     margin-right: 8px;
 }
+.micrograph-controls {
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity .1s .2s, visibility .1s .2s;
+}
+.micrograph-viewer-container:hover .micrograph-controls,
+.micrograph-viewer-container:focus-within .micrograph-controls {
+    opacity: 1;
+    visibility: visible;
+}
+.micrograph-viewer-container ::deep .micrograph-minimap {
+    position: absolute;
+    bottom: 10px;
+    left: 10px;
+    cursor: crosshair;
+    opacity: 0;
+    transition: opacity .1s .2s;
+}
+.micrograph-viewer-container:hover ::deep .micrograph-minimap,
+.micrograph-viewer-container:focus-within ::deep .micrograph-minimap { opacity: 1; }
+.micrograph-viewer-container ::deep .micrograph-status {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+}
