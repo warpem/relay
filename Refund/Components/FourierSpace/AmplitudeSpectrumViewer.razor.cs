@@ -36,6 +36,9 @@ public partial class AmplitudeSpectrumViewer : IAsyncDisposable
     /// This parameter is used for standard movie mode.
     /// </summary>
     [Parameter] public string? MovieFilePath { get; set; }
+    /// <summary>Reload a live CTF result when its metadata/spectrum files are overwritten.</summary>
+    [Parameter] public long? ResultRevision { get; set; }
+    private long? _previousResultRevision;
     
     /// <summary>
     /// Path to the tilt series file for which to display the amplitude spectrum.
@@ -145,9 +148,10 @@ public partial class AmplitudeSpectrumViewer : IAsyncDisposable
         bool needsUpdate = false;
         
         // Check if movie path has changed
-        if (MovieFilePath != null && MovieFilePath != _previousMoviePath)
+        if (MovieFilePath != null && (MovieFilePath != _previousMoviePath || ResultRevision != _previousResultRevision))
         {
             _previousMoviePath = MovieFilePath;
+            _previousResultRevision = ResultRevision;
             needsUpdate = true;
         }
         

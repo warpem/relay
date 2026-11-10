@@ -1,0 +1,15 @@
+.astigmatism {width:100%;min-width:0;font-size:12px;}
+.astigmatism-heading,.astigmatism-scale {display:flex;align-items:center;justify-content:space-between;gap:8px;}
+.astigmatism-heading {min-height:22px;flex-wrap:wrap;}
+.astigmatism-heading span,.astigmatism-scale {color:var(--colorNeutralForeground3);font-size:11px;font-variant-numeric:tabular-nums;}
+.astigmatism-scale {min-height:26px;}
+.zoom-controls {display:flex;gap:2px;}
+.zoom-controls ::deep fluent-button {min-width:24px;min-height:24px;height:24px;padding:0 4px;}
+canvas {display:block;width:100%;aspect-ratio:1;cursor:crosshair;touch-action:manipulation;}
+canvas:focus-visible {outline:2px solid var(--colorBrandStroke1);outline-offset:2px;}
+
+.astigmatism-filter {display:flex;align-items:center;gap:4px;}.astigmatism-filter ::deep fluent-number-field {width:70px;}
+.astigmatism-filter ::deep fluent-field{display:block;row-gap:0;margin:0;padding:0;line-height:1}
+.astigmatism-filter ::deep fluent-text-input{height:24px;line-height:1}
+.astigmatism-filter ::deep fluent-text-input::part(root){height:24px;min-height:24px;padding:0 6px}
+.astigmatism-filter ::deep fluent-text-input::part(control){font-size:11px;line-height:18px}

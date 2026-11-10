@@ -3,10 +3,12 @@ const scatterPlots = new Map();
 /** Simple debounce helper */
 function debounce(fn, wait) {
     let t;
-    return function (...args) {
+    const debounced = function (...args) {
         clearTimeout(t);
         t = setTimeout(() => fn.apply(this, args), wait);
     };
+    debounced.cancel = () => clearTimeout(t);
+    return debounced;
 }
 
 /** Round the axis bounds to nice round numbers for labeling. */
@@ -57,8 +59,10 @@ class ScatterPlot {
 
         // Set up debounced blazor calls
         this._debouncedPointHover = debounce((idx) => {
-            if (dotNetRef) {
-                dotNetRef.invokeMethodAsync("OnPointHovered", idx);
+            if (dotNetRef && !this.disposed) {
+                dotNetRef.invokeMethodAsync("OnPointHovered", idx).catch(error => {
+                    if (!this.disposed) console.error(error);
+                });
             }
         }, 50);
 
@@ -76,6 +80,7 @@ class ScatterPlot {
         this.pointCollections = [];   // Array of collections of points
         this.pointRadius = 2.5;
         this.zoom = 1.0;
+        this.enableZoom = true;
         this.rangeMin = 0;
         this.rangeMax = 1;
         this.opacity = 1.0;
@@ -171,7 +176,12 @@ class ScatterPlot {
         
         // Make sure names match the JSON from Blazor
         this.pointRadius = config.pointRadius;
-        this.zoom = config.zoom;
+        this.enableZoom = config.enableZoom !== false;
+        this.zoom = this.enableZoom ? config.zoom : 1;
+        if (!this.enableZoom) {
+            this._debounceWheel.cancel();
+            this._accumWheelDelta = 0;
+        }
         this.rangeMin = config.rangeMin;
         this.rangeMax = config.rangeMax;
         this.opacity = config.opacity;
@@ -696,6 +706,7 @@ class ScatterPlot {
 
     /** Debounced trackpad zoom accumulation */
     handleWheel(e) {
+        if (!this.enableZoom) return;
         if (e.ctrlKey || e.shiftKey) {
             e.preventDefault();
             this._accumWheelDelta += e.deltaY;
@@ -705,6 +716,7 @@ class ScatterPlot {
 
     // Helper method to apply zoom changes, used by both wheel zoom and sync zoom
     applyZoomChange(newZoom, useMousePosition = false) {
+        if (!this.enableZoom) return;
         if (newZoom === this.zoom) return; // No change needed
         
         // Store old zoom for comparison
@@ -835,6 +847,8 @@ class ScatterPlot {
     }
 
     dispose() {
+        this.disposed = true;
+        this._debouncedPointHover.cancel();
         this.canvas.removeEventListener("mousemove", this.handleMouseMove);
         this.canvas.removeEventListener("mouseleave", this.handleMouseLeave);
         this.canvas.removeEventListener("click", this.handleClick);

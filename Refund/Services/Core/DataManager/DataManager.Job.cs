@@ -156,6 +156,9 @@ public partial class DataManager
                         "This job belongs to a factory instance and cannot be deleted directly. " +
                         "Delete the factory instance instead.");
 
+                if (originalJob is Refund.Jobs.Fs.WarpLive.WarpLiveJob liveSession)
+                    WarpLiveSessions.Remove(liveSession.Identity);
+
                 // Delete the job from the data model
                 _dataRepository.DeleteJob(originalUser, originalJob);
             }
@@ -365,6 +368,8 @@ public partial class DataManager
                     $"Job {resolvedJob.QualifiedName}",
                     allowClearingDependents: true,
                     allowWaitingDependents: true);
+                if (resolvedJob is Refund.Jobs.Fs.WarpLive.WarpLiveJob liveSession)
+                    WarpLiveSessions.Remove(liveSession.Identity);
                 resolvedJob.AddEvent(EventType.ClearingStarted, originalUser);
                 resolvedJob.Status = JobStatus.Clearing;
                 originalJob = resolvedJob;

@@ -426,6 +426,8 @@ public abstract class ReadOnlyJob : IIdentifiable, IAudited, IAnnotated, IViewIt
     /// Interactive jobs require user input during execution.
     /// </summary>
     public bool IsInteractive => _job.IsInteractive;
+
+    public bool ControlsOwnExecution => _job.ControlsOwnExecution;
     
     /// <summary>
     /// Gets a value indicating whether this job can be resumed if interrupted.

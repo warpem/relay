@@ -1,0 +1,209 @@
+@using Refund.Services.WarpLive
+@using Microsoft.JSInterop
+@using System.Globalization
+
+<section class="study-movies" aria-label="Movies">
+    <div class="movies-toolbar">
+        <FluentTextInput Class="movie-search" Value="@View.Query" ValueChanged="Search" Immediate="true" ImmediateDelay="180" Placeholder="Filename or movie number" aria-label="Search movies" />
+        <FluentSelect Class="status-filter" Width="148px" TOption="string" TValue="string" Items="Statuses" Value="@View.Status" ValueChanged="FilterStatus" aria-label="Movie status" />
+        <span class="match-count">@_matches.Count.ToString("N0") @(_matches.Count == 1 ? "movie" : "movies")</span>
+        <span class="toolbar-space"></span>
+        <span class="selection-count">@View.Selected.Count.ToString("N0") selected</span>
+        @if (_hiddenSelected > 0)
+        {
+            <span class="hidden-selection">@_hiddenSelected.ToString("N0") outside these results</span>
+        }
+        <FluentButton Appearance="ButtonAppearance.Subtle" Disabled="@(View.Selected.Count == 0)" OnClick="ClearSelection">Clear</FluentButton>
+    </div>
+    <div class="batch-toolbar">
+        <FluentButton Disabled="@(_pageItems.Count == 0)" OnClick="SelectPage">Select page</FluentButton>
+        <FluentButton Disabled="@(_matches.Count == 0 || _selectedMatching == _matches.Count)" OnClick="SelectAllMatching">Select all @_matches.Count.ToString("N0") matching</FluentButton>
+        <span class="batch-divider"></span>
+        <FluentButton Disabled="@(View.Selected.Count == 0)" OnClick="@(() => ApplyDisposition(WarpLiveDisposition.Auto))" Title="Use the current filter rules">Filter rules</FluentButton>
+        <FluentButton Disabled="@(View.Selected.Count == 0)" OnClick="@(() => ApplyDisposition(WarpLiveDisposition.Keep))" Title="Keep regardless of filters">Keep</FluentButton>
+        <FluentButton Disabled="@(View.Selected.Count == 0)" OnClick="@(() => ApplyDisposition(WarpLiveDisposition.Exclude))">Exclude</FluentButton>
+        <FluentButton Disabled="@(_selectedFailed == 0)" OnClick="RetrySelected">Retry failed @(_selectedFailed > 0 ? $"({_selectedFailed:N0})" : "")</FluentButton>
+    </div>
+    <div class="movie-table-scroll">
+        <table class="movie-table">
+            <thead>
+                <tr>
+                    <th class="check-column"><FluentCheckbox ThreeState="true" ShowIndeterminate="false" CheckState="@PageCheckState" CheckStateChanged="TogglePage" Disabled="@(_pageItems.Count == 0)" aria-label="Select all movies on this page" /></th>
+                    @foreach (var column in Columns)
+                    {
+                        <th class="@column.Class" aria-sort="@SortAria(column.Key)"><button @onclick="@(() => Sort(column.Key))">@column.Label <span class="sort-arrow">@(View.SortColumn == column.Key ? (View.Descending ? "↓" : "↑") : "")</span></button></th>
+                    }
+                    <th class="inspect-column"><span class="visually-hidden">View in Monitor</span></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var movie in _pageItems)
+                {
+                    <tr @key="movie.Index" class="@(movie.Index == SelectedIndex ? "active-movie" : "") @(View.Selected.Contains(movie.Index) ? "checked-movie" : "")" style="--movie-status:@Session.StatusColor(movie)" @onclick="@(() => SelectMovie(movie.Index))" @ondblclick="@(() => Open(movie.Index))">
+                        <td class="check-column" @onclick:stopPropagation="true" @ondblclick:stopPropagation="true"><FluentCheckbox Value="@View.Selected.Contains(movie.Index)" ValueChanged="@(value => ToggleMovie(movie.Index, value))" aria-label="@($"Select movie {movie.Index + 1}")" /></td>
+                        <td class="number-column">@((movie.Index + 1).ToString("N0"))</td>
+                        <td class="filename-column"><button class="filename" title="@movie.Name" @onclick="@(() => Open(movie.Index))" @onclick:stopPropagation="true">@movie.Name</button></td>
+                        <td class="status-column"><span class="movie-status" title="@movie.Error"><i></i>@Session.Status(movie)</span></td>
+                        <td class="metric-column">@Reading(movie, "defocus")</td>
+                        <td class="metric-column">@Reading(movie, "ctf")</td>
+                        <td class="motion-column">@Reading(movie, "motion")</td>
+                        <td class="metric-column">@Reading(movie, "ice")</td>
+                        <td class="metric-column">@Reading(movie, "particles")</td>
+                        <td class="metric-column">@Reading(movie, "astigmatism")</td>
+                        <td class="metric-column">@Reading(movie, "angle")</td>
+                        <td class="inspect-column" @onclick:stopPropagation="true"><FluentButton Appearance="ButtonAppearance.Subtle" OnClick="@(() => Open(movie.Index))" Title="@($"View movie {movie.Index + 1} in Monitor")" aria-label="@($"View movie {movie.Index + 1} in Monitor")">↗</FluentButton></td>
+                    </tr>
+                }
+                @if (_matches.Count == 0)
+                {
+                    <tr><td class="empty-table" colspan="12">No movies match this search.</td></tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <div class="pagination">
+        <span>@(_matches.Count == 0 ? "0" : $"{View.PageIndex * View.PageSize + 1:N0}–{Math.Min((View.PageIndex + 1) * View.PageSize, _matches.Count):N0}") of @_matches.Count.ToString("N0")</span>
+        <span class="toolbar-space"></span>
+        <label class="page-size"><span>Rows</span><FluentSelect TOption="string" TValue="string" Items="PageSizes" Width="76px" Value="@View.PageSize.ToString()" ValueChanged="ChangePageSize" aria-label="Rows per page" /></label>
+        <FluentButton Appearance="ButtonAppearance.Subtle" Disabled="@(View.PageIndex == 0)" OnClick="@(() => GoToPage(0))" Title="First page">«</FluentButton>
+        <FluentButton Appearance="ButtonAppearance.Subtle" Disabled="@(View.PageIndex == 0)" OnClick="@(() => GoToPage(View.PageIndex - 1))" Title="Previous page">‹</FluentButton>
+        <label class="page-number"><span>Page</span><FluentNumberInput TValue="int" Value="@(View.PageIndex + 1)" ValueChanged="@(value => GoToPage(value - 1))" Min="1" Max="@PageCount" StepButtons="NumberInputStepVisibility.Hidden" Style="width:64px" aria-label="Page number" /><span>of @PageCount.ToString("N0")</span></label>
+        <FluentButton Appearance="ButtonAppearance.Subtle" Disabled="@(View.PageIndex >= PageCount - 1)" OnClick="@(() => GoToPage(View.PageIndex + 1))" Title="Next page">›</FluentButton>
+        <FluentButton Appearance="ButtonAppearance.Subtle" Disabled="@(View.PageIndex >= PageCount - 1)" OnClick="@(() => GoToPage(PageCount - 1))" Title="Last page">»</FluentButton>
+    </div>
+</section>
+
+@code {
+    [Parameter, EditorRequired] public WarpLiveSession Session { get; set; }
+    [Parameter, EditorRequired] public Func<Action<WarpLiveSession>, Task> Update { get; set; }
+    [Parameter] public int SelectedIndex { get; set; }
+    [Parameter] public EventCallback<int> SelectedIndexChanged { get; set; }
+    [Parameter] public EventCallback<int> OpenMovie { get; set; }
+    [Parameter] public string InitialStatus { get; set; }
+    [Parameter] public ViewState State { get; set; }
+
+    public sealed class ViewState
+    {
+        public string Query { get; set; } = "";
+        public string Status { get; set; } = "All";
+        public int PageIndex { get; set; }
+        public int PageSize { get; set; } = 25;
+        public string SortColumn { get; set; } = "number";
+        public bool Descending { get; set; }
+        public HashSet<int> Selected { get; } = [];
+    }
+
+    private static readonly string[] Statuses = ["All", "Unprocessed", "Failed", "Excluded", "Filtered", "Outdated", "Kept", "Partial", "Ready"];
+    private static readonly string[] PageSizes = ["25", "50", "100"];
+    private sealed record Column(string Key, string Label, string Class);
+    private static readonly Column[] Columns = [
+        new("number", "Movie", "number-column"), new("filename", "Filename", "filename-column"), new("status", "Status", "status-column"),
+        new("defocus", "Defocus · µm", "metric-column defocus-column"), new("ctf", "CTF · Å", "metric-column"), new("motion", "Motion · Å/frame", "motion-column"),
+        new("ice", "Ice · Å", "metric-column"), new("particles", "Particles", "metric-column"),
+        new("astigmatism", "Astig. · µm", "metric-column"), new("angle", "Angle · °", "metric-column") ];
+    private readonly ViewState _localState = new();
+    private ViewState View => State ?? _localState;
+    private readonly List<WarpLiveMovie> _matches = [];
+    private readonly List<WarpLiveMovie> _pageItems = [];
+    private ViewState _previousState;
+    private string _previousInitialStatus, _previousQuery, _previousStatus, _previousSort;
+    private int _catalogVersion = -1, _plotVersion = -1, _previousPage = -1, _previousPageSize = -1;
+    private bool _previousDescending;
+    private int _hiddenSelected, _selectedMatching, _selectedFailed;
+    private int PageCount => Math.Max(1, (_matches.Count + View.PageSize - 1) / View.PageSize);
+    private bool? PageCheckState => _pageItems.Count == 0 || !_pageItems.Any(m => View.Selected.Contains(m.Index)) ? false : _pageItems.All(m => View.Selected.Contains(m.Index)) ? true : null;
+
+    protected override void OnParametersSet()
+    {
+        if (!ReferenceEquals(_previousState, View)) { _previousState = View; _catalogVersion = -1; }
+        if (InitialStatus != _previousInitialStatus)
+        {
+            _previousInitialStatus = InitialStatus;
+            if (InitialStatus != null && Statuses.Contains(InitialStatus))
+            {
+                View.Status = InitialStatus;
+                View.PageIndex = 0;
+                View.Selected.Clear();
+            }
+        }
+        Refresh();
+    }
+
+    private void Refresh()
+    {
+        bool resultsChanged = _catalogVersion != Session.CatalogVersion || _plotVersion != Session.PlotVersion || _previousQuery != View.Query || _previousStatus != View.Status || _previousSort != View.SortColumn || _previousDescending != View.Descending;
+        if (resultsChanged)
+        {
+            _catalogVersion = Session.CatalogVersion;
+            _plotVersion = Session.PlotVersion;
+            _previousQuery = View.Query;
+            _previousStatus = View.Status;
+            _previousSort = View.SortColumn;
+            _previousDescending = View.Descending;
+            string query = View.Query.Trim();
+            bool isNumber = int.TryParse(query.TrimStart('#').Replace(",", ""), out int number);
+            _matches.Clear();
+            foreach (var movie in Session.Movies)
+                if ((View.Status == "All" || Session.Status(movie) == View.Status) && (query.Length == 0 || movie.Name.Contains(query, StringComparison.OrdinalIgnoreCase) || isNumber && movie.Index + 1 == number))
+                    _matches.Add(movie);
+            _matches.Sort(CompareMovies);
+            View.Selected.RemoveWhere(index => index < 0 || index >= Session.Movies.Count);
+            UpdateSelectionCounts();
+        }
+        View.PageIndex = Math.Clamp(View.PageIndex, 0, PageCount - 1);
+        if (resultsChanged || _previousPage != View.PageIndex || _previousPageSize != View.PageSize)
+        {
+            _previousPage = View.PageIndex;
+            _previousPageSize = View.PageSize;
+            _pageItems.Clear();
+            int end = Math.Min((View.PageIndex + 1) * View.PageSize, _matches.Count);
+            for (int i = View.PageIndex * View.PageSize; i < end; i++) _pageItems.Add(_matches[i]);
+        }
+    }
+
+    private int CompareMovies(WarpLiveMovie a, WarpLiveMovie b)
+    {
+        int result;
+        if (View.SortColumn == "filename") result = string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
+        else if (View.SortColumn == "status") result = string.Compare(Session.Status(a), Session.Status(b), StringComparison.Ordinal);
+        else
+        {
+            double? av = Value(a, View.SortColumn), bv = Value(b, View.SortColumn);
+            if (!av.HasValue || !bv.HasValue) return av.HasValue ? -1 : bv.HasValue ? 1 : a.Index.CompareTo(b.Index);
+            result = av.Value.CompareTo(bv.Value);
+        }
+        if (View.Descending) result = -result;
+        return result == 0 ? a.Index.CompareTo(b.Index) : result;
+    }
+
+    private static double? Value(WarpLiveMovie movie, string metric)
+    {
+        if (metric == "number") return movie.Index;
+        var stage = metric == "motion" ? WarpLiveStage.Motion : metric == "particles" ? WarpLiveStage.Pick : WarpLiveStage.Ctf;
+        if (!movie.Done.HasFlag(stage)) return null;
+        double value = metric switch { "defocus" => movie.Defocus, "ctf" => movie.Ctf, "motion" => movie.Motion, "ice" => movie.Ice, "particles" => movie.Picks, "astigmatism" => movie.Astigmatism, "angle" => movie.AstigmatismAngle, _ => movie.Index };
+        return double.IsFinite(value) ? value : null;
+    }
+    private static string Reading(WarpLiveMovie movie, string metric) => Value(movie, metric)?.ToString(metric is "ice" or "particles" ? "N0" : metric == "angle" ? "F1" : "F2", CultureInfo.CurrentCulture) ?? "—";
+    private string SortAria(string column) => View.SortColumn != column ? "none" : View.Descending ? "descending" : "ascending";
+    private void Sort(string column) { View.Descending = View.SortColumn == column && !View.Descending; View.SortColumn = column; View.PageIndex = 0; Refresh(); }
+    private void Search(string query) { View.Query = query ?? ""; View.PageIndex = 0; View.Selected.Clear(); Refresh(); UpdateSelectionCounts(); }
+    private void FilterStatus(string status) { View.Status = status ?? "All"; View.PageIndex = 0; View.Selected.Clear(); Refresh(); UpdateSelectionCounts(); }
+    private void ChangePageSize(string size) { if (!int.TryParse(size, out int parsed) || parsed is not (25 or 50 or 100)) return; int first = View.PageIndex * View.PageSize; View.PageSize = parsed; View.PageIndex = first / parsed; Refresh(); }
+    private void GoToPage(int page) { View.PageIndex = Math.Clamp(page, 0, PageCount - 1); Refresh(); }
+    private void ToggleMovie(int index, bool selected) { if (selected) View.Selected.Add(index); else View.Selected.Remove(index); UpdateSelectionCounts(); }
+    private void TogglePage(bool? selected) { foreach (var movie in _pageItems) { if (selected == true) View.Selected.Add(movie.Index); else View.Selected.Remove(movie.Index); } UpdateSelectionCounts(); }
+    private void SelectPage() => TogglePage(true);
+    private void SelectAllMatching() { foreach (var movie in _matches) View.Selected.Add(movie.Index); UpdateSelectionCounts(); }
+    private void ClearSelection() { View.Selected.Clear(); UpdateSelectionCounts(); }
+    private void UpdateSelectionCounts()
+    {
+        _selectedMatching = _matches.Count(m => View.Selected.Contains(m.Index));
+        _hiddenSelected = View.Selected.Count - _selectedMatching;
+        _selectedFailed = View.Selected.Count(i => i >= 0 && i < Session.Movies.Count && Session.Movies[i].Failed);
+    }
+    private async Task ApplyDisposition(WarpLiveDisposition disposition) { var indices = View.Selected.ToArray(); await Update(s => s.SetDisposition(indices, disposition)); Refresh(); }
+    private async Task RetrySelected() { var indices = View.Selected.ToArray(); await Update(s => s.Retry(indices)); Refresh(); }
+    private Task SelectMovie(int index) => SelectedIndexChanged.InvokeAsync(index);
+    private async Task Open(int index) { await SelectedIndexChanged.InvokeAsync(index); await OpenMovie.InvokeAsync(index); }
+}

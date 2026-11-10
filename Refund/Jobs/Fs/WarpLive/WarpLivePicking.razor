@@ -1,0 +1,46 @@
+@using Refund.Services.WarpLive
+@using Microsoft.JSInterop
+@using Refund.Components.MicrographViewer
+
+<div class="picking-workspace">
+    <div class="picking-toolbar">
+        <FluentButton Title="Previous exposure" Appearance="ButtonAppearance.Subtle" OnClick="@(() => Select(Movie.Index - 1))" Disabled="@(Movie.Index == 0)">‹</FluentButton>
+        <span class="exposure-number"><FluentNumberInput TValue="int" Value="@(Movie.Index + 1)" ValueChanged="@(v => Select(v - 1))" Min="1" Max="Session.Movies.Count" aria-label="Picking exposure number" /></span>
+        <FluentButton Title="Next exposure" Appearance="ButtonAppearance.Subtle" OnClick="@(() => Select(Movie.Index + 1))" Disabled="@(Movie.Index == Session.Movies.Count - 1)">›</FluentButton>
+        <span class="movie-name" title="@Movie.Name">@Movie.Name</span><span class="movie-state"><i style="background:@Session.StatusColor(Movie)"></i>@Session.Status(Movie)</span>
+        <FluentButton Appearance="ButtonAppearance.Subtle" Disabled="@(LatestPicked < 0)" OnClick="@(() => Select(LatestPicked))">Latest picked</FluentButton>
+        <span class="spacer"></span>
+        @if (OpenSetup.HasDelegate) { <FluentButton Size="ButtonSize.Small" Appearance="ButtonAppearance.Subtle" OnClick="OpenSetup">Picking settings</FluentButton> }
+        <FluentButton Appearance="@(!ShowEnhanced ? ButtonAppearance.Primary : ButtonAppearance.Subtle)" OnClick="@(() => _enhanced = false)">Average</FluentButton><FluentButton Appearance="@(ShowEnhanced ? ButtonAppearance.Primary : ButtonAppearance.Subtle)" Disabled="@(!Movie.Done.HasFlag(WarpLiveStage.Enhance))" OnClick="@(() => _enhanced = true)">Enhanced</FluentButton><FluentCheckbox @bind-Value="_showPicks" Label="Picks" Disabled="@(!Session.HasCurrentParticleMetrics(Movie))" />
+    </div>
+    <div class="picking-content">
+        <section class="picking-image-region">
+            <div class="image-heading"><b>@(ShowEnhanced ? "Denoised · deconvolved" : "Dose-weighted average")</b><span>@(Session.HasCurrentParticleMetrics(Movie) ? "Selected picks" : "Picking pending")</span></div>
+            @if (Session.ActiveStale(Movie).HasFlag(WarpLiveStage.Pick)) { <div class="result-note">Picking awaits current processing settings.</div> }
+            <div class="picking-image">
+                @if (Movie.Done.HasFlag(WarpLiveStage.Motion) && !string.IsNullOrEmpty(Movie.AveragePath))
+                {
+                    <MicrographViewer @key="ViewerKey" MicrographPath="@(ShowEnhanced ? Movie.EnhancedPath : Movie.AveragePath)" ResultRevision="@(ShowEnhanced ? Movie.ResultRevision : Movie.MotionRevision)" ThumbnailPath="@Movie.ThumbnailPath" ParticleStarPath="@(_showPicks && Session.HasCurrentParticleMetrics(Movie) ? Session.GetFilteredParticleStar(Movie.Index, DisplayPixelSize) : null)" MinWidth="300" MinHeight="300" CanEditParticles="false" CanEditMask="false" CanControlParticleDisplay="false" DefaultParticleDiameter="@((double)Session.Settings.Diameter )" DefaultParticleBoxSize="@((double)(Session.Settings.Box * Session.Settings.TargetPixelSize) )" />
+                }
+                else { <div class="empty-image">Awaiting motion correction</div> }
+            </div>
+        </section>
+
+    </div>
+
+</div>
+
+@code {
+    [Parameter] public WarpLiveSession Session { get; set; }
+    [Parameter, EditorRequired] public Func<Action<WarpLiveSession>, Task> Update { get; set; }
+    [Parameter] public EventCallback OpenSetup { get; set; }
+    [Parameter] public WarpLiveMovie Movie { get; set; }
+    [Parameter] public EventCallback<int> SelectedIndexChanged { get; set; }
+    private bool _enhanced = true, _showPicks = true;
+    private bool ShowEnhanced => _enhanced && Movie.Done.HasFlag(WarpLiveStage.Enhance) && !string.IsNullOrEmpty(Movie.EnhancedPath);
+    private int LatestPicked => Session.Movies.LastOrDefault(m => Session.HasCurrentParticleMetrics(m))?.Index ?? -1;
+    // Convert physical geometry using the actual sampling of the displayed image.
+    private double DisplayPixelSize => Math.Max(.001, ShowEnhanced ? Movie.EnhancedPixelSize : Movie.PixelSize);
+    private string ViewerKey => $"{Movie.Id}-{Movie.MotionRevision}-{(ShowEnhanced ? Movie.ResultRevision : 0)}-{ShowEnhanced}-{Session.Settings.Diameter}-{Session.Settings.Box}-{Session.Settings.TargetPixelSize}";
+    private Task Select(int index) => SelectedIndexChanged.InvokeAsync(Math.Clamp(index, 0, Session.Movies.Count - 1));
+}

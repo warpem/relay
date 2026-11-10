@@ -1,0 +1,43 @@
+@using ComponentDev.Services
+@using Refund.Components.MicrographViewer
+
+<div class="picking-workspace">
+    <div class="picking-toolbar">
+        <FluentButton Title="Previous exposure" Appearance="ButtonAppearance.Subtle" OnClick="@(() => Select(Movie.Index - 1))" Disabled="@(Movie.Index == 0)">‹</FluentButton>
+        <span class="exposure-number"><FluentNumberInput TValue="int" Value="@(Movie.Index + 1)" ValueChanged="@(v => Select(v - 1))" Min="1" Max="Session.Movies.Count" aria-label="Picking exposure number" /></span>
+        <FluentButton Title="Next exposure" Appearance="ButtonAppearance.Subtle" OnClick="@(() => Select(Movie.Index + 1))" Disabled="@(Movie.Index == Session.Movies.Count - 1)">›</FluentButton>
+        <span class="movie-name" title="@Movie.Name">@Movie.Name</span><span class="movie-state"><i style="background:@Session.StatusColor(Movie)"></i>@Session.Status(Movie)</span>
+        <FluentButton Appearance="ButtonAppearance.Subtle" Disabled="@(LatestPicked < 0)" OnClick="@(() => Select(LatestPicked))">Latest picked</FluentButton>
+        <span class="spacer"></span>
+        @if (OpenSetup.HasDelegate) { <FluentButton Size="ButtonSize.Small" Appearance="ButtonAppearance.Subtle" OnClick="OpenSetup">Picking settings</FluentButton> }
+        <FluentButton Appearance="@(!ShowEnhanced ? ButtonAppearance.Primary : ButtonAppearance.Subtle)" OnClick="@(() => _enhanced = false)">Average</FluentButton><FluentButton Appearance="@(ShowEnhanced ? ButtonAppearance.Primary : ButtonAppearance.Subtle)" Disabled="@(!Movie.Done.HasFlag(PreviewStage.Enhance))" OnClick="@(() => _enhanced = true)">Enhanced</FluentButton><FluentCheckbox @bind-Value="_showPicks" Label="Picks" Disabled="@(!Movie.Done.HasFlag(PreviewStage.Pick))" />
+    </div>
+    <div class="picking-content">
+        <section class="picking-image-region">
+            <div class="image-heading"><b>@(ShowEnhanced ? "Denoised · deconvolved" : "Dose-weighted average")</b><span>@(Movie.Done.HasFlag(PreviewStage.Pick) ? "Selected picks" : "Picking pending")</span></div>
+            @if (Session.ActiveStale(Movie).HasFlag(PreviewStage.Pick)) { <div class="result-note">Displayed picks use earlier settings.</div> }
+            <div class="picking-image">
+                @if (Movie.Done.HasFlag(PreviewStage.Motion))
+                {
+                    <MicrographViewer @key="ViewerKey" MicrographPath="@Session.Fixtures.StudyImage(Movie.Index, WarpStudyEvidence.Condition(Movie), ShowEnhanced)" ThumbnailPath="@Session.Fixtures.StudyThumbnail(Movie.Index, WarpStudyEvidence.Condition(Movie))" ParticleStarPath="@(_showPicks && Movie.Done.HasFlag(PreviewStage.Pick) ? Session.GetFilteredParticleStar(Movie.Index) : null)" MinWidth="300" MinHeight="300" CanEditParticles="false" CanEditMask="false" CanControlParticleDisplay="false" DefaultParticleDiameter="@((double)Session.Settings.Diameter / 4)" DefaultParticleBoxSize="@((double)(Session.Settings.Box * Session.Settings.TargetPixelSize) / 4)" />
+                }
+                else { <div class="empty-image">Awaiting motion correction</div> }
+            </div>
+        </section>
+
+    </div>
+
+</div>
+
+@code {
+    [Parameter] public WarpSessionPreview Session { get; set; }
+    [Parameter] public EventCallback OpenSetup { get; set; }
+    [Parameter] public PreviewMovie Movie { get; set; }
+    [Parameter] public EventCallback<int> SelectedIndexChanged { get; set; }
+    private bool _enhanced = true, _showPicks = true;
+    private bool ShowEnhanced => _enhanced && Movie.Done.HasFlag(PreviewStage.Enhance);
+    private int LatestPicked => Session.Movies.FindLastIndex(m => m.Done.HasFlag(PreviewStage.Pick));
+    // Synthetic image sampling is 4 Å/px; convert physical settings for the real viewer's pixel-based overlay API.
+    private string ViewerKey => $"{Movie.Index}-{Session.Settings.Diameter}-{Session.Settings.Box}-{Session.Settings.TargetPixelSize}";
+    private Task Select(int index) => SelectedIndexChanged.InvokeAsync(Math.Clamp(index, 0, Session.Movies.Count - 1));
+}

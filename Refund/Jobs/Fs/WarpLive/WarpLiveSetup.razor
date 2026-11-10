@@ -1,0 +1,235 @@
+@using Refund.Services.WarpLive
+@using Microsoft.JSInterop
+@using Refund.UIFields
+@using Refund.Components
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@inject IDialogService DialogService
+@using Refund.Components.FileBrowser
+@using Microsoft.AspNetCore.Components.Rendering
+
+<div class="warp-setup" id="@_rootId">
+    <div class="preset-bar">
+        <strong>Microscope preset</strong>
+        <FluentSelect TOption="string" TValue="string" Items="PresetNames" Value="@_selectedPreset" ValueChanged="@(v => { _selectedPreset = v; _deletePending = false; })" Width="210px" Size="ListSize.Small" Disabled="Locked" />
+        <FluentButton Size="ButtonSize.Small" Disabled="@(Locked || string.IsNullOrEmpty(_selectedPreset))" OnClick="LoadPreset">Load</FluentButton>
+        <FluentButton Size="ButtonSize.Small" Disabled="Locked" OnClick="@(() => { _saveAs = true; _presetName = Draft.Preset; })">Save as…</FluentButton>
+        <FluentButton Size="ButtonSize.Small" Disabled="@(Locked || !PresetNames.Contains(_selectedPreset))" OnClick="UpdatePreset">Update</FluentButton>
+        <FluentButton Size="ButtonSize.Small" Appearance="ButtonAppearance.Subtle" Disabled="@(Locked || !PresetNames.Contains(_selectedPreset))" OnClick="@(() => _deletePending = !_deletePending)">Delete</FluentButton>
+        <span class="spacer"></span><FluentSwitch @bind-Value="_advanced" Label="Advanced settings" />
+    </div>
+    @if (!string.IsNullOrEmpty(Session.CalibrationPresetError)) { <div class="preset-message" role="alert">@Session.CalibrationPresetError</div> }
+    @if (_saveAs)
+    {
+        <div class="preset-edit"><FluentTextInput @bind-Value="_presetName" Placeholder="Preset name" Style="width:280px" /><FluentButton Size="ButtonSize.Small" Appearance="ButtonAppearance.Primary" OnClick="SavePreset">Save preset</FluentButton><FluentButton Size="ButtonSize.Small" OnClick="@(() => _saveAs = false)">Cancel</FluentButton></div>
+    }
+    @if (_deletePending)
+    {
+        <div class="preset-edit"><span>Delete @_selectedPreset? Current collection settings are retained.</span><FluentButton Size="ButtonSize.Small" OnClick="DeletePreset">Delete preset</FluentButton><FluentButton Size="ButtonSize.Small" OnClick="@(() => _deletePending = false)">Cancel</FluentButton></div>
+    }
+    @if (!string.IsNullOrEmpty(_presetMessage)) { <div class="preset-message" role="status">@_presetMessage</div> }
+    <div class="setup-columns">
+      <div class="setup-stack">
+        <section class="settings-group collection">
+            <header><h2>Collection</h2><FluentButton Size="ButtonSize.Small" Appearance="ButtonAppearance.Subtle" OnClick="CheckInput" Disabled="@(Locked || _checking)">@(_checking ? "Checking…" : "Check input")</FluentButton></header>
+            @P("InputPath", "Movies", SelectionMode.SingleFolder)
+            <div class="fields two">
+                @S("InputPattern", "File pattern", "Wildcard matched against movie file names, e.g. FoilHole*.eer")
+                @B("Recursive", "Include subfolders")
+            </div>
+            <div class="fields three">
+                @D("TotalDose", "Total dose", .01, 10000, .1, "e⁻/Å²")
+                @N("EerGrouping", "EER groups", 1, 10000)
+                @D("MinimumFileSizeMb", "Minimum file size", 0, 1000000, 1, "MB")
+            </div>
+            @B("CorrectGain", "Gain correction")
+            @P("GainPath", "Gain", SelectionMode.SingleFile)
+            <div class="switch-row">@B("GainFlipX", "Flip X")@B("GainFlipY", "Flip Y")@B("GainTranspose", "Transpose")</div>
+            @if (_checks != null)
+            {
+                <div class="input-checks" role="status">
+                    @foreach (var check in _checks) { <div class="input-check @(check.Passed == true ? "passed" : check.Passed == false ? "failed" : "unchecked")"><b>@(check.Passed == true ? "✓" : check.Passed == false ? "!" : "—") @check.Item</b><span>@check.Detail</span></div> }
+                </div>
+            }
+        </section>
+        <section class="settings-group motion">
+            <header><h2>Motion correction</h2></header>
+            @B("MotionGridAuto", "Automatic motion grid")
+            @if (!Draft.MotionGridAuto) { <div class="fields three">@N("MotionGrid", "Grid X", 1, 100)@N("MotionGridY", "Grid Y", 1, 100)@N("MotionGridZ", "Temporal grid", 1, 1000)</div> }
+            @if (_advanced)
+            {
+                <div class="advanced-block"><div class="fields three">@D("MotionMin", "Low-res. limit", 1, 10000, 1, "Å")@D("MotionMax", "High-res. limit", 1, 1000, .1, "Å")@D("MotionBfactor", "B factor", -10000, 0, 10, "Å²")</div></div>
+            }
+        </section>
+      </div>
+      <div class="setup-stack">
+        <section class="settings-group calibration">
+            <header><h2>Microscope &amp; camera</h2><span>@Draft.Preset</span></header>
+            <div class="fields two">@D("Pixel", "Pixel size", .01, 1000, .0001, "Å")@D("TargetPixelSize", "Bin to pixel size", .01, 1000, .01, "Å")</div>
+            <div class="fields three">@N("Voltage", "Voltage", 10, 2000, 10, "kV")@D("Cs", "Spherical aberration", 0, 10, .01, "mm")@D("Amplitude", "Amplitude contrast", 0, 1, .01)</div>
+            @if (_advanced)
+            {
+                <div class="advanced-block">
+                    <div class="fields two">@D("Cc", "Chromatic aberration", 0, 10, .01, "mm")</div>
+                    <div class="fields two">@B("CorrectDefects", "Defect correction")</div>
+                    @if (Draft.CorrectDefects) { @P("DefectsPath", "Defects", SelectionMode.SingleFile) }
+                </div>
+            }
+        </section>
+        <section class="settings-group ctf">
+            <header><h2>CTF estimation</h2></header>
+            <div class="fields two">@D("CtfMin", "Low-res. limit", 1, 1000, .1, "Å")@D("CtfMax", "High-res. limit", 1, 1000, .1, "Å")</div>
+            <div class="fields two">@D("DefocusMin", "Minimum defocus", -100, 100, .1, "µm")@D("DefocusMax", "Maximum defocus", -100, 100, .1, "µm")</div>
+            <div class="switch-row">@B("CtfGridAuto", "Automatic defocus grid")@B("FitPhase", "Phase plate")</div>
+            @if (!Draft.CtfGridAuto) { <div class="fields two">@N("CtfGridX", "Grid X", 1, 100)@N("CtfGridY", "Grid Y", 1, 100)</div> }
+            @if (_advanced)
+            {
+                <div class="advanced-block">
+                    <div class="fields two">@N("CtfWindow", "Window", 128, 4096, 128, "px")</div>
+                    @B("FitThickness", "Fit thickness")
+                    @B("UseMovieSum", "Use movie-average spectrum")
+                </div>
+            }
+        </section>
+      </div>
+      <div class="setup-stack">
+        <section class="settings-group enhancement">
+            <header><h2>Deconvolution &amp; denoising</h2></header>
+            @B("Denoise", "Denoise micrographs")
+            <div class="training-state @(Session.Training ? "active" : "")">
+                <div><b>@TrainingTitle</b><span>@TrainingDetail</span></div>
+                @if (Session.Training) { <progress aria-label="Training denoiser"></progress> }
+                <FluentButton Size="ButtonSize.Small" Disabled="@(!Session.Running || Session.Training || Session.StageCounts[1] < Session.Settings.TrainCount || !Session.Settings.Denoise)" OnClick="Train">@(Session.Model > 0 ? "Train new model" : "Train now")</FluentButton>
+            </div>
+            <div class="fields two">@N("TrainCount", "Training sample", 1, 10000, 1, "movies")</div>
+            @if (_advanced)
+            {
+                <div class="advanced-block">
+                    <div class="fields two">@D("DeconvolutionStrength", "Deconvolution strength", 0, 10, .1)@D("DeconvolutionFalloff", "High-frequency falloff", 0, 10, .1)</div>
+                    <div class="fields two">@B("FineTune", "Periodic fine-tuning")@N("TrainingIterations", "Training iterations", 1, 100000, 100)</div>
+                    @if (Draft.FineTune) { <div class="fields two">@N("FineTuneEvery", "Fine-tune every", 1, 100000, 100, "movies")</div> }
+                </div>
+            }
+        </section>
+        <section class="settings-group output">
+            <header><h2>Picking &amp; extraction</h2></header>
+            @B("PickingEnabled", "Blob picking")
+            <div class="fields three">@D("Diameter", "Particle diameter", 1, 10000, 1, "Å")@D("MinSeparation", "Separation", .1, 5, .05, "diameters")@N("Box", "Extraction box", 16, 4096, 8, "px")</div>
+            <div class="particle-dimensions"><span>Separation <b>@((Draft.Diameter * Draft.MinSeparation).ToString("0")) Å</b></span><span>Box field <b>@((Draft.Box * Draft.TargetPixelSize).ToString("0")) Å</b></span></div>
+            @if (_advanced)
+            {
+                <div class="advanced-block">
+                    <div class="switch-row">@B("ExportStack", "Save aligned stack")</div>
+                    <div class="fields three">@N("SkipFirst", "Skip first", 0, 10000, 1, "frames")@N("SkipLast", "Skip last", 0, 10000, 1, "frames")@if (Draft.ExportStack) { @N("StackGroup", "Stack grouping", 1, 10000, 1, "frames") }</div>
+                </div>
+            }
+        </section>
+      </div>
+    </div>
+    <footer class="draft-actions">
+        <div>@if (Locked) { <b>Stop processing to edit parameters.</b> } else if (Draft != Session.Settings) { <b>Unsaved changes</b><span>@Session.GetSettingsImpact(Draft)</span> } else { <span>Settings saved</span> }
+            @if (!string.IsNullOrEmpty(Error)) { <span class="error" role="alert">@Error</span> }
+        </div>
+        <FluentButton Size="ButtonSize.Small" Disabled="@(Locked || Draft == Session.Settings)" OnClick="Revert">Revert</FluentButton>
+        <FluentButton Size="ButtonSize.Small" Appearance="ButtonAppearance.Primary" Disabled="@(Locked || Draft == Session.Settings)" OnClick="Apply">Apply changes</FluentButton>
+    </footer>
+</div>
+
+@code {
+    [Parameter] public WarpLiveSession Session { get; set; }
+    [Parameter, EditorRequired] public Func<Action<WarpLiveSession>, Task> Update { get; set; }
+    [Parameter] public bool Locked { get; set; }
+    [Parameter] public WarpLiveSettings Draft { get; set; }
+    [Parameter] public EventCallback<WarpLiveSettings> DraftChanged { get; set; }
+    [Parameter] public EventCallback Apply { get; set; }
+    [Parameter] public EventCallback Revert { get; set; }
+    [Parameter] public string Error { get; set; }
+    private readonly string _rootId = $"warp-setup-{Guid.NewGuid():N}";
+    private bool _advanced;
+    private string _selectedPreset, _presetName = "", _presetMessage;
+    private bool _saveAs, _deletePending, _checking;
+    private IReadOnlyList<WarpLiveInputCheck> _checks;
+    private WarpLiveSettings _checkedSettings;
+    private IReadOnlyList<WarpLiveCalibrationPreset> _presets = [];
+    private IEnumerable<string> PresetNames => _presets.Select(p => p.Name);
+    private string TrainingTitle => !Session.Settings.Denoise ? "Denoising off" : Session.Training ? "Training" : Session.Model > 0 ? $"Model v{Session.Model} ready" : $"Waiting for training · {Session.StageCounts[1]:N0}/{Session.Settings.TrainCount:N0} movies";
+    private string TrainingDetail => !Session.Settings.Denoise ? "Deconvolved micrographs are still produced." : Session.Training ? (Session.Model > 0 ? $"Model v{Session.Model} remains available during training." : "Motion and CTF continue; denoising waits for the first model.") : Session.Model > 0 ? $"Trained on {Session.Settings.TrainCount:N0} micrographs." : Locked ? "Training starts automatically when enough CTF results are available." : "Training begins after processing starts and enough movies are ready.";
+
+    protected override void OnParametersSet()
+    {
+        _presets = Session.CalibrationPresets;
+        _selectedPreset ??= Draft.Preset;
+        if (_checkedSettings != null && _checkedSettings != Draft) { _checks = null; _checkedSettings = null; }
+    }
+
+    private async Task SetProperty(string name, object value)
+    {
+        if (Locked) return;
+        var next = Draft with { };
+        typeof(WarpLiveSettings).GetProperty(name)!.SetValue(next, value);
+        await DraftChanged.InvokeAsync(next);
+    }
+
+    private RenderFragment Field(string property, string label, UiFieldBase description) => builder => {
+        builder.OpenElement(0, "div"); builder.AddAttribute(1, "class", "setting-row"); builder.AddAttribute(30, "data-setting", property); builder.SetKey(property);
+        builder.OpenElement(2, "label"); builder.AddAttribute(3, "title", description.HelpText); builder.AddContent(4, label); builder.CloseElement();
+        builder.OpenElement(5, "div"); builder.AddAttribute(6, "class", "setting-control");
+        builder.OpenComponent(7, description.ViewType);
+        builder.AddAttribute(8, "FieldDescription", description);
+        builder.AddAttribute(9, "Value", typeof(WarpLiveSettings).GetProperty(property)!.GetValue(Draft));
+        builder.AddAttribute(10, "ValueChanged", EventCallback.Factory.Create<object>(this, v => SetProperty(property, v)));
+        builder.AddAttribute(11, "IsDisabled", IsDisabled(property));
+        builder.CloseComponent(); builder.CloseElement(); builder.CloseElement();
+    };
+    private RenderFragment D(string property, string label, double min, double max, double step, string unit = "") => Field(property, label + (unit.Length > 0 ? $" · {unit}" : ""), new UiDecimal(property, label, min, max, step, unit));
+    private RenderFragment N(string property, string label, int min, int max, int step = 1, string unit = "") => Field(property, label + (unit.Length > 0 ? $" · {unit}" : ""), new UiInt(property, label, min, max, step, unit));
+    private RenderFragment S(string property, string label, string help = "") => Field(property, label, new UiString(property, label, help));
+    private bool IsDisabled(string property) => Locked ||
+        (!Draft.PickingEnabled && property is "Diameter" or "MinSeparation" or "Box") ||
+        (!Draft.CorrectGain && property is "GainPath" or "GainFlipX" or "GainFlipY" or "GainTranspose") ||
+        (!Draft.Denoise && property is "TrainCount" or "FineTune" or "FineTuneEvery" or "TrainingIterations");
+    private RenderFragment B(string property, string label) => builder => {
+        builder.OpenElement(0, "div"); builder.AddAttribute(1, "class", "boolean-setting"); builder.AddAttribute(2, "data-setting", property); builder.SetKey(property);
+        builder.OpenComponent<FluentSwitch>(3);
+        builder.AddAttribute(4, "Value", (bool)typeof(WarpLiveSettings).GetProperty(property)!.GetValue(Draft));
+        builder.AddAttribute(5, "ValueChanged", EventCallback.Factory.Create<bool>(this, v => SetProperty(property, v)));
+        builder.AddAttribute(6, "Label", label); builder.AddAttribute(7, "Disabled", IsDisabled(property));
+        builder.CloseComponent(); builder.CloseElement();
+    };
+    // Use Relay's file browser with the current draft path as the initial folder.
+    private RenderFragment P(string property, string label, SelectionMode mode) => builder => {
+        builder.OpenElement(0, "div"); builder.AddAttribute(1, "class", "setting-row path-row"); builder.AddAttribute(30, "data-setting", property); builder.SetKey(property);
+        builder.OpenElement(2, "label"); builder.AddContent(3, label); builder.CloseElement();
+        builder.OpenElement(4, "div"); builder.AddAttribute(5, "class", "path-control");
+        builder.OpenComponent<RelayTextInput>(6);
+        builder.AddAttribute(7, "Value", (string)typeof(WarpLiveSettings).GetProperty(property)!.GetValue(Draft));
+        builder.AddAttribute(8, "ValueChanged", EventCallback.Factory.Create<string>(this, v => SetProperty(property, v)));
+        builder.AddAttribute(9, "Immediate", true); builder.AddAttribute(10, "Disabled", IsDisabled(property));
+        builder.AddAttribute(11, "Class", "borderless"); builder.AddAttribute(12, "Style", "width:100%;min-width:0"); builder.AddAttribute(13, "Size", TextInputSize.Small);
+        builder.CloseComponent();
+        builder.OpenComponent<FluentButton>(14); builder.AddAttribute(15, "Size", ButtonSize.Small); builder.AddAttribute(16, "IconEnd", new Icons.Filled.Size16.Folder());
+        builder.AddAttribute(17, "Title", $"Browse {label.ToLowerInvariant()}"); builder.AddAttribute(18, "Disabled", IsDisabled(property));
+        builder.AddAttribute(19, "OnClick", EventCallback.Factory.Create<MouseEventArgs>(this, () => BrowsePath(property, label, mode)));
+        builder.CloseComponent(); builder.CloseElement(); builder.CloseElement();
+    };
+    private async Task BrowsePath(string property, string label, SelectionMode mode)
+    {
+        if (Locked) return;
+        string path = (string)typeof(WarpLiveSettings).GetProperty(property)!.GetValue(Draft);
+        string current = "/";
+        try {
+            string candidate = Path.GetFullPath(string.IsNullOrWhiteSpace(path) ? Session.Settings.OutputPath : path);
+            while (!Directory.Exists(candidate) && candidate != null) candidate = Path.GetDirectoryName(candidate);
+            if (candidate != null) current = candidate;
+        } catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException) { }
+        await FileBrowserDialog.Show(DialogService, this, async result => {
+            if (!result.Cancelled && result.Value is List<FileSystemItem> selected && selected.Count > 0)
+                await SetProperty(property, selected[0].Path);
+        }, $"Select {label.ToLowerInvariant()}", selectionMode: mode, showFiles: mode != SelectionMode.SingleFolder, currentFolder: current);
+    }
+    private async Task Train() { try { await Update(s => s.Train()); } catch (Exception ex) { _presetMessage = ex.Message; } }
+    private async Task CheckInput() { _checking = true; var checkedDraft = Draft; try { var result = await Session.CheckInputAsync(checkedDraft); if (Draft == checkedDraft) { _checks = result; _checkedSettings = checkedDraft; } } finally { _checking = false; } }
+    private async Task LoadPreset() { try { await DraftChanged.InvokeAsync(Session.LoadCalibrationPreset(_selectedPreset, Draft)); _presetMessage = $"Loaded {_selectedPreset}; apply to use these calibration settings."; } catch (Exception ex) { _presetMessage = ex.Message; } }
+    private async Task SavePreset() { try { await Update(s => s.SaveCalibrationPreset(_presetName, Draft)); _presets = Session.CalibrationPresets; _selectedPreset = _presetName.Trim(); await DraftChanged.InvokeAsync(Draft with { Preset = _selectedPreset }); _saveAs = false; _presetMessage = $"Saved {_selectedPreset}."; } catch (Exception ex) { _presetMessage = ex.Message; } }
+    private async Task UpdatePreset() { try { await Update(s => s.SaveCalibrationPreset(_selectedPreset, Draft, true)); await DraftChanged.InvokeAsync(Draft with { Preset = _selectedPreset }); _presetMessage = $"Updated {_selectedPreset}."; } catch (Exception ex) { _presetMessage = ex.Message; } }
+    private async Task DeletePreset() { try { await Update(s => s.DeleteCalibrationPreset(_selectedPreset)); _presets = Session.CalibrationPresets; _presetMessage = $"Deleted {_selectedPreset}; collection settings retained."; _selectedPreset = PresetNames.FirstOrDefault(); _deletePending = false; } catch (Exception ex) { _presetMessage = ex.Message; } }
+}

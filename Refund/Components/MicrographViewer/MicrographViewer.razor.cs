@@ -11,6 +11,8 @@ public partial class MicrographViewer : ComponentBase, IAsyncDisposable
     [Inject] private IJSRuntime JsRuntime { get; set; }
     [Inject] private FileService FileService { get; set; }
     [Parameter] public string MicrographPath { get; set; }
+    /// <summary>Changes when a live result overwrites the same file; omitted for immutable results.</summary>
+    [Parameter] public long? ResultRevision { get; set; }
     [Parameter] public string MaskPath { get; set; }
     [Parameter] public string ThumbnailPath { get; set; }
     [Parameter] public string ParticleStarPath { get; set; }
@@ -18,7 +20,9 @@ public partial class MicrographViewer : ComponentBase, IAsyncDisposable
     [Parameter] public int MinHeight { get; set; } = 600;
     [Parameter] public bool CanEditMask { get; set; } = true;
     [Parameter] public bool CanEditParticles { get; set; } = true;
+    /// <summary>Particle circle diameter in Å; the viewer converts using the MRC sampling.</summary>
     [Parameter] public double DefaultParticleDiameter { get; set; } = 100;
+    /// <summary>Physical extraction-box width in Å.</summary>
     [Parameter] public double DefaultParticleBoxSize { get; set; } = 200;
     [Parameter] public bool CanControlParticleDisplay { get; set; } = true;
     public int Width { get; private set; } = 800;
@@ -46,7 +50,7 @@ public partial class MicrographViewer : ComponentBase, IAsyncDisposable
         particleBoxSize = (decimal)DefaultParticleBoxSize;
     }
 
-    private string Url(string path) => string.IsNullOrWhiteSpace(path) ? null : FileService.GetUrl(path);
+    private string Url(string path) => string.IsNullOrWhiteSpace(path) ? null : FileService.GetUrl(path) + (ResultRevision.HasValue ? "?revision=" + ResultRevision.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) : "");
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {

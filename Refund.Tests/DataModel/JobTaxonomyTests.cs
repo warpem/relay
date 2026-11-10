@@ -25,6 +25,9 @@ public class JobTaxonomyTests
         ["Motion2D"]               = "Frame-series.Motion & CTF.Motion",
         ["CTF2D"]                  = "Frame-series.Motion & CTF.CTF",
         ["MotionAndCTF2D"]         = "Frame-series.Motion & CTF.Motion and CTF",
+        ["WarpLiveJob"]             = "Frame-series.Motion & CTF.Warp Live",
+        ["WarpLiveMicrographsExportJob"] = "Frame-series.Export.Warp Live micrographs",
+        ["WarpLiveParticlesExportJob"] = "Frame-series.Export.Warp Live particles",
         ["BoxNetInference2D"]      = "Frame-series.Picking.BoxNet",
         ["ExtractParticles2D"]     = "Frame-series.Extraction.Extract particles",
 
@@ -63,6 +66,9 @@ public class JobTaxonomyTests
 
         // Beam
         ["BeamRefine3D"]           = "💥 Beam.💥 Refine 3D",
+        ["BeamClass2D"]            = "💥 Beam.💥 2D classification",
+        ["BeamClass3D"]            = "💥 Beam.💥 Classify 3D",
+        ["BeamInit3D"]             = "💥 Beam.💥 Initial model",
 
         // M
         ["CreatePopulation"]       = "M.Create population",

@@ -166,6 +166,8 @@ public partial class DataManager
                     originalSpace.Jobs,
                     $"Space {originalSpace.Alias}");
 
+                foreach (var live in originalSpace.Jobs.OfType<Refund.Jobs.Fs.WarpLive.WarpLiveJob>())
+                    WarpLiveSessions.Remove(live.Identity);
                 _dataRepository.DeleteSpace(originalUser, originalSpace);
             }
             catch (Exception e)

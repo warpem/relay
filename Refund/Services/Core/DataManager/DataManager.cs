@@ -274,7 +274,7 @@ public partial class DataManager
             _dataRepository.UpdateJob(job.UpdatedBy, job, action);
             await JobUpdated.InvokeHierarchy(job.AsReadOnly(),
                 GroupName.JobHierarchy(job.Space.Project.Id, job.Space.Id, job.Id));
-        });
+        }, RunLocalJobAsync);
         _queueRepository.LoadQueues(_dataRepository);
 
         // Detect and remove any cyclic edges that would cause infinite recursion
@@ -385,7 +385,7 @@ public partial class DataManager
 
         // A dependency waiter cannot advance while its parent is unfinished. Do not
         // exempt Preparing/Queued attempts, which also project to the Waiting status.
-        if (jobs.Any(job => job.Status == JobStatus.Clearing || HasPendingExecution(job) ||
+        if (jobs.Any(job => job.Status == JobStatus.Clearing || _warpLiveExportOperations.Contains(job) || HasPendingExecution(job) ||
                             job.GetChildren().Any(child =>
                                 (HasPendingExecution(child) && !CanWaitForParent(job, child)) ||
                                 (!allowClearingDependents && child.Status == JobStatus.Clearing))))
@@ -551,5 +551,9 @@ public partial class DataManager
     /// <summary>
     /// Stops execution monitoring and terminates Relay-owned work.
     /// </summary>
-    public Task ShutdownAsync() => _queueRepository.ShutdownAsync();
+    public async Task ShutdownAsync()
+    {
+        await _queueRepository.ShutdownAsync();
+        WarpLiveSessions.Dispose();
+    }
 }

@@ -1,0 +1,108 @@
+@inherits Refund.Components.Jobs.ExpandedView.LoadingExpandedViewBase
+@using Refund.Services.WarpLive
+@using Refund.Services
+@using Refund.Services.Core.DataManager
+@using Refund.Services.Core.Session
+@using Refund.DataModel.ReadOnly
+@using Microsoft.JSInterop
+@inject DataManager DataManager
+@inject RelaySession RelaySession
+@inject ExpandedJobViewService ExpandedViewService
+@inject FileService Files
+@inject IJSRuntime Js
+@implements IAsyncDisposable
+
+@if (IsInitializing || Session == null) { <Refund.Components.Jobs.ExpandedView.ExpandedViewLoading /> }
+else {
+<div class="study-page" id="@_layoutId">
+    <header class="session-header">
+        <strong class="warp-title">Warp Live</strong><span class="session-identity">@Session.Settings.Preset</span><span class="spacer"></span>
+        @if (Dirty) { <button class="unsaved" @onclick="@(() => ChangeView("Setup"))">Unsaved settings</button> }
+        <span class="run-label"><i class="@(Session.Running ? "active" : "")"></i>@ExecutionLabel</span>
+        <FluentSelect TOption="SelectOption<string>" TValue="string" Items="QueueOptions" OptionText="@(q => q.Text)" OptionValue="@(q => q.Value)" Value="@_queueId.ToString()" ValueChanged="@(v => _queueId = int.Parse(v))" Disabled="@(ExecutionActive || !HasWorkerQueues)" Size="ListSize.Small" Width="@(HasWorkerQueues ? "170px" : "210px")" aria-label="Worker queue" />
+        <span class="pool-size"><FluentButton Title="Remove worker" Appearance="ButtonAppearance.Subtle" OnClick="@(() => Resize(_poolSize - 1))" Disabled="@(_busy || _poolSize <= 1)">−</FluentButton><FluentButton Id="@(_layoutId + "-resources")" Title="Worker resources" Appearance="ButtonAppearance.Subtle" OnClick="OpenResources">@_poolSize @(_poolSize == 1 ? "GPU worker" : "GPU workers") ⌄</FluentButton><FluentButton Title="Add worker" Appearance="ButtonAppearance.Subtle" OnClick="@(() => Resize(_poolSize + 1))" Disabled="_busy">+</FluentButton></span>
+        <FluentButton Id="processing-toggle" Appearance="ButtonAppearance.Primary" OnClick="ToggleProcessing" Disabled="@(_busy || Stopping || !ExecutionActive && (Dirty || _resourcesOpen && ResourceDirty || _queueId < 0))">@(ExecutionActive ? "Stop processing" : "Start processing")</FluentButton>
+    </header>
+    <RelayPopover AnchorId="@(_layoutId + "-resources")" @bind-Opened="_resourcesOpen" Style="width:300px">
+        @if (_resourcesOpen)
+        {
+            <div class="worker-resources">
+                <strong>Worker resources</strong>
+                <label><span>Processes per GPU</span><FluentNumberInput TValue="int" @bind-Value="_perDevice" Min="1" Max="32" Disabled="ExecutionActive" aria-label="Worker processes per GPU" /></label>
+                <label><span>RAM per process · GB</span><FluentNumberInput TValue="int" @bind-Value="_memoryPerWorker" Min="1" Max="4096" Disabled="ExecutionActive" aria-label="RAM per worker process in GB" /></label>
+                @if (ExecutionActive) { <span>Stop processing to change worker resources.</span> }
+                @if (!string.IsNullOrEmpty(_resourceError)) { <span class="resource-error" role="alert">@_resourceError</span> }
+                <div class="resource-actions"><FluentButton Size="ButtonSize.Small" Disabled="@(ExecutionActive || !ResourceDirty)" OnClick="RevertResources">Revert</FluentButton><FluentButton Size="ButtonSize.Small" Appearance="ButtonAppearance.Primary" Disabled="@(ExecutionActive || _busy || !ResourceDirty || _queueId < 0)" OnClick="SaveResources">Apply changes</FluentButton></div>
+            </div>
+        }
+    </RelayPopover>
+    <div class="telemetry">
+        <span class="@(InputLate ? "input-alert" : "")"><i class="signal-dot"></i><b>Input</b> @Age(Session.LastInputAt)</span>
+        <span><b>Processing</b> @ProcessingSummary</span>
+        <button class="training-link @(Session.Training || Session.AwaitingDenoiser > 0 ? "training-alert" : "")" @onclick="@(() => ChangeView("Setup"))"><b>Denoiser</b> @Session.DenoiserStatus</button>
+        <span class="spacer"></span><span><b id="movie-count">@Session.Movies.Count.ToString("N0")</b> received</span><span><b>@Session.Accepted.ToString("N0")</b> accepted</span>
+        @if (Session.Failed > 0) { <button class="error-link" @onclick="ShowFailures">! @Session.Failed errors</button> }
+    </div>
+    <nav class="workspace-nav" aria-label="Session workspace">
+        @foreach (var view in Views) { <button class="@(_view == view ? "selected" : "")" @onclick="@(() => ChangeView(view))" aria-current="@(_view == view ? "page" : null)">@view</button> }
+        <span class="spacer"></span>
+        @if (_view is "Monitor" or "Picking") { <FluentButton Appearance="ButtonAppearance.Subtle" OnClick="FollowLatest">@(_follow ? "Following latest" : "Return to latest")</FluentButton> }
+    </nav>
+    @if (Session.Training || Session.AwaitingDenoiser > 0)
+    {
+        <div class="training-banner"><strong>@Session.DenoiserStatus</strong>
+            @if (Session.Training) { <progress aria-label="Training denoiser"></progress> }
+            @if (Session.AwaitingDenoiser > 0) { <span>@Session.AwaitingDenoiser.ToString("N0") micrographs awaiting denoising</span> } else if (Session.Model > 0) { <span>Model v@Session.Model remains in use</span> }
+            @if (!ExecutionActive) { <span>Processing stopped</span> }
+            <span class="spacer"></span><FluentButton Appearance="ButtonAppearance.Subtle" OnClick="@(() => ChangeView("Setup"))">Training settings</FluentButton>
+        </div>
+    }
+    @if (!string.IsNullOrEmpty(_actionError)) { <div class="action-error" role="alert">@_actionError</div> }
+    <main>
+        @if (_view == "Setup")
+        {
+            <WarpLiveSetup Session="Session" Update="UpdateSetupSession" Locked="ExecutionActive" Draft="_draft" DraftChanged="DraftChanged" Apply="ApplySettings" Revert="RevertSettings" Error="@_parameterError" />
+        }
+        else if (Session.Movies.Count == 0 && _view != "Exports")
+        { <div class="empty-session">No movies received. Configure the input directory and start processing.</div> }
+        else if (_view == "Monitor")
+        {
+            <div class="monitor-grid">
+                <section class="trends-column">
+                    <div class="section-intro"><div><h1>Collection quality</h1><span>@($"{WindowResults:N0} results · {WindowPending:N0} pending · {WindowFailed} failed")</span></div><div class="recent-yield @(WindowResults > 0 && (double)WindowAccepted / WindowResults < .8 ? "attention" : "")"><b>@(WindowResults == 0 ? "—" : $"{WindowAccepted:N0} / {WindowResults:N0}")</b><span>accepted in window</span></div></div>
+                    <WarpLiveTrends @ref="_trends" Session="Session" Update="UpdateSession" SelectedIndex="_selected" SelectedIndexChanged="SelectMovie" State="_trendState" WindowChanged="WindowChanged" RangeChanged="RangeChanged" />
+                    @if (_trendState.RangeStart.HasValue && _trendState.RangeEnd.HasValue)
+                    {
+                        <div class="range-actions"><b>@((_trendState.RangeEnd.Value - _trendState.RangeStart.Value).ToString("N0")) selected</b><span class="spacer"></span><FluentButton Title="Apply filtering criteria" OnClick="@(() => CurateRange(WarpLiveDisposition.Auto))">Filter rules</FluentButton><FluentButton Title="Keep regardless of filters" OnClick="@(() => CurateRange(WarpLiveDisposition.Keep))">Keep</FluentButton><FluentButton OnClick="@(() => CurateRange(WarpLiveDisposition.Exclude))">Exclude</FluentButton><FluentButton Appearance="ButtonAppearance.Subtle" OnClick="ClearRange">Clear</FluentButton></div>
+                    }
+                    <div class="collection-diagnostics" aria-label="Whole collection diagnostics">
+                        <WarpLiveAstigmatismPlot Session="Session" Update="UpdateSession" Movie="Selected" SelectedIndexChanged="SelectMovie" />
+                        <WarpLiveParticleHistogram Session="Session" Update="UpdateSession" />
+                    </div>
+                    <div class="status-key">@foreach (var status in WarpLiveSession.StatusNames) { <span><i style="background:@WarpLiveSession.StatusColorFor(status)"></i>@status</span> }</div>
+                </section>
+                <section class="preview-column">
+                    <div class="preview-title"><h2>@(_follow ? "Latest result" : "Selected micrograph")</h2></div>
+                    <WarpLiveEvidence Session="Session" Update="UpdateSession" Movie="Selected" SelectedIndexChanged="SelectMovie" />
+                </section>
+            </div>
+        }
+        else if (_view == "Picking")
+        {
+            <WarpLivePicking OpenSetup="@(() => ChangeView("Setup"))" Session="Session" Update="UpdateSession" Movie="Selected" SelectedIndexChanged="SelectMovie" />
+        }
+        else if (_view == "Movies")
+        {
+            <div class="movies-layout"><WarpLiveMovies Session="Session" Update="UpdateSession" SelectedIndex="_selected" SelectedIndexChanged="SelectMovie" OpenMovie="OpenMovie" State="_movieState" />@if (_wideScreen) { <aside class="table-evidence"><WarpLiveEvidence Session="Session" Update="UpdateSession" Movie="Selected" SelectedIndexChanged="SelectMovie" /></aside> }</div>
+        }
+        else if (_view == "Exports")
+        {
+            <div class="exports-workspace"><h1>Export available results</h1><div class="export-actions"><span>@Session.Accepted.ToString("N0") accepted micrographs · whole session</span><span class="spacer"></span><FluentButton Appearance="ButtonAppearance.Primary" Disabled="Session.Exporting" OnClick="@(() => Export(false))">Export micrographs</FluentButton><FluentButton Disabled="Session.Exporting" OnClick="@(() => Export(true))">Export particles</FluentButton></div>
+                @if (Session.Exporting) { <p><FluentSpinner /> Writing STAR…</p> }
+                @foreach (var export in Session.Exports.AsEnumerable().Reverse()) { <div class="export-entry"><b>@Path.GetFileName(export.StarPath)</b><div>@(export.Particles ? "Particles" : "Micrographs")<span>@export.MovieCount.ToString("N0") micrographs · @export.Created.ToString("HH:mm")</span></div><span class="spacer"></span><span>@(export.Particles ? export.ParticleCount.ToString("N0") : export.MovieCount.ToString("N0")) rows</span><a href="@Files.GetUrl(export.StarPath)" download>Download STAR</a></div> }
+            </div>
+        }
+    </main>
+    @if (!string.IsNullOrWhiteSpace(Session.Notice)) { <footer class="study-footer"><span role="status">@Session.Notice</span></footer> }
+</div>
+}

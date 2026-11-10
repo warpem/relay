@@ -1,0 +1,13 @@
+<label class="parameter">
+    <span>@Label</span>
+    <FluentNumberInput TValue="decimal" Value="Value" ValueChanged="ValueChanged" Min="Min" Max="Max" Step="Step" Disabled="Disabled" aria-label="@Label" />
+</label>
+@code {
+    [Parameter] public string Label { get; set; }
+    [Parameter] public decimal Value { get; set; }
+    [Parameter] public EventCallback<decimal> ValueChanged { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public decimal Min { get; set; } = 0;
+    [Parameter] public decimal Max { get; set; } = 10000;
+    [Parameter] public decimal Step { get; set; } = 1;
+}

@@ -1,0 +1,63 @@
+.session-trends {--warp-track-height:clamp(24px,calc((100dvh - 550px) / 8),160px);min-width:0;color:var(--colorNeutralForeground1);font-size:12px;}
+.trend-toolbar {display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:32px;margin-bottom:8px;}
+.trend-title {font-weight:600;}
+.window-buttons {display:flex;gap:2px;}
+.window-buttons ::deep fluent-button {font-size:11px;min-height:26px;padding:0 8px;}
+.tracks {display:flex;flex-direction:column;gap:6px;}
+.track-label {display:flex;align-items:center;gap:10px;min-height:28px;line-height:18px;}
+.metric-name {white-space:nowrap;}
+.metric-filter {display:flex;align-items:center;gap:5px;color:var(--colorNeutralForeground2);}
+.metric-filter {flex:none;}
+.metric-filter ::deep input {font-size:12px;padding:2px 6px;min-height:24px;height:24px;font-variant-numeric:tabular-nums;}
+.metric-filter ::deep .fluent-input {min-height:24px;height:24px;}
+.track-label .selected-reading {margin-left:auto;white-space:nowrap;}
+.unit {color:var(--colorNeutralForeground3);font-size:11px;margin-left:4px;}
+.selected-reading {font-variant-numeric:tabular-nums;color:var(--colorNeutralForeground2);font-size:12px;}
+.plot-frame {position:relative;}
+.selected-rule-frame {position:absolute;z-index:6;inset:0 0 0 34px;pointer-events:none;}
+.selected-rule {display:block;position:absolute;top:0;bottom:0;width:1px;background:var(--colorNeutralForeground1);opacity:.45;}
+.shared-axis {display:flex;justify-content:space-between;margin:4px 0 0 34px;color:var(--colorNeutralForeground3);font-size:11px;font-variant-numeric:tabular-nums;}
+.window-context {display:flex;align-items:center;gap:8px;min-height:26px;font-size:11px;color:var(--colorNeutralForeground3);}
+.selected-context {margin-left:auto;}
+.window-context ::deep fluent-button {font-size:10px;min-height:22px;padding:0 4px;}
+.session-trends ::deep .y-axis-column {width:34px;}
+.session-trends ::deep .axis-label {font-size:11px;right:5px;}
+.session-trends ::deep .histogram {opacity:.5;}
+.session-trends ::deep .range-highlight {opacity:.035;}
+.compact .trend-toolbar {margin-bottom:4px;min-height:26px;}
+.compact .tracks {gap:3px;}
+.compact .track-label {min-height:26px;line-height:14px;font-size:11px;}
+.compact .unit {font-size:11px;}.compact .selected-reading {font-size:12px;}
+.compact .window-context {min-height:20px;}
+@container(max-width:600px) {.window-context {flex-wrap:wrap;}.selected-context {margin-left:0;}.window-buttons ::deep fluent-button {padding:0 5px;}}
+
+.interval-frame {position:absolute;z-index:6;inset:0 0 0 34px;pointer-events:none;}
+.interval-shade {display:none;position:absolute;top:0;bottom:0;left:var(--interval-left,0%);width:var(--interval-width,0%);background:color-mix(in srgb,var(--colorBrandBackground) 12%,transparent);border-inline:1px solid var(--colorBrandStroke1);box-sizing:border-box;}
+.has-interval .interval-shade {display:block;}
+.is-brushing {user-select:none;}
+.is-brushing .plot-frame {cursor:crosshair;}
+.is-brushing ::deep .highlight-circle {visibility:hidden;}
+
+.pending-window {position:absolute;z-index:7;inset:0 0 0 34px;display:flex;align-items:center;justify-content:center;gap:10px;color:var(--colorNeutralForeground2);font-size:12px;pointer-events:none;}
+.pending-window > span {background:var(--colorNeutralBackground1);padding:3px 6px;}
+.pending-window ::deep fluent-button {pointer-events:auto;font-size:11px;min-height:26px;}
+.drag-hint {font-size:11px;color:var(--colorNeutralForeground3);line-height:16px;}
+.compact .pending-window {font-size:11px;gap:4px;}
+
+@container(min-width:2000px) {
+    .session-trends {font-size:14px;}
+    .trend-toolbar {min-height:36px;}
+    .window-buttons ::deep fluent-button {font-size:13px;}
+    .track-label {line-height:22px;min-height:32px;}
+    .unit,.shared-axis,.window-context,.drag-hint {font-size:13px;}
+    .selected-reading {font-size:14px;}
+    .metric-filter ::deep input {font-size:14px;}
+    .session-trends ::deep .axis-label {font-size:13px;}
+    .window-context ::deep fluent-button {font-size:12px;}
+}
+/* Fluent v5 number inputs use text-input shadow parts. */
+.metric-filter ::deep fluent-field{display:block;min-width:0;row-gap:0;margin:0;padding:0;line-height:1}
+.metric-filter ::deep fluent-text-input{height:24px;min-width:0;line-height:1}
+.metric-filter ::deep fluent-text-input::part(root){height:24px;min-height:24px;padding:0 6px}
+.metric-filter ::deep fluent-text-input::part(control){font-size:12px;line-height:18px;min-width:0}
+@container(max-width:1999px){.trend-toolbar{min-height:26px;margin-bottom:2px}.tracks{gap:3px}.track-label{min-height:26px}.window-context{min-height:22px}.drag-hint{display:none}}

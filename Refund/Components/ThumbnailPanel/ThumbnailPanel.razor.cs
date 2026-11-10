@@ -526,7 +526,8 @@ public partial class ThumbnailPanel : ComponentBase, IAsyncDisposable
             return;
 
         ComponentWidth = newWidth;
-        CalculateStatusBars();
+        if (ShowStatusBar)
+            CalculateStatusBars();
         
         // Also update visible items and highlight when component resizes
         // This ensures the status bar highlights update properly
@@ -668,7 +669,10 @@ public enum ProcessingStatus
     /// <summary>
     /// Item was manually deselected by the user (gray color in status bar)
     /// </summary>
-    Deselected
+    Deselected,
+    Failed,
+    Kept,
+    Partial
 }
 
 /// <summary>
@@ -693,6 +697,9 @@ public static class StatusColorMapping
             ProcessingStatus.Outdated => "#f6d282",     // Light amber
             ProcessingStatus.FilteredOut => "#bae8fd",  // Light blue 
             ProcessingStatus.Processed => "#a0d598",    // Light green
+            ProcessingStatus.Failed => "#d94a4a",
+            ProcessingStatus.Kept => "#ab83d1",
+            ProcessingStatus.Partial => "#dca477",
             ProcessingStatus.Deselected => "#ddd",      // Light gray
             _ => "transparent"
         };
@@ -721,6 +728,9 @@ public static class StatusLabelMapping
             ProcessingStatus.Outdated => "outdated",
             ProcessingStatus.FilteredOut => "filtered out",
             ProcessingStatus.Processed => "processed",
+            ProcessingStatus.Failed => "failed",
+            ProcessingStatus.Kept => "kept regardless of filters",
+            ProcessingStatus.Partial => "partially processed",
             ProcessingStatus.Deselected => "deselected",
             null => "no status",
             _ => "unknown"

@@ -58,6 +58,9 @@ function releaseImages(state) {
     clearTimeout(state.loadTimer);
     state.worker?.terminate();
     state.worker = null;
+    state.particleWorker?.terminate();
+    state.particleWorker = null;
+    state.particleGeneration = (state.particleGeneration ?? 0) + 1;
     for (const level of state.levels) level.close();
     state.levels = [];
     state.mask?.close();
@@ -229,12 +232,33 @@ function create(root, callback) {
     return state;
 }
 
+function updateParticles(state) {
+    state.particleWorker?.terminate();
+    state.particleWorker = null;
+    const generation = state.particleGeneration = (state.particleGeneration ?? 0) + 1;
+    state.particles = [];
+    schedule(state);
+    if (!state.options.particlesUrl || !state.width || state.disposed) return;
+    const worker = state.particleWorker = new Worker(new URL('../../js/micrograph-worker.js', import.meta.url), { type: 'module' });
+    worker.onmessage = ({ data }) => {
+        if (state.disposed || generation !== state.particleGeneration) return;
+        if (data.type === 'particles') { state.particles = data.particles; state.status.textContent = ''; }
+        else state.status.textContent = data.message;
+        schedule(state);
+    };
+    worker.onerror = event => {
+        if (!state.disposed && generation === state.particleGeneration)
+            state.status.textContent = `Unable to load particles: ${event.message}`;
+    };
+    worker.postMessage({ type: 'particles', particlesUrl: state.options.particlesUrl, width: state.width, height: state.height });
+}
+
 export function update(root, options, callback) {
     const state = viewers.get(root.id) ?? create(root, callback);
     state.callback = callback;
     const previous = state.options;
     state.options = options;
-    const key = JSON.stringify([options.url, options.layer, options.maskUrl, options.particlesUrl, options.thumbnailUrl]);
+    const key = JSON.stringify([options.url, options.layer, options.maskUrl, options.thumbnailUrl]);
     if (key !== state.sourceKey) {
         state.sourceKey = key;
         releaseImages(state);
@@ -257,6 +281,7 @@ export function update(root, options, callback) {
                         state.status.textContent = '';
                         state.root.setAttribute('aria-busy', 'false');
                         resize(state);
+                        updateParticles(state);
                     } else if (data.type === 'mask') state.mask = data.mask;
                     else if (data.type === 'particles') state.particles = data.particles;
                     else {
@@ -270,7 +295,7 @@ export function update(root, options, callback) {
                     state.status.textContent = `Unable to load micrograph: ${event.message}`;
                     state.root.setAttribute('aria-busy', 'false');
                 };
-                worker.postMessage(options);
+                worker.postMessage({ ...options, particlesUrl: null });
                 if (options.thumbnailUrl) {
                     state.thumbnail.onload = () => schedule(state);
                     state.thumbnail.onerror = () => schedule(state);
@@ -279,6 +304,7 @@ export function update(root, options, callback) {
             }, 50);
         }
     }
+    else if (previous?.particlesUrl !== options.particlesUrl) updateParticles(state);
     if (!previous) state.observer.observe(root);
     if (!previous || previous.minWidth !== options.minWidth || previous.minHeight !== options.minHeight) resize(state);
     schedule(state);

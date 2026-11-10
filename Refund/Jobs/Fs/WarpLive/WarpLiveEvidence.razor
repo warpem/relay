@@ -1,0 +1,41 @@
+@using Refund.Services.WarpLive
+@using Microsoft.JSInterop
+@using Refund.Components.MicrographViewer
+@using Refund.Components.FourierSpace
+
+<div class="evidence monitor">
+    <div class="exposure-heading"><span><b>#@((Movie.Index + 1).ToString("N0"))</b><span class="file-name" title="@Movie.Name">@Movie.Name</span></span><span class="exposure-state"><i style="background:@Session.StatusColor(Movie)"></i>@Session.Status(Movie)</span></div>
+    <div class="evidence-controls">
+        <div class="exposure-navigation"><FluentButton Title="Previous exposure" OnClick="@(() => Select(Movie.Index - 1))" Disabled="@(Movie.Index == 0)" Appearance="ButtonAppearance.Subtle">‹</FluentButton><FluentButton Title="Next exposure" OnClick="@(() => Select(Movie.Index + 1))" Disabled="@(Movie.Index == Session.Movies.Count - 1)" Appearance="ButtonAppearance.Subtle">›</FluentButton></div>
+        <div class="view-modes"><FluentButton Class="@(!ShowEnhanced ? "active-view" : "")" Appearance="ButtonAppearance.Subtle" OnClick="@(() => _enhanced = false)">Average</FluentButton><FluentButton Class="@(ShowEnhanced ? "active-view" : "")" Appearance="ButtonAppearance.Subtle" Disabled="@(!Movie.Done.HasFlag(WarpLiveStage.Enhance))" OnClick="@(() => _enhanced = true)">Enhanced</FluentButton></div>
+        <span class="spacer"></span>
+        <div class="disposition-controls" aria-label="Movie selection"><FluentButton Appearance="@DispositionAppearance(WarpLiveDisposition.Auto)" OnClick="@(() => SetDisposition(WarpLiveDisposition.Auto))">Filter rules</FluentButton><FluentButton Appearance="@DispositionAppearance(WarpLiveDisposition.Keep)" OnClick="@(() => SetDisposition(WarpLiveDisposition.Keep))">Keep</FluentButton><FluentButton Appearance="@DispositionAppearance(WarpLiveDisposition.Exclude)" OnClick="@(() => SetDisposition(WarpLiveDisposition.Exclude))">Exclude</FluentButton></div>
+    </div>
+    @if (Movie.Failed && !string.IsNullOrWhiteSpace(Movie.Error)) { <div class="movie-error" role="alert">@Movie.Error</div> }
+    <div class="diagnostic-grid">
+        <section class="micrograph-evidence">
+            <div class="figure-meta"><div class="figure-heading"><b>@(ShowEnhanced ? "Denoised · deconvolved" : "Dose-weighted average")</b><span>Motion @Value(Movie.Motion, WarpLiveStage.Motion) Å/frame</span></div></div>
+            <div class="micrograph-square">@if (Movie.Done.HasFlag(WarpLiveStage.Motion) && !string.IsNullOrEmpty(Movie.AveragePath)) { <MicrographViewer @key="Movie.Id" MicrographPath="@(ShowEnhanced ? Movie.EnhancedPath : Movie.AveragePath)" ResultRevision="@(ShowEnhanced ? Movie.ResultRevision : Movie.MotionRevision)" ThumbnailPath="@Movie.ThumbnailPath" MinWidth="200" MinHeight="200" CanEditParticles="false" CanEditMask="false" /> } else { <div class="empty-evidence">Awaiting motion correction</div> }</div>
+        </section>
+        <section class="fourier-evidence">
+            <div class="figure-meta"><div class="figure-heading"><b>CTF fit</b><span>@Value(Movie.Ctf, WarpLiveStage.Ctf) Å</span></div>
+            <div class="spectral-readings"><span>Defocus <b>@Value(Movie.Defocus, WarpLiveStage.Ctf) µm</b></span><span>Ice <b>@Value(Movie.Ice, WarpLiveStage.Ctf, "F0") Å</b></span></div>
+            <div class="spectrum-key"><span>― Measured</span><span>― Fitted</span><span>― Quality</span></div>
+            </div>
+            @if (Movie.Done.HasFlag(WarpLiveStage.Ctf) && !string.IsNullOrEmpty(Movie.MetadataPath)) { <div class="real-spectrum"><AmplitudeSpectrumViewer @key="Movie.Id" ResultRevision="Movie.CtfRevision" MovieFilePath="@Movie.MetadataPath" FittingRangeMin="Session.Settings.CtfMin" FittingRangeMax="Session.Settings.CtfMax" /></div> } else { <div class="empty-evidence">Awaiting CTF estimation</div> }
+        </section>
+    </div>
+</div>
+
+@code {
+    [Parameter] public WarpLiveSession Session { get; set; }
+    [Parameter, EditorRequired] public Func<Action<WarpLiveSession>, Task> Update { get; set; }
+    [Parameter] public WarpLiveMovie Movie { get; set; }
+    [Parameter] public EventCallback<int> SelectedIndexChanged { get; set; }
+    private bool _enhanced;
+    private bool ShowEnhanced => _enhanced && Movie.Done.HasFlag(WarpLiveStage.Enhance) && !string.IsNullOrEmpty(Movie.EnhancedPath);
+    private string Value(double value, WarpLiveStage stage, string format = "F2") => Movie.Done.HasFlag(stage) && double.IsFinite(value) ? value.ToString(format) : "—";
+    private ButtonAppearance DispositionAppearance(WarpLiveDisposition disposition) => Movie.Disposition == disposition ? ButtonAppearance.Primary : ButtonAppearance.Subtle;
+    private Task SetDisposition(WarpLiveDisposition disposition) => Update(s => s.SetDisposition([Movie.Index], disposition));
+    private Task Select(int index) => SelectedIndexChanged.InvokeAsync(Math.Clamp(index, 0, Session.Movies.Count - 1));
+}

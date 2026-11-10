@@ -101,6 +101,15 @@ export function parseParticles(text, width, height) {
         y: height - 1 - (normalized ? p.y * (height - 1) : p.y) }));
 }
 
+// Overlay requests do not fetch or retain a micrograph plane.
+export async function loadParticles(options) {
+    try {
+        const response = await fetch(options.particlesUrl);
+        if (!response.ok) throw new Error(`File request failed (${response.status})`);
+        postMessage({ type: 'particles', particles: parseParticles(await response.text(), options.width, options.height) });
+    } catch (error) { postMessage({ type: 'warning', message: `Particles: ${error.message}` }); }
+}
+
 async function load(options) {
     try {
         let plane = await loadPlane(options.url, options.layer);
@@ -126,4 +135,5 @@ async function load(options) {
         ]);
     } catch (error) { postMessage({ type: 'error', message: error.message }); }
 }
-if (typeof self !== 'undefined') self.onmessage = ({ data }) => load(data).finally(() => self.close());
+if (typeof self !== 'undefined') self.onmessage = ({ data }) =>
+    (data.type === 'particles' ? loadParticles(data) : load(data)).finally(() => self.close());

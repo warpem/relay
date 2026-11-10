@@ -101,6 +101,12 @@ public class JobEditorService : IDisposable
 
     private async Task SetJob(ReadOnlyJob job, long? expectedVersion)
     {
+        if (job?.ControlsOwnExecution == true && _session.CurrentMain != MainScreenType.FactoryBuilder)
+        {
+            await SetJob(null, expectedVersion);
+            await _session.NavigateToAsync(JobNavigation.ForJob(job, _session.View));
+            return;
+        }
         long version;
         lock (_subscriptionLock)
         {

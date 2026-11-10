@@ -20,6 +20,14 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Refund\Refund.csproj" />
+    <ProjectReference Include="..\Warp\WarpWorker2\WarpWorker2.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
+  <PropertyGroup>
+    <WarpWorkerTestDirectory Condition="'$(Configuration)' == 'Release'">Release</WarpWorkerTestDirectory>
+    <WarpWorkerTestDirectory Condition="'$(WarpWorkerTestDirectory)' == ''">bin</WarpWorkerTestDirectory>
+  </PropertyGroup>
+  <ItemGroup>
+    <AssemblyMetadata Include="WarpWorkerAssemblyPath" Value="$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/../Warp/$(WarpWorkerTestDirectory)/WarpWorker2.dll'))" />
+  </ItemGroup>
 </Project>

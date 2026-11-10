@@ -27,3 +27,16 @@ test('mipmaps bin 2x2 blocks and terminate for narrow odd images', () => {
     const narrow = worker.bin2(new Float32Array(513),1,513);
     assert.equal(narrow.width,1);assert.equal(narrow.height,256);
 });
+
+
+test('particle-only worker fetches only STAR and uses supplied image dimensions', async () => {
+    const requests = [], messages = [];
+    const previousFetch = globalThis.fetch, previousPost = globalThis.postMessage;
+    globalThis.fetch = async url => { requests.push(url); return { ok: true, text: async () => 'data_\nloop_\n_rlnCoordinateX #1\n_rlnCoordinateY #2\n2 3\n' }; };
+    globalThis.postMessage = message => messages.push(message);
+    try {
+        await worker.loadParticles({ particlesUrl: '/filtered.star', width: 10, height: 20 });
+        assert.deepEqual(requests, ['/filtered.star']);
+        assert.deepEqual(messages, [{ type: 'particles', particles: [{ x: 2, y: 16 }] }]);
+    } finally { globalThis.fetch = previousFetch; globalThis.postMessage = previousPost; }
+});

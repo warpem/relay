@@ -1,0 +1,68 @@
+@using Refund.Services.WarpLive
+@using Microsoft.JSInterop
+@inject IJSRuntime Js
+@implements IAsyncDisposable
+
+<section class="particle-histogram" aria-label="Particle correlation and power histogram">
+    <div class="histogram-heading"><b>Particle scores</b><FluentButton Appearance="ButtonAppearance.Subtle" OnClick="Reset">Reset</FluentButton></div>
+    <div class="histogram-filters">
+        <span title="Pearson correlation with the blob template">Correlation</span>
+        <FluentNumberInput TValue="double" Value="Session.MinPickCorrelation" ValueChanged="@(v => Update(s => s.FilterParticleMetric("correlation-min", v)))" Min="0" Max="Session.MaxPickCorrelation" Step=".01" Immediate="true" ImmediateDelay="180" StepButtons="NumberInputStepVisibility.Hidden" aria-label="Minimum particle correlation" />
+        <span>–</span>
+        <FluentNumberInput TValue="double" Value="Session.MaxPickCorrelation" ValueChanged="@(v => Update(s => s.FilterParticleMetric("correlation-max", v)))" Min="Session.MinPickCorrelation" Max="1" Step=".01" Immediate="true" ImmediateDelay="180" StepButtons="NumberInputStepVisibility.Hidden" aria-label="Maximum particle correlation" />
+        <span title="Local variance within twice the blob radius, in input intensity squared">Local power</span>
+        <FluentNumberInput TValue="double" Value="Session.MinPickPower" ValueChanged="@(v => Update(s => s.FilterParticleMetric("power-min", v)))" Min="0" Step=".1" Immediate="true" ImmediateDelay="180" StepButtons="NumberInputStepVisibility.Hidden" aria-label="Minimum particle power" />
+        <span>–</span>
+        <FluentNumberInput TValue="double?" Value="Session.MaxPickPower" ValueChanged="@(v => Update(s => s.FilterParticleMetric("power-max", v)))" Min="Session.MinPickPower" Step=".1" Placeholder="∞" Immediate="true" ImmediateDelay="180" StepButtons="NumberInputStepVisibility.Hidden" aria-label="Maximum particle power" />
+    </div>
+    <canvas id="@_id" @ref="_canvas" aria-label="Joint histogram: Pearson correlation on X, local power on Y. Drag a rectangle to keep particles within both ranges."></canvas>
+    <div class="histogram-key"><span title="Accepted count estimated from histogram bins; exports use exact particle scores">≈@_data.Accepted.ToString("N0") / @_data.Total.ToString("N0") picks</span><span class="density-scale" title="Logarithmic particle density">Low <i></i> High</span></div>
+    <div class="histogram-scope">@_data.Movies.ToString("N0") up-to-date micrographs</div>
+</section>
+
+@code {
+    [Parameter] public WarpLiveSession Session { get; set; }
+    [Parameter, EditorRequired] public Func<Action<WarpLiveSession>, Task> Update { get; set; }
+    private readonly string _id = $"warp-particle-histogram-{Guid.NewGuid():N}";
+    private ElementReference _canvas;
+    private IJSObjectReference _module;
+    private DotNetObjectReference<WarpLiveParticleHistogram> _self;
+    private Refund.Services.WarpLive.WarpLiveParticleHistogram _data;
+    private int[] _sentBins;
+    private bool _disposed;
+    protected override void OnParametersSet() => _data = Session.GetParticleHistogram();
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        try { await RenderAsync(firstRender); }
+        catch (JSDisconnectedException) { }
+        catch (ObjectDisposedException) when (_disposed) { }
+        catch (OperationCanceledException) when (_disposed) { }
+    }
+    private async Task RenderAsync(bool firstRender)
+    {
+        if (_disposed) return;
+        if (firstRender)
+        {
+            _module = await Js.InvokeAsync<IJSObjectReference>("import", "./_content/Refund/Jobs/Fs/WarpLive/WarpLiveParticleHistogram.razor.js");
+            if (_disposed) { await _module.DisposeAsync(); return; }
+            _self = DotNetObjectReference.Create(this);
+            await _module.InvokeVoidAsync("initialize", _canvas, _id, _self);
+        }
+        if (_module == null) return;
+        await _module.InvokeVoidAsync("update", _id, ReferenceEquals(_sentBins, _data.Bins) ? null : _data.Bins, _data.Columns, _data.Rows, _data.PowerMaximum,
+            new[] { Session.MinPickCorrelation, Session.MaxPickCorrelation, Session.MinPickPower, Session.MaxPickPower ?? _data.PowerMaximum });
+        _sentBins = _data.Bins;
+    }
+    [JSInvokable] public Task SelectRange(double minCorrelation, double maxCorrelation, double minPower, double maxPower)
+    {
+        if (_disposed) return Task.CompletedTask;
+        return Update(s => s.SetParticleRange(minCorrelation, maxCorrelation, minPower, maxPower));
+    }
+    private Task Reset() => Update(s => s.SetParticleRange(0, 1, 0, null));
+    public async ValueTask DisposeAsync()
+    {
+        _disposed = true;
+        if (_module != null) try { await _module.InvokeVoidAsync("dispose", _id); await _module.DisposeAsync(); } catch (JSDisconnectedException) { } catch (OperationCanceledException) { }
+        _self?.Dispose();
+    }
+}
