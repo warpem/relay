@@ -14,7 +14,7 @@ using WarpHelper = Warp.Tools.Helper;
 namespace Refund.Jobs.Ts.Selection.DeselectTilts;
 
 [GenerateReadOnly]
-public class DeselectTilts : WarpJob, ILocalJob
+public class DeselectTilts : WarpToolsJob, ILocalJob
 {
     public override string TypeGuid => "97d2bfde-f719-47fe-96a4-525b3bf54249";
 

@@ -25,16 +25,8 @@
     line-height: 10px;
     font-size: 10px;
     color: var(--text-secondary);
-}
-.axis-label.top {
-    top: 0;
-}
-.axis-label.center {
-    top: 50%;
+    /* Script sets top to the label's gridline. */
     transform: translateY(-50%);
-}
-.axis-label.bottom {
-    bottom: 0;
 }
 
 .histogram {

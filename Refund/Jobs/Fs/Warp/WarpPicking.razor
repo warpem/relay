@@ -1,0 +1,67 @@
+@using Refund.Services.Warp
+@using Microsoft.JSInterop
+@using Refund.Components.MicrographViewer
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+
+<div class="picking-workspace">
+    <div class="picking-toolbar exposure-heading">
+        <span class="exposure-number" title="Movie number"><FluentNumberInput TValue="int" Value="@(Movie.Index + 1)" ValueChanged="@(v => Select(v - 1))" Min="1" Max="Session.Movies.Count" StepButtons="NumberInputStepVisibility.Hidden" aria-label="Movie number" /></span>
+        <span class="movie-total">of @Session.Movies.Count.ToString("N0")</span>
+        <span class="movie-name" title="@Movie.Name">@Movie.Name</span>
+        <span class="status-chip movie-state"><i style="background:@Session.StatusColor(Movie)"></i>@Session.Status(Movie)</span>
+        <span class="exposure-navigation">
+            <FluentButton Title="Previous exposure" Appearance="ButtonAppearance.Subtle" IconStart="@(new Icons.Filled.Size16.ChevronLeft())" OnClick="@(() => Select(Movie.Index - 1))" Disabled="@(Movie.Index == 0)" />
+            <FluentButton Title="Next exposure" Appearance="ButtonAppearance.Subtle" IconStart="@(new Icons.Filled.Size16.ChevronRight())" OnClick="@(() => Select(Movie.Index + 1))" Disabled="@(Movie.Index == Session.Movies.Count - 1)" />
+        </span>
+        @if (FollowChanged.HasDelegate) { <FluentSwitch Class="follow-latest" Value="Follow" ValueChanged="@((bool v) => FollowChanged.InvokeAsync(v))" Label="Follow latest" title="Show each newly picked micrograph as it arrives" /> }
+    </div>
+    <div class="picking-content">
+        <figure class="picking-image-region">
+            <div class="picking-image image-well">
+                @if (Movie.Done.HasFlag(WarpStage.Motion) && !string.IsNullOrEmpty(Movie.AveragePath))
+                {
+                    <MicrographViewer @key="ViewerKey" MicrographPath="@(ShowEnhanced ? Movie.EnhancedPath : Movie.AveragePath)" ResultRevision="@(ShowEnhanced ? Movie.ResultRevision : Movie.MotionRevision)" ThumbnailPath="@Movie.ThumbnailPath" ParticleStarPath="@(_showPicks && Session.HasCurrentParticleMetrics(Movie) ? Session.GetFilteredParticleStar(Movie.Index, DisplayPixelSize) : null)" MinWidth="300" MinHeight="300" CanEditParticles="false" CanEditMask="false" CanControlParticleDisplay="false" DefaultParticleDiameter="@((double)Session.Settings.Diameter )" DefaultParticleBoxSize="@((double)(Session.Settings.Box * Session.Settings.TargetPixelSize) )" />
+                }
+                else { <div class="empty-evidence">Waiting for motion correction</div> }
+            </div>
+        </figure>
+        <aside class="picking-sidebar" aria-label="Picking">
+            <section>
+                <h3>View</h3>
+                <div class="view-modes segmented" role="group" aria-label="Micrograph"><FluentButton Class="@(!ShowEnhanced ? "selected" : null)" Appearance="ButtonAppearance.Subtle" OnClick="@(() => _enhanced = false)">Average</FluentButton><FluentButton Class="@(ShowEnhanced ? "selected" : null)" Appearance="ButtonAppearance.Subtle" Disabled="@(!Movie.Done.HasFlag(WarpStage.Enhance))" OnClick="@(() => _enhanced = true)">@DenoisedLabel</FluentButton></div>
+                <FluentCheckbox @bind-Value="_showPicks" Label="Show picks" Disabled="@(!Session.HasCurrentParticleMetrics(Movie))" />
+            </section>
+            <section>
+                <h3>This micrograph</h3>
+                @if (Session.ActiveStale(Movie).HasFlag(WarpStage.Pick)) { <p class="result-note">Picks are from previous settings and will be redone.</p> }
+                <dl class="pick-facts">
+                    <div><dt>Detected picks</dt><dd>@(Movie.Done.HasFlag(WarpStage.Pick) ? Movie.Picks.ToString("N0") : "Pending")</dd></div>
+                    <div><dt>Particle diameter</dt><dd>@Session.Settings.Diameter.ToString("0") Å</dd></div>
+                    <div><dt>Extraction box</dt><dd>@Session.Settings.Box px</dd></div>
+                </dl>
+                @if (OpenSetup.HasDelegate) { <FluentButton OnClick="OpenSetup">Picking settings</FluentButton> }
+            </section>
+            <section class="sidebar-histogram">
+                <WarpParticleHistogram Session="Session" Update="Update" />
+            </section>
+        </aside>
+    </div>
+</div>
+
+@code {
+    [Parameter] public WarpSession Session { get; set; }
+    [Parameter, EditorRequired] public Func<Action<WarpSession>, Task> Update { get; set; }
+    [Parameter] public EventCallback OpenSetup { get; set; }
+    [Parameter] public WarpMovie Movie { get; set; }
+    [Parameter] public EventCallback<int> SelectedIndexChanged { get; set; }
+    [Parameter] public bool Follow { get; set; }
+    [Parameter] public EventCallback<bool> FollowChanged { get; set; }
+    // Enhancement always deconvolves; it denoises only when the denoiser is enabled in Setup.
+    private string DenoisedLabel => Session.Settings.Denoise ? "Denoised" : "Deconvolved";
+    private bool _enhanced = true, _showPicks = true;
+    private bool ShowEnhanced => _enhanced && Movie.Done.HasFlag(WarpStage.Enhance) && !string.IsNullOrEmpty(Movie.EnhancedPath);
+    // Convert physical geometry using the actual sampling of the displayed image.
+    private double DisplayPixelSize => Math.Max(.001, ShowEnhanced ? Movie.EnhancedPixelSize : Movie.PixelSize);
+    private string ViewerKey => $"{Movie.Id}-{Movie.MotionRevision}-{(ShowEnhanced ? Movie.ResultRevision : 0)}-{ShowEnhanced}-{Session.Settings.Diameter}-{Session.Settings.Box}-{Session.Settings.TargetPixelSize}";
+    private Task Select(int index) => SelectedIndexChanged.InvokeAsync(Math.Clamp(index, 0, Session.Movies.Count - 1));
+}

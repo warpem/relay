@@ -9,7 +9,7 @@ using Warp.Tools;
 namespace Refund.Jobs.M.CreateDataSource;
 
 [GenerateReadOnly]
-public class CreateDataSource : WarpJob, IClusterJob
+public class CreateDataSource : WarpToolsJob, IClusterJob
 {
     /// <summary>
     /// Gets or sets the dimensions of the job card in the workflow editor.

@@ -1,0 +1,13 @@
+/* Joint particle score histogram with its two accepted ranges. In the Monitor its four rows join the
+   astigmatism plot's through the diagnostics subgrid; elsewhere they simply stack. */
+.particle-histogram { display: grid; grid-row: span 4; grid-template-rows: subgrid; row-gap: var(--w-space-s); min-width: 0; align-content: start; }
+.plot-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--w-space-s); min-height: 28px; }
+/* One row per score, with labels, minimums, dashes and maximums in shared columns. */
+.histogram-filters { align-self: start; display: grid; grid-template-columns: max-content repeat(3, max-content); align-items: center; gap: var(--w-space-xs); }
+.histogram-filters .range-input { display: contents; }
+.range-label { font-size: var(--w-text-s); margin-right: var(--w-space-xs); }
+/* Text-only reset, flush with the plot's right edge. */
+.particle-histogram .plot-heading ::deep fluent-button { min-width: 0; padding-inline: 0; }
+/* The plot area spans the polar plot's circle; below it, a 6 px gap and two label lines. */
+canvas { display: block; width: 100%; font-size: var(--w-text-s); height: calc(var(--diagnostic-size, 240px) - var(--plot-inset, 8px) + 6px + 2.4em); cursor: crosshair; touch-action: none; }
+.histogram-key { min-height: 1lh; font-size: var(--w-text-s); color: var(--w-muted); }

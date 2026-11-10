@@ -212,8 +212,8 @@ public partial class DataManager
 
                 foreach (var job in subJobs)
                 {
-                    if (job is Refund.Jobs.Fs.WarpLive.WarpLiveJob liveSession)
-                        WarpLiveSessions.Remove(liveSession.Identity);
+                    if (job is Refund.Jobs.Fs.Warp.WarpJob warpJob)
+                        WarpSessions.Remove(warpJob.Identity);
                     _dataRepository.DeleteJob(originalUser, job);
                 }
 

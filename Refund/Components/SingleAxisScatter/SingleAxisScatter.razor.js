@@ -26,12 +26,14 @@ function computeNiceAxisBounds(dataMin, dataMax) {
     return {min: niceMin, max: niceMax, center};
 }
 
-/** Simple numeric formatter for axis labels. */
-function formatNumber(val) {
-    const abs = Math.abs(val);
-    if (abs < 10) return val.toFixed(2);
-    if (abs < 100) return val.toFixed(1);
-    return val.toFixed(0);
+/** Formats an axis's labels with one shared precision: the fewest decimals that represent all of them,
+ *  capped by magnitude, so 0-10 reads "10 / 5 / 0" rather than "10.0 / 5.00 / 0.00". */
+function formatAxisLabels(values) {
+    const largest = Math.max(...values.map(v => Math.abs(v)));
+    const cap = largest < 10 ? 2 : largest < 100 ? 1 : 0;
+    let digits = 0;
+    while (digits < cap && values.some(v => { const scaled = v * 10 ** digits; return Math.abs(scaled - Math.round(scaled)) > 1e-6; })) digits++;
+    return values.map(v => v.toFixed(digits));
 }
 
 class ScatterPlot {
@@ -561,11 +563,14 @@ class ScatterPlot {
         this.topLine.style.top = `${topY}px`;
         this.centerLine.style.top = `${centerY}px`;
         this.bottomLine.style.top = `${bottomY}px`;
+        // Each label is centred on its own gridline (the CSS translates it up by half its height).
+        this.topLabel.style.top = `${topY}px`;
+        this.centerLabel.style.top = `${centerY}px`;
+        this.bottomLabel.style.top = `${bottomY}px`;
 
         // labels
-        this.topLabel.textContent = formatNumber(this.axisMax);
-        this.centerLabel.textContent = formatNumber(this.axisCenter);
-        this.bottomLabel.textContent = formatNumber(this.axisMin);
+        [this.topLabel.textContent, this.centerLabel.textContent, this.bottomLabel.textContent] =
+            formatAxisLabels([this.axisMax, this.axisCenter, this.axisMin]);
     }
 
     renderRangeHighlight() {
@@ -575,8 +580,10 @@ class ScatterPlot {
             this.rangeHighlight.style.height = "0px";
             return;
         }
-        const hiMin = Math.max(this.plotMin, this.rangeMin);
-        const hiMax = Math.min(this.plotMax, this.rangeMax);
+        // Clamp to the gridded axis range, which holds every point; past it the band would run into
+        // the plot's padding and overshoot the gridlines.
+        const hiMin = Math.max(this.axisMin, this.rangeMin);
+        const hiMax = Math.min(this.axisMax, this.rangeMax);
         const topPx = (this.plotMax - hiMax) / pRange * this.currentHeight;
         const heightPx = (hiMax - hiMin) / pRange * this.currentHeight;
 

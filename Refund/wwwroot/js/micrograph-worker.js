@@ -1,34 +1,7 @@
-import { parseHeader, readSlice } from './mrc-parser.js';
+import { loadPlane } from './mrc-parser.js';
 
-async function range(url, start, end) {
-    const response = await fetch(url, { headers: { Range: `bytes=${start}-${end}` } });
-    if (!response.ok) throw new Error(`File request failed (${response.status})`);
-    return { buffer: await response.arrayBuffer(), partial: response.status === 206 };
-}
-
-// Request only the selected plane, including for large particle/image stacks.
-export async function loadPlane(url, layer = 0) {
-    let { buffer, partial } = await range(url, 0, 1023);
-    if (buffer.byteLength < 1024) throw new Error('Truncated MRC header');
-    const extended = new DataView(buffer).getInt32(92, true);
-    if (extended < 0) throw new Error('Invalid extended MRC header');
-    if (partial && extended > 0) ({ buffer } = await range(url, 0, 1023 + extended));
-    const header = parseHeader(buffer);
-    const { x: width, y: height, z: count } = header.dimensions;
-    if (width < 1 || height < 1 || count < 1 || !Number.isInteger(layer) || layer < 0 || layer >= count)
-        throw new Error('Invalid MRC dimensions or layer');
-    let data;
-    if (!partial) data = readSlice(buffer, header, layer);
-    else {
-        const start = header.sliceByteOffset(layer);
-        const plane = await range(url, start, start + header.sliceByteSize - 1);
-        // Some servers ignore Range and return the complete file.
-        if (!plane.partial) data = readSlice(plane.buffer, header, layer);
-        else data = readSlice(plane.buffer, { ...header, dimensions: { x: width, y: height, z: 1 },
-            sliceByteOffset: () => 0, sliceVoxelCount: width * height }, 0);
-    }
-    return { width, height, pixelSize: header.pixelSize.x > 0 ? header.pixelSize.x : 1, data };
-}
+// Shared with main-thread viewers (the amplitude spectrum); kept exported here for existing callers.
+export { loadPlane };
 
 export function bin2(data, width, height) {
     const w = Math.max(1, Math.floor(width / 2)), h = Math.max(1, Math.floor(height / 2));

@@ -67,7 +67,7 @@ are **asymmetric** and must not be conflated:
 | Resource | Expression | Why |
 |---|---|---|
 | Cores | `ProcessCount × CoreCount` | `CoreCount` is documented and used as cores *per process* (`Job.cs:347`); the SLURM template pairs it with `--ntasks-per-node {{ n_processes }}` |
-| Memory | `MemoryGb` | Already a total in every override, e.g. `(NGpus * PerDevice) * MemoryPerWorker` (`WarpJobGpu.cs:27`) and `(NProcesses - 1) * MemoryPerWorker` (`Refine3D.cs:103`) |
+| Memory | `MemoryGb` | Already a total in every override, e.g. `(NGpus * PerDevice) * MemoryPerWorker` (`WarpToolsJobGpu.cs:27`) and `(NProcesses - 1) * MemoryPerWorker` (`Refine3D.cs:103`) |
 | GPUs | `GpuCount` | Count of whole devices |
 
 `GpuMemoryGb` is not tracked. Jobs on one host contend for whole devices, not fractions of VRAM.
@@ -169,8 +169,8 @@ into the script, so the submission template stays scheduler-agnostic and there i
 
 CUDA renumbers visible devices to `0..n-1`, which is exactly what Relay's jobs already assume:
 
-- `WarpJobGpu` pool workers pass `--device {deviceIndex}` for `deviceIndex` in `0..n-1`
-  (`WarpJobGpu.cs:183`).
+- `WarpToolsJobGpu` pool workers pass `--device {deviceIndex}` for `deviceIndex` in `0..n-1`
+  (`WarpToolsJobGpu.cs:183`).
 - `AlignMiss` states it outright — *"GPUs as indices 0..NGpus-1"* (`AlignMiss.cs:294`) — and composes
   `--training-devices 0` with `--reconstruction-devices 1,1,2,2` on that basis.
 

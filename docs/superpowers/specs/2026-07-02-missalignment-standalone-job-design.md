@@ -7,15 +7,15 @@ Status: Design — awaiting user approval
 
 `AlignMiss` (internal `TypeName` "MissAlignment") inherits worker-pool support it
 should not have. The whole worker-pool mechanism lives on the abstract base
-`WarpJobGpu`:
+`WarpToolsJobGpu`:
 
-- `WarpJobGpu : WarpJob, IPooledJob` (`Refund/Jobs/Abstract/WarpJobGpu.cs:9`)
+- `WarpToolsJobGpu : WarpToolsJob, IPooledJob` (`Refund/Jobs/Abstract/WarpToolsJobGpu.cs:9`)
 - The `IPooledJob` contract, the `[UiQueue("Pool Queue")]` field (`PoolQueueId`),
   `PoolSize`, the `PoolWorkers*` counters, `GetWorkerCommand` (which literally
   launches `WarpWorker2 --queue-dir …`), and `GetWorkerResourceValues`.
 
 Every WarpTools GPU job (`Motion2D`, `CTF2D`, `TemplateMatch`, `Refine`, … — 19
-in total) legitimately derives from `WarpJobGpu` and runs per-item work via
+in total) legitimately derives from `WarpToolsJobGpu` and runs per-item work via
 `WarpWorker2` pulling from a shared task queue, so pooling makes sense for them.
 
 `AlignMiss` is **not** a WarpTools per-item job. It runs a single `miss-alignment`
@@ -29,10 +29,10 @@ against a queue `AlignMiss` never fills.
 ## Decision
 
 Make `AlignMiss` a **standalone GPU cluster job** that does not inherit
-`WarpJobGpu` or `WarpJob` at all:
+`WarpToolsJobGpu` or `WarpToolsJob` at all:
 
 ```
-AlignMiss : Job, IClusterJob      // was: WarpJobGpu, IClusterJob
+AlignMiss : Job, IClusterJob      // was: WarpToolsJobGpu, IClusterJob
 ```
 
 Replicate only the members `AlignMiss` genuinely uses. This removes worker-pool
@@ -55,17 +55,17 @@ is outside the WarpTools ecosystem" and enables custom log parsing.
 
 | Member | Source today | Standalone behavior |
 |---|---|---|
-| `QueueType` | `WarpJobGpu` | `=> JobQueueType.GPU` (base `Job.QueueType` is abstract) |
-| `NGpus` ("Number of GPUs") | `WarpJobGpu` | own `[RelayProperty]`, default 1 — **kept** |
-| `PerDevice` ("Workers per GPU", CliName `perdevice`) | `WarpJobGpu` | own `[RelayProperty]`, default 1 — **kept**; still composed into the command |
-| `GpuCount` | `WarpJobGpu` (`IsPooled?0:NGpus`) | `=> NGpus` |
+| `QueueType` | `WarpToolsJobGpu` | `=> JobQueueType.GPU` (base `Job.QueueType` is abstract) |
+| `NGpus` ("Number of GPUs") | `WarpToolsJobGpu` | own `[RelayProperty]`, default 1 — **kept** |
+| `PerDevice` ("Workers per GPU", CliName `perdevice`) | `WarpToolsJobGpu` | own `[RelayProperty]`, default 1 — **kept**; still composed into the command |
+| `GpuCount` | `WarpToolsJobGpu` (`IsPooled?0:NGpus`) | `=> NGpus` |
 | `CoreCount` / `MemoryGb` | already overridden in `AlignMiss` | unchanged (`NWorkers*4+4`, `NWorkers*6+20`) |
 | `GpuMemoryGb` | base `Job` default (12) | inherit base default |
-| `CommandSuffix` | `WarpJob` (`&& touch SUCCESS`) | replicated — queue relies on the SUCCESS marker |
-| `ComposeCommandArguments` | `WarpJob` adds `strict`; `WarpJobGpu` adds `external_provisioner` | `base` (reflection) + `config-file` + `prepare-stacks`; no `strict` to remove, no pool arg |
-| `ResProcessedItemsJson` | `WarpJob` | replicated — the expanded view reads `processed_items.json` |
-| `TrackProgressLogs()` | `WarpJob` (WarpTools parser) | replicated verbatim now; custom parser later |
-| `NItemsProcessed/Total/Failed` | `WarpJob` | replicated (used by the verbatim parser) |
+| `CommandSuffix` | `WarpToolsJob` (`&& touch SUCCESS`) | replicated — queue relies on the SUCCESS marker |
+| `ComposeCommandArguments` | `WarpToolsJob` adds `strict`; `WarpToolsJobGpu` adds `external_provisioner` | `base` (reflection) + `config-file` + `prepare-stacks`; no `strict` to remove, no pool arg |
+| `ResProcessedItemsJson` | `WarpToolsJob` | replicated — the expanded view reads `processed_items.json` |
+| `TrackProgressLogs()` | `WarpToolsJob` (WarpTools parser) | replicated verbatim now; custom parser later |
+| `NItemsProcessed/Total/Failed` | `WarpToolsJob` | replicated (used by the verbatim parser) |
 
 ## Members dropped
 
@@ -87,7 +87,7 @@ is outside the WarpTools ecosystem" and enables custom log parsing.
    one-line change — flip it if miss-alignment's environment is confirmed
    independent of the warp module.
 
-2. **Log parsing — REPLICATE WarpTools verbatim.** Copy `WarpJob.TrackProgressLogs`
+2. **Log parsing — REPLICATE WarpTools verbatim.** Copy `WarpToolsJob.TrackProgressLogs`
    exactly (stderr capture, `JobTools.CleanProgressBarLines`, write cleaned log to
    `LogFilePath(0)`, `WarpTools.ExtractProgressInfo` → `NItems*`). Behavior is
    byte-identical to today; the miss-alignment-specific parser is a follow-up at a
@@ -102,7 +102,7 @@ everything the expanded view uses (`AngPix`, `ResProcessedItemsJson`, ports,
 
 Unchanged and verified safe:
 
-- The 19 pooled jobs, `WarpJobGpu`, `WorkerPool`, `QueueRepository` (pool casts are
+- The 19 pooled jobs, `WarpToolsJobGpu`, `WorkerPool`, `QueueRepository` (pool casts are
   inside `is IPooledJob` guards → never reached for AlignMiss).
 - `WorkerPoolTests` and `JobTaxonomyTests` (the latter only checks the category
   string, which is unchanged).
@@ -118,7 +118,7 @@ the display is made capability-driven:
 
 - New `IItemProgress` interface (`Job.cs`) — a pure read contract with nullable
   `NItemsProcessed`/`NItemsTotal`/`NItemsFailed` getters.
-- `WarpJob` and `AlignMiss` implement it; their count fields become `int?`
+- `WarpToolsJob` and `AlignMiss` implement it; their count fields become `int?`
   (default `null` = "not reporting"). The two pre-existing shadowed redeclarations of
   these fields in `BoxNetInference2D`/`ExtractParticles2D` (a `CS0108` smell) are
   removed so they use the base nullable fields.

@@ -1,0 +1,232 @@
+/* Warp expanded view.
+   This file owns the shared design layer for every Warp component: tokens, type scale and the
+   common controls (segmented toggles, field rows, message bars). Child components inherit the
+   custom properties and pick up the shared classes through ::deep, so their own CSS stays small.
+   Everything is expressed in Fluent tokens so light and dark themes follow Relay. */
+
+.study-page { container-type: inline-size; min-height: 100%; display: flex; flex-direction: column; }
+
+.warp {
+    /* Spacing on a 4px grid. */
+    --w-space-xs: 4px; --w-space-s: 8px; --w-space-m: 12px; --w-space: 16px; --w-space-l: 24px;
+    /* Three text sizes: body/controls, secondary, section titles. Fluent's own tokens are the source. */
+    --w-text: var(--fontSizeBase300); --w-text-s: var(--fontSizeBase200); --w-text-l: var(--fontSizeBase400);
+    --w-rule: var(--colorNeutralStroke2);
+    --w-muted: var(--colorNeutralForeground3);
+    --w-surface: var(--colorNeutralBackground1);
+    --w-bar: var(--colorNeutralBackground2);
+    /* Micrographs and spectra sit on the same dark well in both themes. */
+    --w-well: #1f1f1f;
+    --w-ok: var(--colorStatusSuccessForeground1);
+    --w-warn: var(--colorStatusWarningForeground1); --w-warn-bg: var(--colorStatusWarningBackground1); --w-warn-line: var(--colorStatusWarningBorder1, var(--colorStatusWarningForeground1));
+    --w-bad: var(--colorStatusDangerForeground1); --w-bad-bg: var(--colorStatusDangerBackground1); --w-bad-line: var(--colorStatusDangerBorder1, var(--colorStatusDangerForeground1));
+    --w-selected-bg: var(--colorBrandBackground2); --w-selected-fg: var(--colorBrandForeground1);
+    --highlight-bg: var(--colorBrandBackground);
+    --text-secondary: var(--w-muted);
+
+    flex: 1; display: flex; flex-direction: column; min-width: 0;
+    background: var(--w-surface); color: var(--colorNeutralForeground1);
+    font-family: var(--fontFamilyBase); font-size: var(--w-text); line-height: var(--lineHeightBase300);
+    font-variant-numeric: tabular-nums;
+}
+
+/* Wall displays at the microscope: scale Fluent's tokens so components grow with the text. */
+@container (min-width: 2000px) {
+    .warp {
+        --fontSizeBase200: 14px; --lineHeightBase200: 20px;
+        --fontSizeBase300: 16px; --lineHeightBase300: 22px;
+        --fontSizeBase400: 18px; --lineHeightBase400: 26px;
+        --w-space: 24px; --w-space-l: 32px; --w-space-m: 16px;
+    }
+    .collection-diagnostics { --plot-inset: 32px; --diagnostic-size: clamp(180px, 18cqi, 380px); }
+}
+
+/* Base element rules reach child components through ::deep (scoped CSS stops at component edges). */
+.warp ::deep h1, .warp ::deep h2, .warp ::deep h3, .warp ::deep p, .warp ::deep dl, .warp ::deep dd { margin: 0; }
+.warp ::deep dt { font-weight: 400; }
+.warp ::deep h2 { font-size: var(--w-text-l); line-height: var(--lineHeightBase400); font-weight: 600; }
+.warp ::deep h3 { font-size: var(--w-text); line-height: var(--lineHeightBase300); font-weight: 600; }
+.warp ::deep button { font: inherit; }
+.warp ::deep :focus-visible { outline: 2px solid var(--colorStrokeFocus2); outline-offset: 1px; }
+.warp ::deep .spacer { flex: 1; min-width: 0; }
+
+/* ---------- Header: run state, telemetry, workers, primary action ---------- */
+
+.session-header {
+    display: flex; align-items: center; flex-wrap: wrap; gap: var(--w-space-s) var(--w-space-l);
+    padding: var(--w-space-m) var(--w-space); background: var(--w-bar); border-bottom: 1px solid var(--w-rule);
+}
+.run-state { display: flex; flex-direction: column; min-width: 128px; }
+.run-label { display: flex; align-items: center; gap: var(--w-space-s); font-size: var(--w-text-l); line-height: var(--lineHeightBase400); font-weight: 600; }
+.run-label i { position: relative; width: 10px; height: 10px; border-radius: 50%; background: var(--colorNeutralForeground4); flex: none; }
+.running .run-label i { background: var(--w-ok); }
+.running .run-label i::after {
+    content: ""; position: absolute; inset: -4px; border-radius: 50%; border: 2px solid var(--w-ok); opacity: 0;
+    animation: warp-pulse 2.4s ease-out infinite;
+}
+.pending .run-label i { background: var(--w-warn); }
+@keyframes warp-pulse { 0% { transform: scale(.6); opacity: .6; } 100% { transform: scale(1.4); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .running .run-label i::after { animation: none; } }
+.session-identity { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--w-text-s); color: var(--w-muted); }
+
+.telemetry { display: flex; flex-wrap: nowrap; gap: var(--w-space-l); margin: 0; flex: 1; min-width: 0; }
+.stat { display: flex; flex-direction: column; min-width: 0; }
+.stat dt { font-size: var(--w-text-s); color: var(--w-muted); white-space: nowrap; }
+.stat dd { margin: 0; font-weight: 600; white-space: nowrap; }
+.stat.warning dd, .stat.warning dt { color: var(--w-warn); }
+.stat.danger dd, .stat.danger dt { color: var(--w-bad); }
+.training-link, .error-link { border: 0; padding: 0; background: none; color: inherit; font-weight: inherit; cursor: pointer; text-align: left; }
+.training-link:hover, .error-link:hover { text-decoration: underline; }
+
+.worker-controls { display: flex; align-items: center; gap: var(--w-space-s); }
+.pool-size { display: inline-flex; align-items: center; border: 1px solid var(--colorNeutralStroke1); border-radius: var(--borderRadiusMedium); background: var(--w-surface); }
+.pool-size ::deep fluent-button { min-width: 32px; border-radius: 0; }
+.pool-size ::deep fluent-button[title="Worker resources"] { min-width: 112px; border-inline: 1px solid var(--w-rule); }
+
+.worker-resources { display: flex; flex-direction: column; gap: var(--w-space-m); padding: var(--w-space); }
+.worker-resources > strong { font-size: var(--w-text-l); font-weight: 600; }
+.worker-resources > label { display: grid; grid-template-columns: 1fr 96px; gap: var(--w-space-m); align-items: center; }
+.worker-resources ::deep fluent-number-input, .worker-resources ::deep fluent-field { width: 96px; }
+.worker-resources .hint { font-size: var(--w-text-s); color: var(--w-muted); }
+.worker-resources .resource-error { font-size: var(--w-text-s); color: var(--w-bad); }
+.resource-actions { display: flex; justify-content: flex-end; gap: var(--w-space-s); }
+
+/* ---------- Workspace tabs ---------- */
+
+.workspace-nav { display: flex; align-items: stretch; gap: var(--w-space-xs); min-height: 44px; padding: 0 var(--w-space-s); border-bottom: 1px solid var(--w-rule); }
+.workspace-nav > button {
+    position: relative; display: flex; align-items: center; gap: 6px; padding: 0 var(--w-space-m);
+    border: 0; background: none; color: var(--colorNeutralForeground2); cursor: pointer;
+}
+.workspace-nav > button:hover { color: var(--colorNeutralForeground1); background: var(--colorSubtleBackgroundHover); }
+.workspace-nav > button.selected { color: var(--colorNeutralForeground1); font-weight: 600; }
+.workspace-nav > button.selected::after { content: ""; position: absolute; left: var(--w-space-m); right: var(--w-space-m); bottom: 0; height: 3px; border-radius: 2px 2px 0 0; background: var(--colorCompoundBrandStroke); }
+.unsaved-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--w-warn); }
+
+/* ---------- Message bars ---------- */
+
+.message-bar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--w-space-s) var(--w-space); padding: var(--w-space-s) var(--w-space); border-bottom: 1px solid var(--w-rule); }
+.message-bar.warning { background: var(--w-warn-bg); }
+.message-bar.danger { background: var(--w-bad-bg); color: var(--w-bad); }
+.message-bar progress { width: 160px; height: 6px; accent-color: var(--w-warn); }
+.message-bar > span:not(.spacer) { color: var(--colorNeutralForeground2); }
+.message-bar.danger > span:not(.spacer) { color: inherit; }
+
+/* ---------- Workspace ---------- */
+
+main.workspace { flex: 1; min-height: 0; min-width: 0; }
+/* Setup fills the workspace so its apply bar sits at the bottom on tall screens. */
+main.workspace.setup { display: flex; flex-direction: column; }
+main.workspace.setup ::deep .warp-setup { flex: 1; }
+.empty-session { display: flex; flex-direction: column; align-items: flex-start; gap: var(--w-space-s); max-width: 520px; padding: 48px var(--w-space-l); }
+.empty-session p { color: var(--colorNeutralForeground2); margin-bottom: var(--w-space-s); }
+
+.monitor-grid { display: grid; grid-template-columns: minmax(420px, 2fr) minmax(0, 3fr); }
+.trends-column { min-width: 0; padding: var(--w-space); border-right: 1px solid var(--w-rule); }
+.preview-column { min-width: 0; padding: var(--w-space); }
+/* Same height and spacing as the evidence heading, so the two columns' rows line up. */
+.section-intro { display: flex; align-items: center; flex-wrap: wrap; gap: var(--w-space-xs) var(--w-space-m); min-height: 32px; margin-bottom: var(--w-space-s); }
+.recent-yield { margin-left: auto; font-size: var(--w-text-s); color: var(--w-muted); white-space: nowrap; }
+.recent-yield b { font-size: var(--w-text-l); font-weight: 600; color: var(--colorNeutralForeground1); margin-right: 2px; }
+.recent-yield.attention b { color: var(--w-warn); }
+.range-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--w-space-s); margin-top: var(--w-space-s); padding: var(--w-space-s); border-radius: var(--borderRadiusMedium); background: var(--w-selected-bg); }
+.range-actions > b { font-weight: 600; }
+.range-actions ::deep fluent-button { min-width: 0; }
+/* Astigmatism and particle scores share four rows (heading, filters, plot, key) through subgrid, so
+   their headings, inputs, plot frames and keys line up. The polar plot is square with a hard maximum;
+   --plot-inset is the circle's margin, which the histogram's plot area matches. */
+.collection-diagnostics {
+    --diagnostic-size: clamp(180px, 18cqi, 320px);
+    --plot-inset: 28px;
+    display: grid; grid-template-columns: var(--diagnostic-size) minmax(0, 1fr); grid-template-rows: repeat(4, auto);
+    column-gap: var(--w-space-l); row-gap: var(--w-space-s);
+    margin-top: var(--w-space); padding-top: var(--w-space); border-top: 1px solid var(--w-rule);
+}
+.status-key { display: flex; flex-wrap: wrap; gap: var(--w-space-xs) var(--w-space); margin-top: var(--w-space); font-size: var(--w-text-s); color: var(--w-muted); }
+.status-key > span { display: inline-flex; align-items: center; gap: 6px; }
+.status-key i { width: 8px; height: 8px; border-radius: 50%; }
+
+.movies-layout { min-width: 0; }
+.table-evidence { display: none; }
+@container (min-width: 2400px) {
+    .movies-layout { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); }
+    .table-evidence { display: block; min-width: 0; padding: var(--w-space); border-left: 1px solid var(--w-rule); }
+}
+
+/* ---------- Exports ---------- */
+
+.exports-workspace { display: flex; flex-direction: column; gap: var(--w-space); max-width: 1040px; padding: var(--w-space-l); }
+.exports-intro { color: var(--colorNeutralForeground2); max-width: 70ch; }
+.export-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--w-space); }
+.export-option { display: flex; flex-direction: column; align-items: flex-start; gap: var(--w-space-s); padding: var(--w-space); border: 1px solid var(--w-rule); border-radius: var(--borderRadiusMedium); }
+.export-option p { color: var(--colorNeutralForeground2); flex: 1; margin-bottom: var(--w-space-xs); }
+.export-option p b { color: var(--colorNeutralForeground1); }
+.export-progress { display: flex; align-items: center; gap: var(--w-space-s); color: var(--colorNeutralForeground2); }
+.export-history-title { margin-top: var(--w-space-s); }
+.export-empty { color: var(--w-muted); }
+.export-history { border-top: 1px solid var(--w-rule); }
+.export-entry { display: grid; grid-template-columns: 110px minmax(0, 1fr) 140px 120px auto; align-items: center; gap: var(--w-space); min-height: 44px; border-bottom: 1px solid var(--w-rule); }
+.export-kind { font-weight: 600; }
+.export-file { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--colorNeutralForeground2); }
+.export-rows { text-align: right; }
+.export-time { color: var(--w-muted); }
+.export-entry > a { color: var(--colorBrandForegroundLink); text-decoration: none; }
+.export-entry > a:hover { text-decoration: underline; }
+
+/* ---------- Footer status ---------- */
+
+
+/* ---------- Shared controls for child components ---------- */
+
+/* Either/or choices everywhere: one bordered group, selected option tinted with brand. */
+.warp ::deep .segmented { display: inline-flex; align-items: center; gap: 2px; padding: 2px; border: 1px solid var(--colorNeutralStroke1); border-radius: var(--borderRadiusMedium); background: var(--w-surface); flex: none; }
+.warp ::deep .segmented fluent-button { min-width: 0; min-height: 26px; height: 26px; padding-inline: 10px; border-radius: 3px; font-weight: 400; }
+.warp ::deep .segmented fluent-button.selected { background: var(--w-selected-bg); color: var(--w-selected-fg); font-weight: 600; }
+.warp ::deep .segmented-label { font-size: var(--w-text-s); color: var(--w-muted); margin-right: var(--w-space-xs); }
+
+/* Compact numeric inputs used inline next to plots (filter ranges). */
+.warp ::deep .range-input { display: inline-flex; align-items: center; gap: var(--w-space-xs); color: var(--w-muted); }
+.warp ::deep .range-input fluent-field { display: block; min-width: 0; margin: 0; padding: 0; row-gap: 0; }
+.warp ::deep .range-input fluent-text-input { width: 76px; min-width: 0; height: 24px; }
+.warp ::deep .range-input fluent-text-input::part(root) { height: 24px; min-height: 24px; padding: 0 0 0 6px; }
+.warp ::deep .range-input fluent-text-input::part(control) { font-size: var(--w-text-s); text-align: right; }
+/* Steppers sized to the compact row: two halves of its height. */
+.warp ::deep .range-input .relay-number-steps { height: 22px; margin-left: 2px; }
+.warp ::deep .range-input .relay-number-steps button { height: 11px; width: 16px; border-radius: 2px; color: var(--w-muted); }
+.warp ::deep .range-input .relay-number-steps svg { width: 12px; height: 12px; }
+
+/* Empty image wells and status chips. */
+.warp ::deep .image-well { position: relative; background: var(--w-well); border-radius: var(--borderRadiusMedium); overflow: hidden; }
+.warp ::deep .empty-evidence { display: flex; align-items: center; justify-content: center; height: 100%; min-height: 200px; color: #a8a8a8; font-size: var(--w-text-s); }
+.warp ::deep .status-chip { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: var(--w-text-s); color: var(--colorNeutralForeground2); }
+.warp ::deep .status-chip i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+
+/* ---------- Narrower containers ---------- */
+
+/* Not enough room for one row: controls stay on top, the status figures get their own row. */
+@container (max-width: 1360px) {
+    .telemetry { order: 3; flex-basis: 100%; padding-top: var(--w-space-s); border-top: 1px solid var(--w-rule); }
+    .worker-controls { margin-left: auto; }
+}
+@container (max-width: 1240px) {
+    .monitor-grid { grid-template-columns: minmax(380px, 1fr) minmax(0, 1.25fr); }
+    .collection-diagnostics { column-gap: var(--w-space); }
+    .telemetry { gap: var(--w-space); }
+}
+@container (max-width: 1000px) {
+    .monitor-grid { grid-template-columns: 1fr; }
+    .trends-column { border-right: 0; border-bottom: 1px solid var(--w-rule); }
+    .telemetry { flex-wrap: wrap; row-gap: var(--w-space-xs); }
+    .export-options { grid-template-columns: 1fr; }
+    .export-entry { grid-template-columns: 100px minmax(0, 1fr) auto; }
+    .export-rows, .export-time { display: none; }
+}
+/* Narrow: run state and the primary action share the top row; queue and workers go below. */
+@container (max-width: 640px) {
+    .session-header ::deep #processing-toggle { order: 1; margin-left: auto; }
+    .worker-controls { order: 2; flex-basis: 100%; flex-wrap: wrap; margin-left: 0; }
+    .workspace-nav { overflow-x: auto; padding: 0 var(--w-space-xs); gap: 0; }
+    .workspace-nav > button { padding: 0 var(--w-space-s); }
+    .workspace-nav > button.selected::after { left: var(--w-space-s); right: var(--w-space-s); }
+    .collection-diagnostics { grid-template-columns: 1fr; grid-template-rows: none; --diagnostic-size: min(320px, 100%); }
+}

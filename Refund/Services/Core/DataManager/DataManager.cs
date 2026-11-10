@@ -385,7 +385,7 @@ public partial class DataManager
 
         // A dependency waiter cannot advance while its parent is unfinished. Do not
         // exempt Preparing/Queued attempts, which also project to the Waiting status.
-        if (jobs.Any(job => job.Status == JobStatus.Clearing || _warpLiveExportOperations.Contains(job) || HasPendingExecution(job) ||
+        if (jobs.Any(job => job.Status == JobStatus.Clearing || _warpExportOperations.Contains(job) || HasPendingExecution(job) ||
                             job.GetChildren().Any(child =>
                                 (HasPendingExecution(child) && !CanWaitForParent(job, child)) ||
                                 (!allowClearingDependents && child.Status == JobStatus.Clearing))))
@@ -554,6 +554,6 @@ public partial class DataManager
     public async Task ShutdownAsync()
     {
         await _queueRepository.ShutdownAsync();
-        WarpLiveSessions.Dispose();
+        WarpSessions.Dispose();
     }
 }

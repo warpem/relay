@@ -16,7 +16,7 @@ namespace Refund.Jobs.Fs.MotionCtf.MotionAndCTF2D;
 /// (defocus, astigmatism, etc.), which are critical for high-quality structure determination.
 /// </summary>
 [GenerateReadOnly]
-public class MotionAndCTF2D : WarpJobGpu, IClusterJob
+public class MotionAndCTF2D : WarpToolsJobGpu, IClusterJob
 {
     /// <summary>
     /// Defines the size of the job card in the workflow view.
@@ -85,7 +85,7 @@ public class MotionAndCTF2D : WarpJobGpu, IClusterJob
     /// Higher-resolution information can help with precise alignment but may be noisy.
     /// </summary>
     [UiDecimal("m_range_max", "Maximum resolution",
-               helpText: "Maximum resolution in Angstrom to consider in motion fit",
+               stepSize: 0.1, helpText: "Maximum resolution in Angstrom to consider in motion fit",
                min: 1,
                unit: "Å")]
     [RelayProperty]
@@ -167,7 +167,7 @@ public class MotionAndCTF2D : WarpJobGpu, IClusterJob
                helpText: "Maximum resolution in Angstrom to consider in CTF fit",
                min: 1,
                max: 1000,
-               stepSize: 1,
+               stepSize: 0.1,
                unit: "Å")]
     [RelayProperty]
     public decimal CTFRangeMax { get; set; } = 4.0M;

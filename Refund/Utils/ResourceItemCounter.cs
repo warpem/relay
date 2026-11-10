@@ -65,7 +65,7 @@ public static class ResourceItemCounter
 
         // Use this job's successful items where available, so failed/unprocessed images are not
         // mistaken for missing particle files. Pass-through sets fall back to their source items.
-        string processedItems = job is WarpJob warp && File.Exists(warp.ResProcessedItemsJson)
+        string processedItems = job is WarpToolsJob warp && File.Exists(warp.ResProcessedItemsJson)
             ? warp.ResProcessedItemsJson
             : particles.PickedInTomograms?.ProcessedItemsJson ?? particles.PickedInMicrographs?.ProcessedItemsJson;
 

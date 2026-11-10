@@ -10,7 +10,7 @@ using Warp.Tools;
 namespace Refund.Jobs.M.EstimateWeights;
 
 [GenerateReadOnly]
-public class EstimateWeights : WarpJob, IClusterJob
+public class EstimateWeights : WarpToolsJob, IClusterJob
 {
     public override int2 CardSquareCount { get; set; } = new int2(2, 1);
 

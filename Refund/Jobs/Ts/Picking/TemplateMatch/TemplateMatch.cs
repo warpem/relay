@@ -17,7 +17,7 @@ namespace Refund.Jobs.Ts.Picking.TemplateMatch;
 /// This is based on the WarpTools TemplateMatchTiltseries command.
 /// </summary>
 [GenerateReadOnly]
-public class TemplateMatch : WarpJobGpu, IClusterJob
+public class TemplateMatch : WarpToolsJobGpu, IClusterJob
 {
     public override string TypeGuid => "b44eae53-19e2-4c67-bd59-b9c7b3f52f2e";
     

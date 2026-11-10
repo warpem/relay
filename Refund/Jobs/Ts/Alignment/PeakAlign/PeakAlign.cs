@@ -18,7 +18,7 @@ namespace Refund.Jobs.Ts.Alignment.PeakAlign;
 /// This is based on the WarpTools EtomoPatchTrackTiltseries command.
 /// </summary>
 [GenerateReadOnly]
-public class PeakAlign : WarpJobGpu, IClusterJob
+public class PeakAlign : WarpToolsJobGpu, IClusterJob
 {
     public override string TypeGuid => "08b596fb-3b9f-4888-a9d7-4faba5cb045c";
 

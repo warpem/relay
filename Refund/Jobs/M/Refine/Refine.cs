@@ -9,7 +9,7 @@ using Warp.Tools;
 namespace Refund.Jobs.M.Refine;
 
 [GenerateReadOnly]
-public class Refine : WarpJobGpu, IClusterJob
+public class Refine : WarpToolsJobGpu, IClusterJob
 {
     public override int2 CardSquareCount
     {
@@ -85,7 +85,7 @@ public class Refine : WarpJobGpu, IClusterJob
     [UiDecimal("first_iteration_fraction", "Initial resolution fraction",
                min: 0.1,
                max: 1.0,
-               helpText: "Use this fraction of available resolution for alignment in first " +
+               stepSize: 0.01, helpText: "Use this fraction of available resolution for alignment in first " +
                          "sub-iteration, increase linearly to 1.0 towards last sub-iterations")]
     [RelayProperty]
     public decimal FirstIterationFraction { get; set; } = 1M;
@@ -98,7 +98,7 @@ public class Refine : WarpJobGpu, IClusterJob
 
     [UiDecimal("weight_threshold", "Weight threshold",
                min: 0,
-               max: 1.0,
+               max: 1.0, stepSize: 0.01,
                helpText: "Refine each tilt/frame up to the resolution at which the exposure " +
                          "weighting function (B-factor) reaches this value")]
     [RelayProperty]
@@ -312,7 +312,7 @@ public class Refine : WarpJobGpu, IClusterJob
         result["port"] = "0"; // Use port 0 to disable the built-in web server
 
         // Pin MCore's filesystem work queue to <job>/tasks so the Manager and the externally
-        // provisioned pool workers share one queue: WarpJobGpu.GetWorkerCommand points the
+        // provisioned pool workers share one queue: WarpToolsJobGpu.GetWorkerCommand points the
         // workers' --queue-dir at <DirectoryPath>/tasks, but MCore otherwise defaults task_dir
         // to <population>/refinement_temp/tasks, which those workers would never poll.
         result["task_dir"] = Path.Combine(DirectoryPath, "tasks");

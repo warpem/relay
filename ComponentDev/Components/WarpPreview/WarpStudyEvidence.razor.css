@@ -30,7 +30,7 @@
 .real-spectrum ::deep .container>div:first-child:not(.chart-container) {display:none;}
 .real-spectrum ::deep .chart-container {width:100%;}
 .real-spectrum ::deep canvas.chart {width:100%!important;height:auto!important;aspect-ratio:4/1!important;}
-.real-spectrum ::deep img.power-spectrum {width:100%!important;height:auto!important;aspect-ratio:1;}
+.real-spectrum ::deep .power-spectrum {width:100%!important;height:auto!important;aspect-ratio:1;}
 .empty-evidence {display:flex;align-items:center;justify-content:center;min-height:240px;color:var(--colorNeutralForeground3);font-size:12px;}
 .monitor .diagnostic-grid {grid-template-columns:minmax(0,1fr) minmax(0,.66fr);grid-template-areas:"micro fourier";gap:20px;}
 .monitor .figure-heading {font-size:11px;min-height:30px;flex-wrap:wrap;gap:2px 8px;}

@@ -20,7 +20,7 @@ namespace Refund.Jobs.Ts.Alignment.AlignAretomo;
 /// This is based on the WarpTools EtomoPatchTrackTiltseries command.
 /// </summary>
 [GenerateReadOnly]
-public class AlignAretomo : WarpJobGpu, IClusterJob
+public class AlignAretomo : WarpToolsJobGpu, IClusterJob
 {
     public override string TypeGuid => "b189fd92-ec29-489c-b70a-01f43eb62a9c";
 

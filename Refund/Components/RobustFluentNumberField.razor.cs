@@ -9,7 +9,9 @@ namespace Refund.Components;
 public partial class RobustFluentNumberField<TValue> : BufferedInputBase<TValue>, IAsyncDisposable where TValue : new()
 {
     [Inject] private IJSRuntime JS { get; set; }
-    private FluentNumberInput<TValue> _input;
+    private RelayNumberInput<TValue> _input;
+    private static readonly Dictionary<int, FluentNumberInputCultureInfo> Cultures = new();
+    private const int MaxDecimals = 6;
     private IJSObjectReference? _module;
     private (string? Min, string? Max, string? Step, bool Disabled)? _stepOptions;
     [Parameter] public string? Class { get; set; }
@@ -22,6 +24,8 @@ public partial class RobustFluentNumberField<TValue> : BufferedInputBase<TValue>
     [Parameter] public bool Immediate { get; set; }
     [Parameter] public int ImmediateDelay { get; set; } = 200;
     [Parameter] public string? AutoComplete { get; set; }
+    /// <summary>Passed to the input, e.g. aria-label and title.</summary>
+    [Parameter(CaptureUnmatchedValues = true)] public IReadOnlyDictionary<string, object>? AdditionalAttributes { get; set; }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -55,6 +59,48 @@ public partial class RobustFluentNumberField<TValue> : BufferedInputBase<TValue>
             await _module.DisposeAsync();
         }
         catch (Exception e) when (e is JSDisconnectedException or OperationCanceledException) { }
+    }
+
+    /// <summary>
+    /// A field shows and accepts its step's precision ("15.0" for step 0.1). A stored value with more
+    /// decimals than its step still shows all of them rather than being silently rounded.
+    /// </summary>
+    private FluentNumberInputCultureInfo DisplayCulture
+    {
+        get
+        {
+            int digits = Math.Max(StepDecimals(Step), Decimals(EditingValue));
+            lock (Cultures)
+            {
+                if (!Cultures.TryGetValue(digits, out var culture))
+                    Cultures[digits] = culture = new FluentNumberInputCultureInfo(digits);
+                return culture;
+            }
+        }
+    }
+
+    internal static int StepDecimals(string? step) =>
+        decimal.TryParse(step, NumberStyles.Float, CultureInfo.InvariantCulture, out var value) ? StepDecimals(value) : 0;
+
+    /// <summary>Decimals a step implies, capped (not rounded) at <see cref="MaxDecimals"/>.</summary>
+    internal static int StepDecimals(decimal step)
+    {
+        step = Math.Abs(step);
+        int digits = 0;
+        while (digits < MaxDecimals && step != Math.Round(step, digits)) digits++;
+        return digits;
+    }
+
+    /// <summary>Fewest decimals that represent the value exactly, capped at <see cref="MaxDecimals"/>.</summary>
+    internal static int Decimals(object? value)
+    {
+        decimal number;
+        try { number = value is null ? 0 : Convert.ToDecimal(value, CultureInfo.InvariantCulture); }
+        catch (Exception e) when (e is OverflowException or InvalidCastException or FormatException) { return 0; }
+        number = Math.Round(number, MaxDecimals);
+        int digits = 0;
+        while (digits < MaxDecimals && number != Math.Round(number, digits)) digits++;
+        return digits;
     }
 
     private static TValue ParseBound(string? value, string kind)

@@ -11,7 +11,7 @@ using WarpHelper = Warp.Tools.Helper;
 namespace Refund.Jobs.Ts.Import.ImportDataSetTs;
 
 [GenerateReadOnly]
-public class ImportDataSetTs : WarpJob, IClusterJob
+public class ImportDataSetTs : WarpToolsJob, IClusterJob
 {
     public override string TypeGuid => "8275ebaf-ae30-432b-bacf-8fc4d4dab549";
     

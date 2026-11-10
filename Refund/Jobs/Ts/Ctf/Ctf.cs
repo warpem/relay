@@ -18,7 +18,7 @@ namespace Refund.Jobs.Ts.Ctf;
 /// This is based on the WarpTools CTFTiltseries command.
 /// </summary>
 [GenerateReadOnly]
-public class Ctf : WarpJobGpu, IClusterJob
+public class Ctf : WarpToolsJobGpu, IClusterJob
 {
     public override string TypeGuid => "5b6053ff-f377-458c-99dc-bdf8e3b92699";
     public override string TypeCategory => "Tilt-series.CTF.CTF";
@@ -65,7 +65,7 @@ public class Ctf : WarpJobGpu, IClusterJob
     /// Highest (best) resolution in Angstrom to consider in fit
     /// </summary>
     [RelayProperty]
-    [UiDecimal("range_high", "Maximum resolution", min: 1, max: 100, stepSize: 1, unit: "Å",
+    [UiDecimal("range_high", "Maximum resolution", min: 1, max: 100, stepSize: 0.1, unit: "Å",
                helpText: "Highest (best) resolution in Angstrom to consider in fit")]
     public decimal RangeMax { get; set; } = 4;
 

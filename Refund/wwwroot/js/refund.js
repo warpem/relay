@@ -179,3 +179,12 @@ window.scatterHighlightSync = (function() {
         }
     };
 })();
+// Fluent's number mask strips trailing zeros; padding keeps a field at its step precision ("15.0"), the same
+// before and after an edit. Called by RelayNumberInput each time Fluent (re)creates the mask.
+window.relayPadNumberMask = function (id) {
+    const host = document.getElementById(id), mask = host?.shadowRoot?.querySelector('input')?.mask;
+    if (!mask || mask.masked?.padFractionalZeros) return;
+    mask.updateOptions({ padFractionalZeros: true });
+    // Re-resolving commits, which pads the loaded value now. A field being typed in pads when it blurs.
+    if (!host.matches(':focus-within')) mask.value = mask.value;
+};

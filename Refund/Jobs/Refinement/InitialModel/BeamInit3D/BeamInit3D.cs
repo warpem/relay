@@ -40,7 +40,7 @@ public class BeamInit3D : BeamParticleJob
     [RelayProperty] public int WorkingBox { get; set; } = 64;
 
     [UiDecimal("final-resolution", "Final resolution", min: 1, max: 1000, unit: "Å",
-        helpText: "Target at the end of the resolution ramp, bounded by the working Nyquist resolution.")]
+        stepSize: 0.1, helpText: "Target at the end of the resolution ramp, bounded by the working Nyquist resolution.")]
     [RelayProperty] public decimal FinalResolution { get; set; } = 12;
 
     [UiBool("ctf-intact-first-peak", "Keep first CTF peak intact", isAdvanced: true,

@@ -1,0 +1,33 @@
+/* Picking: one large micrograph with picks; view options and score bounds alongside. */
+.picking-workspace { display: flex; flex-direction: column; gap: var(--w-space-m); padding: var(--w-space); min-width: 0; }
+
+.picking-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--w-space-s); min-height: 32px; }
+.exposure-number { width: 72px; flex: none; }
+.exposure-number ::deep fluent-text-input { width: 100%; }
+.exposure-number ::deep fluent-text-input::part(control) { text-align: right; }
+.movie-total { color: var(--w-muted); white-space: nowrap; }
+.movie-name { min-width: 0; max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--colorNeutralForeground2); margin-left: var(--w-space-s); }
+.exposure-navigation { display: inline-flex; gap: 2px; }
+.exposure-navigation ::deep fluent-button { min-width: 32px; }
+.picking-toolbar ::deep .follow-latest { flex: none; margin-left: var(--w-space-s); white-space: nowrap; }
+
+.picking-content { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: var(--w-space-l); align-items: start; }
+/* Left-aligned with the toolbar above it. */
+.picking-image-region { margin: 0; width: min(100%, calc(100dvh - 400px)); min-width: 320px; justify-self: start; }
+.picking-image { width: 100%; aspect-ratio: 1; }
+
+.picking-sidebar { display: flex; flex-direction: column; gap: var(--w-space-l); min-width: 0; }
+.picking-sidebar > section { display: flex; flex-direction: column; align-items: flex-start; gap: var(--w-space-s); }
+.picking-sidebar > section + section { padding-top: var(--w-space); border-top: 1px solid var(--w-rule); }
+.sidebar-histogram { align-items: stretch !important; --diagnostic-size: 240px; }
+.pick-facts { display: grid; grid-template-columns: 1fr auto; gap: var(--w-space-xs) var(--w-space-m); width: 100%; margin: 0 0 var(--w-space-xs); }
+.pick-facts > div { display: contents; }
+.pick-facts dt { color: var(--colorNeutralForeground2); }
+.pick-facts dd { margin: 0; text-align: right; font-weight: 600; }
+.result-note { font-size: var(--w-text-s); color: var(--w-warn); }
+
+@container (max-width: 1000px) {
+    .picking-content { grid-template-columns: 1fr; }
+    .picking-image-region { width: 100%; }
+    .movie-name { display: none; }
+}

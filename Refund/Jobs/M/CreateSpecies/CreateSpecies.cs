@@ -9,7 +9,7 @@ using Warp.Tools;
 namespace Refund.Jobs.M.CreateSpecies;
 
 [GenerateReadOnly]
-public class CreateSpecies : WarpJob, IClusterJob
+public class CreateSpecies : WarpToolsJob, IClusterJob
 {
     /// <summary>
     /// Gets or sets the dimensions of the job card in the workflow editor.

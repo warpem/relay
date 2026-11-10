@@ -15,7 +15,7 @@ namespace Refund.Jobs.Ts.Reconstruction.ReconstructTomograms;
 /// This is based on the WarpTools ReconstructTiltseries command.
 /// </summary>
 [GenerateReadOnly]
-public class ReconstructTomograms : WarpJobGpu, IClusterJob
+public class ReconstructTomograms : WarpToolsJobGpu, IClusterJob
 {
     public override string TypeGuid => "24b1cc22-2a52-477a-b4c7-19fac71f669f";
     

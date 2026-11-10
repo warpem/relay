@@ -18,7 +18,7 @@ namespace Refund.Jobs.Ts.Alignment.AlignMiss;
 /// Job that prepares tilt series stacks and runs MissAlignment (a learning-based tilt-series
 /// alignment tool) to improve tilt-series alignments. MissAlignment is a standalone GPU tool
 /// outside the WarpTools ecosystem, so this job derives directly from <see cref="Job"/> rather
-/// than the WarpTools <c>WarpJobGpu</c> base (and therefore does not support GPU worker pools).
+/// than the WarpTools <c>WarpToolsJobGpu</c> base (and therefore does not support GPU worker pools).
 /// </summary>
 [GenerateReadOnly]
 public class AlignMiss : Job, IClusterJob, IItemProgress
@@ -38,8 +38,8 @@ public class AlignMiss : Job, IClusterJob, IItemProgress
     public override int2 CardSquareCount { set; get; } = new int2(2, 1);
 
     // MissAlignment runs a single GPU command (not a WarpTools per-item worker pool), so it derives
-    // directly from Job rather than WarpJobGpu. It still needs GPU cluster resources; QueueType and
-    // GpuCount are the WarpJobGpu bits it genuinely uses, replicated here.
+    // directly from Job rather than WarpToolsJobGpu. It still needs GPU cluster resources; QueueType and
+    // GpuCount are the WarpToolsJobGpu bits it genuinely uses, replicated here.
     public override JobQueueType QueueType => JobQueueType.GPU;
 
     public override int GpuCount => NGpus;
@@ -51,7 +51,7 @@ public class AlignMiss : Job, IClusterJob, IItemProgress
 
     public override int MemoryGb => ReconstructionDevices.Length * 4 + TrainingDevices.Length * NWorkers + 8;
 
-    // MissAlignment lives outside the WarpTools ecosystem, so it does not inherit WarpJob's module
+    // MissAlignment lives outside the WarpTools ecosystem, so it does not inherit WarpToolsJob's module
     // set. It still needs the "warp" module in its runtime environment for now; drop "warp" here if
     // the miss-alignment binary is confirmed independent of it.
     public override string[] SupportedModules => base.SupportedModules.Concat(["warp", "missalignment"]).ToArray();
@@ -165,7 +165,7 @@ public class AlignMiss : Job, IClusterJob, IItemProgress
     public int MaxEpochs { get; set; } = 30;
     
     [RelayProperty]
-    [UiDecimal("", "Learning rate", min: 0, stepSize: 1e-10,
+    [UiDecimal("", "Learning rate", min: 0, stepSize: 1e-5,
            helpText: "Learning rate at the beginning of training")]
     public decimal LearningRate { get; set; } = 1e-3M;
 
@@ -456,7 +456,7 @@ public class AlignMiss : Job, IClusterJob, IItemProgress
     }
 
     /// <summary>
-    /// Monitors and parses log output from the running job. Replicated from WarpJob so MissAlignment
+    /// Monitors and parses log output from the running job. Replicated from WarpToolsJob so MissAlignment
     /// no longer depends on the WarpTools hierarchy. Currently reuses the WarpTools progress format;
     /// this is the seam to swap in a miss-alignment-specific parser once its output is finalized.
     /// </summary>

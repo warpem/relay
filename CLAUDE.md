@@ -55,7 +55,7 @@ Relay is a platform for cryo-EM data processing workflows with these key compone
 
 - Abstract job types:
   - `RelionJob`: Base for RELION-based processing
-  - `WarpJob`: Base for Warp-based processing
+  - `WarpToolsJob`: Base for WarpTools command jobs (`WarpToolsJobGpu` adds GPU worker pools)
 - Job interfaces:
   - `ILocalJob`: Can run locally (`RunLocal()` method)
   - `IClusterJob`: Marker for command-based execution on a managed or external scheduler queue

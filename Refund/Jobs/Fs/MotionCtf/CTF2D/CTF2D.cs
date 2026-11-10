@@ -18,7 +18,7 @@ namespace Refund.Jobs.Fs.MotionCtf.CTF2D;
 /// serving as a more lightweight alternative to the combined MotionAndCTF2D job.
 /// </summary>
 [GenerateReadOnly]
-public class CTF2D : WarpJobGpu, IClusterJob
+public class CTF2D : WarpToolsJobGpu, IClusterJob
 {
     /// <summary>
     /// Defines the square size for the job card display in the workflow view.
@@ -119,7 +119,7 @@ public class CTF2D : WarpJobGpu, IClusterJob
         helpText: "Maximum resolution in Angstrom to consider in CTF fit",
         min: 1,
         max: 1000,
-        stepSize: 1,
+        stepSize: 0.1,
         unit: "Å")]
     public decimal? CTFRangeMax { get; set; } = 4.0M;
 

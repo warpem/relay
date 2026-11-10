@@ -1,0 +1,89 @@
+@using Refund.Services.Warp
+@using Microsoft.JSInterop
+@inject IJSRuntime Js
+@implements IAsyncDisposable
+
+<section class="astigmatism" aria-label="Astigmatism distribution">
+    <div class="plot-heading"><h3>Astigmatism</h3></div>
+    <div class="plot-filters">
+        <span class="astigmatism-filter range-input" title="@($"Movies whose astigmatism lies more than this many standard deviations from the mean of their {WarpSession.AstigmatismWindow} neighbouring movies are filtered out")">
+            <span class="range-label">Accept ≤</span>
+            <RobustFluentNumberField TValue="double" Value="Session.MaxAstigmatismSigma" ValueChanged="@(v => Update(s => s.FilterMetric("astigmatism", v)))" Min="0" Step="0.1" aria-label="Maximum astigmatism deviation, in standard deviations from the local mean" />
+            <span class="unit">σ</span>
+        </span>
+    </div>
+    <canvas id="@_canvasId" @ref="_canvas" tabindex="0" aria-label="Astigmatism magnitude and axial angle. Zero and 180 degrees are identical; 45 degrees is down, 90 degrees left, and 135 degrees up. Click a movie to select it."></canvas>
+    <div class="plot-key">@if (Neighborhood is { } local) { <span class="ellipse-key"><i aria-hidden="true"></i>@($"{Session.MaxAstigmatismSigma:0.#} σ around the mean of #{Movie.Index + 1:N0}’s {local.Count:N0} neighbours")</span> }</div>
+</section>
+
+@code {
+    [Parameter, EditorRequired] public WarpSession Session { get; set; }
+    [Parameter, EditorRequired] public Func<Action<WarpSession>, Task> Update { get; set; }
+    [Parameter] public WarpMovie Movie { get; set; }
+    [Parameter] public EventCallback<int> SelectedIndexChanged { get; set; }
+    private readonly string _canvasId = $"warp-astig-{Guid.NewGuid():N}";
+    private ElementReference _canvas;
+    private IJSObjectReference _module;
+    private DotNetObjectReference<WarpAstigmatismPlot> _self;
+    private int _version = -1, _catalog = -1, _selected = -1;
+    private double _threshold = double.NaN;
+    private bool _disposed, _dataChanged = true, _viewChanged = true;
+    private double _radius = .1;
+    private WarpAstigmatismNeighborhood? Neighborhood => Movie == null ? null : Session.AstigmatismNeighborhood(Movie);
+    // The selected movie's acceptance boundary: an ellipse at the threshold distance from its local mean.
+    private object Ellipse => Neighborhood is { } n ? new[] { n.MeanX, n.MeanY, n.Sxx, n.Syy, n.Sxy, Session.MaxAstigmatismSigma } : null;
+    protected override void OnParametersSet()
+    {
+        if (_catalog != Session.CatalogVersion || _version != Session.PlotVersion)
+        {
+            _catalog = Session.CatalogVersion; _version = Session.PlotVersion;
+            _radius = NiceCeiling(Session.Movies.Where(WarpSession.HasAstigmatism).Select(m => Math.Abs(m.Astigmatism)).DefaultIfEmpty(.1).Max());
+            _dataChanged = true;
+        }
+        if (_selected != (Movie?.Index ?? -1)) { _selected = Movie?.Index ?? -1; _viewChanged = true; }
+        if (!_threshold.Equals(Session.MaxAstigmatismSigma)) { _threshold = Session.MaxAstigmatismSigma; _viewChanged = true; }
+    }
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        try { await RenderAsync(firstRender); }
+        catch (JSDisconnectedException) { }
+        catch (ObjectDisposedException) when (_disposed) { }
+    }
+    private async Task RenderAsync(bool firstRender)
+    {
+        if (_disposed) return;
+        if (firstRender)
+        {
+            var module = await Js.InvokeAsync<IJSObjectReference>("import", "./_content/Refund/Jobs/Fs/Warp/WarpAstigmatismPlot.razor.js");
+            if (_disposed) { await module.DisposeAsync(); return; }
+            _module = module;
+            _self = DotNetObjectReference.Create(this);
+            await _module.InvokeVoidAsync("initialize", _canvas, _self, _canvasId);
+        }
+        if (_module == null || _disposed) return;
+        if (_dataChanged)
+        {
+            _dataChanged = false;
+            // Preserve desktop Warp's axial convention: Δ*cos(2θ), Δ*sin(2θ), positive Y downward.
+            var points = Session.Movies.Where(WarpSession.HasAstigmatism).Select(m => { var (x, y) = WarpSession.AstigmatismVector(m); return new object[] {
+                m.Index, x, y, Session.StatusColor(m), m.AstigmatismAngle, m.Astigmatism }; }).ToArray();
+            await _module.InvokeVoidAsync("setData", _canvasId, points, _radius, _selected, Ellipse);
+            _viewChanged = false;
+        }
+        else if (_viewChanged) { _viewChanged = false; await _module.InvokeVoidAsync("setView", _canvasId, _radius, _selected, Ellipse); }
+    }
+    // 1-2-5 steps keep the scale label round while every movie stays inside the plot.
+    private static double NiceCeiling(double value)
+    {
+        if (!(value > 0)) return .1;
+        double magnitude = Math.Pow(10, Math.Floor(Math.Log10(value))), fraction = value / magnitude;
+        return (fraction <= 1 ? 1 : fraction <= 2 ? 2 : fraction <= 5 ? 5 : 10) * magnitude;
+    }
+    [JSInvokable] public Task SelectMovie(int index) => _disposed ? Task.CompletedTask : SelectedIndexChanged.InvokeAsync(index);
+    public async ValueTask DisposeAsync()
+    {
+        _disposed = true;
+        if (_module != null) { try { await _module.InvokeVoidAsync("dispose", _canvasId); await _module.DisposeAsync(); } catch (JSDisconnectedException) { } catch (ObjectDisposedException) { } }
+        _self?.Dispose();
+    }
+}

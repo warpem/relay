@@ -1,0 +1,98 @@
+/* Setup: processing parameters in pipeline order. Tokens come from the expanded view (.warp). */
+
+.warp-setup { display: flex; flex-direction: column; min-width: 0; }
+
+.setup-lock { padding: var(--w-space-s) var(--w-space); background: var(--colorNeutralBackground3); border-bottom: 1px solid var(--w-rule); color: var(--colorNeutralForeground2); }
+.setup-lock b { color: var(--colorNeutralForeground1); font-weight: 600; }
+
+.preset-bar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--w-space-s); padding: var(--w-space-m) var(--w-space); border-bottom: 1px solid var(--w-rule); }
+.preset-bar > label { font-weight: 600; margin-right: var(--w-space-xs); }
+.bar-divider { width: 1px; height: 20px; background: var(--w-rule); margin: 0 var(--w-space-xs); }
+.preset-edit { display: flex; align-items: center; flex-wrap: wrap; gap: var(--w-space-s); padding: var(--w-space-s) var(--w-space); border-bottom: 1px solid var(--w-rule); background: var(--colorNeutralBackground2); }
+.preset-message { padding: var(--w-space-s) var(--w-space); color: var(--colorNeutralForeground2); border-bottom: 1px solid var(--w-rule); }
+.preset-message.error { color: var(--w-bad); background: var(--w-bad-bg); }
+
+/* Three stacks of sections; on wall displays every section gets its own column. */
+.setup-columns { display: grid; grid-template-columns: repeat(3, minmax(0, 440px)); gap: var(--w-space-l) 40px; padding: var(--w-space-l) var(--w-space); align-items: start; }
+.setup-stack { display: flex; flex-direction: column; gap: 32px; min-width: 0; }
+
+.settings-group { min-width: 0; }
+.settings-group > header { display: flex; align-items: center; justify-content: space-between; gap: var(--w-space-s); min-height: 32px; padding-bottom: var(--w-space-s); margin-bottom: var(--w-space-m); border-bottom: 1px solid var(--w-rule); }
+.settings-group h3 { font-size: var(--w-text-l); line-height: var(--lineHeightBase400); font-weight: 600; }
+
+/* Label | control | unit. Rows use display: contents so all rows of a section share columns. */
+.field-grid { display: grid; grid-template-columns: minmax(0, 1fr) 112px 52px; column-gap: var(--w-space-s); row-gap: var(--w-space-s); align-items: center; }
+.field-grid + .field-grid { margin-top: var(--w-space-s); }
+.warp-setup ::deep .setting-row { display: contents; }
+.warp-setup ::deep .setting-row > label { grid-column: 1; min-width: 0; color: var(--colorNeutralForeground2); overflow-wrap: anywhere; }
+/* One row height for inputs and switches alike, so labels keep an even rhythm. */
+.warp-setup ::deep .setting-control { grid-column: 2; min-width: 0; min-height: 32px; display: flex; align-items: center; }
+.warp-setup ::deep .setting-control.wide { grid-column: 2 / 4; }
+.warp-setup ::deep .setting-unit { grid-column: 3; color: var(--w-muted); white-space: nowrap; }
+.warp-setup ::deep .setting-note { grid-column: 2 / 4; margin-top: calc(-1 * var(--w-space-xs)); font-size: var(--w-text-s); color: var(--w-muted); }
+.warp-setup ::deep .setting-control.checks { flex-wrap: wrap; gap: var(--w-space-xs) var(--w-space-m); }
+
+/* Paths are long, so their label sits on its own line above a full-width field. */
+.warp-setup ::deep .path-row > label { grid-column: 1 / -1; }
+.warp-setup ::deep .path-control { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--w-space-xs); min-width: 0; margin-bottom: var(--w-space-xs); }
+.warp-setup ::deep .path-control > fluent-field { flex: 1; min-width: 0; }
+.warp-setup ::deep .path-control > fluent-button { flex: none; min-width: 32px; }
+
+.advanced-label { grid-column: 1 / -1; margin-top: var(--w-space-s); padding-top: var(--w-space-s); border-top: 1px dashed var(--w-rule); font-size: var(--w-text-s); color: var(--w-muted); }
+
+/* Inputs: Relay's field views render borderless; in a dense form an outline shows what is editable.
+   While processing runs the outline is dropped, so locked values read as plain text. */
+.warp-setup ::deep .setting-control fluent-field, .warp-setup ::deep .path-control fluent-field { display: block; width: 100%; min-width: 0; margin: 0; padding: 0; row-gap: 0; }
+.warp-setup ::deep .setting-control fluent-text-input, .warp-setup ::deep .path-control fluent-text-input { display: block; width: 100%; max-width: none; min-width: 0; }
+.warp-setup:not(.locked) ::deep .setting-control fluent-text-input::part(root), .warp-setup:not(.locked) ::deep .path-control fluent-text-input::part(root) {
+    border: 1px solid var(--colorNeutralStroke1) !important; border-bottom-color: var(--colorNeutralStrokeAccessible) !important; padding-inline: 8px 2px;
+}
+.warp-setup ::deep .setting-control fluent-text-input::part(control) { text-align: right; font-variant-numeric: tabular-nums; }
+.warp-setup ::deep [data-setting=InputPattern] fluent-text-input::part(control) { text-align: left; }
+.warp-setup.locked ::deep fluent-text-input::part(root) { background: transparent; padding-inline: 8px 2px; }
+.warp-setup.locked ::deep fluent-text-input::part(control) { color: var(--colorNeutralForeground2); }
+.warp-setup ::deep .relay-number-steps { height: 28px; }
+.warp-setup ::deep .relay-number-steps button { height: 14px; width: 18px; border-radius: 2px; color: var(--w-muted); }
+
+/* Denoiser state. */
+.training-state { display: flex; align-items: center; flex-wrap: wrap; gap: var(--w-space-s) var(--w-space-m); margin-top: var(--w-space-m); padding: var(--w-space-m); border-radius: var(--borderRadiusMedium); background: var(--colorNeutralBackground3); border-left: 3px solid var(--colorNeutralStroke1); }
+.training-state.ready { border-left-color: var(--w-ok); }
+.training-state.active { border-left-color: var(--w-warn); }
+.training-state > div { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 180px; }
+.training-state b { font-weight: 600; }
+.training-state span { font-size: var(--w-text-s); color: var(--w-muted); }
+.training-state progress { flex-basis: 100%; height: 6px; accent-color: var(--w-warn); }
+
+/* Input check results. */
+.input-checks { list-style: none; margin: var(--w-space-m) 0 0; padding: 0; border-top: 1px solid var(--w-rule); }
+.input-check { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: var(--w-space-s); padding: var(--w-space-s) 0; border-bottom: 1px solid var(--w-rule); }
+.input-check > i { font-style: normal; font-weight: 700; text-align: center; }
+.input-check > div { display: flex; flex-direction: column; min-width: 0; }
+.input-check b { font-weight: 600; }
+.input-check span { font-size: var(--w-text-s); color: var(--w-muted); overflow-wrap: anywhere; }
+.input-check.passed > i { color: var(--w-ok); }
+.input-check.failed > i, .input-check.failed b { color: var(--w-bad); }
+.input-check.unchecked > i { color: var(--w-muted); }
+
+/* Apply bar: sticks to the bottom so the commit point is always in reach. */
+.draft-actions { position: sticky; bottom: 0; z-index: 3; display: flex; align-items: center; gap: var(--w-space-s); margin-top: auto; padding: var(--w-space-m) var(--w-space); background: var(--w-bar); border-top: 1px solid var(--w-rule); }
+.draft-actions > div { display: flex; flex: 1; flex-direction: column; min-width: 0; }
+.draft-actions > div > span { font-size: var(--w-text-s); color: var(--w-muted); }
+.draft-actions.dirty { background: var(--w-warn-bg); }
+.draft-actions.dirty b { color: var(--w-warn); font-weight: 600; }
+.draft-actions .error { color: var(--w-bad) !important; }
+
+@container (min-width: 2400px) {
+    .setup-columns { grid-template-columns: repeat(6, minmax(0, 440px)); }
+    .setup-stack { display: contents; }
+    .collection { order: 0; } .calibration { order: 1; } .motion { order: 2; } .ctf { order: 3; } .enhancement { order: 4; } .output { order: 5; }
+}
+@container (max-width: 1100px) {
+    .setup-columns { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .setup-stack { display: contents; }
+    .collection { order: 0; } .calibration { order: 1; } .motion { order: 2; } .ctf { order: 3; } .enhancement { order: 4; } .output { order: 5; }
+}
+@container (max-width: 720px) {
+    .setup-columns { grid-template-columns: 1fr; padding: var(--w-space); }
+    .preset-bar .spacer { flex-basis: 100%; height: 0; }
+}

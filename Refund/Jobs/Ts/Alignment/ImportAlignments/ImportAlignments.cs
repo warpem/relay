@@ -18,7 +18,7 @@ namespace Refund.Jobs.Ts.Alignment.ImportAlignments;
 /// This is based on the WarpTools EtomoPatchTrackTiltseries command.
 /// </summary>
 [GenerateReadOnly]
-public class ImportAlignments : WarpJob, IClusterJob
+public class ImportAlignments : WarpToolsJob, IClusterJob
 {
     public override string TypeGuid => "fe02ae31-db05-4928-9196-87eacb6601b6";
 

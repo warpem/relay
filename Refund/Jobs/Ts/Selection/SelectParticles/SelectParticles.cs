@@ -63,7 +63,7 @@ public class FilterCollection : RelayBase
 /// This is based on the template matching job structure.
 /// </summary>
 [GenerateReadOnly]
-public class SelectParticles : WarpJob, ILocalJob
+public class SelectParticles : WarpToolsJob, ILocalJob
 {
     public override string TypeGuid => "dfb781a9-e18d-4a80-8eff-b5d50b56c994";
     

@@ -4,7 +4,7 @@
 
 **Goal:** Add worker-pool configuration and command building to the RELION `Class3D` job so it can run through RELION's new disk-based CPU worker pool, driven by Relay's existing `IPooledJob`/`WorkerPool` machinery.
 
-**Architecture:** `Class3D` becomes the RELION analog of `WarpJobGpu`: a `UseWorkerPool` toggle flips the job to a CPU-only pool **manager** (`relion_refine_pool … --pool_dir`), requests the new `relion-pool` submission module instead of `relion`, and implements `IPooledJob` so Relay's `WorkerPool` maintains a fleet of CPU **worker** jobs (`relion_refine_pool … --worker --half 0`). Unlike Warp, both manager and workers are CPU, and a worker's command is the manager's full science command plus role flags.
+**Architecture:** `Class3D` becomes the RELION analog of `WarpToolsJobGpu`: a `UseWorkerPool` toggle flips the job to a CPU-only pool **manager** (`relion_refine_pool … --pool_dir`), requests the new `relion-pool` submission module instead of `relion`, and implements `IPooledJob` so Relay's `WorkerPool` maintains a fleet of CPU **worker** jobs (`relion_refine_pool … --worker --half 0`). Unlike Warp, both manager and workers are CPU, and a worker's command is the manager's full science command plus role flags.
 
 **Tech Stack:** C# / .NET, xUnit (`Refund.Tests`), Relay `[RelayProperty]` + `[GenerateReadOnly]` source generators, attribute-based UI fields (`Refund/UIFields`).
 
@@ -15,13 +15,13 @@
 - Pooled manager binary is `relion_refine_pool` with **no** `mpirun` and **no** `--worker`.
 - The pooled module tag is exactly `relion-pool`, and it **replaces** `relion`/`gpu`/`cpu` in `RequiredModules` when pooled.
 - `--j` (RELION threads) for every pool process == `CoresPerWorker` (default `8`).
-- Follow existing patterns in `WarpJobGpu.cs` and `Refund.Tests/JobQueues/WorkerPoolTests.cs`.
+- Follow existing patterns in `WarpToolsJobGpu.cs` and `Refund.Tests/JobQueues/WorkerPoolTests.cs`.
 - Run tests with: `dotnet test Refund.Tests/Refund.Tests.csproj --filter "FullyQualifiedName~<Name>"`.
 
 ## File Structure
 
 - Modify `Refund/DataModel/Job.cs` — add three pool-counter properties to the `IPooledJob` interface (~line 1657).
-- Modify `Refund/Services/Core/Repositories/QueueRepository.StateHandlers.cs` — replace `(WarpJobGpu)` casts (~lines 170, 182–191) with `IPooledJob`.
+- Modify `Refund/Services/Core/Repositories/QueueRepository.StateHandlers.cs` — replace `(WarpToolsJobGpu)` casts (~lines 170, 182–191) with `IPooledJob`.
 - Modify `Refund/Jobs/Refinement/Classes3D/Class3D/Class3D.cs` — pool fields, resource/module/command branching, `IPooledJob` implementation, arg seams.
 - Modify `Refund.Tests/JobQueues/WorkerPoolTests.cs` — extend `FakePooledJob` with the new interface members; add a counter test.
 - Create `Refund.Tests/Jobs/Class3DPoolTests.cs` — all new Class3D pool tests.
@@ -39,7 +39,7 @@ Removes the only Warp-specific coupling in the pool driver so a non-Warp pooled 
 - Modify/Test: `Refund.Tests/JobQueues/WorkerPoolTests.cs` (`FakePooledJob` ~line 540; new `[Fact]`)
 
 **Interfaces:**
-- Produces: `IPooledJob.PoolWorkersAlive`, `.PoolWorkersRunning`, `.PoolWorkersSubmitted` — all `int { get; set; }`. `WarpJobGpu` already declares matching public `[RelayProperty]` properties, satisfying them implicitly.
+- Produces: `IPooledJob.PoolWorkersAlive`, `.PoolWorkersRunning`, `.PoolWorkersSubmitted` — all `int { get; set; }`. `WarpToolsJobGpu` already declares matching public `[RelayProperty]` properties, satisfying them implicitly.
 
 - [ ] **Step 1: Extend `FakePooledJob` and add the failing test**
 
@@ -58,7 +58,7 @@ Add a new test to the `WorkerPoolTests` class (after `WarpJobGpu_PoolWorkersAliv
     public void IPooledJob_ExposesPoolWorkerCounters_MappingToConcreteProperties()
     {
         // The pool driver writes counters through IPooledJob (not a concrete cast), so the interface
-        // members must map to WarpJobGpu's real [RelayProperty] properties.
+        // members must map to WarpToolsJobGpu's real [RelayProperty] properties.
         var job = new MotionAndCTF2D();
         var pooled = (IPooledJob)job;
 
@@ -91,7 +91,7 @@ In `Refund/DataModel/Job.cs`, inside `interface IPooledJob` (after `GetWorkerCom
     int PoolWorkersSubmitted { get; set; }
 ```
 
-- [ ] **Step 4: Replace the `WarpJobGpu` casts in the state handler**
+- [ ] **Step 4: Replace the `WarpToolsJobGpu` casts in the state handler**
 
 In `Refund/Services/Core/Repositories/QueueRepository.StateHandlers.cs`, replace line ~170:
 
@@ -132,7 +132,7 @@ Expected: PASS (all existing pool tests still green).
 
 ```bash
 git add Refund/DataModel/Job.cs Refund/Services/Core/Repositories/QueueRepository.StateHandlers.cs Refund.Tests/JobQueues/WorkerPoolTests.cs
-git commit -m "refactor: lift pool worker counters onto IPooledJob (drop WarpJobGpu cast)"
+git commit -m "refactor: lift pool worker counters onto IPooledJob (drop WarpToolsJobGpu cast)"
 ```
 
 ---
@@ -728,14 +728,14 @@ Expected: PASS (or only pre-existing unrelated failures — if any fail, confirm
 - CPU workers (contrast with Warp GPU workers) → Task 4 (`n_gpus=0`, `WorkerRequiredModules=relion-pool`). ✓
 - Cores-per-worker (default 8) drives `--j` and per-worker cores → Task 2 (field), Task 3 (`ApplyPoolArguments` `--j`), Task 4 (`n_cores`). ✓
 - `relion_refine_pool` manager (no mpirun/--worker) + workers `--worker --half 0` → Task 3 (`CommandName`), Task 4 (`ComposeWorkerCommand`). ✓
-- Generalize the `WarpJobGpu` hard-cast → Task 1. ✓
+- Generalize the `WarpToolsJobGpu` hard-cast → Task 1. ✓
 - Full `IPooledJob` wiring so it runs end-to-end via `WorkerPool` → Task 4. ✓
 - Manager reuses `CoresPerWorker` for its core count → Task 3 (`CoreCount`). ✓
 - Dedicated `NWorkers` field for fleet size → Task 2, Task 4 (`PoolSize`). ✓
 
 **Placeholder scan:** No TBD/TODO; every code step shows full code; every test has assertions.
 
-**Type consistency:** `IsPooled` (bool), `PoolSize` (int, public), `ApplyPoolArguments`/`ComposeWorkerCommand` (public), explicit-interface `PoolQueueId`/`PoolSubmissionCap`/`GetWorkerResourceValues`/`WorkerRequiredModules`/`GetWorkerCommand`, counters `int {get;set;}` — names identical across tasks and matching `IPooledJob`/`WarpJobGpu`.
+**Type consistency:** `IsPooled` (bool), `PoolSize` (int, public), `ApplyPoolArguments`/`ComposeWorkerCommand` (public), explicit-interface `PoolQueueId`/`PoolSubmissionCap`/`GetWorkerResourceValues`/`WorkerRequiredModules`/`GetWorkerCommand`, counters `int {get;set;}` — names identical across tasks and matching `IPooledJob`/`WarpToolsJobGpu`.
 
 ## Known risks carried from the spec (verify during execution, do not silently work around)
 

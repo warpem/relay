@@ -1,0 +1,13 @@
+/* Astigmatism polar plot. Its four rows join the particle histogram's through the diagnostics subgrid. */
+.astigmatism { display: grid; grid-row: span 4; grid-template-rows: subgrid; row-gap: var(--w-space-s); min-width: 0; align-content: start; }
+.plot-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--w-space-s); min-height: 28px; }
+.plot-heading h3 { white-space: nowrap; }
+/* Top-aligned, so it shares a line with the histogram's first filter row. */
+.plot-filters { align-self: start; display: flex; flex-wrap: wrap; align-items: center; gap: var(--w-space-xs) var(--w-space-m); }
+.range-label { font-size: var(--w-text-s); margin-right: 2px; }
+.unit { font-size: var(--w-text-s); color: var(--w-muted); }
+canvas { display: block; width: 100%; max-width: var(--diagnostic-size, 320px); aspect-ratio: 1; font-size: var(--w-text-s); cursor: crosshair; touch-action: manipulation; }
+canvas:focus-visible { outline: 2px solid var(--colorStrokeFocus2); outline-offset: 2px; }
+.plot-key { min-height: 1lh; font-size: var(--w-text-s); color: var(--w-muted); }
+.ellipse-key { display: inline-flex; align-items: center; gap: 6px; }
+.ellipse-key i { width: 14px; height: 0; border-top: 2px dashed var(--colorBrandForeground1); }

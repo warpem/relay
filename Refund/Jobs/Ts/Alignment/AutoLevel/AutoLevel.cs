@@ -18,7 +18,7 @@ namespace Refund.Jobs.Ts.Alignment.AutoLevel;
 /// This is based on the WarpTools EtomoPatchTrackTiltseries command.
 /// </summary>
 [GenerateReadOnly]
-public class AutoLevel : WarpJobGpu, IClusterJob
+public class AutoLevel : WarpToolsJobGpu, IClusterJob
 {
     public override string TypeGuid => "79885498-1325-4aac-8ffe-2066f7cbdac0";
 
