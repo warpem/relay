@@ -51,7 +51,7 @@ public partial class WarpExpandedView
     private string QueueSummary => !Session.Running ? $"{Session.Pending:N0} waiting" + (Session.Outdated > 0 ? $", {Session.Outdated:N0} outdated" : "")
         : Session.Pending == 0 && Session.Outdated == 0 ? "caught up" : $"{Session.Pending + Session.Outdated:N0} waiting";
     private string StartBlockedReason => ExecutionActive ? null : _queueId < 0 ? "Configure a GPU worker queue first" : Dirty ? "Apply or revert the settings changes first" : null;
-    private string DenoiserSummary => !Session.Settings.Denoise ? "Off" : Session.Training ? "Training" : Session.Model > 0 ? $"Model v{Session.Model}" : $"Needs {Session.Settings.TrainAfter:N0} movies";
+    private string DenoiserSummary => !Session.Settings.Denoise ? "Off" : Session.Training ? "Training" : Session.HasModel ? $"Model v{Session.Model}" : $"Needs {Session.Settings.TrainAfter:N0} movies";
     private bool HasWorkerQueues => DataManager.GetWarpWorkerQueues().Count > 0;
     private IEnumerable<SelectOption<string>> QueueOptions {
         get {

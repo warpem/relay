@@ -28,6 +28,14 @@ public sealed partial class WarpSession
         }
     }
 
+    // Derived by the session, not edited: they never count as a pending change.
+    private static readonly System.Reflection.PropertyInfo[] EditableSettings = typeof(WarpSettings).GetProperties()
+        .Where(p => p.Name is not (nameof(WarpSettings.OutputPath) or nameof(WarpSettings.TrainAfter) or nameof(WarpSettings.BinTimes))).ToArray();
+
+    /// <summary>Settings whose draft value differs from the applied one.</summary>
+    public static IReadOnlySet<string> ChangedSettings(WarpSettings draft, WarpSettings applied) =>
+        EditableSettings.Where(p => !Equals(p.GetValue(draft), p.GetValue(applied))).Select(p => p.Name).ToHashSet();
+
     public static WarpSettings NormalizeSettings(WarpSettings settings) => settings with
     {
         TrainAfter = settings.TrainCount,
@@ -102,7 +110,8 @@ public sealed partial class WarpSession
         if(s.CorrectDefects&&string.IsNullOrWhiteSpace(s.DefectsPath))return "Select the defect map.";
         if(!s.MotionGridAuto&&(s.MotionGrid<1||s.MotionGridY<1||s.MotionGridZ<1))return "Motion grid dimensions must be positive.";
         if(!s.CtfGridAuto&&(s.CtfGridX<1||s.CtfGridY<1))return "CTF grid dimensions must be positive.";
-        if(s.TrainCount<1||s.TrainingIterations<1||s.FineTuneEvery<1)return "Training sample, iterations and interval are invalid.";
+        if(s.TrainCount<1||s.TrainingEpochs<1||s.FineTuneEvery<1)return "Training sample, epochs and interval are invalid.";
+        if(s.Denoise&&!string.IsNullOrWhiteSpace(s.DenoiserStart)&&!File.Exists(s.DenoiserStart))return "The starting model for denoiser training does not exist.";
         if(s.Diameter<=0||s.MinSeparation<=0||s.Box<2||s.Box%2!=0)return "Particle diameter/separation must be positive and box size positive/even.";
         if(s.SkipFirst<0||s.SkipLast<0||s.StackGroup<1)return "Frame skips must be nonnegative; stack grouping must be positive.";
         return null;

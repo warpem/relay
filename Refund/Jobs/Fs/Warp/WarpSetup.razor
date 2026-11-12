@@ -48,7 +48,7 @@
                 @if (Draft.CorrectGain)
                 {
                     @P("GainPath", "Gain reference", SelectionMode.SingleFile)
-                    <div class="setting-row" data-setting="GainOrientation"><label>Gain orientation</label><div class="setting-control wide checks">@C("GainFlipX", "Flip X")@C("GainFlipY", "Flip Y")@C("GainTranspose", "Transpose")</div></div>
+                    <div class="@Row("setting-row", "GainFlipX", "GainFlipY", "GainTranspose")" data-setting="GainOrientation"><label>Gain orientation</label><div class="setting-control wide checks">@C("GainFlipX", "Flip X")@C("GainFlipY", "Flip Y")@C("GainTranspose", "Transpose")</div></div>
                 }
             </div>
             @if (_checks != null)
@@ -115,11 +115,28 @@
             <div class="field-grid">
                 @B("Denoise", "Denoise micrographs")
                 @N("TrainCount", "Training sample", 1, 10000, 1, "movies")
+                @if (Draft.Denoise) { @P("DenoiserStart", "Starting model (optional)", SelectionMode.SingleFile) }
             </div>
-            <div class="training-state @(Session.Training ? "active" : Session.Model > 0 && Session.Settings.Denoise ? "ready" : "")">
+            <div class="training-state @(Session.Training ? "active" : Session.HasModel && Session.Settings.Denoise ? "ready" : "")">
                 <div><b>@TrainingTitle</b><span>@TrainingDetail</span></div>
-                <FluentButton Size="ButtonSize.Small" Disabled="@(!Session.Running || Session.Training || Session.StageCounts[1] < Session.Settings.TrainCount || !Session.Settings.Denoise)" OnClick="Train" Title="@TrainBlockedReason">@(Session.Model > 0 ? "Train new model" : "Train now")</FluentButton>
+                <FluentButton Size="ButtonSize.Small" Disabled="@(!Session.Running || Session.Training || Session.StageCounts[1] < Session.Settings.TrainCount || !Session.Settings.Denoise)" OnClick="Train" Title="@TrainBlockedReason">@(Session.HasModel ? "Train new model" : "Train now")</FluentButton>
                 @if (Session.Training) { <progress aria-label="Training denoiser"></progress> }
+                @if (Session.OlderModelMovies is var older && older > 0)
+                {
+                    <div class="redo-model">
+                        @if (_redoPending)
+                        {
+                            <span>Denoise, pick and extract @older.ToString("N0") @(older == 1 ? "movie" : "movies") again with model v@(Session.Model)? Particles are extracted from the raw movies, so all @older.ToString("N0") are read again.</span>
+                            <FluentButton OnClick="RedoDenoising">Redo @older.ToString("N0") @(older == 1 ? "movie" : "movies")</FluentButton>
+                            <FluentButton Appearance="ButtonAppearance.Subtle" OnClick="@(() => _redoPending = false)">Cancel</FluentButton>
+                        }
+                        else
+                        {
+                            <span>@older.ToString("N0") @(older == 1 ? "movie was" : "movies were") denoised with an older model.</span>
+                            <FluentButton Size="ButtonSize.Small" OnClick="@(() => _redoPending = true)">Redo with model v@(Session.Model)…</FluentButton>
+                        }
+                    </div>
+                }
             </div>
             @if (_advanced)
             {
@@ -127,7 +144,7 @@
                     <div class="advanced-label">Advanced</div>
                     @D("DeconvolutionStrength", "Deconvolution strength", 0, 10, .01)
                     @D("DeconvolutionFalloff", "High-frequency falloff", 0, 10, .01)
-                    @N("TrainingIterations", "Training iterations", 1, 100000, 100)
+                    @N("TrainingEpochs", "Training epochs", 1, 1000, 1)
                     @B("FineTune", "Periodic fine-tuning")
                     @if (Draft.FineTune) { @N("FineTuneEvery", "Fine-tune every", 1, 100000, 100, "movies") }
                 </div>
@@ -176,20 +193,23 @@
     private readonly string _rootId = $"warp-setup-{Guid.NewGuid():N}";
     private bool _advanced;
     private string _selectedPreset, _presetName = "", _presetMessage;
-    private bool _saveAs, _deletePending, _checking;
+    private bool _saveAs, _deletePending, _checking, _redoPending;
+    private IReadOnlySet<string> _changed = new HashSet<string>();
     private IReadOnlyList<WarpInputCheck> _checks;
     private WarpSettings _checkedSettings;
     private IReadOnlyList<WarpCalibrationPreset> _presets = [];
     private IEnumerable<string> PresetNames => _presets.Select(p => p.Name);
-    private string TrainingTitle => !Session.Settings.Denoise ? "Denoising is off" : Session.Training ? "Training a new model" : Session.Model > 0 ? $"Model v{Session.Model} ready" : $"Collecting training data: {Math.Min(Session.StageCounts[1], Session.Settings.TrainCount):N0} of {Session.Settings.TrainCount:N0} movies";
+    private string TrainingTitle => !Session.Settings.Denoise ? "Denoising is off" : Session.Training ? "Training a new model" : Session.HasModel ? $"Model v{Session.Model} ready" : $"Collecting training data: {Math.Min(Session.StageCounts[1], Session.Settings.TrainCount):N0} of {Session.Settings.TrainCount:N0} movies";
     private string TrainBlockedReason => !Session.Settings.Denoise ? "Denoising is off" : !Session.Running ? "Start processing to train" : Session.Training ? "Training is in progress" : Session.StageCounts[1] < Session.Settings.TrainCount ? $"Needs {Session.Settings.TrainCount:N0} prepared movies" : null;
-    private string TrainingDetail => !Session.Settings.Denoise ? "Deconvolved micrographs are still produced." : Session.Training ? (Session.Model > 0 ? $"Model v{Session.Model} remains available during training." : "Motion and CTF continue; denoising waits for the first model.") : Session.Model > 0 ? $"Trained on {Session.Settings.TrainCount:N0} micrographs." : Locked ? "Training starts automatically when enough CTF results are available." : "Training begins after processing starts and enough movies are ready.";
+    private string TrainingDetail => !Session.Settings.Denoise ? "Deconvolved micrographs are still produced." : Session.Training ? (Session.HasModel ? $"Model v{Session.Model} denoises new movies until training finishes." : "Motion and CTF continue; denoising waits for the first model.") : Session.HasModel ? $"Trained on {Session.Settings.TrainCount:N0} micrographs; it denoises new movies." : (Locked ? "Training starts automatically when enough CTF results are available." : "Training begins after processing starts and enough movies are ready.") + StartingModelNote;
+    private string StartingModelNote => string.IsNullOrWhiteSpace(Session.Settings.DenoiserStart) ? " The first model is trained from scratch." : $" The first model is fine-tuned from {System.IO.Path.GetFileName(Session.Settings.DenoiserStart)}.";
 
     protected override void OnParametersSet()
     {
         _presets = Session.CalibrationPresets;
         _selectedPreset ??= Draft.Preset;
         if (_checkedSettings != null && _checkedSettings != Draft) { _checks = null; _checkedSettings = null; }
+        _changed = WarpSession.ChangedSettings(Draft, Session.Settings);
     }
 
     private async Task SetProperty(string name, object value)
@@ -202,7 +222,7 @@
 
     // Every row shares the section grid: label | control | unit, so values line up down a section.
     private RenderFragment Field(string property, string label, UiFieldBase description, string unit = "", string note = null) => builder => {
-        builder.OpenElement(0, "div"); builder.AddAttribute(1, "class", "setting-row"); builder.AddAttribute(2, "data-setting", property); builder.SetKey(property);
+        builder.OpenElement(0, "div"); builder.AddAttribute(1, "class", Row("setting-row", property)); builder.AddAttribute(2, "data-setting", property); builder.SetKey(property);
         builder.OpenElement(3, "label"); builder.AddAttribute(4, "title", description.HelpText); builder.AddContent(5, label); builder.CloseElement();
         builder.OpenElement(6, "div"); builder.AddAttribute(7, "class", unit == null ? "setting-control wide" : "setting-control");
         builder.OpenComponent(8, description.ViewType);
@@ -218,12 +238,14 @@
     private RenderFragment D(string property, string label, double min, double max, double step, string unit = "", string note = null) => Field(property, label, new UiDecimal(property, label, min, max, step, unit), unit, note);
     private RenderFragment N(string property, string label, int min, int max, int step = 1, string unit = "", string note = null) => Field(property, label, new UiInt(property, label, min, max, step, unit), unit, note);
     private RenderFragment S(string property, string label, string help = "") => Field(property, label, new UiString(property, label, help), null);
+    // A field whose value differs from the applied settings tints until Apply.
+    private string Row(string classes, params string[] properties) => properties.Any(_changed.Contains) ? classes + " changed" : classes;
     private bool IsDisabled(string property) => Locked ||
         (!Draft.PickingEnabled && property is "Diameter" or "MinSeparation" or "Box") ||
         (!Draft.CorrectGain && property is "GainPath" or "GainFlipX" or "GainFlipY" or "GainTranspose") ||
-        (!Draft.Denoise && property is "TrainCount" or "FineTune" or "FineTuneEvery" or "TrainingIterations");
+        (!Draft.Denoise && property is "TrainCount" or "FineTune" or "FineTuneEvery" or "TrainingEpochs" or "DenoiserStart");
     private RenderFragment B(string property, string label) => builder => {
-        builder.OpenElement(0, "div"); builder.AddAttribute(1, "class", "setting-row boolean-setting"); builder.AddAttribute(2, "data-setting", property); builder.SetKey(property);
+        builder.OpenElement(0, "div"); builder.AddAttribute(1, "class", Row("setting-row boolean-setting", property)); builder.AddAttribute(2, "data-setting", property); builder.SetKey(property);
         builder.OpenElement(3, "label"); builder.AddAttribute(4, "for", _rootId + property); builder.AddContent(5, label); builder.CloseElement();
         builder.OpenElement(6, "div"); builder.AddAttribute(7, "class", "setting-control wide");
         builder.OpenComponent<FluentSwitch>(8);
@@ -243,7 +265,7 @@
     };
     // Paths are long: the label sits above a full-width field with Relay's file browser.
     private RenderFragment P(string property, string label, SelectionMode mode) => builder => {
-        builder.OpenElement(0, "div"); builder.AddAttribute(1, "class", "setting-row path-row"); builder.AddAttribute(2, "data-setting", property); builder.SetKey(property);
+        builder.OpenElement(0, "div"); builder.AddAttribute(1, "class", Row("setting-row path-row", property)); builder.AddAttribute(2, "data-setting", property); builder.SetKey(property);
         builder.OpenElement(3, "label"); builder.AddContent(4, label); builder.CloseElement();
         builder.OpenElement(5, "div"); builder.AddAttribute(6, "class", "path-control");
         builder.OpenComponent<RelayTextInput>(7);
@@ -272,6 +294,7 @@
                 await SetProperty(property, selected[0].Path);
         }, $"Select {label.ToLowerInvariant()}", selectionMode: mode, showFiles: mode != SelectionMode.SingleFolder, currentFolder: current);
     }
+    private async Task RedoDenoising() { try { await Update(s => s.RedoDenoising()); _redoPending = false; } catch (Exception ex) { _presetMessage = ex.Message; } }
     private async Task Train() { try { await Update(s => s.Train()); } catch (Exception ex) { _presetMessage = ex.Message; } }
     private async Task CheckInput() { _checking = true; var checkedDraft = Draft; try { var result = await Session.CheckInputAsync(checkedDraft); if (Draft == checkedDraft) { _checks = result; _checkedSettings = checkedDraft; } } finally { _checking = false; } }
     private async Task LoadPreset() { try { await DraftChanged.InvokeAsync(Session.LoadCalibrationPreset(_selectedPreset, Draft)); _presetMessage = $"Loaded {_selectedPreset}; apply to use these calibration settings."; } catch (Exception ex) { _presetMessage = ex.Message; } }

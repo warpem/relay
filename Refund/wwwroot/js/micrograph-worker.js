@@ -85,7 +85,11 @@ export async function loadParticles(options) {
 
 async function load(options) {
     try {
-        let plane = await loadPlane(options.url, options.layer);
+        let reported = -1;
+        let plane = await loadPlane(options.url, options.layer, { onProgress: (loaded, total) => {
+            const percent = Math.floor(loaded / total * 100);
+            if (percent !== reported) { reported = percent; postMessage({ type: 'progress', loaded, total }); }
+        } });
         const { width, height, pixelSize } = plane;
         const levels = [];
         while (true) {

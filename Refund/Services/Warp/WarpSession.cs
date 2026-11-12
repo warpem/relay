@@ -9,7 +9,7 @@ namespace Refund.Services.Warp;
 
 internal sealed record WarpCheckpoint(int Schema,WarpSettings Settings,IReadOnlyList<WarpMovie> Movies,
     List<WarpExportManifest> Exports,string ModelPath,int Model,int LastTrainingCount,DateTime? LastInputAt,DateTime? LastResultAt,
-    WarpFilters Filters,WarpHistogramCheckpoint Histogram,ulong ModelPreparationKey=0);
+    WarpFilters Filters,WarpHistogramCheckpoint Histogram,ulong ModelPreparationKey=0,int MinDenoiseModel=0);
 internal sealed record WarpHistogramCheckpoint(int Schema,WarpParticleHistogram Histogram,string CohortSignature,string FilterSignature);
 public sealed record WarpFilters(double MinCtf=0,double MaxCtf=5,double MinMotion=0,double MaxMotion=2.5,
     double MinIce=0,double MaxIce=2000,int MinParticles=0,int MaxParticles=int.MaxValue,double MaxAstigmatismSigma=3,
@@ -34,6 +34,8 @@ public sealed partial class WarpSession : IDisposable
     private bool _disposed,_dirty,_plotDirty;
     private string _modelPath="";
     private int _lastTrainingCount;
+    /// <summary>Denoising from a model older than this is outdated; set by <see cref="RedoDenoising"/>.</summary>
+    private int _minDenoiseModel;
     private ulong _modelPreparationKey;
     private WarpFilters _filters=new();
     private WarpParticleHistogram _histogram;
@@ -48,7 +50,10 @@ public sealed partial class WarpSession : IDisposable
     public bool Running {get;private set;}
     public bool Training {get;private set;}
     public int TrainingPercent {get;private set;}
+    /// <summary>Version of the newest denoiser; it keeps counting when a model file goes missing.</summary>
     public int Model {get;private set;}
+    /// <summary>A trained model is on disk, so movies can be denoised.</summary>
+    public bool HasModel=>Model>0&&_modelPath.Length>0;
     public bool Exporting {get;private set;}
     /// <summary>The latest problem that needs attention (a failed run, training or checkpoint), or "".</summary>
     public string Problem=>_checkpointProblem.Length>0?_checkpointProblem:_runProblem.Length>0?_runProblem:_discoveryProblem;
@@ -68,8 +73,8 @@ public sealed partial class WarpSession : IDisposable
     public int Outdated {get;private set;}
     public long ParticleCount {get;private set;}
     public int[] StageCounts {get;}=new int[5];
-    public int AwaitingDenoiser=>Settings.Denoise && Model==0 ? _view.Count(m=>Current(m,"prepare")&&!m.Done.HasFlag(WarpStage.Enhance)&&!m.Failed):0;
-    public string DenoiserStatus=>!Settings.Denoise?"Off":Training?"Training":Model>0?$"Model v{Model}":$"Waiting for {Settings.TrainAfter} prepared movies";
+    public int AwaitingDenoiser=>Settings.Denoise && !HasModel ? _view.Count(m=>Current(m,"prepare")&&!m.Done.HasFlag(WarpStage.Enhance)&&!m.Failed):0;
+    public string DenoiserStatus=>!Settings.Denoise?"Off":Training?"Training":HasModel?$"Model v{Model}":$"Waiting for {Settings.TrainAfter} prepared movies";
     public static readonly string[] StatusNames=["Unprocessed","Partial","Ready","Outdated","Filtered","Kept","Excluded","Failed"];
     private string CheckpointPath=>Path.Combine(Identity.SessionDirectory,"warp-mini.json");
     private WarpStage RequiredStages=>Settings.PickingEnabled?WarpStage.All:WarpStage.Motion|WarpStage.Ctf|WarpStage.Enhance;
@@ -85,12 +90,13 @@ public sealed partial class WarpSession : IDisposable
                 var saved=JsonSerializer.Deserialize<WarpCheckpoint>(File.ReadAllText(CheckpointPath),JsonOptions);
                 if(saved?.Schema!=1)throw new InvalidDataException("Unsupported Warp session checkpoint schema.");
                 Settings=NormalizeSettings(saved.Settings);_movies.AddRange(saved.Movies);_exports.AddRange(saved.Exports);
-                _modelPreparationKey=saved.ModelPreparationKey;Model=saved.Model;_modelPath=saved.ModelPath??"";_lastTrainingCount=saved.LastTrainingCount;
+                _modelPreparationKey=saved.ModelPreparationKey;Model=saved.Model;_modelPath=saved.ModelPath??"";_lastTrainingCount=saved.LastTrainingCount;_minDenoiseModel=saved.MinDenoiseModel;
                 LastInputAt=saved.LastInputAt;LastResultAt=saved.LastResultAt;_filters=saved.Filters??new();
                 foreach(var m in _movies){m.ActiveStage="";_byInput[m.InputPath]=m;}
                 foreach(var m in _movies)_changedRows.Add(m.Index);PublishRows();
-                if(Model>0&&!File.Exists(_modelPath)){Model=0;_modelPath="";}
-                RecomputeStageKeys();if(Model>0&&_modelPreparationKey!=_stageKeys["prepare"]){Model=0;_modelPath="";RecomputeStageKeys();}RefreshStates();
+                // A missing model file only stops new denoising until the next model; existing results stay valid.
+                if(_modelPath.Length>0&&!File.Exists(_modelPath))_modelPath="";
+                RecomputeStageKeys();if(Model>0&&_modelPreparationKey!=_stageKeys["prepare"])ForgetModel();RefreshStates();
                 if(saved.Histogram is {Schema:1} h && h.CohortSignature==ParticleCohortSignature() &&
                     h.Histogram.Bins?.Length==64*48 && h.Histogram.Bins.All(v=>v>=0) && h.Histogram.Bins.Sum(v=>(long)v)==h.Histogram.Total)
                 {_histogram=h.Histogram;_histogramCohort=h.CohortSignature;_histogramFilter=h.FilterSignature;foreach(var m in _movies.Where(HistogramEligible))_histogramMembers[m.Index]=m.PickingRevision;}
@@ -111,8 +117,8 @@ public sealed partial class WarpSession : IDisposable
             if(Running)throw new InvalidOperationException("Stop processing before changing settings.");
             var error=ValidateSettings(settings);if(error!=null)throw new ArgumentException(error);
             var next=NormalizeSettings(settings) with{OutputPath=Path.Combine(Identity.SessionDirectory,"processing")};
-            if(_stageKeys["prepare"]!=BuildStageKeys(next,"")["prepare"]){_modelPath="";Model=0;_lastTrainingCount=0;}
-            bool processingChanged=StageOrder.Any(stage=>_stageKeys[stage]!=BuildStageKeys(next,_modelPath)[stage]);
+            if(_stageKeys["prepare"]!=BuildStageKeys(next)["prepare"])ForgetModel();
+            bool processingChanged=StageOrder.Any(stage=>_stageKeys[stage]!=BuildStageKeys(next)[stage]);
             Settings=next;RecomputeStageKeys();
             if (processingChanged)
             {
@@ -129,7 +135,7 @@ public sealed partial class WarpSession : IDisposable
     public string GetSettingsImpact(WarpSettings next)
     {
         if(next==Settings)return "";
-        var before=BuildStageKeys(Settings,_modelPath);var after=BuildStageKeys(NormalizeSettings(next),_modelPath);
+        var before=BuildStageKeys(Settings);var after=BuildStageKeys(NormalizeSettings(next));
         string[] changed=StageOrder.Where(k=>before[k]!=after[k]).ToArray();
         return changed.Length==0?"Update discovery and training schedule; retain current results.":"Redo "+string.Join(", ",changed.Select(StageLabel))+".";
     }
@@ -144,6 +150,16 @@ public sealed partial class WarpSession : IDisposable
     public static string StatusColorFor(string status)=>StatusColorMapping.GetColor(status switch{"Failed"=>ProcessingStatus.Failed,"Kept"=>ProcessingStatus.Kept,"Excluded"=>ProcessingStatus.Deselected,"Outdated"=>ProcessingStatus.Outdated,"Filtered"=>ProcessingStatus.FilteredOut,"Ready"=>ProcessingStatus.Processed,"Partial"=>ProcessingStatus.Partial,_=>ProcessingStatus.Unprocessed});
     public void SetDisposition(IEnumerable<int> indices,WarpDisposition value)=>Mutate(()=>{foreach(int i in indices.Distinct())if(i>=0&&i<_movies.Count){_movies[i].Disposition=value;_movies[i].Excluded=value==WarpDisposition.Exclude;_changedRows.Add(i);}});
     public void Retry(IEnumerable<int> indices)=>Mutate(()=>{foreach(int i in indices.Distinct())if(i>=0&&i<_movies.Count){_movies[i].Failed=false;_movies[i].Error="";_changedRows.Add(i);}});
+    /// <summary>A model trained on other deconvolution settings no longer fits the data, so training starts over.</summary>
+    private void ForgetModel(){_modelPath="";Model=0;_lastTrainingCount=0;_minDenoiseModel=0;}
+    /// <summary>Denoised movies whose model is older than the current one.</summary>
+    public int OlderModelMovies=>Settings.Denoise&&HasModel?_view.Count(m=>!m.Failed&&Current(m,"denoise")&&m.DenoiseModel<Model):0;
+    /// <summary>Outdates denoising, picking and extraction for every movie denoised with an older model.</summary>
+    public void RedoDenoising()=>Mutate(()=>
+    {
+        if(!Settings.Denoise||!HasModel)throw new InvalidOperationException("There is no denoiser model to redo with.");
+        _minDenoiseModel=Model;
+    });
     public void Train()=>Mutate(()=>{if(!Running)throw new InvalidOperationException("Start processing before training.");_trainRequested=true;_trainingFailed=false;});
     private void Mutate(Action action){lock(_sync){action();_plotDirty=true;RefreshStates();Save();}Publish();}
     private void Publish()
@@ -164,7 +180,7 @@ public sealed partial class WarpSession : IDisposable
         foreach(var m in _movies)
         {
             var priorStale=m.Stale;m.Stale=0;
-            foreach(string stage in StageOrder)if(m.Completed.TryGetValue(stage,out ulong completed)&&completed!=_stageKeys[stage])m.Stale|=StageFlag(stage);
+            foreach(string stage in StageOrder)if(m.Completed.TryGetValue(stage,out ulong completed)&&(completed!=_stageKeys[stage]||RedoneByModel(m,stage)))m.Stale|=StageFlag(stage);
             if(priorStale!=m.Stale)_changedRows.Add(m.Index);
             if(m.Failed)Failed++;else if(m.Done.HasFlag(WarpStage.Ctf))Processed++;
             if(ActiveStale(m)!=0)Outdated++;
@@ -196,7 +212,7 @@ public sealed partial class WarpSession : IDisposable
                 if(!_dirty)return;
                 PublishRows();GetParticleHistogram();version=_mutationVersion;terminalFiles=_terminalFiles.ToArray();
                 var histogram=_histogram!=null&&_histogramCohort==ParticleCohortSignature()?new WarpHistogramCheckpoint(1,_histogram,_histogramCohort,_histogramFilter):null;
-                saved=new(1,Settings,_view,_exports.ToList(),_modelPath,Model,_lastTrainingCount,LastInputAt,LastResultAt,_filters,histogram,_modelPreparationKey);
+                saved=new(1,Settings,_view,_exports.ToList(),_modelPath,Model,_lastTrainingCount,LastInputAt,LastResultAt,_filters,histogram,_modelPreparationKey,_minDenoiseModel);
             }
             string temporary=CheckpointPath+".writing";
             using(var stream=new FileStream(temporary,FileMode.Create,FileAccess.Write,FileShare.None,65536,true))

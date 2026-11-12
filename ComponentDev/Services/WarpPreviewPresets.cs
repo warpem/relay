@@ -172,7 +172,7 @@ public sealed partial class WarpSessionPreview
         if (value.EerGrouping < 1) return "EER grouping must be at least 1.";
         if (!value.MotionGridAuto && (value.MotionGrid < 1 || value.MotionGridY < 1 || value.MotionGridZ < 1)) return "Manual motion grid dimensions must be at least 1.";
         if (!value.CtfGridAuto && (value.CtfGridX < 1 || value.CtfGridY < 1)) return "Manual defocus grid dimensions must be at least 1.";
-        if (value.TrainCount < 1 || value.TrainingIterations < 1 || value.FineTuneEvery < 1) return "Training counts and intervals must be positive.";
+        if (value.TrainCount < 1 || value.TrainingEpochs < 1 || value.FineTuneEvery < 1) return "Training counts and intervals must be positive.";
         if (value.MinSeparation < .1m || value.MinSeparation > 5) return "Minimum separation must be between 0.1 and 5 particle diameters.";
         if (value.Diameter <= 0 || value.Box < 1) return "Particle diameter and extraction box must be positive.";
         if (value.Threshold < 0 || value.Threshold > 1) return "Picking threshold must be between 0 and 1.";

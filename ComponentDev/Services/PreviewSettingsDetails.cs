@@ -60,5 +60,5 @@ public sealed partial record PreviewSettings
     public bool Denoise { get; init; } = true;
     public int FineTuneEvery { get; init; } = 1000;
     public int TrainCount { get; init; } = 100;
-    public int TrainingIterations { get; init; } = 1000;
+    public int TrainingEpochs { get; init; } = 8;
 }

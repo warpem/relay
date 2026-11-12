@@ -71,7 +71,7 @@ static async Task Seed(string bootstrapFile)
         {
             Preset = "MOCK · local development", InputPath = Path.Combine(state, "input"), InputPattern = "*.mrc",
             Pixel = 2, TargetPixelSize = 2, TotalDose = 40, TrainCount = 4,
-            TrainingIterations = 10, Diameter = 80, Box = 64, PickingEnabled = true, FitThickness = true
+            TrainingEpochs = 10, Diameter = 80, Box = 64, PickingEnabled = true, FitThickness = true
         });
         await manager.ConfigureWarpWorkers(user, job, queue.Id, 1, 1, 2);
         // DataManager has no public flush operation. Flush only its normal repositories;

@@ -62,6 +62,9 @@
 .training-state b { font-weight: 600; }
 .training-state span { font-size: var(--w-text-s); color: var(--w-muted); }
 .training-state progress { flex-basis: 100%; height: 6px; accent-color: var(--w-warn); }
+/* Outranks the title block rule above: the redo offer is a full-width row under it. */
+.training-state > .redo-model { flex: 1 1 100%; flex-direction: row; align-items: center; flex-wrap: wrap; gap: var(--w-space-s); min-width: 0; padding-top: var(--w-space-s); border-top: 1px solid var(--w-rule); }
+.training-state > .redo-model > span { flex: 1 1 240px; }
 
 /* Input check results. */
 .input-checks { list-style: none; margin: var(--w-space-m) 0 0; padding: 0; border-top: 1px solid var(--w-rule); }
@@ -96,3 +99,8 @@
     .setup-columns { grid-template-columns: 1fr; padding: var(--w-space); }
     .preset-bar .spacer { flex-basis: 100%; height: 0; }
 }
+
+/* Edited but not applied: the field (or the switch's cell) takes a light brand tint until Apply. */
+.warp-setup ::deep .setting-row.changed fluent-text-input::part(root) { background-color: var(--colorBrandBackground2); border-color: var(--colorBrandStroke2) !important; }
+.warp-setup ::deep .setting-row.boolean-setting.changed > .setting-control,
+.warp-setup ::deep .setting-row.changed > .setting-control.checks { justify-self: start; margin-inline: -6px; padding-inline: 6px; border-radius: var(--borderRadiusMedium); background: var(--colorBrandBackground2); }

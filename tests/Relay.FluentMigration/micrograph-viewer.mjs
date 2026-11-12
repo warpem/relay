@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
+import { deflateSync, crc32 } from 'node:zlib';
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ?? 'playwright');
 const root = new URL('../../', import.meta.url);
 function mrc(mode = 2, extended = 0) {
@@ -18,6 +19,14 @@ function mrc(mode = 2, extended = 0) {
     }
     return buffer;
 }
+// An 8x6 gray PNG whose uniform value no MRC fixture produces.
+function png(value = 200) {
+    const chunk = (type, data) => { const out = Buffer.alloc(12 + data.length); out.writeUInt32BE(data.length, 0); out.write(type, 4);
+        data.copy(out, 8); out.writeUInt32BE(crc32(out.subarray(4, 8 + data.length)), 8 + data.length); return out; };
+    const header = Buffer.alloc(13); header.writeUInt32BE(8, 0); header.writeUInt32BE(6, 4); header[8] = 8; header[9] = 0;
+    const rows = Buffer.alloc(6 * 9); for (let y = 0; y < 6; y++) rows.fill(value, y * 9 + 1, y * 9 + 9);
+    return Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]), chunk('IHDR', header), chunk('IDAT', deflateSync(rows)), chunk('IEND', Buffer.alloc(0))]);
+}
 const requests = [];
 const server = createServer(async (req,res) => {
     try {
@@ -31,6 +40,7 @@ const server = createServer(async (req,res) => {
                 refresh();window.ready=true;
             </script>`); return;
         }
+        if (req.url === '/preview.png') { requests.push({url:req.url}); res.setHeader('Content-Type','image/png'); res.end(png()); return; }
         if (req.url === '/particles.star') {res.end('data_particles\nloop_\n_rlnCoordinateX #1\n_rlnCoordinateY #2\n0.5 0.5\n');return;}
         if (req.url.endsWith('.mrc')) {
             if (req.url === '/missing.mrc') { res.writeHead(404);res.end();return; }
@@ -39,6 +49,8 @@ const server = createServer(async (req,res) => {
             const match=req.headers.range?.match(/bytes=(\d+)-(\d+)/);
             if(match && !req.url.includes('full')) {
                 const start=Number(match[1]),end=Number(match[2]);
+                // Slow planes keep the progress bar visible long enough to observe.
+                if(req.url.includes('slow') && start>0) await new Promise(resolve=>setTimeout(resolve,400));
                 res.writeHead(206,{'Content-Range':`bytes ${start}-${end}/${data.length}`});res.end(data.subarray(start,end+1));
             } else res.end(data);
             return;
@@ -95,6 +107,23 @@ try {
     await page.evaluate(()=>viewer.command('viewer','fit'));await page.waitForTimeout(100);
     assert.deepEqual(await sample(),reference,'fit restores the image');
     console.log('overlays and minimap passed');
+    // A preview PNG stands in until the view changes; the plane is fetched only then, behind a progress bar.
+    let mark=requests.length;
+    await page.evaluate(()=>refresh({url:'/slow-preview.mrc',previewUrl:'/preview.png',maskUrl:null,particlesUrl:null}));await loaded();
+    assert.ok((await sample()).every(v=>Math.abs(v-200)<=2),'preview pixels are shown first');
+    assert.deepEqual(requests.slice(mark).map(r=>r.range??r.url).sort(),['/preview.png','bytes=0-1023'].sort(),'only the header and preview are fetched');
+    await page.evaluate(()=>viewer.command('viewer','fit'));await page.waitForTimeout(100);
+    assert.equal(requests.length-mark,2,'fitting does not need the full plane');
+    await page.evaluate(()=>viewer.command('viewer','zoom',1.5));
+    await page.waitForFunction(()=>{const bar=document.querySelector('.micrograph-progress');return bar&&!bar.hidden;});
+    await page.waitForFunction(()=>document.querySelector('.micrograph-progress').hidden);
+    await page.evaluate(()=>viewer.command('viewer','fit'));await page.waitForTimeout(150);
+    assert.deepEqual(await sample(),reference,'the full plane replaces the preview');
+    mark=requests.length;
+    await page.evaluate(()=>refresh({url:'/float.mrc',previewUrl:'/missing.png'}));await loaded();
+    assert.deepEqual(await sample(),reference,'a missing preview falls back to the plane');
+    await page.evaluate(()=>refresh({previewUrl:null}));await loaded();
+    console.log('preview passed');
     const before=requests.length;
     await page.evaluate(()=>{for(let i=0;i<30;i++)refresh({url:`/rapid-${i}.mrc`,maskUrl:null,particlesUrl:null})});await loaded();
     assert.equal(requests.length-before,2,'rapid browsing fetches only final header and plane');

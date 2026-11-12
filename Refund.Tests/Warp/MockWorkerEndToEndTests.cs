@@ -26,24 +26,24 @@ public sealed class MockWorkerEndToEndTests
         Assert.All(initial,m=>
         {
             Assert.Equal(WarpStage.All,m.Done);Assert.Equal(WarpStage.None,m.Stale);Assert.False(m.Failed,m.Error);
-            Assert.True(File.Exists(m.MetadataPath));Assert.True(File.Exists(m.ThumbnailPath));Assert.True(File.Exists(m.TrainingOddPath));Assert.True(File.Exists(m.TrainingEvenPath));
+            Assert.True(File.Exists(m.MetadataPath));Assert.True(File.Exists(m.ThumbnailPath));Assert.True(File.Exists(WarpSession.PreviewPath(m.AveragePath)));Assert.True(File.Exists(WarpSession.PreviewPath(m.EnhancedPath)));Assert.True(File.Exists(m.TrainingOddPath));Assert.True(File.Exists(m.TrainingEvenPath));
             var average=MapHeader.ReadFromFile(m.AveragePath);var enhanced=MapHeader.ReadFromFile(m.EnhancedPath);var stack=MapHeader.ReadFromFile(m.ParticleStackPath);
             Assert.Equal(102,average.Dimensions.X);Assert.Equal(102,average.Dimensions.Y);Assert.Equal(1,average.Dimensions.Z);
-            Assert.Equal(26,enhanced.Dimensions.X);Assert.Equal(26,enhanced.Dimensions.Y);
+            Assert.Equal(22,enhanced.Dimensions.X);Assert.Equal(22,enhanced.Dimensions.Y);
             Assert.Equal((float)fixture.Session.Settings.TargetPixelSize,average.PixelSize.X,5);
-            Assert.Equal((float)Math.Max(5,fixture.Session.Settings.TargetPixelSize),enhanced.PixelSize.X,5);
+            Assert.Equal(MovieDenoising.Sampling((float)fixture.Session.Settings.TargetPixelSize),enhanced.PixelSize.X,5);
             Assert.Equal(m.Picks,stack.Dimensions.Z);Assert.Equal(fixture.Session.Settings.Box,stack.Dimensions.X);
             Assert.Equal((float)fixture.Session.Settings.TargetPixelSize,stack.PixelSize.X,5);
             Assert.True(double.IsFinite(m.Motion)&&double.IsFinite(m.Ctf));
             var metadata=new Movie(m.ProcessingPath);Assert.NotEmpty(metadata.PS1D);Assert.NotEmpty(metadata.Simulated1D);
             using var spectrum=Image.FromFile(metadata.PowerSpectrumPath);Assert.True(spectrum.Dims.X>0);Assert.True(spectrum.GetHost(Intent.Read)[0].All(float.IsFinite));
         });
-        Assert.True(fixture.Session.Model>0);
+        Assert.True(fixture.Session.Model>0);Assert.All(initial,m=>Assert.Equal(fixture.Session.Model,m.DenoiseModel));Assert.Equal(0,fixture.Session.OlderModelMovies);
         var model=Assert.Single(Directory.GetFiles(Path.Combine(fixture.Identity.SessionDirectory,"models")));
         using(var marker=JsonDocument.Parse(File.ReadAllText(model)))
         {
             Assert.Equal("warpworker2-mock-denoiser",marker.RootElement.GetProperty("format").GetString());Assert.True(marker.RootElement.GetProperty("synthetic").GetBoolean());
-            Assert.Equal(2,marker.RootElement.GetProperty("trainingMovies").GetArrayLength());Assert.Equal(3,marker.RootElement.GetProperty("iterations").GetInt32());
+            Assert.Equal(2,marker.RootElement.GetProperty("trainingMovies").GetArrayLength());Assert.Equal(3,marker.RootElement.GetProperty("epochs").GetInt32());
         }
         long total=initial.Sum(m=>(long)m.Picks);Assert.Equal(total,fixture.Session.GetParticleHistogram().Total);
         fixture.Session.SetParticleRange(.45,.85,0,null);
@@ -103,7 +103,7 @@ public sealed class MockWorkerEndToEndTests
         {
             string input=Path.Combine(Root,"input"),job=Path.Combine(Root,"session");Directory.CreateDirectory(input);
             Identity=new(1,1,1,job,Path.Combine(job,"tasks"));Session=Manager.GetOrCreate(Identity);
-            Session.Apply(new(){InputPath=input,InputPattern="*.mrc",Recursive=true,Pixel=1,TargetPixelSize=1.25m,TrainCount=2,TrainingIterations=3,Diameter=20,Box=64});
+            Session.Apply(new(){InputPath=input,InputPattern="*.mrc",Recursive=true,Pixel=1,TargetPixelSize=1.25m,TrainCount=2,TrainingEpochs=3,Diameter=20,Box=64});
             Session.FilterMetric("ctf-max",100);Session.FilterMetric("motion-max",100);
         }
         public void WriteMovie(string relative)

@@ -20,7 +20,7 @@
             <div class="picking-image image-well">
                 @if (Movie.Done.HasFlag(WarpStage.Motion) && !string.IsNullOrEmpty(Movie.AveragePath))
                 {
-                    <MicrographViewer @key="ViewerKey" MicrographPath="@(ShowEnhanced ? Movie.EnhancedPath : Movie.AveragePath)" ResultRevision="@(ShowEnhanced ? Movie.ResultRevision : Movie.MotionRevision)" ThumbnailPath="@Movie.ThumbnailPath" ParticleStarPath="@(_showPicks && Session.HasCurrentParticleMetrics(Movie) ? Session.GetFilteredParticleStar(Movie.Index, DisplayPixelSize) : null)" MinWidth="300" MinHeight="300" CanEditParticles="false" CanEditMask="false" CanControlParticleDisplay="false" DefaultParticleDiameter="@((double)Session.Settings.Diameter )" DefaultParticleBoxSize="@((double)(Session.Settings.Box * Session.Settings.TargetPixelSize) )" />
+                    <MicrographViewer @key="ViewerKey" MicrographPath="@(ShowEnhanced ? Movie.EnhancedPath : Movie.AveragePath)" PreviewPath="@WarpSession.ExistingPreview(ShowEnhanced ? Movie.EnhancedPath : Movie.AveragePath)" ResultRevision="@(ShowEnhanced ? Movie.ResultRevision : Movie.MotionRevision)" ThumbnailPath="@Movie.ThumbnailPath" ParticleStarPath="@(_showPicks && Session.HasCurrentParticleMetrics(Movie) ? Session.GetFilteredParticleStar(Movie.Index, DisplayPixelSize) : null)" MinWidth="300" MinHeight="300" CanEditParticles="false" CanEditMask="false" CanControlParticleDisplay="false" DefaultParticleDiameter="@((double)Session.Settings.Diameter )" DefaultParticleBoxSize="@((double)(Session.Settings.Box * Session.Settings.TargetPixelSize) )" />
                 }
                 else { <div class="empty-evidence">Waiting for motion correction</div> }
             </div>

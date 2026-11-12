@@ -105,7 +105,7 @@
             {
                 <div class="advanced-block">
                     <div class="fields two">@D("DeconvolutionStrength", "Deconvolution strength", 0, 10, .1)@D("DeconvolutionFalloff", "High-frequency falloff", 0, 10, .1)</div>
-                    <div class="fields two">@B("FineTune", "Periodic fine-tuning")@N("TrainingIterations", "Training iterations", 1, 100000, 100)</div>
+                    <div class="fields two">@B("FineTune", "Periodic fine-tuning")@N("TrainingEpochs", "Training epochs", 1, 1000, 1)</div>
                     @if (Draft.FineTune) { <div class="fields two">@N("FineTuneEvery", "Fine-tune every", 1, 100000, 100, "movies")</div> }
                 </div>
             }
@@ -182,7 +182,7 @@
     private bool IsDisabled(string property) => Session.Running ||
         (!Draft.PickingEnabled && property is "Diameter" or "MinSeparation" or "Box") ||
         (!Draft.CorrectGain && property is "GainPath" or "GainFlipX" or "GainFlipY" or "GainTranspose") ||
-        (!Draft.Denoise && property is "TrainCount" or "FineTune" or "FineTuneEvery" or "TrainingIterations");
+        (!Draft.Denoise && property is "TrainCount" or "FineTune" or "FineTuneEvery" or "TrainingEpochs");
     private RenderFragment B(string property, string label) => builder => {
         builder.OpenElement(0, "div"); builder.AddAttribute(1, "class", "boolean-setting"); builder.AddAttribute(2, "data-setting", property); builder.SetKey(property);
         builder.OpenComponent<FluentSwitch>(3);

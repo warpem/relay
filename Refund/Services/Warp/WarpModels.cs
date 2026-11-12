@@ -59,12 +59,16 @@ public sealed record WarpSettings
     public int StackGroup { get; init; } = 1;
     public int SkipFirst { get; init; }
     public int SkipLast { get; init; }
-    public decimal DeconvolutionStrength { get; init; } = .85m;
-    public decimal DeconvolutionFalloff { get; init; } = .25m;
+    // Noise2Mic's settings for the BoxNet picking corpus; the denoiser and picker expect images made this way.
+    public decimal DeconvolutionStrength { get; init; } = .9m;
+    public decimal DeconvolutionFalloff { get; init; } = .1m;
     public bool Denoise { get; init; } = true;
     public int FineTuneEvery { get; init; } = 1000;
     public int TrainCount { get; init; } = 100;
-    public int TrainingIterations { get; init; } = 1000;
+    /// <summary>Noise2Mic's recipe: 4 patches per training movie per epoch, 8 epochs.</summary>
+    public int TrainingEpochs { get; init; } = 8;
+    /// <summary>A trained Noise2Mic model the session's first training fine-tunes, e.g. the BoxNet corpus model; "" trains from scratch.</summary>
+    public string DenoiserStart { get; init; } = "";
 
 }
 public sealed record WarpMovie
@@ -104,6 +108,8 @@ public sealed record WarpMovie
     public long CtfRevision {get;set;}
     public long PickingRevision {get;set;}
     public bool TrainingPairReady {get;set;}
+    /// <summary>Version of the denoiser that produced this movie's denoised micrograph; 0 if none.</summary>
+    public int DenoiseModel {get;set;}
     public bool InputReady {get;set;}=true;
     public long SourceLength {get;set;}
     public long SourceWriteTicks {get;set;}

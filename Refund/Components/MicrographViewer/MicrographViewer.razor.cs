@@ -15,6 +15,8 @@ public partial class MicrographViewer : ComponentBase, IAsyncDisposable
     [Parameter] public long? ResultRevision { get; set; }
     [Parameter] public string MaskPath { get; set; }
     [Parameter] public string ThumbnailPath { get; set; }
+    /// <summary>Optional display-ready PNG of the micrograph: shown first, until zooming or panning loads the MRC.</summary>
+    [Parameter] public string PreviewPath { get; set; }
     [Parameter] public string ParticleStarPath { get; set; }
     [Parameter] public int MinWidth { get; set; } = 800;
     [Parameter] public int MinHeight { get; set; } = 600;
@@ -69,7 +71,7 @@ public partial class MicrographViewer : ComponentBase, IAsyncDisposable
         }
         var options = new
         {
-            url = Url(path), layer, maskUrl = Url(MaskPath), thumbnailUrl = Url(ThumbnailPath),
+            url = Url(path), layer, maskUrl = Url(MaskPath), thumbnailUrl = Url(ThumbnailPath), previewUrl = Url(PreviewPath),
             particlesUrl = Url(ParticleStarPath), minWidth = MinWidth, minHeight = MinHeight,
             showScaleBar, showMask, isPaintingMask = CanEditMask && isPaintingMask,
             isPickingParticles = CanEditParticles && isPickingParticles,

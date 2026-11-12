@@ -63,7 +63,7 @@ else {
         <div class="message-bar warning training-banner" role="status">
             <strong>@Session.DenoiserStatus</strong>
             @if (Session.Training) { <progress aria-label="Training denoiser"></progress> }
-            @if (Session.AwaitingDenoiser > 0) { <span>@Session.AwaitingDenoiser.ToString("N0") micrographs are waiting for the denoiser.</span> } else if (Session.Model > 0) { <span>Model v@Session.Model stays in use until training finishes.</span> }
+            @if (Session.AwaitingDenoiser > 0) { <span>@Session.AwaitingDenoiser.ToString("N0") micrographs are waiting for the denoiser.</span> } else if (Session.HasModel) { <span>Model v@Session.Model denoises new movies until training finishes.</span> }
             @if (!ExecutionActive) { <span>Training resumes when processing starts.</span> }
             <span class="spacer"></span><FluentButton Appearance="ButtonAppearance.Subtle" OnClick="@(() => ChangeView("Setup"))">Denoising settings</FluentButton>
         </div>
