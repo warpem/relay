@@ -134,10 +134,10 @@
                         <span class="st-sel-text"><strong>@sel.Count.ToString("N0") selected</strong> · @StorageFormat.Bytes(t.Allocated) · @StorageFormat.Count(t.Entries) files</span>
                         @if (t.Cleanable.Entries > 0 || sel.Any(r => r.Job.IntermediateRule != null && !r.Measured))
                         {
-                            <FluentButton id="st-clean" Appearance="ButtonAppearance.Outline" Class="danger" Disabled="@(_busy || !CanCleanAny(sel))" OnClick="@(() => _confirm = "clean")"
+                            <FluentButton id="st-clean" Appearance="ButtonAppearance.Outline" Class="danger" Disabled="@(!CanCleanAny(sel))" OnClick="@(() => _confirm = "clean")"
                                           IconStart="@(new Icons.Regular.Size16.BroomSparkle())">@(t.Cleanable.Entries > 0 ? $"Clean intermediate ({StorageFormat.Bytes(t.Cleanable.Allocated)})" : "Clean intermediate")</FluentButton>
                         }
-                        <FluentButton id="st-clear" Appearance="ButtonAppearance.Outline" Class="danger" Disabled="@(_busy || !CanClearAny(sel))" OnClick="@(() => _confirm = "clear")"
+                        <FluentButton id="st-clear" Appearance="ButtonAppearance.Outline" Class="danger" Disabled="@(!CanClearAny(sel))" OnClick="@(() => _confirm = "clear")"
                                       IconStart="@(new Icons.Regular.Size16.Broom())">@($"Clear {sel.Count:N0} {(sel.Count == 1 ? "job" : "jobs")}")</FluentButton>
                         <FluentButton Appearance="ButtonAppearance.Subtle" OnClick="MeasureSelected">Measure again</FluentButton>
                         <FluentButton Appearance="ButtonAppearance.Subtle" OnClick="@(() => _selected.Clear())">Clear selection</FluentButton>
@@ -169,7 +169,7 @@
                                 <a href="@JobHref(row)" @onclick="@(e => OpenJob(row, e))" @onclick:preventDefault="true" title="@($"Open {row.Job.QualifiedName}")">@row.Job.QualifiedName</a>
                             </span>
                             <span class="c-type" role="cell" title="@row.TypeName">@row.TypeName</span>
-                            <span class="c-location" role="cell" title="@row.Location">@row.Location</span>
+                            <span class="c-location" role="cell" title="@row.LocationFull">@row.Location</span>
                             <span class="c-person" role="cell">@(row.Person?.Name ?? "")</span>
                             <span class="c-num c-modified" role="cell" title="@(row.Modified?.ToLocalTime().ToString("yyyy-MM-dd HH:mm"))">@(row.Modified is { } m ? StorageFormat.Age(_now - m) : "")</span>
                             <span class="c-num" role="cell" title="@(row.Measured ? $"{row.Storage.Total.Bytes:N0} bytes in files, {row.Allocated:N0} on disk" : null)">@(row.Measured ? StorageFormat.Bytes(row.Allocated) : "—")</span>
@@ -204,7 +204,7 @@
                             <span role="cell" class="c-action">
                                 @if (IsAdmin && l.Leftover.IsDeletable)
                                 {
-                                    <FluentButton id="@id" Appearance="ButtonAppearance.Subtle" Class="danger" Disabled="@_busy" OnClick="@(() => _confirmLeftover = l)">Delete</FluentButton>
+                                    <FluentButton id="@id" Appearance="ButtonAppearance.Subtle" Class="danger" Disabled="@IsDeleting(l)" OnClick="@(() => _confirmLeftover = l)">@(IsDeleting(l) ? "Deleting…" : "Delete")</FluentButton>
                                     @if (_confirmLeftover == l)
                                     {
                                         <RelayPopover AnchorId="@id" Opened="true" OpenedChanged="@(v => { if (!v) _confirmLeftover = null; })" Position="Positioning.BelowEnd" Gap="6" Class="popover-no-padding popover-no-shadow">

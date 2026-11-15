@@ -67,7 +67,8 @@ public partial class OverlayStorage : ComponentBase, IAsyncDisposable
     private (int, int, int)? _focusedKey;
     private StorageLeftoverRow _confirmLeftover;
     private string _metric = "bytes", _colorBy = "age", _breakdown = "types", _tab = "jobs", _sort = "size", _confirm;
-    private bool _descending = true, _dark, _busy, _dirty, _disposed;
+    private bool _descending = true, _dark, _dirty, _disposed;
+    private readonly HashSet<string> _deleting = [];
     private int _pendingRefresh;
     private (double W, double H) _area = (1200, 400);
     private DateTime _now = DateTime.UtcNow, _lastRebuild = DateTime.MinValue;
@@ -331,6 +332,8 @@ public partial class OverlayStorage : ComponentBase, IAsyncDisposable
     {
         if (_progress?.Walking.Any(w => w.Target.IsJob && w.Target.JobId == row.Job.Id && w.Target.SpaceId == row.Space.Id && w.Target.ProjectId == row.Space.Project.Id) == true)
             return "Measuring…";
+        if (DataManager.IsCleaning(row.Job))
+            return "Cleaning…";
         return row.Storage is not { } s ? "Not yet" : _now - s.MeasuredAt < TimeSpan.FromMinutes(1) ? "just now" : StorageFormat.Age(_now - s.MeasuredAt) + " ago";
     }
 
@@ -384,85 +387,97 @@ public partial class OverlayStorage : ComponentBase, IAsyncDisposable
         return (ok, skipped);
     }
 
-    private async Task ClearSelected(List<StorageRow> rows)
+    // Clearing and cleaning run in the background: the jobs leave the selection at once, so more can be picked and
+    // started while they work; each batch reports with a toast when it is done.
+    private void ClearSelected(List<StorageRow> rows)
     {
         _confirm = null;
-        _busy = true;
-        var freed = StorageView.Totals(rows);
+        foreach (var r in rows) _selected.Remove(Key(r));
         var user = Session.User;
-        try
+        _ = Task.Run(async () =>
         {
-            var result = await Task.Run(() => DataManager.ClearJobs(user, rows.Select(r => r.Job)));
-            foreach (var job in result.Cleared) _selected.Remove((job.Space.Project.Id, job.Space.Id, job.Id));
-            string message = $"Cleared {result.Cleared.Count:N0} {(result.Cleared.Count == 1 ? "job" : "jobs")}";
-            if (freed.Measured > 0 && result.Cleared.Count > 0)
+            try
             {
+                var result = await DataManager.ClearJobs(user, rows.Select(r => r.Job), started: RefreshNow);
+                string message = $"Cleared {result.Cleared.Count:N0} {(result.Cleared.Count == 1 ? "job" : "jobs")}";
                 var cleared = StorageView.Totals(rows.Where(r => result.Cleared.Contains(r.Job)));
-                message += $", freeing about {StorageFormat.Bytes(cleared.Allocated)} and {StorageFormat.Count(cleared.Entries)} files";
+                if (cleared.Measured > 0)
+                    message += $", freeing about {StorageFormat.Bytes(cleared.Allocated)} and {StorageFormat.Count(cleared.Entries)} files";
+                if (result.Skipped.Count > 0)
+                    message += $". {result.Skipped.Count:N0} skipped: {string.Join("; ", result.Skipped.GroupBy(x => x.Reason).Select(g => $"{g.Key} ({g.Count()})"))}";
+                _ = result.Cleared.Count > 0 ? Toasts.ShowSuccessToastAsync(message) : Toasts.ShowWarningToastAsync(message);
+                Storage.Request(result.Cleared);
             }
-            if (result.Skipped.Count > 0) message += $". {result.Skipped.Count:N0} skipped: {string.Join("; ", result.Skipped.GroupBy(s => s.Reason).Select(g => $"{g.Key} ({g.Count()})"))}";
-            _ = result.Cleared.Count > 0 ? Toasts.ShowSuccessToastAsync(message) : Toasts.ShowWarningToastAsync(message);
-            Storage.Request(result.Cleared);
-        }
-        catch (Exception e)
-        {
-            _ = Toasts.ShowErrorToastAsync($"Couldn't clear jobs: {e.Message}");
-        }
-        finally
-        {
-            _busy = false;
-            Rebuild();
-        }
+            catch (Exception e)
+            {
+                _ = Toasts.ShowErrorToastAsync($"Couldn't clear jobs: {e.Message}");
+            }
+            await RefreshNow();
+        });
     }
 
-    private async Task CleanSelected(List<StorageRow> rows)
+    private void CleanSelected(List<StorageRow> rows)
     {
         _confirm = null;
-        _busy = true;
+        foreach (var r in rows) _selected.Remove(Key(r));
         var user = Session.User;
-        int cleaned = 0; UsagePart freed = default; var failed = new List<string>();
-        try
+        _ = Task.Run(async () =>
         {
-            foreach (var row in rows)
+            int cleaned = 0; UsagePart freed = default; var failed = new List<string>();
+            // Every job is marked as cleaning at once; DataManager works on a few folders at a time.
+            var work = rows.Select(async row =>
             {
                 try
                 {
-                    var result = await Task.Run(() => DataManager.CleanIntermediate(user, row.Job));
-                    cleaned++;
-                    freed += result.Estimated;
+                    var result = await DataManager.CleanIntermediate(user, row.Job);
+                    lock (failed) { cleaned++; freed += result.Estimated; }
                 }
-                catch (Exception e) { failed.Add($"{row.Job.QualifiedName}: {e.Message}"); }
-                await InvokeAsync(StateHasChanged);
-            }
-            string message = $"Cleaned {cleaned:N0} {(cleaned == 1 ? "job" : "jobs")}" + (freed.Entries > 0 ? $", freeing about {StorageFormat.Bytes(freed.Allocated)} and {StorageFormat.Count(freed.Entries)} files" : "");
+                catch (Exception e) { lock (failed) failed.Add($"{row.Job.QualifiedName}: {e.Message}"); }
+                await RefreshNow();
+            }).ToList();
+            await RefreshNow();
+            await Task.WhenAll(work);
             if (failed.Count > 0) _ = Toasts.ShowErrorToastAsync($"Couldn't clean {failed.Count} {(failed.Count == 1 ? "job" : "jobs")}: {string.Join("; ", failed.Take(3))}");
-            if (cleaned > 0) _ = Toasts.ShowSuccessToastAsync(message);
-        }
-        finally
-        {
-            _busy = false;
-            Rebuild();
-        }
+            if (cleaned > 0)
+                _ = Toasts.ShowSuccessToastAsync($"Cleaned {cleaned:N0} {(cleaned == 1 ? "job" : "jobs")}" +
+                    (freed.Entries > 0 ? $", freeing about {StorageFormat.Bytes(freed.Allocated)} and {StorageFormat.Count(freed.Entries)} files" : ""));
+        });
     }
 
-    private async Task DeleteLeftover(StorageLeftoverRow leftover)
+    private void DeleteLeftover(StorageLeftoverRow leftover)
     {
         _confirmLeftover = null;
-        _busy = true;
-        try
+        var key = LeftoverKey(leftover);
+        _deleting.Add(key);
+        var user = Session.User;
+        _ = Task.Run(async () =>
         {
-            await Task.Run(() => DataManager.DeleteLeftover(Session.User, leftover.Space, leftover.Leftover.Name));
-            _ = Toasts.ShowSuccessToastAsync($"Deleted {leftover.Leftover.Name} from {leftover.Space.QualifiedName}, freeing {StorageFormat.Bytes(leftover.Leftover.Total.Allocated)}");
-        }
-        catch (Exception e)
-        {
-            _ = Toasts.ShowErrorToastAsync($"Couldn't delete {leftover.Leftover.Name}: {e.Message}");
-        }
-        finally
-        {
-            _busy = false;
-            Rebuild();
-        }
+            try
+            {
+                await DataManager.DeleteLeftover(user, leftover.Space, leftover.Leftover.Name);
+                _ = Toasts.ShowSuccessToastAsync($"Deleted {leftover.Leftover.Name} from {leftover.Space.QualifiedName}, freeing {StorageFormat.Bytes(leftover.Leftover.Total.Allocated)}");
+            }
+            catch (Exception e)
+            {
+                _ = Toasts.ShowErrorToastAsync($"Couldn't delete {leftover.Leftover.Name}: {e.Message}");
+            }
+            await InvokeIfAlive(() => _deleting.Remove(key));
+            await RefreshNow();
+        });
+    }
+
+    private static string LeftoverKey(StorageLeftoverRow l) => $"{l.Space.Project.Id}/{l.Space.Id}/{l.Leftover.Name}";
+    private bool IsDeleting(StorageLeftoverRow l) => _deleting.Contains(LeftoverKey(l));
+
+    // Rebuilds from the live model now (statuses changed), unless the page has closed meanwhile.
+    private Task RefreshNow() => InvokeIfAlive(() => { Rebuild(); StateHasChanged(); });
+
+    private async Task InvokeIfAlive(Action action)
+    {
+        if (_disposed) return;
+        try { await InvokeAsync(() => { if (!_disposed) action(); }); }
+        catch (ObjectDisposedException) { }
+        catch (InvalidOperationException) when (_disposed) { }
     }
 
     private void MeasureSelected()

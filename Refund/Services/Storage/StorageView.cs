@@ -48,7 +48,14 @@ public sealed class StorageRow
     public long Entries => Storage?.Total.Entries ?? 0;
     public bool Measured => Storage != null;
     public DateTime? Modified => Storage?.NewestWrite;
-    public string Location => Folders.Length == 0 ? Space.QualifiedName : $"{Space.QualifiedName} › {string.Join(" › ", Folders)}";
+    /// <summary>"P15 › S1: name › folder": the project by ID, which keeps the column short.</summary>
+    public string Location => Join($"P{Space.Project.Id}");
+
+    /// <summary>The same with the project's name, for tooltips.</summary>
+    public string LocationFull => Join(Space.Project.QualifiedName);
+
+    private string Join(string project) =>
+        Folders.Length == 0 ? $"{project} › {Space.QualifiedName}" : $"{project} › {Space.QualifiedName} › {string.Join(" › ", Folders)}";
 }
 
 /// <summary>A leftover folder in a space the user can see.</summary>
@@ -356,7 +363,7 @@ public sealed class TreemapPayload
         var s = r.Storage;
         double age = s.NewestWrite is { } w ? Math.Max(0, (now - w).TotalDays) : -1;
         byte stage = (byte)r.Stage, person = r.Person is { } p && owners.TryGetValue(p.Id, out var slot) ? slot : OtherOwner, ageBin = AgeBin(age);
-        string location = r.Location;
+        string location = r.LocationFull;
         var job = new Node
         {
             Kind = TreemapKind.Job, Label = r.Job.QualifiedName, Detail = $"{r.TypeName} · {location}",

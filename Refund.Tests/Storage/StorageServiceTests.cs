@@ -200,6 +200,37 @@ public sealed class StorageServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ABulkClearMarksEveryJobAsClearingBeforeDeletingAnyFolder()
+    {
+        var jobs = new List<ReadOnlyJob>();
+        for (int i = 0; i < 6; i++)
+        {
+            var job = await AddJob();
+            Write(Path.Combine(job.DirectoryPath, "result.mrc"), 1000);
+            await _manager.UpdateJob(_user, job, j => j.Status = JobStatus.Finished);
+            jobs.Add(Current(job));
+        }
+        var running = await AddJob();
+        await _manager.UpdateJob(_user, running, j => j.Status = JobStatus.Running);
+        List<JobStatus> atStart = null;
+        bool filesAtStart = false;
+
+        var result = await _manager.ClearJobs(_user, [.. jobs, Current(running)], started: () =>
+        {
+            atStart = jobs.Select(j => Current(j).Status).ToList();
+            filesAtStart = jobs.All(j => File.Exists(Path.Combine(j.DirectoryPath, "result.mrc")));
+            return Task.CompletedTask;
+        });
+
+        Assert.All(atStart!, s => Assert.Equal(JobStatus.Clearing, s));
+        Assert.True(filesAtStart);
+        Assert.Equal(6, result.Cleared.Count);
+        Assert.Equal("The job is active", result.Skipped.Single().Reason);
+        Assert.All(jobs, j => Assert.Equal(JobStatus.Building, Current(j).Status));
+        Assert.All(jobs, j => Assert.False(File.Exists(Path.Combine(j.DirectoryPath, "result.mrc"))));
+    }
+
+    [Fact]
     public async Task ViewersCanNotClearJobs()
     {
         var job = await AddJob();

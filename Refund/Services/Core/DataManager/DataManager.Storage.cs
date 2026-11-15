@@ -68,26 +68,46 @@ public partial class DataManager
         user != null && project != null && user.Role != UserRole.Viewer &&
         (user.Role == UserRole.Admin || project.Owner?.Id == user.Id || project.Members.Any(m => m.Id == user.Id));
 
-    /// <summary>Clears jobs one after another, skipping (with the reason) those that can't be cleared.</summary>
-    public async Task<StorageClearResult> ClearJobs(ReadOnlyUser user, IEnumerable<ReadOnlyJob> jobs, CancellationToken cancellation = default)
+    /// <summary>How many folders bulk clearing and cleaning delete at the same time.</summary>
+    public const int CleanupParallelism = 4;
+    private readonly SemaphoreSlim _cleanupSlots = new(CleanupParallelism);
+
+    /// <summary>
+    /// Clears jobs together: every job that can be cleared moves to Clearing first (then <paramref name="started"/>
+    /// runs), and their folders are deleted a few at a time. Jobs that can't be cleared are skipped with the reason.
+    /// </summary>
+    public async Task<StorageClearResult> ClearJobs(ReadOnlyUser user, IEnumerable<ReadOnlyJob> jobs, Func<Task> started = null)
     {
         var cleared = new List<ReadOnlyJob>();
         var skipped = new List<(ReadOnlyJob, string)>();
+        var clearing = new List<(ReadOnlyJob Job, Job Mutable)>();
         foreach (var job in jobs)
         {
-            if (cancellation.IsCancellationRequested) { skipped.Add((job, "Stopped")); continue; }
             string reason = ClearBlocker(user, job);
             if (reason != null) { skipped.Add((job, reason)); continue; }
+            try { clearing.Add((job, await StartClearing(user, job))); }
+            catch (Exception e) { skipped.Add((job, e.Message)); }
+        }
+        if (started != null)
+            await started();
+
+        await Task.WhenAll(clearing.Select(async c =>
+        {
+            await _cleanupSlots.WaitAsync();
             try
             {
-                await ClearJob(user, job);
-                cleared.Add(job);
+                await FinishClearing(user, c.Job, c.Mutable);
+                lock (cleared) cleared.Add(c.Job);
             }
             catch (Exception e)
             {
-                skipped.Add((job, e.Message));
+                lock (skipped) skipped.Add((c.Job, e.Message));
             }
-        }
+            finally
+            {
+                _cleanupSlots.Release();
+            }
+        }));
         return new(cleared, skipped);
     }
 
@@ -165,8 +185,12 @@ public partial class DataManager
             await Task.CompletedTask;
         });
 
+        // Marked as cleaning right away (so a batch shows as such), but only a few folders are worked on at a time.
+        bool slot = false;
         try
         {
+            await _cleanupSlots.WaitAsync(cancellation);
+            slot = true;
             var rule = mutable.IntermediateRule;
             string folder = mutable.DirectoryPath;
             var (candidates, onDisk) = await Task.Run(() => IntermediateCleaner.Find(folder, rule), cancellation);
@@ -193,6 +217,8 @@ public partial class DataManager
         }
         finally
         {
+            if (slot)
+                _cleanupSlots.Release();
             lock (_cleaning)
                 _cleaning.Remove(key);
             await JobFilesChanged.InvokeHierarchy(job, GroupName.JobHierarchy(key.Item1, key.Item2, key.Item3));
