@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Components;
 using Microsoft.JSInterop;
+using Refund.Components.Jobs;
+using Refund.DataModel.ReadOnly;
 using Refund.Services.Storage;
 
 namespace Refund.Components.Storage;
@@ -16,6 +18,7 @@ namespace Refund.Components.Storage;
 public partial class StorageTreemap : ComponentBase, IAsyncDisposable
 {
     [Inject] private IJSRuntime Js { get; set; } = default!;
+    [Inject] private IServiceProvider Services { get; set; } = default!;
 
     [Parameter] public TreemapPayload Payload { get; set; }
     /// <summary>"bytes" or "files".</summary>
@@ -33,13 +36,32 @@ public partial class StorageTreemap : ComponentBase, IAsyncDisposable
     [Parameter] public EventCallback<(double Width, double Height)> OnResized { get; set; }
 
     private readonly string _id = "treemap-" + Guid.NewGuid().ToString("N");
-    private ElementReference _canvas, _overlay, _tooltip;
+    private string _anchorId => _id + "-anchor";
+    private string _cardSuffix => _id + "-card";
+    private ElementReference _canvas, _overlay, _tooltip, _anchor;
+    // Job cards come from the host (Relay); hosts without one (the component playground) keep the plain tooltip.
+    private IJobPreviewRenderer _renderer;
+    private HoverPreview<ReadOnlyJob> _preview;
+    private string[] _summary;
     private IJSObjectReference _module;
     private DotNetObjectReference<StorageTreemap> _self;
     private TreemapPayload _sent;
     private (string Metric, string ColorBy, bool Dark, int Highlight) _sentView = (null, null, false, -2);
     private bool _disposed;
     private string _failed;
+
+    protected override void OnInitialized()
+    {
+        _renderer = Services.GetService(typeof(IJobPreviewRenderer)) as IJobPreviewRenderer;
+        _preview = new(() => InvokeAsync(StateHasChanged));
+    }
+
+    protected override void OnParametersSet()
+    {
+        // A new layout moves every tile: close a card that was opened for the old one.
+        if (!ReferenceEquals(_sent, Payload) && _preview.Current != null)
+            _preview.Reset();
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -50,7 +72,7 @@ public partial class StorageTreemap : ComponentBase, IAsyncDisposable
                 _module = await Js.InvokeAsync<IJSObjectReference>("import", "./_content/Refund/Components/Storage/StorageTreemap.razor.js");
                 if (_disposed) { await _module.DisposeAsync(); return; }
                 _self = DotNetObjectReference.Create(this);
-                await _module.InvokeVoidAsync("create", _id, _canvas, _overlay, _tooltip, _self);
+                await _module.InvokeVoidAsync("create", _id, _canvas, _overlay, _tooltip, _self, _anchor, _renderer != null);
             }
             if (_module == null) return;
             if (!ReferenceEquals(_sent, Payload) && Payload != null)
@@ -98,6 +120,25 @@ public partial class StorageTreemap : ComponentBase, IAsyncDisposable
             await OnSelect.InvokeAsync(target);
     }
 
+    /// <summary>The pointer entered a tile of a job (its index), or left every job (-1).</summary>
+    [JSInvokable]
+    public async Task Hovered(int jobIndex, string[] summary)
+    {
+        if (_disposed) return;
+        var job = Payload != null && jobIndex >= 0 && jobIndex < Payload.Targets.Count ? Payload.Targets[jobIndex]?.Row?.Job : null;
+        if (job == null)
+        {
+            _summary = null;
+            await _preview.HideAsync();
+            return;
+        }
+        _summary = summary;
+        if (_preview.Current == job)
+            StateHasChanged();
+        else
+            await _preview.ShowAsync(job, immediate: false);
+    }
+
     [JSInvokable]
     public Task Resized(double width, double height) => _disposed ? Task.CompletedTask : OnResized.InvokeAsync((width, height));
 
@@ -116,5 +157,6 @@ public partial class StorageTreemap : ComponentBase, IAsyncDisposable
         catch (ObjectDisposedException) { }
         catch (JSException) { }
         _self?.Dispose();
+        _preview?.Dispose();
     }
 }

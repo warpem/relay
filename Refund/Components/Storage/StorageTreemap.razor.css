@@ -14,3 +14,14 @@
 .treemap-tooltip ::deep .tt-key { flex: none; width: 12px; height: 3px; border-radius: 2px; }
 .treemap-tooltip ::deep .tt-detail { color: var(--colorNeutralForeground2); overflow-wrap: anywhere; }
 .treemap-tooltip ::deep .tt-hint { margin-top: 2px; color: var(--colorNeutralForeground3); font-size: 11px; }
+
+/* The job card shown on hover: anchored at the pointer, never in the way of the pointer itself. */
+.treemap-anchor { position: absolute; width: 1px; height: 1px; pointer-events: none; }
+.treemap-card-host { position: absolute; width: 0; height: 0; overflow: visible; pointer-events: none; }
+.treemap-card { display: flex; flex-direction: column; gap: 6px; padding: 8px; pointer-events: none; border-radius: 6px;
+    background: var(--colorNeutralBackground1); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2), 0 0 0 1px var(--colorNeutralStroke2); }
+.treemap-card-summary { padding: 0 2px; font-size: 12px; line-height: 1.4; max-width: 340px; }
+.treemap-card-summary .tt-value { font-size: 14px; font-weight: 600; }
+.treemap-card-summary .tt-name { color: var(--colorNeutralForeground1); overflow-wrap: anywhere; }
+.treemap-card-summary .tt-detail { color: var(--colorNeutralForeground2); overflow-wrap: anywhere; }
+.treemap-card ::deep .card-common { opacity: 1 !important; }

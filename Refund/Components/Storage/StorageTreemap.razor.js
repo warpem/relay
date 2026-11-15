@@ -24,9 +24,10 @@ const PALETTE = {
     },
 };
 
-export function create(id, canvas, overlay, tooltip, dotnet) {
+// cards: the component shows the hovered job's card itself (anchored at the pointer), with the size summary on top.
+export function create(id, canvas, overlay, tooltip, dotnet, anchor, cards) {
     const s = {
-        id, canvas, overlay, tooltip, dotnet, disposed: false,
+        id, canvas, overlay, tooltip, dotnet, anchor, cards: !!cards, hoverJob: -1, disposed: false,
         n: 0, parent: null, bytes: null, files: null, age: null, kind: null, stage: null, person: null, ageBin: null,
         labels: [], details: [], view: { metric: 'bytes', colorBy: 'age', dark: false, highlight: -1 },
         rects: null, value: null, firstChild: null, nextSibling: null, hover: -1, dpr: 1, frame: 0, lastSize: [0, 0],
@@ -73,6 +74,7 @@ export function setData(id, nodes, labels, details) {
         last[p] = i;
     }
     s.hover = -1;
+    s.hoverJob = -1;
     schedule(s, true);
 }
 
@@ -284,6 +286,7 @@ function hasVisibleChild(s, i) {
 
 function drawLabels(s, ctx, surface) {
     const d = s.dpr;
+    s.placed = [];
     const font = css(s.canvas, '--fontFamilyBase', 'system-ui, sans-serif');
     const ink = css(s.canvas, '--colorNeutralForeground2', s.view.dark ? '#d6d6d6' : '#424242');
     const band = css(s.canvas, '--colorNeutralBackground3', s.view.dark ? '#2a2a2a' : '#f5f5f5');
@@ -300,33 +303,49 @@ function drawLabels(s, ctx, surface) {
             ctx.font = `600 ${11.5 * d}px ${font}`;
             fitText(ctx, s.labels[i], x0 + 6 * d, y0 + HEADER * d / 2 + 0.5 * d, w - 12 * d, valueText(s, i));
         } else if ((s.kind[i] === KIND.Job || s.kind[i] === KIND.Leftover) && w > 110 * d && h > 34 * d) {
-            const [cr, cg, cb] = hex(colorOf(s, i));
-            const light = (0.2126 * cr + 0.7152 * cg + 0.0722 * cb) / 255 > 0.55;
+            // Name and size on a chip, so they read the same over any colour and cushion highlight.
             ctx.font = `600 ${11 * d}px ${font}`;
-            ctx.fillStyle = light ? 'rgba(20,20,20,0.9)' : 'rgba(255,255,255,0.95)';
-            ctx.shadowColor = light ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.45)';
-            ctx.shadowBlur = 2 * d;
-            fitText(ctx, s.labels[i], x0 + 5 * d, y0 + 10 * d, w - 10 * d, null);
+            const name = fitString(ctx, s.labels[i], w - 14 * d, null);
+            if (!name) continue;
+            let width = ctx.measureText(name).width;
+            let value = null;
             if (h > 48 * d) {
                 ctx.font = `${10.5 * d}px ${font}`;
-                fitText(ctx, valueText(s, i), x0 + 5 * d, y0 + 24 * d, w - 10 * d, null);
+                value = fitString(ctx, valueText(s, i), w - 14 * d, null);
+                if (value) width = Math.max(width, ctx.measureText(value).width);
             }
-            ctx.shadowBlur = 0;
+            const box = [x0 + 3 * d, y0 + 3 * d, x0 + 11 * d + width, y0 + (value ? 34 : 19) * d];
+            chip(s, ctx, box);
+            s.placed.push(box);
+            ctx.fillStyle = chipInk(s);
+            ctx.font = `600 ${11 * d}px ${font}`;
+            ctx.fillText(name, box[0] + 4 * d, box[1] + 8.5 * d);
+            if (value) {
+                ctx.font = `${10.5 * d}px ${font}`;
+                ctx.fillStyle = chipInk(s, true);
+                ctx.fillText(value, box[0] + 4 * d, box[1] + 23 * d);
+            }
         }
     }
 }
 
-// Folders inside big jobs: one line each, biggest first, never over another label (the job's included).
+function chipInk(s, secondary) {
+    return s.view.dark ? (secondary ? 'rgba(242,242,242,0.82)' : '#f2f2f2') : (secondary ? 'rgba(27,27,27,0.75)' : '#1b1b1b');
+}
+
+function chip(s, ctx, box) {
+    const r = 3 * s.dpr;
+    ctx.fillStyle = s.view.dark ? 'rgba(28,28,28,0.74)' : 'rgba(255,255,255,0.84)';
+    ctx.beginPath();
+    ctx.roundRect(box[0], box[1], box[2] - box[0], box[3] - box[1], r);
+    ctx.fill();
+}
+
+// Folders inside big jobs: one chip each, biggest first, never over another label (the job's included).
 function drawFolderLabels(s, ctx, font) {
     const d = s.dpr;
-    const placed = [];
+    const placed = s.placed || [];
     const overlaps = (r) => placed.some(p => r[0] < p[2] && p[0] < r[2] && r[1] < p[3] && p[1] < r[3]);
-    for (let i = 1; i < s.n; i++) {
-        const r = i * 4;
-        if (s.rects[r] < 0) continue;
-        if ((s.kind[i] === KIND.Job || s.kind[i] === KIND.Leftover) && s.rects[r + 2] - s.rects[r] > 110 * d && s.rects[r + 3] - s.rects[r + 1] > 34 * d)
-            placed.push([s.rects[r], s.rects[r + 1], s.rects[r] + 170 * d, s.rects[r + 1] + (s.rects[r + 3] - s.rects[r + 1] > 48 * d ? 32 : 18) * d]);
-    }
     const folders = [];
     for (let i = 1; i < s.n; i++) {
         const r = i * 4;
@@ -340,24 +359,35 @@ function drawFolderLabels(s, ctx, font) {
     for (const i of folders) {
         const r = i * 4;
         const x0 = s.rects[r], y0 = s.rects[r + 1], x1 = s.rects[r + 2], y1 = s.rects[r + 3];
-        const text = `${s.labels[i]}  ·  ${valueText(s, i)}`;
-        const width = Math.min(x1 - x0 - 10 * d, ctx.measureText(text).width);
+        const text = fitString(ctx, s.labels[i], x1 - x0 - 14 * d, valueText(s, i));
+        if (!text) continue;
+        const width = ctx.measureText(text).width;
         // Top-left of the tile, or lower down its left edge if a label is already there.
         let box = null;
-        for (let y = y0 + 3 * d; y + 16 * d <= y1 - 2 * d && y < y0 + 90 * d; y += 16 * d) {
-            const candidate = [x0 + 3 * d, y, x0 + 7 * d + width, y + 15 * d];
+        for (let y = y0 + 3 * d; y + 17 * d <= y1 - 2 * d && y < y0 + 90 * d; y += 18 * d) {
+            const candidate = [x0 + 3 * d, y, x0 + 11 * d + width, y + 16 * d];
             if (!overlaps(candidate)) { box = candidate; break; }
         }
         if (!box) continue;
         placed.push(box);
-        const [cr, cg, cb] = hex(colorOf(s, i));
-        const light = (0.2126 * cr + 0.7152 * cg + 0.0722 * cb) / 255 > 0.55;
-        ctx.fillStyle = light ? 'rgba(20,20,20,0.8)' : 'rgba(255,255,255,0.85)';
-        ctx.shadowColor = light ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)';
-        ctx.shadowBlur = 2 * d;
-        fitText(ctx, s.labels[i], box[0] + 2 * d, box[1] + 7.5 * d, x1 - x0 - 10 * d, valueText(s, i));
-        ctx.shadowBlur = 0;
+        chip(s, ctx, box);
+        ctx.fillStyle = chipInk(s, true);
+        ctx.fillText(text, box[0] + 4 * d, box[1] + 8 * d);
     }
+}
+
+// The text as it fits: whole with its trailing value, the text alone, or truncated with an ellipsis (null if nothing fits).
+function fitString(ctx, text, maxWidth, trailing) {
+    if (!text || maxWidth < 12) return null;
+    const full = trailing ? `${text}  ·  ${trailing}` : text;
+    if (ctx.measureText(full).width <= maxWidth) return full;
+    if (trailing && ctx.measureText(text).width <= maxWidth) return text;
+    let lo = 0, hi = text.length;
+    while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        if (ctx.measureText(text.slice(0, mid) + '…').width <= maxWidth) lo = mid; else hi = mid - 1;
+    }
+    return lo > 1 ? text.slice(0, lo) + '…' : null;
 }
 
 function fitText(ctx, text, x, y, maxWidth, trailing) {
@@ -409,12 +439,34 @@ function jobOf(s, i) {
 }
 
 function setHover(s, i, e) {
-    if (i !== s.hover) {
+    const changed = i !== s.hover;
+    if (changed) {
         s.hover = i;
         drawOverlay(s);
         s.canvas.style.cursor = i > 0 ? 'pointer' : 'default';
     }
     const tip = s.tooltip;
+    const job = i > 0 && e ? jobOf(s, i) : -1;
+    if (s.cards) {
+        if (job > 0) {
+            tip.hidden = true;
+            if (job !== s.hoverJob) {
+                // The card opens next to where the pointer entered the job and stays there while it moves within it.
+                const host = s.canvas.parentElement.getBoundingClientRect();
+                s.anchor.style.left = (e.clientX - host.left) + 'px';
+                s.anchor.style.top = (e.clientY - host.top) + 'px';
+            }
+            if (changed || job !== s.hoverJob) {
+                s.hoverJob = job;
+                s.dotnet.invokeMethodAsync('Hovered', job, summary(s, i)).catch(() => { });
+            }
+            return;
+        }
+        if (s.hoverJob !== -1) {
+            s.hoverJob = -1;
+            s.dotnet.invokeMethodAsync('Hovered', -1, null).catch(() => { });
+        }
+    }
     if (i <= 0 || !e) { tip.hidden = true; return; }
     fillTooltip(s, i);
     tip.hidden = false;
@@ -459,6 +511,13 @@ function age(days) {
     if (days < 61) return `${Math.round(days)} day${Math.round(days) === 1 ? '' : 's'} ago`;
     if (days < 730) return `${Math.round(days / 30.44)} months ago`;
     return `${Math.round(days / 365.25)} years ago`;
+}
+
+// What the tooltip says about a tile, as plain lines: size and files, name, where it is, when it last changed.
+function summary(s, i) {
+    const [b, f] = totals(s, i);
+    const a = age(s.age[i]);
+    return [`${size(b)} · ${count(f)} files`, s.labels[i] || '', s.details[i] || '', a ? `Last modified ${a}` : ''];
 }
 
 function fillTooltip(s, i) {
