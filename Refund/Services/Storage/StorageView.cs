@@ -125,7 +125,8 @@ public static class StorageView
 
     public static List<StorageLeftoverRow> Leftovers(DataManager dataManager, ReadOnlyUser user) =>
         dataManager.GetUserProjects(user).SelectMany(p => p.Spaces)
-            .SelectMany(s => (s.Storage?.Leftovers ?? SpaceStorage.NoLeftovers).Select(l => new StorageLeftoverRow(s, l)))
+            // Measurements saved before non-Relay folders were skipped may still list some; leave them out.
+            .SelectMany(s => (s.Storage?.Leftovers ?? SpaceStorage.NoLeftovers).Where(l => l.IsDeletable).Select(l => new StorageLeftoverRow(s, l)))
             .OrderByDescending(l => l.Leftover.Total.Allocated).ToList();
 
     // Folder aliases (outermost first) of each job, from the first view that shows it.
@@ -317,13 +318,13 @@ public sealed class TreemapPayload
                 Kind = TreemapKind.Space, Label = l.Space.QualifiedName,
                 Target = new(TreemapKind.Space, l.Space.Project.Id, l.Space.Id, [], null, l.Space.QualifiedName),
             });
-            var group = space.Child("leftovers", () => new Node { Kind = TreemapKind.Leftovers, Label = "Folders without a job" });
+            var group = space.Child("leftovers", () => new Node { Kind = TreemapKind.Leftovers, Label = "Folders of deleted jobs" });
             double age = l.Leftover.NewestWrite is { } w ? Math.Max(0, (now - w).TotalDays) : -1;
             group.Children.Add(new Node
             {
                 Kind = TreemapKind.Leftover, Label = l.Leftover.Name, Allocated = l.Leftover.Total.Allocated, Entries = l.Leftover.Total.Entries,
                 AgeDays = age, Age = AgeBin(age),
-                Detail = l.Leftover.JobId is int id ? $"Folder of deleted job {id}" : "Folder without a job",
+                Detail = l.Leftover.JobId is int id ? $"Folder of deleted job {id}" : "Folder of a deleted job",
             });
         }
 

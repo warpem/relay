@@ -87,8 +87,6 @@
         {
             <span class="st-key"><i style="background:@color"></i>@label</span>
         }
-        <FluentSwitch Value="@_showLeftovers" ValueChanged="@((bool v) => ShowLeftovers(v))" Label="Show folders without a job"
-                      title="Folders in space roots that belong to no Relay job, such as another program's projects or leftovers of deleted jobs" />
         <span class="st-legend-note">Area is @(_metric == "files" ? "the number of files, folders and links" : "bytes on disk"). Double-click a project, space or folder to zoom in.</span>
     </div>
 
@@ -118,7 +116,7 @@
             <div class="st-list-head">
                 <div class="segmented small" role="tablist">
                     <button role="tab" class="@(_tab == "jobs" ? "on" : "")" aria-selected="@(_tab == "jobs")" @onclick="@(() => _tab = "jobs")">Jobs <span class="n">@_shown.Count.ToString("N0")</span></button>
-                    <button role="tab" class="@(_tab == "leftovers" ? "on" : "")" aria-selected="@(_tab == "leftovers")" @onclick="@(() => _tab = "leftovers")">Folders without a job <span class="n">@_leftoversShown.Count.ToString("N0")</span></button>
+                    <button role="tab" class="@(_tab == "leftovers" ? "on" : "")" aria-selected="@(_tab == "leftovers")" @onclick="@(() => _tab = "leftovers")">Folders of deleted jobs <span class="n">@_leftoversShown.Count.ToString("N0")</span></button>
                 </div>
                 @if (_pendingRefresh > 0)
                 {
@@ -189,17 +187,17 @@
             }
             else
             {
-                <div class="st-table leftovers" role="table" aria-label="Folders without a job">
+                <div class="st-table leftovers" role="table" aria-label="Folders of deleted jobs">
                     <div class="st-row st-header" role="row">
                         <span role="columnheader">Space</span><span role="columnheader">Folder</span><span role="columnheader" class="c-num">Size</span>
                         <span role="columnheader" class="c-num">Files</span><span role="columnheader" class="c-num">Modified</span><span role="columnheader"></span>
                     </div>
-                    @* Virtualized: a space shared with another program can hold thousands of folders without a job *@
+                    @* Virtualized, like the jobs table *@
                     <Virtualize Items="@_leftoversShown" ItemSize="34" OverscanCount="8" Context="l">
                         @{ var id = "lo-" + l.Space.Project.Id + "-" + l.Space.Id + "-" + l.Leftover.Name.GetHashCode().ToString("x"); }
                         <div class="st-row" role="row">
                             <span role="cell" title="@l.Space.RootDirectory">@l.Space.QualifiedName</span>
-                            <span role="cell" title="@System.IO.Path.Combine(l.Space.RootDirectory, l.Leftover.Name)">@(l.Leftover.JobId is int jid ? $"{l.Leftover.Name} (deleted job J{jid})" : $"{l.Leftover.Name} (not a job folder)")</span>
+                            <span role="cell" title="@System.IO.Path.Combine(l.Space.RootDirectory, l.Leftover.Name)">@(l.Leftover.JobId is int jid ? $"{l.Leftover.Name} (deleted job J{jid})" : l.Leftover.Name)</span>
                             <span role="cell" class="c-num">@StorageFormat.Bytes(l.Leftover.Total.Allocated)</span>
                             <span role="cell" class="c-num">@StorageFormat.Count(l.Leftover.Total.Entries)</span>
                             <span role="cell" class="c-num">@(l.Leftover.NewestWrite is { } w ? StorageFormat.Age(_now - w) : "")</span>
@@ -218,16 +216,12 @@
                                         </RelayPopover>
                                     }
                                 }
-                                else if (!l.Leftover.IsDeletable)
-                                {
-                                    <span class="st-muted" title="Folders that aren't named after a job may hold people's own data, so they can't be deleted here">Not Relay's</span>
-                                }
                             </span>
                         </div>
                     </Virtualize>
                     @if (_leftoversShown.Count == 0)
                     {
-                        <p class="st-empty">Every folder in these spaces belongs to a job.</p>
+                        <p class="st-empty">No folders of deleted jobs in these spaces.</p>
                     }
                 </div>
             }

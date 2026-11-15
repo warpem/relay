@@ -176,7 +176,7 @@ public sealed class StorageServiceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task FindsLeftoverFoldersThatOnlyAdminsCanDelete()
+    public async Task FindsFoldersOfDeletedJobsThatOnlyAdminsCanDelete()
     {
         await AddJob();
         Write(Path.Combine(_space.RootDirectory, "99", "old.mrc"), 2000);
@@ -184,8 +184,9 @@ public sealed class StorageServiceTests : IAsyncLifetime
         _service.Start(0);
         MeasureAll();
 
+        // Only Relay's own: a folder not named after a job (another program's, people's own) is neither listed nor measured.
         var leftovers = _manager.Projects.Single().Spaces.Single().Storage!.Leftovers;
-        Assert.Equal(["99", "notes"], leftovers.Select(l => l.Name));
+        Assert.Equal(["99"], leftovers.Select(l => l.Name));
         Assert.Equal(99, leftovers[0].JobId);
         Assert.Equal(1, leftovers[0].Total.Files);
 

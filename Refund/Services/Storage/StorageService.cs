@@ -397,7 +397,10 @@ public sealed class StorageService : IHostedService, IDisposable
         }
     }
 
-    /// <summary>Lists a space root: leftover folders (folders that belong to no job) and loose files.</summary>
+    /// <summary>
+    /// Lists a space root: folders of deleted jobs (named after a job ID that no job has) and loose files. Any other
+    /// folder is someone else's (cryoSPARC projects often share the folder) and is neither listed nor measured.
+    /// </summary>
     private void ListSpace(StorageTarget target)
     {
         var space = FindSpace(target);
@@ -414,7 +417,7 @@ public sealed class StorageService : IHostedService, IDisposable
         {
             if (info is DirectoryInfo && info.LinkTarget == null)
             {
-                if (StorageLeftovers.JobIdOf(info.Name) is int id && jobIds.Contains(id))
+                if (!StorageLeftovers.IsDeletable(info.Name) || (StorageLeftovers.JobIdOf(info.Name) is int id && jobIds.Contains(id)))
                     continue;
                 if (previous.TryGetValue(info.Name, out var known) && known.MeasuredAt >= stale && known.MeasuredAt >= info.LastWriteTimeUtc)
                     leftovers.Add(known);
@@ -431,7 +434,7 @@ public sealed class StorageService : IHostedService, IDisposable
             // Keep leftovers measured meanwhile by other workers; they are re-checked on the next listing.
             var current = FindSpace(target)?.Storage?.Leftovers ?? SpaceStorage.NoLeftovers;
             foreach (var l in current)
-                if (!leftovers.Any(x => x.Name == l.Name) && Directory.Exists(Path.Combine(space.RootDirectory, l.Name)) &&
+                if (l.IsDeletable && !leftovers.Any(x => x.Name == l.Name) && Directory.Exists(Path.Combine(space.RootDirectory, l.Name)) &&
                     !(l.JobId is int id && jobIds.Contains(id)))
                     leftovers.Add(l);
             _dataManager.SetSpaceStorage(space, new SpaceStorage { ListedAt = Truncate(now), LooseFiles = loose, Leftovers = leftovers.OrderBy(l => l.Name).ToArray() });
@@ -444,6 +447,8 @@ public sealed class StorageService : IHostedService, IDisposable
         var space = FindSpace(target);
         if (space == null) return;
         string folder = Path.Combine(space.RootDirectory, target.Leftover);
+        if (!StorageLeftovers.IsDeletable(target.Leftover))
+            return; // not Relay's
         if (StorageLeftovers.JobIdOf(target.Leftover) is int id && space.Jobs.Any(j => j.Id == id))
             return; // a new job took the folder
         var state = Walk(target, folder, null, cancel);
