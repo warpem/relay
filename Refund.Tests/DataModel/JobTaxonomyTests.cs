@@ -63,6 +63,9 @@ public class JobTaxonomyTests
 
         // Beam
         ["BeamRefine3D"]           = "💥 Beam.💥 Refine 3D",
+        ["BeamClass2D"]            = "💥 Beam.💥 2D classification",
+        ["BeamClass3D"]            = "💥 Beam.💥 Classify 3D",
+        ["BeamInit3D"]             = "💥 Beam.💥 Initial model",
 
         // M
         ["CreatePopulation"]       = "M.Create population",
