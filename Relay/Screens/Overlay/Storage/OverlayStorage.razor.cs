@@ -68,6 +68,8 @@ public partial class OverlayStorage : ComponentBase, IAsyncDisposable
     private StorageLeftoverRow _confirmLeftover;
     private string _metric = "bytes", _colorBy = "age", _breakdown = "types", _tab = "jobs", _sort = "size", _confirm;
     private bool _descending = true, _dark, _dirty, _disposed;
+    // Folders without a job are often another program's (cryoSPARC keeps its projects beside Relay's): off by default.
+    private bool _showLeftovers;
     private readonly HashSet<string> _deleting = [];
     private int _pendingRefresh;
     private (double W, double H) _area = (1200, 400);
@@ -188,7 +190,7 @@ public partial class OverlayStorage : ComponentBase, IAsyncDisposable
         // Tiles smaller than about 3 px² fold into "smaller items".
         double minShare = 3.0 / Math.Max(10_000, _area.W * _area.H);
         bool anyFilter = _filter.Types.Count > 0 || _filter.PersonId != null || _filter.Statuses.Count > 0 || _filter.OlderThanMonths > 0 || _filter.Search.Length > 0;
-        _payload = TreemapPayload.Build(_shown, anyFilter ? [] : _leftoversShown, _filter, _owners, _now, minShare);
+        _payload = TreemapPayload.Build(_shown, anyFilter || !_showLeftovers ? [] : _leftoversShown, _filter, _owners, _now, minShare);
     }
 
     private void SetFilter(Action<StorageFilter> change)
@@ -286,14 +288,23 @@ public partial class OverlayStorage : ComponentBase, IAsyncDisposable
         return crumbs.Select((c, i) => (c.Item1, c.Item2, i == crumbs.Count - 1));
     }
 
-    private IEnumerable<(string Color, string Label)> Legend() => _colorBy switch
+    private IEnumerable<(string Color, string Label)> Legend()
     {
-        "stage" => StorageStages.Names.Select((n, i) => (i < 3 ? $"var(--st-stage-{i})" : "var(--st-neutral)", n)).Append(("var(--st-leftover)", "Folders without a job")),
-        "owner" => _owners.OrderBy(o => o.Value).Select(o => ($"var(--st-stage-{o.Value})", PersonName(o.Key)))
-            .Append(("var(--st-neutral)", _owners.Count == 0 ? "Everyone" : "Everyone else")).Append(("var(--st-leftover)", "Folders without a job")),
-        _ => new[] { "Under a month", "1–3 months", "3–6 months", "6–12 months", "Over a year" }
-            .Select((n, i) => ($"var(--st-age-{i})", n)).Append(("var(--st-leftover)", "Folders without a job")),
-    };
+        IEnumerable<(string, string)> keys = _colorBy switch
+        {
+            "stage" => StorageStages.Names.Select((n, i) => (i < 3 ? $"var(--st-stage-{i})" : "var(--st-neutral)", n)),
+            "owner" => _owners.OrderBy(o => o.Value).Select(o => ($"var(--st-stage-{o.Value})", PersonName(o.Key)))
+                .Append(("var(--st-neutral)", _owners.Count == 0 ? "Everyone" : "Everyone else")),
+            _ => new[] { "Under a month", "1–3 months", "3–6 months", "6–12 months", "Over a year" }.Select((n, i) => ($"var(--st-age-{i})", n)),
+        };
+        return _showLeftovers ? keys.Append(("var(--st-leftover)", "Folders without a job")) : keys;
+    }
+
+    private void ShowLeftovers(bool show)
+    {
+        _showLeftovers = show;
+        BuildPayload();
+    }
 
     // ---- Text ----
 
@@ -320,7 +331,6 @@ public partial class OverlayStorage : ComponentBase, IAsyncDisposable
             text = text.TrimEnd('.');
             if (p.EntriesPerSecond >= 1) text += $" · {p.EntriesPerSecond:N0} files/s";
             if (p.Remaining is { } r && p.Measured < p.Jobs) text += $" · about {Duration(r)} left";
-            if (p.SlowedDown) text += " · slowed down while the file system is busy";
         }
         return text;
     }

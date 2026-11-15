@@ -87,6 +87,8 @@
         {
             <span class="st-key"><i style="background:@color"></i>@label</span>
         }
+        <FluentSwitch Value="@_showLeftovers" ValueChanged="@((bool v) => ShowLeftovers(v))" Label="Show folders without a job"
+                      title="Folders in space roots that belong to no Relay job, such as another program's projects or leftovers of deleted jobs" />
         <span class="st-legend-note">Area is @(_metric == "files" ? "the number of files, folders and links" : "bytes on disk"). Double-click a project, space or folder to zoom in.</span>
     </div>
 
@@ -192,9 +194,9 @@
                         <span role="columnheader">Space</span><span role="columnheader">Folder</span><span role="columnheader" class="c-num">Size</span>
                         <span role="columnheader" class="c-num">Files</span><span role="columnheader" class="c-num">Modified</span><span role="columnheader"></span>
                     </div>
-                    @foreach (var l in _leftoversShown)
-                    {
-                        var id = "lo-" + l.Space.Project.Id + "-" + l.Space.Id + "-" + l.Leftover.Name.GetHashCode().ToString("x");
+                    @* Virtualized: a space shared with another program can hold thousands of folders without a job *@
+                    <Virtualize Items="@_leftoversShown" ItemSize="34" OverscanCount="8" Context="l">
+                        @{ var id = "lo-" + l.Space.Project.Id + "-" + l.Space.Id + "-" + l.Leftover.Name.GetHashCode().ToString("x"); }
                         <div class="st-row" role="row">
                             <span role="cell" title="@l.Space.RootDirectory">@l.Space.QualifiedName</span>
                             <span role="cell" title="@System.IO.Path.Combine(l.Space.RootDirectory, l.Leftover.Name)">@(l.Leftover.JobId is int jid ? $"{l.Leftover.Name} (deleted job J{jid})" : $"{l.Leftover.Name} (not a job folder)")</span>
@@ -222,7 +224,7 @@
                                 }
                             </span>
                         </div>
-                    }
+                    </Virtualize>
                     @if (_leftoversShown.Count == 0)
                     {
                         <p class="st-empty">Every folder in these spaces belongs to a job.</p>

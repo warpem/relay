@@ -120,32 +120,62 @@ public sealed class StorageSchedulerTests
         Assert.Equal(100, usage.Single(u => u.TotalBytes == 600).FreeBytes);
     }
 
-    [Fact]
-    public void TheThrottleCapsTheRateAndBacksOffWhenEntriesGetSlow()
+    private sealed class FakeClock
     {
-        long ticks = 0;
-        var slept = TimeSpan.Zero;
-        var throttle = new StorageThrottle(1000, () => ticks, d => { slept += d; ticks += (long)(d.TotalSeconds * Stopwatch.Frequency); });
-        void Batch(double microsPerEntry)
-        {
-            ticks += (long)(64 * microsPerEntry / 1e6 * Stopwatch.Frequency);
-            throttle.Pace(64, TimeSpan.FromMicroseconds(64 * microsPerEntry), CancellationToken.None);
-        }
+        public long Ticks;
+        public double Seconds => Ticks / (double)Stopwatch.Frequency;
+        public void Advance(double seconds) => Ticks += (long)(seconds * Stopwatch.Frequency);
+    }
+
+    private static (StorageThrottle Throttle, FakeClock Clock) Throttle(double ceiling)
+    {
+        var clock = new FakeClock();
+        var throttle = new StorageThrottle(ceiling, () => clock.Ticks, d => clock.Advance(d.TotalSeconds));
+        return (throttle, clock);
+    }
+
+    private static void Batch(StorageThrottle throttle, FakeClock clock, double microsPerEntry)
+    {
+        clock.Advance(64 * microsPerEntry / 1e6);
+        throttle.Pace(64, TimeSpan.FromMicroseconds(64 * microsPerEntry), CancellationToken.None);
+    }
+
+    [Fact]
+    public void TheThrottleCapsTheRateAndBacksOffOnlyWhenEntriesStaySlow()
+    {
+        var (throttle, clock) = Throttle(1000);
 
         // 64,000 entries at 1,000/s take about a minute however fast each entry is.
-        for (int i = 0; i < 1000; i++) Batch(10);
-        double seconds = ticks / (double)Stopwatch.Frequency;
-        Assert.InRange(seconds, 60, 68);
+        for (int i = 0; i < 1000; i++) Batch(throttle, clock, 10);
+        Assert.InRange(clock.Seconds, 60, 68);
         Assert.False(throttle.SlowedDown);
 
-        // Entries take 10x longer: the cap halves, at most once per 5 s.
-        for (int i = 0; i < 20; i++) Batch(100);
+        // A short slow spell (a cold folder) changes nothing.
+        for (int i = 0; i < 40; i++) Batch(throttle, clock, 200);
+        Assert.False(throttle.SlowedDown);
+
+        // Entries stay 20x slower for long: the cap halves, at most every 10 s.
+        double start = clock.Seconds;
+        while (clock.Seconds - start < 40) Batch(throttle, clock, 200);
         Assert.True(throttle.SlowedDown);
         Assert.InRange(throttle.Rate, StorageThrottle.Floor, 500);
 
-        // Back to normal: it recovers to the ceiling within a few dozen seconds.
-        for (int i = 0; i < 3000; i++) Batch(10);
+        // Back to normal: it recovers to the ceiling.
+        start = clock.Seconds;
+        while (clock.Seconds - start < 120) Batch(throttle, clock, 10);
         Assert.False(throttle.SlowedDown);
         Assert.Equal(1000, throttle.Rate, 1);
+    }
+
+    [Fact]
+    public void MixedCachedAndUncachedEntriesDoNotCountAsSlow()
+    {
+        // A network file system answers some folders from its cache (microseconds) and others not (hundreds).
+        var (throttle, clock) = Throttle(20_000);
+        var random = new Random(1);
+        while (clock.Seconds < 600)
+            Batch(throttle, clock, random.Next(3) == 0 ? 300 : 3);
+        Assert.False(throttle.SlowedDown);
+        Assert.Equal(20_000, throttle.Rate, 1);
     }
 }
