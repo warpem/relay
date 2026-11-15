@@ -100,6 +100,8 @@
 .arrow { display: inline-block; width: 10px; }
 .c-num { text-align: right; }
 .c-job { display: flex; align-items: center; gap: 6px; }
+/* A long name truncates; the status icon keeps its size. */
+.c-job ::deep svg { flex: none; }
 .c-job a { color: var(--colorNeutralForeground1); text-decoration: none; overflow: hidden; text-overflow: ellipsis; }
 .c-job a:hover { color: var(--colorBrandForegroundLink); text-decoration: underline; }
 .c-type, .c-location, .c-person, .c-measured, .c-modified { color: var(--colorNeutralForeground2); }
