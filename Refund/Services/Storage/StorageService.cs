@@ -54,7 +54,7 @@ public sealed class StorageService : IHostedService, IDisposable
     private Timer _notifyTimer, _hourlyTimer;
     private bool _started, _disposed;
 
-    private readonly record struct FileSystemSample(ulong Id, long TotalBytes, long FreeBytes, long TotalFiles, long FreeFiles, bool Ok);
+    internal readonly record struct FileSystemSample(ulong Id, long TotalBytes, long FreeBytes, long TotalFiles, long FreeFiles, bool Ok);
 
     [ThreadStatic] private static WalkState t_state;
 
@@ -525,31 +525,35 @@ public sealed class StorageService : IHostedService, IDisposable
     /// The file systems holding these spaces, with total and free bytes and files. On GPFS with per-fileset df this is
     /// the fileset's quota. Sampled at most once a minute per space root.
     /// </summary>
-    public IReadOnlyList<FileSystemUsage> GetFileSystems(IEnumerable<ReadOnlySpace> spaces)
-    {
-        var groups = new Dictionary<FileSystemSample, List<ReadOnlySpace>>();
-        foreach (var space in spaces)
-        {
-            if (string.IsNullOrWhiteSpace(space.RootDirectory)) continue;
-            var sample = Sample(space.RootDirectory);
-            if (!sample.Ok) continue;
-            if (!groups.TryGetValue(sample, out var list)) groups[sample] = list = [];
-            list.Add(space);
-        }
-        return groups.Select(g => new FileSystemUsage(CommonFolder(g.Value.Select(s => s.RootDirectory)), g.Key.TotalBytes, g.Key.FreeBytes,
-            g.Key.TotalFiles, g.Key.FreeFiles, g.Value)).OrderByDescending(f => f.Spaces.Count).ToList();
-    }
+    public IReadOnlyList<FileSystemUsage> GetFileSystems(IEnumerable<ReadOnlySpace> spaces) =>
+        Group(spaces.Where(s => !string.IsNullOrWhiteSpace(s.RootDirectory)).Select(s => { var (at, sample) = Sample(s.RootDirectory); return (s, at, sample); }));
 
-    private FileSystemSample Sample(string root)
+    /// <summary>
+    /// One entry per file system: the same ID and capacity. Free space moves between samples of different space roots
+    /// (each is sampled on its own once a minute), so it can't tell file systems apart; the newest sample supplies it.
+    /// </summary>
+    internal static List<FileSystemUsage> Group(IEnumerable<(ReadOnlySpace Space, DateTime At, FileSystemSample Sample)> samples) =>
+        samples.Where(x => x.Sample.Ok)
+            .GroupBy(x => (x.Sample.Id, x.Sample.TotalBytes, x.Sample.TotalFiles))
+            .Select(g =>
+            {
+                var latest = g.MaxBy(x => x.At).Sample;
+                var spaces = g.Select(x => x.Space).ToList();
+                return new FileSystemUsage(CommonFolder(spaces.Select(s => s.RootDirectory)), latest.TotalBytes, latest.FreeBytes,
+                    latest.TotalFiles, latest.FreeFiles, spaces);
+            })
+            .OrderByDescending(f => f.Spaces.Count).ToList();
+
+    private (DateTime At, FileSystemSample Sample) Sample(string root)
     {
         var now = UtcNow();
         lock (_fileSystems)
             if (_fileSystems.TryGetValue(root, out var cached) && now - cached.At < FileSystemCache)
-                return cached.Sample;
+                return cached;
         var sample = SampleNow(root);
         lock (_fileSystems)
             _fileSystems[root] = (now, sample);
-        return sample;
+        return (now, sample);
     }
 
     private static unsafe FileSystemSample SampleNow(string root)

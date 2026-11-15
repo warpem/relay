@@ -98,6 +98,29 @@ public sealed class StorageSchedulerTests
     }
 
     [Fact]
+    public void SpacesOnOneFileSystemShareOneMeterThoughFreeSpaceMovesBetweenSamples()
+    {
+        static Refund.DataModel.ReadOnly.ReadOnlySpace Space(string root) => new Refund.DataModel.Space { RootDirectory = root }.AsReadOnly();
+        StorageService.FileSystemSample Fs(ulong id, long total, long free, long files, long freeFiles) => new(id, total, free, files, freeFiles, true);
+        var t0 = Now;
+        var usage = StorageService.Group([
+            (Space("/data/a/one"), t0, Fs(1, 220, 75, 23, 2)),
+            (Space("/data/a/two"), t0.AddSeconds(40), Fs(1, 220, 74, 23, 1)),
+            (Space("/data/b/three"), t0, Fs(1, 600, 101, 157, 70)),
+            (Space("/data/b/four"), t0.AddSeconds(20), Fs(1, 600, 100, 157, 69)),
+            (Space("/data/c"), t0, default),
+        ]);
+
+        Assert.Equal(2, usage.Count);
+        var a = usage.Single(u => u.TotalBytes == 220);
+        Assert.Equal(2, a.Spaces.Count);
+        Assert.Equal(74, a.FreeBytes); // the newest sample
+        Assert.Equal(1, a.FreeFiles);
+        Assert.Equal("/data/a", a.Label);
+        Assert.Equal(100, usage.Single(u => u.TotalBytes == 600).FreeBytes);
+    }
+
+    [Fact]
     public void TheThrottleCapsTheRateAndBacksOffWhenEntriesGetSlow()
     {
         long ticks = 0;
