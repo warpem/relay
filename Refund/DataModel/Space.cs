@@ -92,6 +92,14 @@ public class Space : RelayBase
     public string Notes { get; set; } = string.Empty;
 
     /// <summary>
+    /// What the root holds besides the jobs' folders (leftover folders of deleted jobs, loose files), as last listed by
+    /// the storage service. Null until listed. Never adopted from templates or clones.
+    /// </summary>
+    [SkipAdoption]
+    [RelayProperty]
+    public SpaceStorage Storage { get; set; }
+
+    /// <summary>
     /// Internal list of jobs in this space.
     /// </summary>
     private List<Job> _Jobs = new List<Job>();

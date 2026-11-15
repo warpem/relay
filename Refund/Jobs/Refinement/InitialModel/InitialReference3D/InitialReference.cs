@@ -28,6 +28,7 @@ public class InitialReference : RelionJob, IClusterJob
     public override JobQueueType QueueType => UseGpu ? JobQueueType.GPU : JobQueueType.CPU;
 
     public override bool IsIterative => true;
+    public override Refund.Services.Storage.IntermediateRule IntermediateRule => Refund.Services.Storage.IntermediateRules.InitialReference;
 
     public override bool CanBeFinalized => true;
 

@@ -1,0 +1,11 @@
+.type-filter { display: flex; flex-direction: column; width: 360px; max-height: min(520px, 70vh); background: var(--colorNeutralBackground1); border-radius: 6px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18), 0 0 0 1px var(--colorNeutralStroke2); }
+.type-filter-search { padding: 10px 10px 6px; }
+.type-filter-list { flex: 1; overflow: auto; padding: 0 6px 6px; }
+.type-group, .type-line { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 1px 6px; border-radius: 4px; }
+.type-group { margin-top: 6px; font-weight: 600; }
+.type-line { padding-left: 26px; }
+.type-group:hover, .type-line:hover { background: var(--colorNeutralBackground1Hover); }
+.type-count, .type-size { color: var(--colorNeutralForeground3); font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; }
+.type-size { min-width: 58px; }
+.type-empty { margin: 12px 8px; color: var(--colorNeutralForeground3); }
+.type-filter-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px; border-top: 1px solid var(--colorNeutralStroke2); color: var(--colorNeutralForeground3); font-size: 12px; }

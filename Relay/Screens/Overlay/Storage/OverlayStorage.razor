@@ -1,0 +1,294 @@
+@using Refund.Components
+@using Refund.Components.Storage
+@using Refund.DataModel
+@using Refund.Services.Storage
+@using Refund.Utils
+@using Microsoft.AspNetCore.Components.Web.Virtualization
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@implements IAsyncDisposable
+
+<OverlayBase>
+<div class="storage @(_dark ? "dark" : "")" @ref="_root">
+    <header class="st-head">
+        <h2>Storage</h2>
+        <div class="st-quota">
+            @foreach (var fs in _fileSystems)
+            {
+                <div class="st-fs" title="@fs.Label">
+                    @Meter("Space", fs.UsedBytes, fs.TotalBytes, $"{StorageFormat.Bytes(fs.UsedBytes)} of {StorageFormat.Bytes(fs.TotalBytes)}")
+                    @if (fs.HasFiles)
+                    {
+                        @Meter("Files", fs.UsedFiles, fs.TotalFiles, $"{StorageFormat.Count(fs.UsedFiles)} of {StorageFormat.Count(fs.TotalFiles)}")
+                    }
+                </div>
+            }
+        </div>
+    </header>
+
+    <div class="st-status" aria-live="polite">
+        @if (_progress is { } p)
+        {
+            <span class="st-status-text">@StatusText(p)</span>
+            @if (_totals.Jobs > _totals.Measured && p.Enabled && !p.Paused)
+            {
+                <FluentButton Appearance="ButtonAppearance.Subtle" OnClick="MeasureShownFirst" Title="Measure the jobs that match the current filters before the rest">Measure these first</FluentButton>
+            }
+            @if (IsAdmin && p.Enabled)
+            {
+                <FluentSwitch Value="@p.Paused" ValueChanged="@((bool v) => { Storage.Paused = v; Poll(); })" Label="Pause measuring" title="Stops walking job folders until switched back on (administrators only)" />
+            }
+        }
+    </div>
+
+    <div class="st-filters" role="toolbar" aria-label="Filters">
+        <JobTypeFilter Types="@_typesInScope" Selected="@_filter.Types" SelectedChanged="@(v => SetFilter(f => f.Types = v))" />
+        <FluentSelect TOption="SelectOption<string>" TValue="string" Items="@StatusOptions" OptionText="@(o => o.Text)" OptionValue="@(o => o.Value)"
+                      Value="@StatusValue" ValueChanged="@((string v) => SetFilter(f => f.Statuses = v == "" ? [] : [Enum.Parse<StorageStatus>(v)]))" Width="170px" aria-label="Status" />
+        <FluentSelect TOption="SelectOption<string>" TValue="string" Items="@AgeOptions" OptionText="@(o => o.Text)" OptionValue="@(o => o.Value)"
+                      Value="@_filter.OlderThanMonths.ToString()" ValueChanged="@((string v) => SetFilter(f => f.OlderThanMonths = int.Parse(v)))" Width="196px" aria-label="Last modified" />
+        <FluentSwitch Value="@(_filter.PersonId == Session.User?.Id)" ValueChanged="@((bool v) => SetFilter(f => f.PersonId = v ? Session.User?.Id : null))" Label="Only my jobs" />
+        @if (_filter.PersonId is int pid && pid != Session.User?.Id)
+        {
+            <span class="st-chip">@PersonName(pid)'s jobs <button aria-label="Show everyone's jobs" @onclick="@(() => SetFilter(f => f.PersonId = null))">×</button></span>
+        }
+        <RelayTextInput Value="@_filter.Search" ValueChanged="@((string v) => SetFilter(f => f.Search = v ?? ""))" Immediate="true" ImmediateDelay="250"
+                        Placeholder="Find a job" Style="width: 160px" aria-label="Find a job by name or ID" />
+        <span class="st-spacer"></span>
+        <div class="segmented" role="group" aria-label="Measure by">
+            <button class="@(_metric == "bytes" ? "on" : "")" aria-pressed="@(_metric == "bytes")" @onclick="@(() => SetMetric("bytes"))">Size</button>
+            <button class="@(_metric == "files" ? "on" : "")" aria-pressed="@(_metric == "files")" @onclick="@(() => SetMetric("files"))">Files</button>
+        </div>
+        <div class="segmented" role="group" aria-label="Colour by">
+            <button class="@(_colorBy == "age" ? "on" : "")" aria-pressed="@(_colorBy == "age")" @onclick="@(() => _colorBy = "age")">Age</button>
+            <button class="@(_colorBy == "stage" ? "on" : "")" aria-pressed="@(_colorBy == "stage")" @onclick="@(() => _colorBy = "stage")">Stage</button>
+            <button class="@(_colorBy == "owner" ? "on" : "")" aria-pressed="@(_colorBy == "owner")" @onclick="@(() => _colorBy = "owner")" title="The three people using the most storage; everyone else in grey">Owner</button>
+        </div>
+    </div>
+
+    <div class="st-scope">
+        <nav class="st-crumbs" aria-label="Zoom">
+            @foreach (var (label, scope, last) in Crumbs())
+            {
+                @if (last) { <span aria-current="location">@label</span> }
+                else { <button @onclick="@(() => Zoom(scope))">@label</button><span class="sep">›</span> }
+            }
+        </nav>
+        <span class="st-totals">@TotalsText()</span>
+    </div>
+
+    <div class="st-map">
+        <StorageTreemap Payload="@_payload" Metric="@_metric" ColorBy="@_colorBy" Dark="@_dark" Highlight="@(_hover ?? _focused)"
+                        OnSelect="SelectFromMap" OnZoom="ZoomFromMap" OnResized="MapResized"
+                        EmptyText="@(_totals.Jobs == 0 ? "No jobs match these filters." : "None of these jobs has been measured yet.")"
+                        AriaLabel="@($"Disk usage treemap: {TotalsText()}. The table below lists the same jobs.")" />
+    </div>
+    <div class="st-legend" aria-label="Colour legend">
+        @foreach (var (color, label) in Legend())
+        {
+            <span class="st-key"><i style="background:@color"></i>@label</span>
+        }
+        <span class="st-legend-note">Area is @(_metric == "files" ? "the number of files, folders and links" : "bytes on disk"). Double-click a project, space or folder to zoom in.</span>
+    </div>
+
+    <div class="st-bottom">
+        <aside class="st-breakdown" aria-label="Breakdown">
+            <div class="segmented small" role="tablist">
+                <button role="tab" class="@(_breakdown == "types" ? "on" : "")" aria-selected="@(_breakdown == "types")" @onclick="@(() => _breakdown = "types")">By type</button>
+                <button role="tab" class="@(_breakdown == "people" ? "on" : "")" aria-selected="@(_breakdown == "people")" @onclick="@(() => _breakdown = "people")">By person</button>
+            </div>
+            <ol class="st-bars">
+                @{ var lines = _breakdown == "types" ? _byType : _byPerson; long max = Math.Max(1, lines.Count == 0 ? 1 : lines.Max(l => Value(l))); }
+                @foreach (var line in lines.Take(40))
+                {
+                    bool active = _breakdown == "types" ? _filter.Types.Contains(line.Key) : _filter.PersonId?.ToString() == line.Key;
+                    <li class="@(active ? "active" : "")">
+                        <button @onclick="@(() => ToggleBreakdown(line))" title="@($"{line.Jobs:N0} jobs · {StorageFormat.Bytes(line.Allocated)} · {StorageFormat.Count(line.Entries)} files" + (line.Cleanable.Entries > 0 ? $" · {StorageFormat.Bytes(line.Cleanable.Allocated)} cleanable" : ""))">
+                            <span class="bar-name">@line.Name</span>
+                            <span class="bar-value">@(_metric == "files" ? StorageFormat.Count(line.Entries) : StorageFormat.Bytes(line.Allocated))</span>
+                            <span class="bar-track"><i style="width:@((100.0 * Value(line) / max).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture))%"></i></span>
+                        </button>
+                    </li>
+                }
+            </ol>
+        </aside>
+
+        <section class="st-list">
+            <div class="st-list-head">
+                <div class="segmented small" role="tablist">
+                    <button role="tab" class="@(_tab == "jobs" ? "on" : "")" aria-selected="@(_tab == "jobs")" @onclick="@(() => _tab = "jobs")">Jobs <span class="n">@_shown.Count.ToString("N0")</span></button>
+                    <button role="tab" class="@(_tab == "leftovers" ? "on" : "")" aria-selected="@(_tab == "leftovers")" @onclick="@(() => _tab = "leftovers")">Folders without a job <span class="n">@_leftoversShown.Count.ToString("N0")</span></button>
+                </div>
+                @if (_pendingRefresh > 0)
+                {
+                    <FluentButton Appearance="ButtonAppearance.Subtle" OnClick="Refresh" Title="The table keeps its order while you have jobs selected">@($"{_pendingRefresh:N0} new {(_pendingRefresh == 1 ? "measurement" : "measurements")} · Refresh")</FluentButton>
+                }
+            </div>
+
+            @if (_tab == "jobs")
+            {
+                <div class="st-selection @(_selected.Count > 0 ? "has" : "")">
+                    @if (_selected.Count > 0)
+                    {
+                        var sel = SelectedRows();
+                        var t = StorageView.Totals(sel);
+                        <span class="st-sel-text"><strong>@sel.Count.ToString("N0") selected</strong> · @StorageFormat.Bytes(t.Allocated) · @StorageFormat.Count(t.Entries) files</span>
+                        @if (t.Cleanable.Entries > 0 || sel.Any(r => r.Job.IntermediateRule != null && !r.Measured))
+                        {
+                            <FluentButton id="st-clean" Appearance="ButtonAppearance.Outline" Class="danger" Disabled="@(_busy || !CanCleanAny(sel))" OnClick="@(() => _confirm = "clean")"
+                                          IconStart="@(new Icons.Regular.Size16.BroomSparkle())">@(t.Cleanable.Entries > 0 ? $"Clean intermediate ({StorageFormat.Bytes(t.Cleanable.Allocated)})" : "Clean intermediate")</FluentButton>
+                        }
+                        <FluentButton id="st-clear" Appearance="ButtonAppearance.Outline" Class="danger" Disabled="@(_busy || !CanClearAny(sel))" OnClick="@(() => _confirm = "clear")"
+                                      IconStart="@(new Icons.Regular.Size16.Broom())">@($"Clear {sel.Count:N0} {(sel.Count == 1 ? "job" : "jobs")}")</FluentButton>
+                        <FluentButton Appearance="ButtonAppearance.Subtle" OnClick="MeasureSelected">Measure again</FluentButton>
+                        <FluentButton Appearance="ButtonAppearance.Subtle" OnClick="@(() => _selected.Clear())">Clear selection</FluentButton>
+                    }
+                    else
+                    {
+                        <span class="st-sel-hint">Select jobs to clear their results or clean their intermediate files.</span>
+                    }
+                </div>
+
+                <div class="st-table" role="table" aria-label="Jobs" aria-rowcount="@_shown.Count" @ref="_tableScroll">
+                    <div class="st-row st-header" role="row">
+                        <span role="columnheader" class="c-check">
+                            <FluentCheckbox ThreeState="true" ShowIndeterminate="false" CheckState="@AllState" CheckStateChanged="ToggleAll" Disabled="@(_shown.Count == 0)" aria-label="Select every job in the list" />
+                        </span>
+                        @foreach (var c in Columns)
+                        {
+                            <span role="columnheader" class="@c.Class" aria-sort="@(_sort == c.Key ? (_descending ? "descending" : "ascending") : "none")">
+                                <button @onclick="@(() => Sort(c.Key))" title="@c.Help">@c.Label<span class="arrow">@(_sort == c.Key ? (_descending ? "↓" : "↑") : "")</span></button>
+                            </span>
+                        }
+                    </div>
+                    <Virtualize Items="@_shown" ItemSize="34" OverscanCount="8" Context="row">
+                        <div class="st-row @(Key(row) == _focusedKey ? "focused" : "") @(_selected.Contains(Key(row)) ? "checked" : "")" role="row"
+                             @onmouseenter="@(() => _hover = row)" @onmouseleave="@(() => { if (_hover == row) _hover = null; })">
+                            <span class="c-check" role="cell"><FluentCheckbox Value="@_selected.Contains(Key(row))" ValueChanged="@((bool v) => Toggle(row, v))" aria-label="@($"Select {row.Job.QualifiedName}")" /></span>
+                            <span class="c-job" role="cell">
+                                <FluentIcon Value="@row.Job.GetStatusIcon().WithStatusColor(row.Job)" Title="@row.Job.Status.GetStatusDescription()" />
+                                <a href="@JobHref(row)" @onclick="@(e => OpenJob(row, e))" @onclick:preventDefault="true" title="@($"Open {row.Job.QualifiedName}")">@row.Job.QualifiedName</a>
+                            </span>
+                            <span class="c-type" role="cell" title="@row.TypeName">@row.TypeName</span>
+                            <span class="c-location" role="cell" title="@row.Location">@row.Location</span>
+                            <span class="c-person" role="cell">@(row.Person?.Name ?? "")</span>
+                            <span class="c-num c-modified" role="cell" title="@(row.Modified?.ToLocalTime().ToString("yyyy-MM-dd HH:mm"))">@(row.Modified is { } m ? StorageFormat.Age(_now - m) : "")</span>
+                            <span class="c-num" role="cell" title="@(row.Measured ? $"{row.Storage.Total.Bytes:N0} bytes in files, {row.Allocated:N0} on disk" : null)">@(row.Measured ? StorageFormat.Bytes(row.Allocated) : "—")</span>
+                            <span class="c-num" role="cell" title="@(row.Measured ? $"{row.Storage.Total.Files:N0} files, {row.Storage.Total.Folders:N0} folders, {row.Storage.Total.Links:N0} links" : null)">@(row.Measured ? StorageFormat.Count(row.Entries) : "—")</span>
+                            <span class="c-num" role="cell">@(row.Cleanable.Entries > 0 ? StorageFormat.Bytes(row.Cleanable.Allocated) : "")</span>
+                            <span class="c-num" role="cell" title="@(row.UsedBy > 0 ? $"{row.UsedBy} jobs read this job's files" : null)">@(row.UsedBy > 0 ? row.UsedBy.ToString("N0") : "")</span>
+                            <span class="c-measured" role="cell">@MeasuredText(row)</span>
+                        </div>
+                    </Virtualize>
+                    @if (_shown.Count == 0)
+                    {
+                        <p class="st-empty">No jobs match these filters.</p>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="st-table leftovers" role="table" aria-label="Folders without a job">
+                    <div class="st-row st-header" role="row">
+                        <span role="columnheader">Space</span><span role="columnheader">Folder</span><span role="columnheader" class="c-num">Size</span>
+                        <span role="columnheader" class="c-num">Files</span><span role="columnheader" class="c-num">Modified</span><span role="columnheader"></span>
+                    </div>
+                    @foreach (var l in _leftoversShown)
+                    {
+                        var id = "lo-" + l.Space.Project.Id + "-" + l.Space.Id + "-" + l.Leftover.Name.GetHashCode().ToString("x");
+                        <div class="st-row" role="row">
+                            <span role="cell" title="@l.Space.RootDirectory">@l.Space.QualifiedName</span>
+                            <span role="cell" title="@System.IO.Path.Combine(l.Space.RootDirectory, l.Leftover.Name)">@(l.Leftover.JobId is int jid ? $"{l.Leftover.Name} (deleted job J{jid})" : $"{l.Leftover.Name} (not a job folder)")</span>
+                            <span role="cell" class="c-num">@StorageFormat.Bytes(l.Leftover.Total.Allocated)</span>
+                            <span role="cell" class="c-num">@StorageFormat.Count(l.Leftover.Total.Entries)</span>
+                            <span role="cell" class="c-num">@(l.Leftover.NewestWrite is { } w ? StorageFormat.Age(_now - w) : "")</span>
+                            <span role="cell" class="c-action">
+                                @if (IsAdmin && l.Leftover.IsDeletable)
+                                {
+                                    <FluentButton id="@id" Appearance="ButtonAppearance.Subtle" Class="danger" Disabled="@_busy" OnClick="@(() => _confirmLeftover = l)">Delete</FluentButton>
+                                    @if (_confirmLeftover == l)
+                                    {
+                                        <RelayPopover AnchorId="@id" Opened="true" OpenedChanged="@(v => { if (!v) _confirmLeftover = null; })" Position="Positioning.BelowEnd" Gap="6" Class="popover-no-padding popover-no-shadow">
+                                            <div class="st-confirm">
+                                                <p><strong>Delete folder @l.Leftover.Name?</strong></p>
+                                                <p>It belongs to no job in @l.Space.QualifiedName. This frees @StorageFormat.Bytes(l.Leftover.Total.Allocated) and @StorageFormat.Count(l.Leftover.Total.Entries) files and can't be undone.</p>
+                                                <FluentButton BackgroundColor="var(--relay-confirmation-background)" Color="white" OnClick="@(() => DeleteLeftover(l))">Delete folder</FluentButton>
+                                            </div>
+                                        </RelayPopover>
+                                    }
+                                }
+                                else if (!l.Leftover.IsDeletable)
+                                {
+                                    <span class="st-muted" title="Folders that aren't named after a job may hold people's own data, so they can't be deleted here">Not Relay's</span>
+                                }
+                            </span>
+                        </div>
+                    }
+                    @if (_leftoversShown.Count == 0)
+                    {
+                        <p class="st-empty">Every folder in these spaces belongs to a job.</p>
+                    }
+                </div>
+            }
+        </section>
+    </div>
+</div>
+
+@if (_confirm != null && _selected.Count > 0)
+{
+    var rows = SelectedRows();
+    <RelayPopover AnchorId="@(_confirm == "clear" ? "st-clear" : "st-clean")" Opened="true" OpenedChanged="@(v => { if (!v) _confirm = null; })"
+                  Position="Positioning.BelowStart" Gap="6" Class="popover-no-padding popover-no-shadow">
+        <div class="st-confirm">
+            @if (_confirm == "clear")
+            {
+                var plan = ClearPlan(rows);
+                var freed = StorageView.Totals(plan.Ok);
+                <p><strong>Clear @plan.Ok.Count.ToString("N0") @(plan.Ok.Count == 1 ? "job" : "jobs")?</strong></p>
+                <p>Deletes @(plan.Ok.Count == 1 ? "its" : "their") results@(freed.Measured > 0 ? $", about {StorageFormat.Bytes(freed.Allocated)} and {StorageFormat.Count(freed.Entries)} files" : ""). @(plan.Ok.Count == 1 ? "The job stays" : "The jobs stay"), ready to run again.</p>
+                @if (plan.Ok.Count(r => r.UsedBy > 0) is var used and > 0)
+                {
+                    <p class="warn">@used.ToString("N0") of them @(used == 1 ? "has jobs" : "have jobs") that read @(used == 1 ? "its" : "their") files. Those keep their results, but can't run again until these have run again.</p>
+                }
+                @SkipList(plan.Skipped)
+                <FluentButton BackgroundColor="var(--relay-confirmation-background)" Color="white" Disabled="@(plan.Ok.Count == 0)" OnClick="@(() => ClearSelected(plan.Ok))">@($"Clear {plan.Ok.Count:N0} {(plan.Ok.Count == 1 ? "job" : "jobs")}")</FluentButton>
+            }
+            else
+            {
+                var plan = CleanPlan(rows);
+                var freed = plan.Ok.Aggregate(default(UsagePart), (s, r) => s + r.Cleanable);
+                <p><strong>Clean intermediate files of @plan.Ok.Count.ToString("N0") @(plan.Ok.Count == 1 ? "job" : "jobs")?</strong></p>
+                <p>Keeps each job's final iteration, any iteration a class selection uses, and every log and figure. Removes the rest@(freed.Entries > 0 ? $": about {StorageFormat.Bytes(freed.Allocated)} and {StorageFormat.Count(freed.Entries)} files" : ""). Earlier iterations can't be browsed in full afterwards.</p>
+                @SkipList(plan.Skipped)
+                <FluentButton BackgroundColor="var(--relay-confirmation-background)" Color="white" Disabled="@(plan.Ok.Count == 0)" OnClick="@(() => CleanSelected(plan.Ok))">Clean intermediate</FluentButton>
+            }
+        </div>
+    </RelayPopover>
+}
+</OverlayBase>
+
+@code {
+    private RenderFragment Meter(string label, long used, long total, string text) => __builder =>
+    {
+        double share = total > 0 ? Math.Clamp(used / (double)total, 0, 1) : 0;
+        string level = share >= 0.95 ? "critical" : share >= 0.85 ? "warning" : "";
+        <div class="st-meter @level">
+            <span class="st-meter-label">@label</span>
+            <span class="st-meter-track" role="meter" aria-label="@($"{label} used")" aria-valuemin="0" aria-valuemax="100" aria-valuenow="@((int)(share * 100))">
+                <i style="width:@((share * 100).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture))%"></i>
+            </span>
+            <span class="st-meter-value">@text · @((share * 100).ToString("0"))%@(level == "critical" ? " · nearly full" : "")</span>
+        </div>
+    };
+
+    private RenderFragment SkipList(IReadOnlyList<(StorageRow Row, string Reason)> skipped) => __builder =>
+    {
+        if (skipped.Count == 0) return;
+        <p class="skip">@skipped.Count.ToString("N0") @(skipped.Count == 1 ? "is" : "are") skipped:</p>
+        <ul class="skip">
+            @foreach (var group in skipped.GroupBy(s => s.Reason).Take(4))
+            {
+                <li>@group.Key: @string.Join(", ", group.Take(5).Select(s => s.Row.Job.QualifiedName))@(group.Count() > 5 ? $" and {group.Count() - 5} more" : "")</li>
+            }
+        </ul>
+    };
+}

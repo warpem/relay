@@ -43,6 +43,9 @@ public abstract class ReadOnlyJob : IIdentifiable, IAudited, IAnnotated, IViewIt
     /// </summary>
     /// <returns>The Type of the wrapped job instance.</returns>
     public Type GetOriginalType() => _job.GetType();
+
+    /// <summary>The wrapped job, for services inside Refund that read type-specific state (storage rules).</summary>
+    internal Job Mutable => _job;
     
     /// <summary>
     /// Gets the value of a specified property from the wrapped job.
@@ -223,6 +226,15 @@ public abstract class ReadOnlyJob : IIdentifiable, IAudited, IAnnotated, IViewIt
     /// Job cleaning reduces disk space usage by removing intermediate files.
     /// </summary>
     public bool HasBeenCleaned => _job.HasBeenCleaned;
+
+    /// <summary>After cleaning intermediate files: the iterations whose result files were kept.</summary>
+    public IReadOnlyList<int> KeptIterations => _job.KeptIterations ?? [];
+
+    /// <summary>The latest measurement of the job's folder, or null if it hasn't been measured.</summary>
+    public JobStorage Storage => _job.Storage;
+
+    /// <summary>How the job type names its iteration files; null for types without intermediate iterations.</summary>
+    public Services.Storage.IntermediateRule IntermediateRule => _job.IntermediateRule;
 
     /// <summary>
     /// Gets the estimated time remaining for this job to complete.

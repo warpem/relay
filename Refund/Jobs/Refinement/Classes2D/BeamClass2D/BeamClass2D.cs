@@ -26,6 +26,7 @@ public class BeamClass2D : Job, IClusterJob
     public override Type ExpandedViewType => typeof(Class2D.Class2DExpandedView);
     public override int2 CardSquareCount { get; set; } = new(2, 1);
     public override bool IsIterative => true;
+    public override Refund.Services.Storage.IntermediateRule IntermediateRule => Refund.Services.Storage.IntermediateRules.BeamClass2D;
     public override bool CanBeFinalized => true;
     public override string CommandName => "beam class2d";
     public override string CommandSuffix => $" && touch {JobTools.QuoteArgumentValue(PathSuccess)}";

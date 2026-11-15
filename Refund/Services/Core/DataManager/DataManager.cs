@@ -551,5 +551,10 @@ public partial class DataManager
     /// <summary>
     /// Stops execution monitoring and terminates Relay-owned work.
     /// </summary>
-    public Task ShutdownAsync() => _queueRepository.ShutdownAsync();
+    public async Task ShutdownAsync()
+    {
+        await _queueRepository.ShutdownAsync();
+        // Measurements wait up to a few minutes to be written; don't lose them on a normal shutdown.
+        FlushChanges();
+    }
 }

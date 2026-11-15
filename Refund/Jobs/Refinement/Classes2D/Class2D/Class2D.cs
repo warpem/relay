@@ -96,6 +96,7 @@ public class Class2D : RelionJob, IClusterJob
     /// Indicates that this job produces intermediate results through multiple iterations
     /// </summary>
     public override bool IsIterative => true;
+    public override Refund.Services.Storage.IntermediateRule IntermediateRule => Refund.Services.Storage.IntermediateRules.Class2D;
 
     /// <summary>
     /// Defines the aspect ratio of the job card in the workspace view

@@ -31,6 +31,14 @@
         </FluentButton>
         <FluentTooltip Anchor="buttonPersonal" Positioning="Positioning.After">Personal settings</FluentTooltip>
 
+        <FluentButton id="buttonStorage"
+                      IconStart="@(new Icons.Regular.Size24.HardDrive())"
+                      Appearance="@(Session.CurrentOverlay == OverlayScreenType.Storage ? ButtonAppearance.Primary : ButtonAppearance.Subtle)"
+                      OnClick="OnStorageButtonClick"
+                      Title="Storage">
+        </FluentButton>
+        <FluentTooltip Anchor="buttonStorage" Positioning="Positioning.After">Storage</FluentTooltip>
+
         @if (Session.User.Role == UserRole.Admin)
         {
             <FluentButton id="buttonSettings"

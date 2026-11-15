@@ -15,7 +15,7 @@ else if (_job == null)
 else
 {
     <div class="classification-view">
-        <FluentButton OnClick="ExportClasses" Disabled="@(!CanExport || !_selectedClasses.Any())" Appearance="ButtonAppearance.Primary">
+        <FluentButton OnClick="ExportClasses" Disabled="@(!CanExport || !_selectedClasses.Any() || IterationCleaned)" Title="@(IterationCleaned ? "This iteration's files were removed to save space" : null)" Appearance="ButtonAppearance.Primary">
             Export selection
         </FluentButton>
         <div class="scroll-container">

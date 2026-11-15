@@ -142,6 +142,24 @@ public partial class LeftBar : ComponentBase, IDisposable
     }
 
     /// <summary>
+    /// Opens the Storage overlay (disk usage and cleanup) over the current screen.
+    /// </summary>
+    private async Task OnStorageButtonClick()
+    {
+        await Session.NavigateToAsync(new()
+        {
+            ProjectId = Session.ProjectId,
+            SpaceId = Session.SpaceId,
+            ViewId = Session.ViewId,
+            FolderId = Session.FolderId,
+            FactoryDefinitionId = Session.FactoryDefinitionId,
+            FactoryInstanceId = Session.FactoryInstanceId,
+            JobId = Session.JobId,
+            Overlay = OverlayScreenType.Storage
+        });
+    }
+
+    /// <summary>
     /// Opens the file browser dialog in browse-only mode.
     /// Restores the last visited folder and tracks navigation.
     /// </summary>

@@ -377,6 +377,29 @@ public abstract class Job : RelayBase, IFolderContent
     public bool HasBeenCleaned { get; set; } = false;
 
     /// <summary>
+    /// After cleaning intermediate files: the (logical) iterations whose result files were kept. Other iterations keep
+    /// only their logs and figures in the .relay folder.
+    /// </summary>
+    [Clearable]
+    [RelayProperty]
+    public int[] KeptIterations { get; set; } = [];
+
+    /// <summary>
+    /// The latest measurement of this job's folder, or null if it hasn't been measured. Written only by the storage
+    /// service (through DataManager.SetJobStorage), never adopted from templates or clones.
+    /// </summary>
+    [Clearable]
+    [SkipAdoption]
+    [RelayProperty(Order = 1000)]
+    public JobStorage Storage { get; set; }
+
+    /// <summary>
+    /// How this job type's iteration files are named, so the storage service can measure them and cleaning can remove
+    /// all but the ones still needed. Null for job types without intermediate iterations.
+    /// </summary>
+    public virtual Services.Storage.IntermediateRule IntermediateRule => null;
+
+    /// <summary>
     /// Counts collected from output files during finalization, keyed by output port name.
     /// Missing entries are unknown, including expensive counts for jobs saved before counting
     /// was introduced. Clearing or cloning a job discards these results.
@@ -497,11 +520,13 @@ public abstract class Job : RelayBase, IFolderContent
         if (PortsOut.Count == 0)
             return false;
 
-        if (!HasBeenCleaned)
-            return iter <= VisAvailableIteration || // Visualizations can't be prepared without results
-                   iter < LogsAvailableIteration;   // Next iteration's log doesn't start before results for this iteration are available
-        else
-            return iter == LogsAvailableIteration; // Cleaning only available once finished, and only leaves results for last iteration
+        // Cleaning keeps the result files of only a few iterations; iterations after the last of them (a continuation
+        // running further) are unaffected.
+        if (HasBeenCleaned && KeptIterations is { Length: > 0 } kept && iter <= kept.Max())
+            return Array.IndexOf(kept, iter) >= 0;
+
+        return iter <= VisAvailableIteration || // Visualizations can't be prepared without results
+               iter < LogsAvailableIteration;   // Next iteration's log doesn't start before results for this iteration are available
     }
 
     /// <summary>

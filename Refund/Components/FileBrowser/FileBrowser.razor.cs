@@ -31,6 +31,9 @@ public partial class FileBrowser : ComponentBase, IAsyncDisposable
     // Hosts that only use Refund's file picker need not provide editor endpoints or authentication.
     private TextFileEditorService EditorService => Services.GetService(typeof(TextFileEditorService)) as TextFileEditorService;
     private RelaySession EditorSession => Services.GetService(typeof(RelaySession)) as RelaySession;
+    // Deleting files inside a job folder changes how much it occupies: let the storage service measure it again.
+    private void NotifyDeleted(string path) =>
+        _ = (Services.GetService(typeof(Refund.Services.Core.DataManager.DataManager)) as Refund.Services.Core.DataManager.DataManager)?.NotifyFilesChanged(path);
     private IJSObjectReference editorModule;
     private DotNetObjectReference<FileBrowser> editorReference;
     private string EditorError;
@@ -1101,6 +1104,7 @@ public partial class FileBrowser : ComponentBase, IAsyncDisposable
                     {
                         File.Delete(item.Path);
                     }
+                    NotifyDeleted(item.Path);
                 }
                 catch (Exception ex)
                 {
@@ -1138,6 +1142,7 @@ public partial class FileBrowser : ComponentBase, IAsyncDisposable
                 }
 
                 Directory.Delete(CurrentFolder, true);
+                NotifyDeleted(CurrentFolder);
 
                 // Update CurrentFolder to parent directory
                 CurrentFolder = parentDirectory;

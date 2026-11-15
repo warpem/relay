@@ -19,6 +19,7 @@ namespace Refund.Jobs.Refinement.Refinement3D.BeamRefine3D;
 public abstract class BeamParticleJob : Job, IClusterJob
 {
     public override bool IsIterative => true;
+    public override Refund.Services.Storage.IntermediateRule IntermediateRule => Refund.Services.Storage.IntermediateRules.BeamIterations;
     public override bool CanBeFinalized => true;
     public override JobQueueType QueueType => Device == BeamDevice.GPU ? JobQueueType.GPU : JobQueueType.CPU;
     public override string[] SupportedModules => ["beam", "gpu", "cpu"];

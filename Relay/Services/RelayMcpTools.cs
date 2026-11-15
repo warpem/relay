@@ -207,6 +207,8 @@ public class RelayMcpTools(IHttpContextAccessor contextAccessor, DataManager dat
 
         int iter = RelayMcpProjections.ResolveResultIteration(iteration, job.LogsAvailableIteration, job.HasResultFilesForIteration);
         if (iter < 0) return [];
+        if (job.HasBeenCleaned && !job.HasResultFilesForIteration(iter))
+            throw new McpException($"Iteration {iter}'s result files were removed when the job's intermediate files were cleaned.");
 
         return EnumerateDownloadables(job, iter)
             .Select(x => RelayMcpProjections.ToResultDto(x.Port, x.Downloadable, iter))
@@ -229,6 +231,8 @@ public class RelayMcpTools(IHttpContextAccessor contextAccessor, DataManager dat
 
         int iter = RelayMcpProjections.ResolveResultIteration(iteration, job.LogsAvailableIteration, job.HasResultFilesForIteration);
         if (iter < 0) throw new McpException("Job has no results.");
+        if (job.HasBeenCleaned && !job.HasResultFilesForIteration(iter))
+            throw new McpException($"Iteration {iter}'s result files were removed when the job's intermediate files were cleaned.");
 
         var match = RelayMcpProjections.MatchDownloadable(EnumerateDownloadables(job, iter), port, name);
         if (match == null) throw new McpException($"No result named '{name}' on port '{port}' for iteration {iter}.");

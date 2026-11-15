@@ -922,7 +922,12 @@ public enum OverlayScreenType
     /// <summary>
     /// The current user's personal settings overlay (e.g. access tokens).
     /// </summary>
-    Personal
+    Personal,
+
+    /// <summary>
+    /// The storage assistant: how much jobs keep on disk, and clearing or cleaning them.
+    /// </summary>
+    Storage
 }
 
 /// <summary>

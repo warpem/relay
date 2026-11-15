@@ -92,6 +92,10 @@ Job.PopulateStatic();
 // DataManager is the central repository for all application data
 builder.Services.AddSingleton<DataManager>(new DataManager(relayOptions, cli.DropUnloadableSpaces));
 
+// Measures every job folder in the background (Storage overlay); starts with the host and flushes measurements on stop.
+builder.Services.AddSingleton(sp => new Refund.Services.Storage.StorageService(sp.GetRequiredService<DataManager>(), relayOptions.Storage));
+builder.Services.AddHostedService(sp => sp.GetRequiredService<Refund.Services.Storage.StorageService>());
+
 // SecurityTokenService manages security tokens for user registration
 builder.Services.AddSingleton<SecurityTokenService>();
 builder.Services.AddHostedService<SecurityTokenService>();

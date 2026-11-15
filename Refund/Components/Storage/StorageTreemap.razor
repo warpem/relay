@@ -1,0 +1,15 @@
+@using Refund.Services.Storage
+
+<div class="treemap" role="img" aria-label="@AriaLabel">
+    <canvas @ref="_canvas" class="treemap-base"></canvas>
+    <canvas @ref="_overlay" class="treemap-overlay"></canvas>
+    <div @ref="_tooltip" class="treemap-tooltip" hidden></div>
+    @if (_failed != null)
+    {
+        <p class="treemap-empty">@_failed</p>
+    }
+    else if (Payload == null || Payload.Count <= 1)
+    {
+        <p class="treemap-empty">@EmptyText</p>
+    }
+</div>

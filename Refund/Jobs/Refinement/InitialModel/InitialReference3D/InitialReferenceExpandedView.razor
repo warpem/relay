@@ -23,7 +23,7 @@ else
             </FluentSwitch>
 
             <FluentButton OnClick="@(ExportClasses)"
-                          Disabled="@(!_selectedClasses.Any())"
+                          Disabled="@(!_selectedClasses.Any() || IterationCleaned)" Title="@(IterationCleaned ? "This iteration's files were removed to save space" : null)"
                           Appearance="ButtonAppearance.Primary">
                 Export selection
             </FluentButton>
