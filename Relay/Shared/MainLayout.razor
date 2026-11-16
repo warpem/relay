@@ -79,6 +79,13 @@
                                         <Relay.Screens.Overlay.Personal.OverlayPersonal @key="@("OverlayPersonal")" />
 
                                         break;
+
+                                    case OverlayScreenType.Storage:
+                                        <PageTitle>Relay: Storage</PageTitle>
+
+                                        <Relay.Screens.Overlay.Storage.OverlayStorage @key="@("OverlayStorage")" />
+
+                                        break;
                                 }
                             </div>
                         }

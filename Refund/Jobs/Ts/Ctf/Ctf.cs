@@ -57,7 +57,7 @@ public class Ctf : WarpToolsJobGpu, IClusterJob
     /// Lowest (worst) resolution in Angstrom to consider in fit
     /// </summary>
     [RelayProperty]
-    [UiDecimal("range_low", "Minimum resolution", min: 1, max: 999, stepSize: 1, unit: "Å",
+    [UiDecimal("range_low", "Minimum resolution", min: 1, max: 999, stepSize: 0.1, unit: "Å",
                helpText: "Lowest (worst) resolution in Angstrom to consider in fit")]
     public decimal RangeMin { get; set; } = 30;
 
@@ -73,7 +73,7 @@ public class Ctf : WarpToolsJobGpu, IClusterJob
     /// Minimum defocus value in µm to explore during fitting (positive = underfocus)
     /// </summary>
     [RelayProperty]
-    [UiDecimal("defocus_min", "Minimum defocus", min: 0, max: 10, stepSize: 0.1, unit: "µm",
+    [UiDecimal("defocus_min", "Minimum defocus", min: 0, max: 10, stepSize: 0.01, unit: "µm",
                helpText: "Minimum defocus value to explore during fitting (positive = underfocus)")]
     public decimal ZMin { get; set; } = 0.5M;
 
@@ -81,7 +81,7 @@ public class Ctf : WarpToolsJobGpu, IClusterJob
     /// Maximum defocus value in µm to explore during fitting (positive = underfocus)
     /// </summary>
     [RelayProperty]
-    [UiDecimal("defocus_max", "Maximum defocus", min: 0, max: 20, stepSize: 0.1, unit: "µm",
+    [UiDecimal("defocus_max", "Maximum defocus", min: 0, max: 20, stepSize: 0.01, unit: "µm",
                helpText: "Maximum defocus value to explore during fitting (positive = underfocus)")]
     public decimal ZMax { get; set; } = 5.0M;
 

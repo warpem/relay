@@ -41,7 +41,7 @@
     {
         <div class="training-banner"><strong>@Session.DenoiserStatus</strong>
             @if (Session.Training) { <progress max="100" value="@Session.TrainingPercent"></progress> }
-            @if (Session.AwaitingDenoiser > 0) { <span>@Session.AwaitingDenoiser.ToString("N0") micrographs awaiting denoising</span> } else if (Session.Model > 0) { <span>Model v@Session.Model remains in use</span> }
+            @if (Session.AwaitingDenoiser > 0) { <span>@Session.AwaitingDenoiser.ToString("N0") micrographs awaiting denoising</span> } else if (Session.Model > 0) { <span>Model v@(Session.Model) remains in use</span> }
             @if (!Session.Running) { <span>Processing stopped</span> }
             <span class="spacer"></span><FluentButton Appearance="ButtonAppearance.Subtle" OnClick="@(() => ChangeView("Setup"))">Training settings</FluentButton>
         </div>
@@ -85,7 +85,7 @@
         {
             <div class="exports-workspace"><h1>Export available results</h1><div class="export-actions"><span>@Session.Accepted.ToString("N0") accepted micrographs · whole session</span><span class="spacer"></span><FluentButton Appearance="ButtonAppearance.Primary" Disabled="Session.Exporting" OnClick="@(() => Session.ExportAsync(false))">Export micrographs</FluentButton><FluentButton Disabled="Session.Exporting" OnClick="@(() => Session.ExportAsync(true))">Export particle coordinates</FluentButton></div>
                 @if (Session.Exporting) { <p><FluentSpinner /> Writing STAR…</p> }
-                @foreach (var export in Session.Exports.AsEnumerable().Reverse()) { <div class="export-entry"><b>J@export.Number</b><div>@export.Kind<span>@export.Movies.ToString("N0") micrographs · @export.Created.ToString("HH:mm")</span></div><span class="spacer"></span><span>@export.Items.ToString("N0") rows</span><a href="@Files.GetUrl(export.Path)" download>Download STAR</a></div> }
+                @foreach (var export in Session.Exports.AsEnumerable().Reverse()) { <div class="export-entry"><b>J@(export.Number)</b><div>@export.Kind<span>@export.Movies.ToString("N0") micrographs · @export.Created.ToString("HH:mm")</span></div><span class="spacer"></span><span>@export.Items.ToString("N0") rows</span><a href="@Files.GetUrl(export.Path)" download>Download STAR</a></div> }
             </div>
         }
     </main>

@@ -342,6 +342,9 @@ public sealed class QueueRepository
             desiredCount,
             cancellationToken);
 
+    /// <summary>Every execution attempt the runtime holds now, for diagnostics.</summary>
+    public IReadOnlyList<ExecutionAttemptSnapshot> ExecutionAttempts => _runtime.Attempts;
+
     public bool HasExecutionAttempt(Job job) =>
         _runtime.Attempts.Any(attempt => attempt.Job == AddressOf(job));
 

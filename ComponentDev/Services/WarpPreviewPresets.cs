@@ -139,7 +139,7 @@ public sealed partial class WarpSessionPreview
         bool motionGridChanged = old.MotionGridAuto != next.MotionGridAuto || !next.MotionGridAuto && Differ(old, next, "MotionGrid", "MotionGridY", "MotionGridZ");
         bool ctfGridChanged = old.CtfGridAuto != next.CtfGridAuto || !next.CtfGridAuto && Differ(old, next, "CtfGridX", "CtfGridY");
         if (motionGridChanged || Differ(old, next, "InputPath", "Pixel", "TotalDose", "TargetPixelSize", "GainPath", "CorrectGain", "DefectsPath", "CorrectDefects", "GainFlipX", "GainFlipY", "GainTranspose", "EerGrouping", "MotionMin", "MotionMax", "MotionBfactor", "SkipFirst", "SkipLast", "ExportAverage", "ExportStack", "StackGroup")) return PreviewStage.All;
-        if (ctfGridChanged || Differ(old, next, "CtfMin", "CtfMax", "CtfWindow", "CtfQuality", "Voltage", "Cs", "Cc", "Amplitude", "IlluminationAperture", "EnergySpread", "DefocusMin", "DefocusMax", "FitPhase", "FitThickness", "Thickness", "UseMovieSum")) return PreviewStage.Ctf | PreviewStage.Enhance | PreviewStage.Pick | PreviewStage.Extract;
+        if (ctfGridChanged || Differ(old, next, "CtfMin", "CtfMax", "CtfWindow", "CtfQuality", "Voltage", "Cs", "Cc", "Amplitude", "IlluminationAperture", "EnergySpread", "DefocusMin", "DefocusMax", "FitPhase", "FitThickness", "Thickness")) return PreviewStage.Ctf | PreviewStage.Enhance | PreviewStage.Pick | PreviewStage.Extract;
         if (Differ(old, next, "Denoise", "DeconvolutionStrength", "DeconvolutionFalloff")) return PreviewStage.Enhance | PreviewStage.Pick | PreviewStage.Extract;
         if (Differ(old, next, "Diameter", "Threshold", "PickingEnabled", "MinSeparation")) return PreviewStage.Pick | PreviewStage.Extract;
         if (old.Box != next.Box) return PreviewStage.Extract;

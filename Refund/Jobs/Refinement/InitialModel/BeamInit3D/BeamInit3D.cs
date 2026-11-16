@@ -56,6 +56,7 @@ public class BeamInit3D : BeamParticleJob
     [RelayProperty] public int BlobCount { get; set; } = 40;
 
     [RelayProperty, Clearable] public bool FinalAssignmentAvailable { get; set; }
+    public override Refund.Services.Storage.IntermediateRule IntermediateRule => Refund.Services.Storage.IntermediateRules.BeamInit3D;
     public override string IterationMetadataDirectory(int iteration) => Path.Combine(BeamDirectory, "warp_metadata");
     public string ParticleStar => Path.Combine(BeamDirectory, "initial_model_data.star");
     public string SummaryFile => Path.Combine(BeamDirectory, "summary.json");

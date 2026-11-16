@@ -1,0 +1,12 @@
+/* Warp export card: two sample micrographs (with the extracted particles, for particle exports) beside the numbers. */
+.export-card { display: flex; align-items: center; gap: 12px; width: 100%; height: 100%; padding: 6px 10px; box-sizing: border-box; font-size: 11px; line-height: 1.3; }
+.samples { display: flex; gap: 6px; height: 128px; flex: none; }
+.sample { position: relative; height: 100%; overflow: hidden; border-radius: 3px; background: var(--colorNeutralBackground3); }
+.sample img, .sample svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.sample img { object-fit: cover; }
+.sample circle { fill: none; stroke: #f3d34a; stroke-width: 1.2px; vector-effect: non-scaling-stroke; opacity: .85; }
+.figures { display: flex; flex-direction: column; min-width: 0; color: var(--colorNeutralForeground2); }
+.figures span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.figures .count { font-size: 20px; font-weight: 600; line-height: 1.1; color: var(--colorNeutralForeground1); font-variant-numeric: tabular-nums; }
+.figures .what { margin-bottom: 4px; color: var(--colorNeutralForeground1); }
+.figures .source { margin-top: 4px; color: var(--colorNeutralForeground3); }

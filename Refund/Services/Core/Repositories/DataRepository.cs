@@ -43,6 +43,15 @@ public class DataRepository : IDisposable
     private bool _disposed;
     private readonly HashSet<Project> _pendingUpdateProjects = new();
     private readonly HashSet<Space> _pendingUpdateSpaces = new();
+    // Spaces whose only changes are storage measurements, with the time of the first such change (UTC).
+    private readonly Dictionary<Space, DateTime> _deferredSpaces = new();
+
+    /// <summary>
+    /// How long measurement-only changes may wait before their space is written. Rewriting a large space.relay on
+    /// every measurement would churn the file system and the GC during catch-up.
+    /// </summary>
+    internal TimeSpan DeferredSaveDelay { get; set; } = TimeSpan.FromMinutes(5);
+    internal Func<DateTime> UtcNow { get; set; } = () => DateTime.UtcNow;
 
     /// <summary>
     /// Read-only collection of all projects.
@@ -155,7 +164,10 @@ public class DataRepository : IDisposable
 
                 Space[] spaces;
                 lock (_saveLock)
+                {
+                    PromoteDeferredSpaces(UtcNow() - DeferredSaveDelay);
                     spaces = _pendingUpdateSpaces.ToArray();
+                }
                 foreach (var space in spaces)
                 {
                     SaveSpace(space);
@@ -855,6 +867,71 @@ public class DataRepository : IDisposable
         }
     }
 
+    /// <summary>
+    /// Records a new measurement of a job's folder. Doesn't count as an edit: UpdateDate and UpdatedBy stay, and the
+    /// space is written within <see cref="DeferredSaveDelay"/> or with its next regular save.
+    /// </summary>
+    public void SetJobStorage(Job job, JobStorage storage)
+    {
+        ArgumentNullException.ThrowIfNull(job);
+        lock (_saveLock)
+        {
+            job.Storage = storage;
+            MarkDeferred(job.Space);
+        }
+    }
+
+    /// <summary>Records a new listing of a space's root, saved like <see cref="SetJobStorage"/>.</summary>
+    public void SetSpaceStorage(Space space, SpaceStorage storage)
+    {
+        ArgumentNullException.ThrowIfNull(space);
+        lock (_saveLock)
+        {
+            space.Storage = storage;
+            MarkDeferred(space);
+        }
+    }
+
+    private void MarkDeferred(Space space)
+    {
+        if (space != null && !_pendingUpdateSpaces.Contains(space))
+            _deferredSpaces.TryAdd(space, UtcNow());
+    }
+
+    // Spaces saved anyway carry their measurements along; others wait until their first measurement is old enough.
+    private void PromoteDeferredSpaces(DateTime olderThan)
+    {
+        if (_deferredSpaces.Count == 0)
+            return;
+        List<Space> due = null;
+        foreach (var (space, since) in _deferredSpaces)
+            if (since <= olderThan || _pendingUpdateSpaces.Contains(space))
+                (due ??= []).Add(space);
+        if (due == null)
+            return;
+        foreach (var space in due)
+        {
+            _deferredSpaces.Remove(space);
+            _pendingUpdateSpaces.Add(space);
+        }
+    }
+
+    /// <summary>Writes every pending change now, measurements included (shutdown).</summary>
+    public void FlushChanges()
+    {
+        lock (_persistenceLock)
+        {
+            if (_disposed)
+                return;
+            lock (_saveLock)
+                PromoteDeferredSpaces(DateTime.MaxValue);
+            SaveChanges(null);
+        }
+    }
+
+    /// <summary>Spaces with measurements not yet written.</summary>
+    internal int DeferredSpaceCount { get { lock (_saveLock) return _deferredSpaces.Count; } }
+
     #endregion
 
     #region Find objects
@@ -1029,6 +1106,8 @@ public class DataRepository : IDisposable
             if (disposing)
             {
                 _autoSaveTimer?.Dispose();
+                lock (_saveLock)
+                    PromoteDeferredSpaces(DateTime.MaxValue);
                 SaveChanges(null);
             }
         }

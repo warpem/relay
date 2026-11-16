@@ -46,6 +46,7 @@
                         <td class="status-column"><span class="status-chip movie-status" title="@movie.Error"><i></i>@Session.Status(movie)</span></td>
                         <td class="metric-column">@Reading(movie, "defocus")</td>
                         <td class="metric-column">@Reading(movie, "ctf")</td>
+                        <td class="metric-column">@Reading(movie, "signal")</td>
                         <td class="motion-column">@Reading(movie, "motion")</td>
                         <td class="metric-column">@Reading(movie, "ice")</td>
                         <td class="metric-column">@Reading(movie, "particles")</td>
@@ -98,7 +99,7 @@
     private sealed record Column(string Key, string Label, string Class);
     private static readonly Column[] Columns = [
         new("number", "Movie", "number-column"), new("filename", "Filename", "filename-column"), new("status", "Status", "status-column"),
-        new("defocus", "Defocus (µm)", "metric-column defocus-column"), new("ctf", "CTF fit (Å)", "metric-column"), new("motion", "Motion (Å/frame)", "motion-column"),
+        new("defocus", "Defocus (µm)", "metric-column defocus-column"), new("ctf", "CTF fit (Å)", "metric-column"), new("signal", "CTF signal (σ)", "metric-column"), new("motion", "Motion (Å/frame)", "motion-column"),
         new("ice", "Ice (Å)", "metric-column"), new("particles", "Particles", "metric-column"),
         new("astigmatism", "Astig. (µm)", "metric-column"), new("angle", "Angle (°)", "metric-column") ];
     private readonly ViewState _localState = new();
@@ -179,12 +180,12 @@
     private static double? Value(WarpMovie movie, string metric)
     {
         if (metric == "number") return movie.Index;
-        var stage = metric == "motion" ? WarpStage.Motion : metric == "particles" ? WarpStage.Pick : WarpStage.Ctf;
+        var stage = metric == "motion" ? WarpStage.Motion : metric == "particles" ? WarpStage.Extract : WarpStage.Ctf;
         if (!movie.Done.HasFlag(stage)) return null;
-        double value = metric switch { "defocus" => movie.Defocus, "ctf" => movie.Ctf, "motion" => movie.Motion, "ice" => movie.Ice, "particles" => movie.Picks, "astigmatism" => movie.Astigmatism, "angle" => movie.AstigmatismAngle, _ => movie.Index };
+        double value = metric switch { "defocus" => movie.Defocus, "ctf" => movie.Ctf, "signal" => movie.CtfSignal, "motion" => movie.Motion, "ice" => movie.Ice, "particles" => movie.Particles, "astigmatism" => movie.Astigmatism, "angle" => movie.AstigmatismAngle, _ => movie.Index };
         return double.IsFinite(value) ? value : null;
     }
-    private static string Reading(WarpMovie movie, string metric) => Value(movie, metric)?.ToString(metric is "ice" or "particles" ? "N0" : metric == "angle" ? "F1" : "F2", CultureInfo.CurrentCulture) ?? "—";
+    private static string Reading(WarpMovie movie, string metric) => Value(movie, metric)?.ToString(metric is "ice" or "particles" ? "N0" : metric is "angle" or "signal" ? "F1" : "F2", CultureInfo.CurrentCulture) ?? "—";
     private string SortAria(string column) => View.SortColumn != column ? "none" : View.Descending ? "descending" : "ascending";
     private void Sort(string column) { View.Descending = View.SortColumn == column && !View.Descending; View.SortColumn = column; View.PageIndex = 0; Refresh(); }
     private void Search(string query) { View.Query = query ?? ""; View.PageIndex = 0; View.Selected.Clear(); Refresh(); UpdateSelectionCounts(); }

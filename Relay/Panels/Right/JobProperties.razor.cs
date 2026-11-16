@@ -183,10 +183,12 @@ public partial class JobProperties : ComponentBase, IDisposable
             if (_iterationsWithResults.Any() && !_resultIterationSetManually)
                 _resultIteration = _iterationsWithResults.Max();
 
-            // Ensure the selected iteration is valid
+            // Ensure the selected iteration is valid (cleaning can remove a hand-picked one)
             _resultIteration = Math.Min(_resultIteration, _iterationsWithResults.Any() ? 
                                                               _iterationsWithResults.Max() : 
                                                               -1);
+            if (_resultIteration >= 0 && !_iterationsWithResults.Contains(_resultIteration))
+                _resultIteration = _iterationsWithResults.Where(i => i < _resultIteration).DefaultIfEmpty(_iterationsWithResults.Max()).Max();
 
             // Find ports with downloadable resources for the current iteration
             foreach (var port in job.PortsOut.Values)

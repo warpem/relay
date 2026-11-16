@@ -39,6 +39,9 @@ public sealed class ReadOnlySpace : IIdentifiable, IAudited, IAnnotated, IJobCon
     /// This directory contains all the job directories and space metadata.
     /// </summary>
     public string RootDirectory => _space.RootDirectory;
+
+    /// <summary>Leftover folders and loose files in the root, as last listed by the storage service; null until listed.</summary>
+    public SpaceStorage Storage => _space.Storage;
     
     /// <summary>
     /// Gets the path to the file containing this space's serialized data.

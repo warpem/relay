@@ -1,8 +1,8 @@
-/* Astigmatism polar plot. Its four rows join the particle histogram's through the diagnostics subgrid. */
+/* Astigmatism polar plot: four rows (heading, filter, plot, key) in the diagnostics grid, beside the status colors. */
 .astigmatism { display: grid; grid-row: span 4; grid-template-rows: subgrid; row-gap: var(--w-space-s); min-width: 0; align-content: start; }
 .plot-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--w-space-s); min-height: 28px; }
 .plot-heading h3 { white-space: nowrap; }
-/* Top-aligned, so it shares a line with the histogram's first filter row. */
+/* Top-aligned under the heading. */
 .plot-filters { align-self: start; display: flex; flex-wrap: wrap; align-items: center; gap: var(--w-space-xs) var(--w-space-m); }
 .range-label { font-size: var(--w-text-s); margin-right: 2px; }
 .unit { font-size: var(--w-text-s); color: var(--w-muted); }

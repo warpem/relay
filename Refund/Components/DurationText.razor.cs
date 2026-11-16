@@ -126,9 +126,9 @@ public partial class DurationText : ComponentBase, IAsyncDisposable
             }
             _objectReference?.Dispose();
         }
-        catch (JSDisconnectedException)
+        catch (Exception ex) when (ex is JSDisconnectedException or OperationCanceledException or ObjectDisposedException)
         {
-            // Safely ignore JS disconnection errors during disposal
+            // A closed circuit cancels or refuses the calls; there is nothing left to clean up in the browser.
         }
     }
 }

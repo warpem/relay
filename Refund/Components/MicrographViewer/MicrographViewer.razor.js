@@ -103,15 +103,17 @@ function fit(state) {
     schedule(state);
     notifyViewport(state);
 }
-function zoom(state, value) {
+// Zooms to value (clamped to 5% or the fit, up to 200% or the fit), keeping the image point at viewport position
+// (px, py) in place: the pointer for wheel zoom, the centre otherwise. The applied zoom is reported back to .NET.
+function zoom(state, value, px = state.viewWidth / 2, py = state.viewHeight / 2) {
     if (!state.width) return;
     ensureFullResolution(state);
     const fitZoom = Math.min(state.viewWidth / state.width, state.viewHeight / state.height);
     const next = Math.max(Math.min(.05, fitZoom), Math.min(Math.max(2, fitZoom), value));
-    const x = (state.viewWidth / 2 - state.tx) / state.zoom, y = (state.viewHeight / 2 - state.ty) / state.zoom;
+    const x = (px - state.tx) / state.zoom, y = (py - state.ty) / state.zoom;
     state.zoom = next;
-    state.tx = state.viewWidth / 2 - x * next;
-    state.ty = state.viewHeight / 2 - y * next;
+    state.tx = px - x * next;
+    state.ty = py - y * next;
     state.fitted = false;
     schedule(state);
     notifyViewport(state);
@@ -221,7 +223,10 @@ function create(root, callback) {
     canvas.addEventListener('wheel', event => {
         event.preventDefault();
         const factor = 1 + Math.abs(event.deltaY) / 50;
-        zoom(state, state.zoom * (event.deltaY < 0 ? factor : 1 / factor));
+        const rect = canvas.getBoundingClientRect();
+        const px = rect.width ? (event.clientX - rect.left) * state.viewWidth / rect.width : state.viewWidth / 2;
+        const py = rect.height ? (event.clientY - rect.top) * state.viewHeight / rect.height : state.viewHeight / 2;
+        zoom(state, state.zoom * (event.deltaY < 0 ? factor : 1 / factor), px, py);
     }, { passive: false, signal });
     canvas.addEventListener('pointerdown', event => {
         if (event.button !== 1) return;

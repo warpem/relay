@@ -1,0 +1,22 @@
+.logs-page { display: flex; flex-direction: column; gap: 0.75rem; padding: 0.5rem; height: 100%; min-height: 0; }
+.logs-note { color: var(--colorNeutralForeground3); margin: 0; }
+.log-filters { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+
+.log-table { flex: 1; min-height: 240px; overflow: auto; font-size: 12.5px; border-top: 1px solid var(--colorNeutralStroke2); }
+.log-row { display: grid; grid-template-columns: 64px 44px 180px minmax(0, 1fr); gap: 0 10px; padding: 3px 6px; border-bottom: 1px solid var(--colorNeutralStroke3); cursor: default; }
+.log-row:hover { background: var(--colorNeutralBackground1Hover); }
+.log-time, .log-level { color: var(--colorNeutralForeground3); font-variant-numeric: tabular-nums; }
+.log-source { color: var(--colorNeutralForeground2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.log-message { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.log-row.open .log-message { white-space: pre-wrap; overflow: visible; }
+.log-has-exception { color: var(--colorNeutralForeground3); }
+.log-exception { grid-column: 1 / -1; margin: 4px 0 2px; padding: 6px 8px; white-space: pre-wrap; font-size: 11.5px; background: var(--colorNeutralBackground3); border-radius: 4px; }
+.log-row.warning .log-level { color: #c19c00; }
+.log-row.error .log-level, .log-row.error .log-message { color: var(--error, #d13438); }
+.log-row.debug .log-message { color: var(--colorNeutralForeground3); }
+
+.log-files h3 { margin: 0 0 0.4rem; font-size: 15px; font-weight: 600; }
+.log-files-table { border-collapse: collapse; font-size: 13px; }
+.log-files-table td { padding: 2px 16px 2px 0; font-variant-numeric: tabular-nums; }
+.log-files-table a { color: var(--colorBrandForegroundLink); text-decoration: none; }
+.log-files-table a:hover { text-decoration: underline; }

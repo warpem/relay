@@ -73,6 +73,8 @@
 .stat { display: flex; flex-direction: column; min-width: 0; }
 .stat dt { font-size: var(--w-text-s); color: var(--w-muted); white-space: nowrap; }
 .stat dd { margin: 0; font-weight: 600; white-space: nowrap; }
+/* Processed's speed, under its count; the line is kept while there is no estimate so the header does not jump. */
+.stat dd.stat-rate { font-size: var(--w-text-s); font-weight: 400; color: var(--w-muted); }
 .stat.warning dd, .stat.warning dt { color: var(--w-warn); }
 .stat.danger dd, .stat.danger dt { color: var(--w-bad); }
 .training-link, .error-link { border: 0; padding: 0; background: none; color: inherit; font-weight: inherit; cursor: pointer; text-align: left; }
@@ -132,9 +134,8 @@ main.workspace.setup ::deep .warp-setup { flex: 1; }
 .range-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--w-space-s); margin-top: var(--w-space-s); padding: var(--w-space-s); border-radius: var(--borderRadiusMedium); background: var(--w-selected-bg); }
 .range-actions > b { font-weight: 600; }
 .range-actions ::deep fluent-button { min-width: 0; }
-/* Astigmatism and particle scores share four rows (heading, filters, plot, key) through subgrid, so
-   their headings, inputs, plot frames and keys line up. The polar plot is square with a hard maximum;
-   --plot-inset is the circle's margin, which the histogram's plot area matches. */
+/* The astigmatism plot's four rows (heading, filter, plot, key) and the status colors beside it. The polar plot
+   is square with a hard maximum; --plot-inset is the circle's margin. */
 .collection-diagnostics {
     --diagnostic-size: clamp(180px, 18cqi, 320px);
     --plot-inset: 28px;
@@ -142,9 +143,12 @@ main.workspace.setup ::deep .warp-setup { flex: 1; }
     column-gap: var(--w-space-l); row-gap: var(--w-space-s);
     margin-top: var(--w-space); padding-top: var(--w-space); border-top: 1px solid var(--w-rule);
 }
-.status-key { display: flex; flex-wrap: wrap; gap: var(--w-space-xs) var(--w-space); margin-top: var(--w-space); font-size: var(--w-text-s); color: var(--w-muted); }
-.status-key > span { display: inline-flex; align-items: center; gap: 6px; }
-.status-key i { width: 8px; height: 8px; border-radius: 50%; }
+/* Beside the astigmatism plot: its heading on the plot's heading row, the colors listed below. */
+.status-key { grid-row: span 4; display: flex; flex-direction: column; gap: var(--w-space-s); min-width: 0; }
+.status-key h3 { display: flex; align-items: center; min-height: 28px; }
+.status-key ul { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: var(--w-space-xs) var(--w-space-m); margin: 0; padding: 0; list-style: none; font-size: var(--w-text-s); color: var(--w-muted); }
+.status-key li { display: inline-flex; align-items: center; gap: 6px; }
+.status-key i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 
 .movies-layout { min-width: 0; }
 .table-evidence { display: none; }
@@ -161,15 +165,18 @@ main.workspace.setup ::deep .warp-setup { flex: 1; }
 .export-option { display: flex; flex-direction: column; align-items: flex-start; gap: var(--w-space-s); padding: var(--w-space); border: 1px solid var(--w-rule); border-radius: var(--borderRadiusMedium); }
 .export-option p { color: var(--colorNeutralForeground2); flex: 1; margin-bottom: var(--w-space-xs); }
 .export-option p b { color: var(--colorNeutralForeground1); }
+.export-waiting { color: var(--w-muted); }
 .export-progress { display: flex; align-items: center; gap: var(--w-space-s); color: var(--colorNeutralForeground2); }
 .export-history-title { margin-top: var(--w-space-s); }
 .export-empty { color: var(--w-muted); }
 .export-history { border-top: 1px solid var(--w-rule); }
 .export-entry { display: grid; grid-template-columns: 110px minmax(0, 1fr) 140px 120px auto; align-items: center; gap: var(--w-space); min-height: 44px; border-bottom: 1px solid var(--w-rule); }
 .export-kind { font-weight: 600; }
-.export-file { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--colorNeutralForeground2); }
+.export-job { min-width: 0; overflow: hidden; }
 .export-rows { text-align: right; }
 .export-time { color: var(--w-muted); }
+/* An export that has not run, is running or failed shows its state where the numbers go. */
+.export-state { grid-column: span 3; color: var(--colorNeutralForeground2); }
 .export-entry > a { color: var(--colorBrandForegroundLink); text-decoration: none; }
 .export-entry > a:hover { text-decoration: underline; }
 

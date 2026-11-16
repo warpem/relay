@@ -847,24 +847,28 @@ public class RelaySession : IAsyncDisposable
     /// <summary>
     /// Asynchronously releases the resources used by the session.
     /// </summary>
+    /// <remarks>
+    /// Runs when the circuit closes, usually after its connection is gone, so the JavaScript cleanup is best-effort and
+    /// must never throw: an exception here stops the circuit's remaining scoped services from being disposed, and those
+    /// that subscribed to DataManager's events (JobStatusToaster) then keep the whole circuit alive.
+    /// </remarks>
     /// <returns>A value task representing the asynchronous dispose operation.</returns>
     public async ValueTask DisposeAsync()
     {
         _navigationManager.LocationChanged -= HandleLocationChanged;
-
-        if (_initialized && _objectReference != null)
+        var reference = _objectReference;
+        _objectReference = null;
+        if (!_initialized || reference == null) return;
+        try
         {
-            try 
-            {
-                await _jsRuntime.InvokeVoidAsync("relaySessionInterop.dispose");
-                _objectReference.Dispose();
-            }
-            catch (InvalidOperationException) 
-            {
-                // Ignore JavaScript interop errors during prerendering
-            }
-            _objectReference = null;
+            await _jsRuntime.InvokeVoidAsync("relaySessionInterop.dispose");
         }
+        catch (Exception ex) when (ex is JSDisconnectedException or OperationCanceledException or ObjectDisposedException
+                                       or InvalidOperationException or JSException)
+        {
+            // The browser is gone (or still prerendering); its side needs no cleanup.
+        }
+        finally { reference.Dispose(); }
     }
 }
 
@@ -922,7 +926,12 @@ public enum OverlayScreenType
     /// <summary>
     /// The current user's personal settings overlay (e.g. access tokens).
     /// </summary>
-    Personal
+    Personal,
+
+    /// <summary>
+    /// The storage assistant: how much jobs keep on disk, and clearing or cleaning them.
+    /// </summary>
+    Storage
 }
 
 /// <summary>

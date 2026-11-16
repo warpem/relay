@@ -24,7 +24,7 @@ public class Motion2D : WarpToolsJobGpu, IClusterJob
     
     [UiFieldGroup("Fitting parameters", 0)]
     [UiDecimal("range_min", "Minimum resolution",
-        helpText: "Minimum resolution in Angstrom to consider in motion fit",
+        stepSize: 0.1, helpText: "Minimum resolution in Angstrom to consider in motion fit",
         min: 1,
         max: 1,
         unit: "Å")]

@@ -17,51 +17,57 @@
     </div>
     <div class="picking-content">
         <figure class="picking-image-region">
+            @* View controls at the top left, as in the Monitor. *@
+            <div class="picking-controls">
+                <FluentCheckbox @bind-Value="_showPicks" Label="Picks" title="Show the picks within the bounds being tried" Disabled="@(!Session.HasCurrentParticleMetrics(Movie))" />
+                @if (Session.Settings.Denoise) { <div class="view-modes segmented" role="group" aria-label="Micrograph"><FluentButton Class="@(!ShowEnhanced ? "selected" : null)" Appearance="ButtonAppearance.Subtle" OnClick="@(() => _enhanced = false)">Average</FluentButton><FluentButton Class="@(ShowEnhanced ? "selected" : null)" Appearance="ButtonAppearance.Subtle" Disabled="@(!Movie.Done.HasFlag(WarpStage.Enhance))" OnClick="@(() => _enhanced = true)">Denoised</FluentButton></div> }
+            </div>
             <div class="picking-image image-well">
                 @if (Movie.Done.HasFlag(WarpStage.Motion) && !string.IsNullOrEmpty(Movie.AveragePath))
                 {
-                    <MicrographViewer @key="ViewerKey" MicrographPath="@(ShowEnhanced ? Movie.EnhancedPath : Movie.AveragePath)" PreviewPath="@WarpSession.ExistingPreview(ShowEnhanced ? Movie.EnhancedPath : Movie.AveragePath)" ResultRevision="@(ShowEnhanced ? Movie.ResultRevision : Movie.MotionRevision)" ThumbnailPath="@Movie.ThumbnailPath" ParticleStarPath="@(_showPicks && Session.HasCurrentParticleMetrics(Movie) ? Session.GetFilteredParticleStar(Movie.Index, DisplayPixelSize) : null)" MinWidth="300" MinHeight="300" CanEditParticles="false" CanEditMask="false" CanControlParticleDisplay="false" DefaultParticleDiameter="@((double)Session.Settings.Diameter )" DefaultParticleBoxSize="@((double)(Session.Settings.Box * Session.Settings.TargetPixelSize) )" />
+                    <MicrographViewer @key="ViewerKey" MicrographPath="@(ShowEnhanced ? Movie.EnhancedPath : Movie.AveragePath)" PreviewPath="@WarpSession.ExistingPreview(ShowEnhanced ? Movie.EnhancedPath : Movie.AveragePath)" ResultRevision="@(ShowEnhanced ? Movie.ResultRevision : Movie.MotionRevision)" ThumbnailPath="@Movie.ThumbnailPath" ParticleStarPath="@(_showPicks ? Session.GetPicksWithinStar(Movie.Index, Bounds, DisplayPixelSize) : null)" MinWidth="300" MinHeight="300" CanEditParticles="false" CanEditMask="false" CanControlParticleDisplay="false" DefaultParticleDiameter="@((double)Session.Settings.Diameter )" DefaultParticleBoxSize="@((double)(Session.Settings.Box * Session.Settings.TargetPixelSize) )" />
                 }
                 else { <div class="empty-evidence">Waiting for motion correction</div> }
             </div>
         </figure>
         <aside class="picking-sidebar" aria-label="Picking">
-            <section>
-                <h3>View</h3>
-                <div class="view-modes segmented" role="group" aria-label="Micrograph"><FluentButton Class="@(!ShowEnhanced ? "selected" : null)" Appearance="ButtonAppearance.Subtle" OnClick="@(() => _enhanced = false)">Average</FluentButton><FluentButton Class="@(ShowEnhanced ? "selected" : null)" Appearance="ButtonAppearance.Subtle" Disabled="@(!Movie.Done.HasFlag(WarpStage.Enhance))" OnClick="@(() => _enhanced = true)">@DenoisedLabel</FluentButton></div>
-                <FluentCheckbox @bind-Value="_showPicks" Label="Show picks" Disabled="@(!Session.HasCurrentParticleMetrics(Movie))" />
-            </section>
-            <section>
-                <h3>This micrograph</h3>
-                @if (Session.ActiveStale(Movie).HasFlag(WarpStage.Pick)) { <p class="result-note">Picks are from previous settings and will be redone.</p> }
-                <dl class="pick-facts">
-                    <div><dt>Detected picks</dt><dd>@(Movie.Done.HasFlag(WarpStage.Pick) ? Movie.Picks.ToString("N0") : "Pending")</dd></div>
-                    <div><dt>Particle diameter</dt><dd>@Session.Settings.Diameter.ToString("0") Å</dd></div>
-                    <div><dt>Extraction box</dt><dd>@Session.Settings.Box px</dd></div>
-                </dl>
-                @if (OpenSetup.HasDelegate) { <FluentButton OnClick="OpenSetup">Picking settings</FluentButton> }
-            </section>
             <section class="sidebar-histogram">
-                <WarpParticleHistogram Session="Session" Update="Update" />
+                <WarpParticleHistogram Session="Session" Bounds="Bounds" BoundsChanged="BoundsChanged" Applied="Session.Settings.ParticleBounds" />
             </section>
+            <footer class="draft-actions @(Dirty ? "dirty" : "")">
+                <div>
+                    @if (Dirty) { <b>Unapplied bounds</b><span>@Session.GetParticleBoundsImpact(Bounds)</span>@if (Locked) { <span>Stop processing to apply them.</span> } }
+                    else { <span>Bounds applied</span> }
+                    @if (!string.IsNullOrEmpty(Error)) { <span class="error" role="alert">@Error</span> }
+                </div>
+                <FluentButton Disabled="@(!Dirty)" OnClick="Revert">Revert</FluentButton>
+                <FluentButton Appearance="ButtonAppearance.Primary" Disabled="@(!Dirty || Locked)" OnClick="Apply" Title="@(Locked ? "Stop processing to apply the bounds" : null)">Apply</FluentButton>
+            </footer>
         </aside>
     </div>
 </div>
 
 @code {
     [Parameter] public WarpSession Session { get; set; }
-    [Parameter, EditorRequired] public Func<Action<WarpSession>, Task> Update { get; set; }
-    [Parameter] public EventCallback OpenSetup { get; set; }
+    /// <summary>The particle score bounds being tried; extraction uses <see cref="WarpSettings.ParticleBounds"/> until they are applied.</summary>
+    [Parameter, EditorRequired] public WarpParticleBounds Bounds { get; set; }
+    [Parameter] public EventCallback<WarpParticleBounds> BoundsChanged { get; set; }
+    [Parameter] public EventCallback Apply { get; set; }
+    [Parameter] public EventCallback Revert { get; set; }
+    /// <summary>Processing is running, so the bounds can be tried but not applied.</summary>
+    [Parameter] public bool Locked { get; set; }
+    [Parameter] public string Error { get; set; }
     [Parameter] public WarpMovie Movie { get; set; }
     [Parameter] public EventCallback<int> SelectedIndexChanged { get; set; }
     [Parameter] public bool Follow { get; set; }
     [Parameter] public EventCallback<bool> FollowChanged { get; set; }
     // Enhancement always deconvolves; it denoises only when the denoiser is enabled in Setup.
-    private string DenoisedLabel => Session.Settings.Denoise ? "Denoised" : "Deconvolved";
     private bool _enhanced = true, _showPicks = true;
-    private bool ShowEnhanced => _enhanced && Movie.Done.HasFlag(WarpStage.Enhance) && !string.IsNullOrEmpty(Movie.EnhancedPath);
+    // Without denoising, picking ran on the average, and there is nothing else to show.
+    private bool ShowEnhanced => Session.Settings.Denoise && _enhanced && Movie.Done.HasFlag(WarpStage.Enhance) && !string.IsNullOrEmpty(Movie.EnhancedPath);
     // Convert physical geometry using the actual sampling of the displayed image.
     private double DisplayPixelSize => Math.Max(.001, ShowEnhanced ? Movie.EnhancedPixelSize : Movie.PixelSize);
     private string ViewerKey => $"{Movie.Id}-{Movie.MotionRevision}-{(ShowEnhanced ? Movie.ResultRevision : 0)}-{ShowEnhanced}-{Session.Settings.Diameter}-{Session.Settings.Box}-{Session.Settings.TargetPixelSize}";
+    private bool Dirty => Bounds != Session.Settings.ParticleBounds;
     private Task Select(int index) => SelectedIndexChanged.InvokeAsync(Math.Clamp(index, 0, Session.Movies.Count - 1));
 }

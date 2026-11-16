@@ -102,4 +102,23 @@ public class RelayConfiguration
     /// data files; override in relay.json when those files live elsewhere.
     /// </summary>
     public string DataProtectionKeysPath { get; set; } = "keys";
+
+    /// <summary>The background storage measurements behind the Storage overlay ("Storage" in relay.json).</summary>
+    public StorageOptions Storage { get; set; } = new();
+}
+
+/// <summary>How the storage service measures job folders.</summary>
+public class StorageOptions
+{
+    /// <summary>Whether job folders are measured at all.</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>Background threads walking folders (1–8). They run at the lowest CPU priority.</summary>
+    public int Workers { get; set; } = 2;
+
+    /// <summary>Most files, folders and links visited per second across all workers; halves while the file system is slow.</summary>
+    public double MaxEntriesPerSecond { get; set; } = 20_000;
+
+    /// <summary>Settled jobs are measured again after this many days. Status changes always trigger a new measurement.</summary>
+    public int RescanDays { get; set; } = 365;
 }

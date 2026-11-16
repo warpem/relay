@@ -1,0 +1,93 @@
+@page "/storage"
+@using System.Buffers.Binary
+@using Refund.Components.Storage
+@using Refund.Services.Storage
+@using Microsoft.FluentUI.AspNetCore.Components
+
+<PageTitle>Storage treemap</PageTitle>
+
+<div style="display: flex; flex-direction: column; gap: 10px; height: calc(100vh - 40px); padding: 12px; box-sizing: border-box; @(_dark ? "background:#333;color:#eee;" : "")">
+    <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+        <strong>Synthetic usage: @_jobs.ToString("N0") jobs, @_payload.Count.ToString("N0") tiles sent</strong>
+        @foreach (var n in new[] { 500, 5_000, 50_000 })
+        {
+            <FluentButton Appearance="@(_jobs == n ? ButtonAppearance.Primary : ButtonAppearance.Outline)" OnClick="@(() => Generate(n))">@n.ToString("N0") jobs</FluentButton>
+        }
+        <FluentSelect TOption="string" TValue="string" Items="@(new[] { "age", "stage", "owner" })" @bind-Value="_colorBy" Width="120px" />
+        <FluentSelect TOption="string" TValue="string" Items="@(new[] { "bytes", "files" })" @bind-Value="_metric" Width="120px" />
+        <FluentSwitch @bind-Value="_dark" Label="Dark" />
+        <span>@_built</span>
+    </div>
+    <div style="flex: 1; min-height: 300px; position: relative;">
+        <StorageTreemap Payload="@_payload" Metric="@_metric" ColorBy="@_colorBy" Dark="@_dark" OnResized="@(s => _area = s)" />
+    </div>
+</div>
+
+@code {
+    private TreemapPayload _payload = new();
+    private int _jobs;
+    private string _colorBy = "age", _metric = "bytes", _built = "";
+    private bool _dark;
+    private (double Width, double Height) _area = (1600, 700);
+
+    protected override void OnInitialized() => Generate(5_000);
+
+    // Projects > spaces > jobs > folders, with sizes spanning six orders of magnitude, like real job folders.
+    private void Generate(int jobs)
+    {
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var random = new Random(jobs);
+        var nodes = new List<(int Parent, double Bytes, double Files, float Age, TreemapKind Kind, byte Stage, byte Person, byte AgeBin, string Label)>();
+        int Add(int parent, double b, double f, float age, TreemapKind kind, byte stage, byte person, string label)
+        {
+            nodes.Add((parent, b, f, age, kind, stage, person, TreemapPayload.AgeBin(age), label));
+            return nodes.Count - 1;
+        }
+        int root = Add(-1, 0, 0, -1, TreemapKind.Root, 3, 1, "All projects");
+        int perProject = Math.Max(1, jobs / 12);
+        int made = 0;
+        for (int p = 1; made < jobs; p++)
+        {
+            int project = Add(root, 0, 0, -1, TreemapKind.Project, 3, 1, $"P{p}: Project {p}");
+            for (int s = 1; s <= 1 + random.Next(4) && made < jobs; s++)
+            {
+                int space = Add(project, 0, 0, -1, TreemapKind.Space, 3, 1, $"S{s}: Space {s}");
+                int count = Math.Min(jobs - made, perProject / 2 + random.Next(perProject));
+                for (int j = 1; j <= count; j++, made++)
+                {
+                    double bytes = Math.Pow(10, 4 + random.NextDouble() * 7.5);
+                    double files = Math.Max(1, bytes / Math.Pow(10, 4 + random.NextDouble() * 4));
+                    float age = (float)(random.NextDouble() * random.NextDouble() * 600);
+                    byte stage = (byte)random.Next(4), person = (byte)random.Next(5);
+                    if (bytes > 2e9 && random.Next(2) == 0)
+                    {
+                        int job = Add(space, 0, 0, age, TreemapKind.Job, stage, person, $"J{j}: Job {j}");
+                        Add(job, bytes * 0.7, files * 0.8, age, TreemapKind.JobFolder, stage, person, "processing");
+                        Add(job, bytes * 0.25, files * 0.15, age, TreemapKind.JobFolder, stage, person, "average");
+                        Add(job, bytes * 0.05, files * 0.05, age, TreemapKind.Files, stage, person, "Other files");
+                    }
+                    else
+                        Add(space, bytes, files, age, TreemapKind.Job, stage, person, $"J{j}: Job {j}");
+                }
+            }
+        }
+        var buffer = new byte[nodes.Count * TreemapPayload.NodeBytes];
+        for (int i = 0; i < nodes.Count; i++)
+        {
+            var n = nodes[i];
+            var span = buffer.AsSpan(i * TreemapPayload.NodeBytes);
+            BinaryPrimitives.WriteInt32LittleEndian(span, n.Parent);
+            BinaryPrimitives.WriteDoubleLittleEndian(span[4..], n.Bytes);
+            BinaryPrimitives.WriteDoubleLittleEndian(span[12..], n.Files);
+            BinaryPrimitives.WriteSingleLittleEndian(span[20..], n.Age);
+            span[24] = (byte)n.Kind; span[25] = n.Stage; span[26] = n.Person; span[27] = n.AgeBin;
+        }
+        _jobs = jobs;
+        _payload = new TreemapPayload
+        {
+            Nodes = buffer, Labels = nodes.Select(n => n.Label).ToArray(), Details = nodes.Select(_ => "Synthetic").ToArray(),
+            Targets = nodes.Select(_ => (TreemapTarget)null).ToArray(),
+        };
+        _built = $"built in {watch.ElapsedMilliseconds} ms";
+    }
+}

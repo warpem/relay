@@ -28,7 +28,7 @@ public class ExtractParticles2D : WarpToolsJobGpu, IClusterJob
     [UiDecimalNullable("angpix_out", "Output pixel size",
                        helpText: "Pixel size the extracted particles will be scaled to; leave empty to use binned pixel size from input settings",
                        min: 0,
-                       stepSize: 0.1,
+                       stepSize: 0.001,
                        unit: "Å")]
     [RelayProperty]
     public decimal? AngpixOut { get; set; } = null;

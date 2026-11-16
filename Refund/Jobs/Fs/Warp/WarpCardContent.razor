@@ -1,0 +1,105 @@
+@using Refund.Services.Warp
+@using Refund.Services.Core.DataManager
+@using Refund.DataModel
+@using Refund.DataModel.ReadOnly
+@inject DataManager DataManager
+@implements IDisposable
+
+@* The card reads the session's summary, never the session: showing a board loads no Warp session. *@
+@if (_summary is { } summary)
+{
+    var counts = StatusCounts(summary);
+    int total = counts.Sum(c => c.Count);
+    <div class="warp-card">
+        <svg class="status-pie" viewBox="0 0 100 100" role="img" aria-label="@PieLabel(counts, total)">
+            <circle cx="50" cy="50" r="38" class="ring" />
+            @{ double start = 0; }
+            @foreach (var (status, count) in counts.Where(c => c.Count > 0))
+            {
+                double share = (double)count / total;
+                string color = WarpSession.StatusColorFor(status);
+                // Filled ring sectors with exact radial edges (dashed circles leave kinks where browsers approximate the dash ends).
+                if (share >= .9999) { <circle cx="50" cy="50" r="38" class="whole" style="stroke:@color"><title>@status: @count.ToString("N0") (100%)</title></circle> }
+                else { <path d="@Sector(start, start + share)" fill="@color" stroke="@color"><title>@status: @count.ToString("N0") (@share.ToString("P0"))</title></path> }
+                start += share;
+            }
+            <text x="50" y="49" class="total">@total.ToString("N0")</text>
+            <text x="50" y="63" class="unit">@(total == 1 ? "movie" : "movies")</text>
+        </svg>
+        <ul class="status-legend" aria-hidden="true">
+            @foreach (var (status, count) in counts.Where(c => c.Count > 0))
+            {
+                <li><i style="background:@WarpSession.StatusColorFor(status)"></i><span>@status</span><b>@count.ToString("N0")</b></li>
+            }
+        </ul>
+        <dl class="card-stats">
+            <div><dt>Last input</dt><dd>@WarpSessionText.Age(summary.LastInputAt)</dd></div>
+            <div><dt>Queue</dt><dd>@WarpSessionText.Queue(summary)</dd></div>
+            <div><dt>Denoiser</dt><dd>@WarpSessionText.Denoiser(summary)</dd></div>
+            <div><dt>Received</dt><dd>@summary.Received.ToString("N0")</dd></div>
+            <div><dt>Processed</dt><dd>@summary.Complete.ToString("N0")@if (WarpSessionText.Rate(summary) is { } rate) { <small>@rate</small> }</dd></div>
+            <div><dt>Accepted</dt><dd>@summary.Accepted.ToString("N0")</dd></div>
+            <div><dt>Particles</dt><dd>@summary.ParticleCount.ToString("N0")</dd></div>
+            @if (summary.Failed > 0) { <div class="danger"><dt>Failed</dt><dd>@summary.Failed.ToString("N0")</dd></div> }
+        </dl>
+    </div>
+}
+else
+{
+    @* Until a summary exists (a new or cleared session, or one being summarized for the first time). *@
+    <Refund.Components.Jobs.BasicJobCardContent Job="@Job" />
+}
+
+@code {
+    [Parameter] public ReadOnlyJob Job { get; set; }
+    private WarpSessionSummary _summary;
+    private ReadOnlyWarpJob _job;
+    private bool _subscribed;
+    private Timer _timer;
+    private int _changed;
+    private DateTime _drawn;
+
+    protected override void OnParametersSet()
+    {
+        _job = Job as ReadOnlyWarpJob;
+        if (!_subscribed) { DataManager.WarpSessions.SummaryChanged += Changed; _subscribed = true; }
+        Load();
+        _timer ??= new Timer(_ => Refresh(), null, 2000, 2000);
+    }
+
+    // A cleared or deleted session has no data to show; a new one exists once processing starts again.
+    private void Load() => _summary = _job == null || _job.Status is JobStatus.Clearing or JobStatus.Deleted ? null : DataManager.WarpSessions.GetSummary(_job.Identity);
+
+    // Summaries change about once a second while processing; the card redraws at most every 2 s, and every 30 s
+    // regardless so "Last input" keeps ageing.
+    private void Changed(string key) { if (key == _job?.Identity.Key) Interlocked.Exchange(ref _changed, 1); }
+    private void Refresh()
+    {
+        if (Interlocked.Exchange(ref _changed, 0) == 0 && DateTime.UtcNow - _drawn < TimeSpan.FromSeconds(30)) return;
+        _ = InvokeAsync(() => { _drawn = DateTime.UtcNow; Load(); StateHasChanged(); });
+    }
+
+    private static List<(string Status, int Count)> StatusCounts(WarpSessionSummary summary) =>
+        WarpSession.StatusNames.Select((name, i) => (name, i < summary.StatusCounts.Length ? summary.StatusCounts[i] : 0)).ToList();
+
+    private static string PieLabel(List<(string Status, int Count)> counts, int total) => total == 0 ? "No movies yet"
+        : "Movie status: " + string.Join(", ", counts.Where(c => c.Count > 0).Select(c => $"{c.Status} {c.Count:N0}"));
+
+    // The ring the sectors fill: radius 38 with a 15-wide band, starting at 12 o'clock and running clockwise.
+    private const double Outer = 45.5, Inner = 30.5;
+    private static string Sector(double from, double to)
+    {
+        double a0 = 2 * Math.PI * from - Math.PI / 2, a1 = 2 * Math.PI * to - Math.PI / 2;
+        int large = to - from > .5 ? 1 : 0;
+        string P(double radius, double angle) => FormattableString.Invariant($"{50 + radius * Math.Cos(angle):0.###} {50 + radius * Math.Sin(angle):0.###}");
+        return FormattableString.Invariant($"M {P(Outer, a0)} A {Outer} {Outer} 0 {large} 1 {P(Outer, a1)} L {P(Inner, a1)} A {Inner} {Inner} 0 {large} 0 {P(Inner, a0)} Z");
+    }
+
+    public void Dispose()
+    {
+        _timer?.Dispose();
+        // The manager outlives every circuit; a handler left here would keep this card, and its circuit, alive.
+        if (_subscribed) DataManager.WarpSessions.SummaryChanged -= Changed;
+        _subscribed = false;
+    }
+}

@@ -22,7 +22,7 @@
             <div style="display: flex; column-gap: 8px; align-items: center;">
                 <div style="width: 24px; height: 24px; flex-shrink: 0;">
                     <FluentIcon Value="@job.GetStatusIcon(IconSize.Size24).WithStatusColor(job)"
-                                Title="@job.Status.GetStatusDescription()"/>
+                                Title="@job.GetStatusDescription()"/>
                 </div>
 
                 <h5 class="job-name">@job.QualifiedName</h5>
@@ -40,8 +40,7 @@
                     Style="height: 100%; padding: 0;">
             <FluentTab Id="job-details" Header="Details" Style="padding: 0.5rem 0; height: 100%;">
                 <div style="display: flex; flex-direction: column; justify-content: space-between; gap: 0.5rem; height: 100%;">
-                    @* The details scroll; the actions below stay in place however long the timeline grows. *@
-                    <div style="width: 100%; flex: 1 1 auto; min-height: 0; overflow-y: auto;">
+                    <div style="width: 100%; height: 100%;">
                         <div class="property-panel">
 
                             <div class="property-item">

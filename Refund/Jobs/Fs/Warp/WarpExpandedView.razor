@@ -27,7 +27,7 @@ else {
             <div class="stat" title="Movies waiting for processing with the current settings"><dt>Queue</dt><dd>@QueueSummary</dd></div>
             <div class="stat @(Session.Training || Session.AwaitingDenoiser > 0 ? "warning" : "")"><dt>Denoiser</dt><dd><button class="training-link" @onclick="@(() => ChangeView("Setup"))" title="@Session.DenoiserStatus">@DenoiserSummary</button></dd></div>
             <div class="stat"><dt>Received</dt><dd id="movie-count">@Session.Movies.Count.ToString("N0")</dd></div>
-            <div class="stat" title="Movies with motion and CTF results"><dt>Processed</dt><dd>@Session.Processed.ToString("N0")</dd></div>
+            <div class="stat" title="Movies with current results from every stage the settings require"><dt>Processed</dt><dd>@Session.Complete.ToString("N0")</dd>@if (WarpSessionText.Rate(Session.Summary) is { } rate) { <dd class="stat-rate" title="Movies processed per hour over the last 10 minutes; once caught up, the rate movies arrive at">@rate</dd> } else { <dd class="stat-rate" aria-hidden="true">&nbsp;</dd> }</div>
             <div class="stat" title="Processed movies that pass the filters or are kept"><dt>Accepted</dt><dd>@Session.Accepted.ToString("N0")</dd></div>
             <div class="stat" title="@ParticleTitle"><dt>Particles</dt><dd>@ParticleSummary</dd></div>
             @if (Session.Failed > 0) { <div class="stat danger"><dt>Failed</dt><dd><button class="error-link" @onclick="ShowFailures" title="Show failed movies">@Session.Failed.ToString("N0")</button></dd></div> }
@@ -56,15 +56,26 @@ else {
         }
     </RelayPopover>
     <nav class="workspace-nav" aria-label="Warp workspace">
-        @foreach (var view in Views) { <button class="@(_view == view ? "selected" : "")" @onclick="@(() => ChangeView(view))" aria-current="@(_view == view ? "page" : null)">@view@if (view == "Setup" && Dirty) { <i class="unsaved-dot" title="Unsaved settings"></i> }</button> }
+        @foreach (var view in Views) { <button class="@(_view == view ? "selected" : "")" @onclick="@(() => ChangeView(view))" aria-current="@(_view == view ? "page" : null)">@view@if (view == "Setup" && Dirty) { <i class="unsaved-dot" title="Unsaved settings"></i> }@if (view == "Picking" && BoundsDirty) { <i class="unsaved-dot" title="Unapplied particle score bounds"></i> }</button> }
     </nav>
     @if (Session.Training || Session.AwaitingDenoiser > 0)
     {
         <div class="message-bar warning training-banner" role="status">
-            <strong>@Session.DenoiserStatus</strong>
-            @if (Session.Training) { <progress aria-label="Training denoiser"></progress> }
-            @if (Session.AwaitingDenoiser > 0) { <span>@Session.AwaitingDenoiser.ToString("N0") micrographs are waiting for the denoiser.</span> } else if (Session.HasModel) { <span>Model v@Session.Model denoises new movies until training finishes.</span> }
-            @if (!ExecutionActive) { <span>Training resumes when processing starts.</span> }
+            @if (Session.Training)
+            {
+                <strong>Training denoiser</strong>
+                @if (Session.TrainingProgress is { } progress) { <progress aria-label="Training progress" max="100" value="@progress.Percent"></progress><span>@progress.Percent% · epoch @progress.Epoch of @progress.Epochs</span> } else { <progress aria-label="Training progress"></progress> }
+                @if (Session.AwaitingDenoiser > 0) { <span>@Session.AwaitingDenoiser.ToString("N0") @(Session.AwaitingDenoiser == 1 ? "micrograph" : "micrographs") will be denoised when training finishes, then continue processing.</span> }
+                else if (Session.HasModel) { <span>Until then, model v@(Session.Model) denoises new movies.</span> }
+                @if (!ExecutionActive) { <span>Training resumes when processing starts.</span> }
+            }
+            else
+            {
+                int ready = Math.Min(Session.TrainingMoviesReady, Session.Settings.TrainAfter);
+                <strong>Collecting movies to train the denoiser</strong>
+                <progress aria-label="Movies collected for training" max="@Session.Settings.TrainAfter" value="@ready"></progress><span>@ready.ToString("N0") of @Session.Settings.TrainAfter.ToString("N0")</span>
+                <span>Movies wait after CTF estimation until the first model is trained; @Session.AwaitingDenoiser.ToString("N0") @(Session.AwaitingDenoiser == 1 ? "is" : "are") waiting to be denoised.</span>
+            }
             <span class="spacer"></span><FluentButton Appearance="ButtonAppearance.Subtle" OnClick="@(() => ChangeView("Setup"))">Denoising settings</FluentButton>
         </div>
     }
@@ -101,9 +112,11 @@ else {
                     }
                     <div class="collection-diagnostics" aria-label="Whole collection diagnostics">
                         <WarpAstigmatismPlot Session="Session" Update="UpdateSession" Movie="Selected" SelectedIndexChanged="SelectMovie" />
-                        <WarpParticleHistogram Session="Session" Update="UpdateSession" />
+                        <section class="status-key" aria-label="Status colors">
+                            <h3>Status</h3>
+                            <ul>@foreach (var status in WarpSession.StatusNames) { <li><i style="background:@WarpSession.StatusColorFor(status)"></i>@status</li> }</ul>
+                        </section>
                     </div>
-                    <div class="status-key" aria-label="Status colors">@foreach (var status in WarpSession.StatusNames) { <span><i style="background:@WarpSession.StatusColorFor(status)"></i>@status</span> }</div>
                 </section>
                 <section class="preview-column" aria-label="@(_follow ? "Latest result" : "Selected micrograph")">
                     <WarpEvidence Session="Session" Update="UpdateSession" Movie="Selected" SelectedIndexChanged="SelectMovie" Follow="_follow" FollowChanged="@((bool v) => SetFollow(v))" />
@@ -112,7 +125,8 @@ else {
         }
         else if (_view == "Picking")
         {
-            <WarpPicking OpenSetup="@(() => ChangeView("Setup"))" Session="Session" Update="UpdateSession" Movie="Selected" SelectedIndexChanged="SelectMovie" Follow="_follow" FollowChanged="@((bool v) => SetFollow(v))" />
+            <WarpPicking Session="Session" Movie="Selected" SelectedIndexChanged="SelectMovie" Follow="_follow" FollowChanged="@((bool v) => SetFollow(v))"
+                         Bounds="_bounds" BoundsChanged="@((WarpParticleBounds b) => { _bounds = b; _boundsError = null; })" Apply="ApplyBounds" Revert="RevertBounds" Locked="ExecutionActive" Error="@_boundsError" />
         }
         else if (_view == "Movies")
         {
@@ -121,33 +135,40 @@ else {
         else if (_view == "Exports")
         {
             <div class="exports-workspace">
-                <p class="exports-intro">Exports capture the current accepted selection as a new Relay job you can connect downstream. Processing can keep running.</p>
+                <p class="exports-intro">Each export is a Relay job you can connect downstream. It writes the accepted selection when it runs, so clearing and running it again exports the session as it is then. Processing can keep running.</p>
+                @{ var micrographExport = Session.ExportCounts(false); var particleExport = Session.ExportCounts(true); int awaitingExtraction = micrographExport.Movies - particleExport.Movies; }
                 <div class="export-options">
                     <section class="export-option">
                         <h2>Micrographs</h2>
-                        <p><b>@Session.Accepted.ToString("N0")</b> accepted micrographs with motion and CTF metadata, as a micrograph set.</p>
-                        <FluentButton Appearance="ButtonAppearance.Primary" Disabled="@(Session.Exporting || Session.Accepted == 0)" OnClick="@(() => Export(false))">Export micrographs</FluentButton>
+                        <p><b>@micrographExport.Movies.ToString("N0")</b> accepted micrographs with current motion and CTF, as a micrograph set.</p>
+                        <FluentButton Appearance="ButtonAppearance.Primary" Disabled="@(Session.Exporting || micrographExport.Movies == 0)" OnClick="@(() => Export(false))">Export micrographs</FluentButton>
                     </section>
                     <section class="export-option">
                         <h2>Particles</h2>
-                        <p>Picks within the particle score bounds from the <b>@Session.Accepted.ToString("N0")</b> accepted micrographs, extracted as a particle set.</p>
-                        <FluentButton Appearance="ButtonAppearance.Primary" Disabled="@(Session.Exporting || Session.Accepted == 0)" OnClick="@(() => Export(true))">Export particles</FluentButton>
+                        <p>The <b>@particleExport.Particles.ToString("N0")</b> particles extracted from <b>@particleExport.Movies.ToString("N0")</b> accepted micrographs, as a particle set.@if (awaitingExtraction > 0) { <span class="export-waiting">@($" {awaitingExtraction:N0} more {(awaitingExtraction == 1 ? "awaits" : "await")} picking or extraction.")</span> }</p>
+                        <FluentButton Appearance="ButtonAppearance.Primary" Disabled="@(Session.Exporting || particleExport.Movies == 0)" OnClick="@(() => Export(true))">Export particles</FluentButton>
                     </section>
                 </div>
                 @if (Session.Exporting) { <p class="export-progress"><FluentSpinner Size="SpinnerSize.Tiny" /> Writing STAR file…</p> }
                 <h2 class="export-history-title">Previous exports</h2>
-                @if (Session.Exports.Count == 0) { <p class="export-empty">Nothing exported yet.</p> }
+                @{ var exportJobs = ExportJobs(); }
+                @if (exportJobs.Count == 0) { <p class="export-empty">Nothing exported yet.</p> }
                 else
                 {
                     <div class="export-history">
-                        @foreach (var export in Session.Exports.AsEnumerable().Reverse())
+                        @foreach (var exportJob in exportJobs)
                         {
+                            var m = exportJob.Manifest;
                             <div class="export-entry">
-                                <span class="export-kind">@(export.Particles ? "Particles" : "Micrographs")</span>
-                                <span class="export-file" title="@export.StarPath">@Path.GetFileName(export.StarPath)</span>
-                                <span class="export-rows">@(export.Particles ? $"{export.ParticleCount:N0} particles" : $"{export.MovieCount:N0} micrographs")</span>
-                                <span class="export-time">@export.Created.ToLocalTime().ToString("MMM d, HH:mm")</span>
-                                <a href="@Files.GetUrl(export.StarPath)" download>Download STAR</a>
+                                <span class="export-kind">@(exportJob.Particles ? "Particles" : "Micrographs")</span>
+                                <span class="export-job"><Refund.Components.Jobs.JobLine Job="exportJob" FontSize="var(--w-text)" ShowStatus="false" /></span>
+                                @if (m != null && exportJob.Status is not (Refund.DataModel.JobStatus.Failed or Refund.DataModel.JobStatus.Aborted or Refund.DataModel.JobStatus.Interrupted))
+                                {
+                                    <span class="export-rows">@(m.Particles ? $"{m.ParticleCount:N0} particles" : $"{m.MovieCount:N0} micrographs")</span>
+                                    <span class="export-time">@m.Created.ToLocalTime().ToString("MMM d, HH:mm")</span>
+                                    <a href="@Files.GetUrl(exportJob.StarPath)" download>Download STAR</a>
+                                }
+                                else { <span class="export-state">@ExportState(exportJob)</span> }
                             </div>
                         }
                     </div>

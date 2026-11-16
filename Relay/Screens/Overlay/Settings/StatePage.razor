@@ -1,0 +1,193 @@
+@using Refund.DataModel
+@using Refund.Services.Core.DataManager
+@using Refund.Services.Core.Session
+@using Refund.Services.Diagnostics
+@using Refund.Services.Warp
+@inject RelaySession Session
+@inject DataManager DataManager
+@inject RelayStateCollector Collector
+@inject Refund.Services.Storage.StorageService StorageMeasurements
+@implements IDisposable
+
+@if (Session.User?.Role != UserRole.Admin)
+{
+    <p class="state-note">Only administrators can see Relay's state.</p>
+}
+else if (_state is { } s)
+{
+    <div class="state-page">
+        <section>
+            <header>
+                <h3>Memory</h3>
+                <FluentButton Appearance="ButtonAppearance.Outline" Disabled="_collecting" OnClick="CollectGarbage" Title="A blocking, compacting full collection; shows what memory is really retained">Collect garbage</FluentButton>
+                @if (_collected is { } c) { <span class="state-note">Heap @MB(c.Before) → @MB(c.After) after a full collection</span> }
+            </header>
+            <dl class="figures">
+                <div><dt>Resident</dt><dd>@MB(s.WorkingSet)</dd></div>
+                <div><dt>Private</dt><dd>@(s.PrivateBytes > 0 ? MB(s.PrivateBytes) : "—")</dd></div>
+                <div><dt>.NET heap</dt><dd>@MB(s.GcHeap)</dd><small>@(s.GcCommitted > 0 ? $"{MB(s.GcCommitted)} committed, {MB(s.GcFragmented)} free inside" : "No collection yet")</small></div>
+                <div><dt>Collections</dt><dd>@s.Collections[2].ToString("N0") full</dd><small>@s.Collections[0].ToString("N0") gen 0, @s.Collections[1].ToString("N0") gen 1; @s.GcPausePercent.ToString("0.0")% paused</small></div>
+                <div><dt>Allocated since start</dt><dd>@GB(s.TotalAllocated)</dd></div>
+                <div><dt>Threads</dt><dd>@s.Threads.ToString("N0")</dd><small>@s.PoolThreads.ToString("N0") in the pool, @s.PendingWorkItems.ToString("N0") work items waiting</small></div>
+                <div><dt>Open handles</dt><dd>@(s.Handles > 0 ? s.Handles.ToString("N0") : "—")</dd></div>
+                <div><dt>Running for</dt><dd>@Duration(s.Uptime)</dd></div>
+            </dl>
+            <table class="state-table">
+                <thead><tr>@foreach (var name in RelayState.Generations.Take(s.GenerationSizes.Length)) { <th>@name</th> }</tr></thead>
+                <tbody><tr>@foreach (var size in s.GenerationSizes) { <td>@MB(size)</td> }</tr></tbody>
+            </table>
+        </section>
+
+        <section>
+            <header><h3>Browser connections</h3></header>
+            <dl class="figures">
+                <div><dt>Connected pages</dt><dd>@s.Circuits.Connected.ToString("N0")</dd></div>
+                <div><dt>Disconnected, kept</dt><dd>@s.Circuits.Disconnected.ToString("N0")</dd><small>Resumed if the tab comes back; freed after 30 min</small></div>
+                <div><dt>Opened since start</dt><dd>@s.Circuits.OpenedSinceStart.ToString("N0")</dd><small>@s.Circuits.ClosedSinceStart.ToString("N0") closed</small></div>
+            </dl>
+            @if (s.Circuits.PerUser.Count > 0)
+            {
+                <table class="state-table"><thead><tr><th>User</th><th>Pages</th></tr></thead>
+                    <tbody>@foreach (var (user, count) in s.Circuits.PerUser) { <tr><td>@user</td><td>@count.ToString("N0")</td></tr> }</tbody></table>
+            }
+        </section>
+
+        <section>
+            <header>
+                <h3>Warp sessions in memory</h3>
+                <FluentButton Appearance="ButtonAppearance.Outline" Disabled="@(s.WarpSessions.Count == 0)" OnClick="UnloadIdle" Title="Unloads every session that is not open, processing or exporting">Unload idle now</FluentButton>
+                @if (_unloaded is { } u) { <span class="state-note">@u.ToString("N0") @(u == 1 ? "session" : "sessions") unloaded</span> }
+            </header>
+            @if (s.WarpSessions.Count == 0)
+            {
+                <p class="state-note">None. Cards show saved summaries; a session loads when its Warp view opens.</p>
+            }
+            else
+            {
+                <table class="state-table">
+                    <thead><tr><th>Session</th><th>Movies</th><th title="About @(RelayState.WarpBytesPerMovie / 1000) KB per movie">Memory (est.)</th><th>In use</th><th>Last used</th></tr></thead>
+                    <tbody>
+                        @foreach (var w in s.WarpSessions)
+                        {
+                            <tr>
+                                <td>@SessionName(w.Identity)</td>
+                                <td>@w.Movies.ToString("N0")</td>
+                                <td>@MB(w.Movies * RelayState.WarpBytesPerMovie)</td>
+                                <td>@InUse(w)</td>
+                                <td>@Ago(w.LastUsed)@if (w.Leases == 0 && !w.Running && !w.Exporting && s.WarpIdleUnload is { } idle) { <small> · unloads @UnloadsIn(w.LastUsed, idle)</small> }</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </section>
+
+        <section>
+            <header>
+                <h3>Storage measurements</h3>
+                @if (_storage is { Enabled: true })
+                {
+                    <FluentSwitch Value="@_storage.Paused" ValueChanged="@((bool v) => { StorageMeasurements.Paused = v; _storage = StorageMeasurements.GetProgress(); })" Label="Paused" />
+                }
+            </header>
+            @if (_storage is not { } st || !st.Enabled)
+            {
+                <p class="state-note">Switched off ("Storage": { "Enabled": false } in relay.json).</p>
+            }
+            else
+            {
+                <dl class="figures">
+                    <div><dt>Jobs measured</dt><dd>@st.Measured.ToString("N0")</dd><small>of @st.Jobs.ToString("N0")</small></div>
+                    <div><dt>Entries per second</dt><dd>@st.EntriesPerSecond.ToString("N0")</dd><small>cap @st.Rate.ToString("N0") of @st.Ceiling.ToString("N0")@(st.SlowedDown ? ", slowed down" : "")</small></div>
+                    <div><dt>Time per entry</dt><dd>@(st.Latency.Recent > 0 ? $"{st.Latency.Recent:N0} µs" : "—")</dd><small>usually @(st.Latency.Usual > 0 ? $"{st.Latency.Usual:N0} µs" : "—")</small></div>
+                    <div><dt>Workers</dt><dd>@st.Workers</dd><small>@(st.NativeWalker ? "native walker, nice 19" : "managed walker")</small></div>
+                    <div><dt>Remaining</dt><dd>@(st.Remaining is { } r ? Duration(r) : "—")</dd><small>@string.Join(", ", st.Pending.OrderBy(kv => kv.Key).Select(kv => $"{kv.Value:N0} {kv.Key.ToString().ToLowerInvariant()}"))</small></div>
+                </dl>
+                @if (st.Walking.Count > 0)
+                {
+                    <table class="state-table"><thead><tr><th>Measuring</th><th>Entries so far</th><th>For</th></tr></thead>
+                        <tbody>@foreach (var w in st.Walking) { <tr><td>@(w.Target.IsJob ? $"P{w.Target.ProjectId}/S{w.Target.SpaceId}/J{w.Target.JobId}" : w.Target.Leftover != null ? $"P{w.Target.ProjectId}/S{w.Target.SpaceId}/{w.Target.Leftover}" : $"P{w.Target.ProjectId}/S{w.Target.SpaceId} root")</td><td>@w.Entries.ToString("N0")</td><td>@Duration(w.Elapsed)</td></tr> }</tbody></table>
+                }
+            }
+        </section>
+
+        <section>
+            <header><h3>Execution and data</h3></header>
+            <dl class="figures">
+                <div><dt>Projects</dt><dd>@s.Projects.ToString("N0")</dd></div>
+                <div><dt>Spaces</dt><dd>@s.Spaces.ToString("N0")</dd></div>
+                <div><dt>Jobs</dt><dd>@s.Jobs.ToString("N0")</dd><small>@string.Join(", ", s.JobsByStatus.Select(j => $"{j.Count:N0} {j.Status.ToLowerInvariant()}"))</small></div>
+                <div><dt>Users</dt><dd>@s.Users.ToString("N0")</dd></div>
+            </dl>
+            @if (s.Attempts.Count == 0) { <p class="state-note">No job is queued, running or finishing.</p> }
+            else
+            {
+                <table class="state-table"><thead><tr><th>Queue</th><th>Phase</th><th>Jobs</th></tr></thead>
+                    <tbody>@foreach (var (queue, phase, count) in s.Attempts) { <tr><td>@queue</td><td>@phase</td><td>@count.ToString("N0")</td></tr> }</tbody></table>
+            }
+        </section>
+    </div>
+}
+
+@code {
+    private RelayState _state;
+    private Refund.Services.Storage.StorageProgress _storage;
+    private (long Before, long After)? _collected;
+    private int? _unloaded;
+    private bool _collecting;
+    private readonly CancellationTokenSource _stop = new();
+
+    protected override void OnInitialized()
+    {
+        if (Session.User?.Role != UserRole.Admin) return;
+        _state = Collector.Collect();
+        _storage = StorageMeasurements.GetProgress();
+        _ = RefreshAsync();
+    }
+
+    // Every 2 s while the page is open; stops when it closes.
+    private async Task RefreshAsync()
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(2));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(_stop.Token))
+                await InvokeAsync(() => { _state = Collector.Collect(); _storage = StorageMeasurements.GetProgress(); StateHasChanged(); });
+        }
+        catch (OperationCanceledException) { }
+        catch (ObjectDisposedException) { }
+    }
+
+    private async Task CollectGarbage()
+    {
+        _collecting = true;
+        // Allocated bytes: garbage included before the collection, only what survives after it.
+        long before = GC.GetTotalMemory(false);
+        await Task.Run(RelayStateCollector.CollectGarbage);
+        _collected = (before, GC.GetTotalMemory(false));
+        _collecting = false;
+        _state = Collector.Collect();
+    }
+
+    private void UnloadIdle()
+    {
+        _unloaded = DataManager.WarpSessions.UnloadIdle(DateTime.UtcNow, TimeSpan.Zero);
+        _state = Collector.Collect();
+    }
+
+    private string SessionName(WarpSessionIdentity identity)
+    {
+        var job = DataManager.Projects.FirstOrDefault(p => p.Id == identity.ProjectId)?.Spaces.FirstOrDefault(sp => sp.Id == identity.SpaceId)?.Jobs.FirstOrDefault(j => j.Id == identity.JobId);
+        return job == null ? $"P{identity.ProjectId}/S{identity.SpaceId}/J{identity.JobId}" : $"P{identity.ProjectId}/S{identity.SpaceId} · {job.QualifiedName}";
+    }
+
+    private static string InUse(WarpSessionManager.LoadedSession w) =>
+        w.Running ? "Processing" : w.Exporting ? "Exporting" : w.Leases > 0 ? $"{w.Leases} {(w.Leases == 1 ? "view or command" : "views or commands")}" : "Idle";
+    private static string MB(long bytes) => $"{bytes / 1048576.0:N0} MB";
+    private static string GB(long bytes) => $"{bytes / 1073741824.0:N1} GB";
+    private static string Duration(TimeSpan t) => t.TotalDays >= 1 ? $"{(int)t.TotalDays} d {t.Hours} h" : t.TotalHours >= 1 ? $"{(int)t.TotalHours} h {t.Minutes} min" : $"{t.Minutes} min";
+    private static string Ago(DateTime utc) { var t = DateTime.UtcNow - utc; return t.TotalMinutes < 1 ? "just now" : $"{Duration(t)} ago"; }
+    private static string UnloadsIn(DateTime lastUsed, TimeSpan idle) { var left = lastUsed + idle - DateTime.UtcNow; return left <= TimeSpan.FromMinutes(1) ? "within a minute" : $"in {Duration(left)}"; }
+
+    public void Dispose() { _stop.Cancel(); _stop.Dispose(); }
+}

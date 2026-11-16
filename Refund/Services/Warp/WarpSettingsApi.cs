@@ -28,9 +28,9 @@ public sealed partial class WarpSession
         }
     }
 
-    // Derived by the session, not edited: they never count as a pending change.
+    // Derived by the session, not edited: they never count as a pending change. Get-only properties are computed.
     private static readonly System.Reflection.PropertyInfo[] EditableSettings = typeof(WarpSettings).GetProperties()
-        .Where(p => p.Name is not (nameof(WarpSettings.OutputPath) or nameof(WarpSettings.TrainAfter) or nameof(WarpSettings.BinTimes))).ToArray();
+        .Where(p => p.CanWrite && p.Name is not (nameof(WarpSettings.OutputPath) or nameof(WarpSettings.TrainAfter) or nameof(WarpSettings.BinTimes))).ToArray();
 
     /// <summary>Settings whose draft value differs from the applied one.</summary>
     public static IReadOnlySet<string> ChangedSettings(WarpSettings draft, WarpSettings applied) =>
@@ -108,12 +108,16 @@ public sealed partial class WarpSession
         if(s.DefocusMin>=s.DefocusMax)return "Minimum defocus must be below maximum.";
         if(s.CorrectGain&&string.IsNullOrWhiteSpace(s.GainPath))return "Select the gain reference.";
         if(s.CorrectDefects&&string.IsNullOrWhiteSpace(s.DefectsPath))return "Select the defect map.";
+        if(s.EpuOpticsGroups&&!(s.EpuGroupRadius>0))return "The beam shift grouping radius must be positive.";
+        if(s.EpuOpticsGroups&&!string.IsNullOrWhiteSpace(s.EpuMetadataPath)&&!Directory.Exists(s.EpuMetadataPath))return "The EPU metadata folder does not exist.";
         if(!s.MotionGridAuto&&(s.MotionGrid<1||s.MotionGridY<1||s.MotionGridZ<1))return "Motion grid dimensions must be positive.";
         if(!s.CtfGridAuto&&(s.CtfGridX<1||s.CtfGridY<1))return "CTF grid dimensions must be positive.";
         if(s.TrainCount<1||s.TrainingEpochs<1||s.FineTuneEvery<1)return "Training sample, epochs and interval are invalid.";
         if(s.Denoise&&!string.IsNullOrWhiteSpace(s.DenoiserStart)&&!File.Exists(s.DenoiserStart))return "The starting model for denoiser training does not exist.";
         if(s.Diameter<=0||s.MinSeparation<=0||s.Box<2||s.Box%2!=0)return "Particle diameter/separation must be positive and box size positive/even.";
-        if(s.SkipFirst<0||s.SkipLast<0||s.StackGroup<1)return "Frame skips must be nonnegative; stack grouping must be positive.";
+        if(s.RescaleParticles&&(s.RescaledBox<2||s.RescaledBox%2!=0||s.RescaledBox>=s.Box))return "The rescaled box must be even and smaller than the extraction box.";
+        if(s.ParticleBounds is not {Valid:true})return "Particle score bounds need correlation within 0–1, nonnegative power, and each minimum at most its maximum.";
+        if(s.SkipFirst<0||s.SkipLast<0)return "Frame skips must be nonnegative.";
         return null;
     }
     public Task<IReadOnlyList<WarpInputCheck>> CheckInputAsync(WarpSettings draft) => Task.Run<IReadOnlyList<WarpInputCheck>>(() =>

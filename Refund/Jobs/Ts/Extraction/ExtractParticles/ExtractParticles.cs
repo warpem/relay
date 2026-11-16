@@ -70,7 +70,7 @@ public class ExtractParticles : WarpToolsJobGpu, IClusterJob
     /// </summary>
     [RelayProperty]
     [UiFieldGroup("Output Parameters", 1)]
-    [UiDecimal("output_angpix", "Output pixel size", min: 0.1, max: 999999, stepSize: 0.01, unit: "Å",
+    [UiDecimal("output_angpix", "Output pixel size", min: 0.1, max: 999999, stepSize: 0.001, unit: "Å",
                helpText: "Pixel size at which to export particles")]
     public decimal OutputPixelSize { get; set; } = 2.0M;
     

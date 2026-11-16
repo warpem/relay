@@ -30,7 +30,13 @@
 .warp-setup ::deep .setting-control.wide { grid-column: 2 / 4; }
 .warp-setup ::deep .setting-unit { grid-column: 3; color: var(--w-muted); white-space: nowrap; }
 .warp-setup ::deep .setting-note { grid-column: 2 / 4; margin-top: calc(-1 * var(--w-space-xs)); font-size: var(--w-text-s); color: var(--w-muted); }
-.warp-setup ::deep .setting-control.checks { flex-wrap: wrap; gap: var(--w-space-xs) var(--w-space-m); }
+/* Switches sit in the value column with their right edge on the numbers' last digit, not on the units. The digits
+   end before the fields' step buttons while editable and nearer the edge once locked (measured: 35 px, 16 px). */
+.warp-setup { --digits-inset: 35px; }
+.warp-setup.locked { --digits-inset: 16px; }
+.warp-setup ::deep .setting-row.boolean-setting > .setting-control.wide { grid-column: 2; justify-self: end; margin-right: var(--digits-inset); }
+/* Fluent leaves 12 px after a switch for its label; these switches are labelled by their row. */
+.warp-setup ::deep .setting-row.boolean-setting fluent-switch { margin-inline-end: 0; }
 
 /* Paths are long, so their label sits on its own line above a full-width field. */
 .warp-setup ::deep .path-row > label { grid-column: 1 / -1; }
@@ -102,5 +108,4 @@
 
 /* Edited but not applied: the field (or the switch's cell) takes a light brand tint until Apply. */
 .warp-setup ::deep .setting-row.changed fluent-text-input::part(root) { background-color: var(--colorBrandBackground2); border-color: var(--colorBrandStroke2) !important; }
-.warp-setup ::deep .setting-row.boolean-setting.changed > .setting-control,
-.warp-setup ::deep .setting-row.changed > .setting-control.checks { justify-self: start; margin-inline: -6px; padding-inline: 6px; border-radius: var(--borderRadiusMedium); background: var(--colorBrandBackground2); }
+.warp-setup ::deep .setting-row.boolean-setting.changed > .setting-control.wide { margin-inline: -6px calc(var(--digits-inset) - 6px); padding-inline: 6px; border-radius: var(--borderRadiusMedium); background: var(--colorBrandBackground2); }

@@ -58,25 +58,14 @@ public partial class ZoomControls : ComponentBase
         }
     }
 
-    /// <summary>
-    /// Increases the zoom level by 20%, up to a maximum of 10x.
-    /// Notifies the parent component of the new zoom level.
-    /// </summary>
-    private void ZoomIn()
-    {
-        ZoomLevel = Math.Min(ZoomLevel * 1.2, 10);
-        OnZoomChanged.InvokeAsync(ZoomLevel);
-    }
+    // The buttons only request a zoom: the viewer clamps it to its limits and reports the zoom it applied back through
+    // ZoomLevel, so the percentage always shows the micrograph's actual zoom.
 
-    /// <summary>
-    /// Decreases the zoom level by ~17% (1/1.2), down to a minimum of 0.1x.
-    /// Notifies the parent component of the new zoom level.
-    /// </summary>
-    private void ZoomOut()
-    {
-        ZoomLevel = Math.Max(ZoomLevel / 1.2, 0.1);
-        OnZoomChanged.InvokeAsync(ZoomLevel);
-    }
+    /// <summary>Requests 20% more zoom.</summary>
+    private void ZoomIn() => OnZoomChanged.InvokeAsync(ZoomLevel * 1.2);
+
+    /// <summary>Requests ~17% (1/1.2) less zoom.</summary>
+    private void ZoomOut() => OnZoomChanged.InvokeAsync(ZoomLevel / 1.2);
 
     /// <summary>
     /// Notifies the parent component to adjust the zoom to fit the entire micrograph
@@ -87,13 +76,6 @@ public partial class ZoomControls : ComponentBase
         OnFitToViewport.InvokeAsync();
     } 
     
-    /// <summary>
-    /// Resets the zoom level to 1.0 (100% or original size).
-    /// Notifies the parent component of the new zoom level.
-    /// </summary>
-    private void FitToOriginal()
-    {
-        ZoomLevel = 1;
-        OnZoomChanged.InvokeAsync(ZoomLevel);
-    }
+    /// <summary>Requests the original size (100%).</summary>
+    private void FitToOriginal() => OnZoomChanged.InvokeAsync(1.0);
 }

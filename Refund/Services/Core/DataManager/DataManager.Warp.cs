@@ -8,10 +8,11 @@ namespace Refund.Services.Core.DataManager;
 
 public partial class DataManager
 {
-    private readonly HashSet<Job> _warpExportOperations = [];
+    /// <summary>How long a Warp session nothing uses stays loaded; restoring one takes well under a second.</summary>
+    public static readonly TimeSpan WarpSessionIdleUnload = TimeSpan.FromMinutes(10);
 
     // Execution and every browser circuit share this instance. It never captures a UI user.
-    public WarpSessionManager WarpSessions { get; } = new(Log.ForContext<WarpSessionManager>());
+    public WarpSessionManager WarpSessions { get; } = new(Log.ForContext<WarpSessionManager>(), WarpSessionIdleUnload);
 
     public IReadOnlyList<ReadOnlyJobQueue> GetWarpWorkerQueues() => _queueRepository.ClusterQueues
         .OfType<Refund.JobQueues.ClusterQueue>()
@@ -22,16 +23,20 @@ public partial class DataManager
     {
         if (job is WarpJob warpJob)
             return RunWarpAsync(warpJob, token);
+        if (job is WarpExportJob export)
+            return RunWarpExportAsync(export, token);
         ((ILocalJob)job).RunLocal(token);
         return Task.CompletedTask;
     }
 
     private async Task RunWarpAsync(WarpJob job, CancellationToken token)
     {
-        var session = WarpSessions.GetOrCreate(job.Identity, job.Settings);
+        // The lease keeps the session loaded for the whole run.
+        using var lease = WarpSessions.Acquire(job.Identity, job.Settings);
+        var session = lease.Session;
         using var progressCancellation = new CancellationTokenSource();
         var progress = ProjectWarpProgressAsync(job, session, progressCancellation.Token);
-        try { await WarpSessions.RunAsync(job.Identity, job.Settings, token); }
+        try { await session.RunAsync(job.Settings, token); }
         finally
         {
             progressCancellation.Cancel();
@@ -92,7 +97,8 @@ public partial class DataManager
             if (queue is not Refund.JobQueues.ClusterQueue cluster || cluster.IsManaged || !cluster.QueueType.HasFlag(JobQueueType.GPU))
                 throw new InvalidOperationException("Warp requires an external scheduler queue for its GPU workers.");
             cluster.ValidateSubmissionConfiguration();
-            var session = WarpSessions.GetOrCreate(warpJob.Identity, warpJob.Settings);
+            using var lease = WarpSessions.Acquire(warpJob.Identity, warpJob.Settings);
+            var session = lease.Session;
             session.Apply(warpJob.Settings with { OutputPath = warpJob.DirectoryPath });
             _dataRepository.UpdateJob(actor, warpJob, _ =>
             {
@@ -165,7 +171,8 @@ public partial class DataManager
         {
             var (actor, warpJob) = ResolveWritableWarp(user, job);
             EnsureWarpStopped(warpJob);
-            var session = WarpSessions.GetOrCreate(warpJob.Identity, warpJob.Settings);
+            using var lease = WarpSessions.Acquire(warpJob.Identity, warpJob.Settings);
+            var session = lease.Session;
             session.Apply(settings with { OutputPath = warpJob.DirectoryPath });
             _dataRepository.UpdateJob(actor, warpJob, _ => warpJob.Settings = session.Settings);
             return Task.CompletedTask;
@@ -180,57 +187,65 @@ public partial class DataManager
         ExecuteWithLock(() =>
         {
             var (_, warpJob) = ResolveWritableWarp(user, job);
-            return Task.FromResult(update(WarpSessions.GetOrCreate(warpJob.Identity, warpJob.Settings)));
+            using var lease = WarpSessions.Acquire(warpJob.Identity, warpJob.Settings);
+            return Task.FromResult(update(lease.Session));
         });
 
+    /// <summary>
+    /// Creates and queues an export job for the session's accepted selection. The job writes the selection when it runs,
+    /// so running it again (after clearing it) exports the session as it is then.
+    /// </summary>
     public async Task<ReadOnlyJob> ExportWarpJob(ReadOnlyUser user, ReadOnlyWarpJob job, bool particles)
     {
-        var (session, source, operation) = await ExecuteWithLock(() =>
+        ReadOnlyJob exported = null;
+        ReadOnlyView exportView = null;
+        await ExecuteSpaceChange(job.Space, () =>
         {
-            var (_, warpJob) = ResolveWritableWarp(user, job);
-            var shared = WarpSessions.GetOrCreate(warpJob.Identity, warpJob.Settings);
-            if (!_warpExportOperations.Add(warpJob))
-                throw new InvalidOperationException("An export is already being compiled for this session.");
-            try { return Task.FromResult((shared, warpJob, shared.BeginExportOperation())); }
-            catch { _warpExportOperations.Remove(warpJob); throw; }
+            var (actor, warpJob) = ResolveWritableWarp(user, job);
+            // Nothing to export yet is said here, rather than by a job that fails.
+            using (var lease = WarpSessions.Acquire(warpJob.Identity, warpJob.Settings))
+                if (lease.Session.CountExportable(particles) == 0)
+                throw new InvalidOperationException(WarpSession.NothingToExport(particles));
+            var view = warpJob.Space.Views.FirstOrDefault(candidate => candidate.Jobs.Any(item => item.Id == warpJob.Id))
+                ?? warpJob.Space.Views.FirstOrDefault()
+                ?? throw new InvalidOperationException("The session's space has no view for its export.");
+            var template = particles ? (WarpExportJob)new WarpParticlesExportJob() : new WarpMicrographsExportJob();
+            template.SourceWarpJobId = warpJob.Id;
+            var created = _dataRepository.CreateJob(actor, warpJob.Space, view, template.TypeGuid, template);
+            exported = created.AsReadOnly();
+            exportView = view.AsReadOnly();
+            return Task.CompletedTask;
         });
-        try
-        {
-            // Capturing can read many small STAR files. Keep it outside the command lock,
-            // but retain a lifetime lease so destructive actions cannot remove its files.
-            var manifest = await session.ExportAsync(particles, operation);
-            ReadOnlyJob exported = null;
-            ReadOnlyView exportView = null;
-            await ExecuteSpaceChange(job.Space, () =>
-            {
-                var (actor, warpJob) = ResolveWritableWarp(user, job);
-                var view = warpJob.Space.Views.FirstOrDefault(candidate => candidate.Jobs.Any(item => item.Id == warpJob.Id))
-                    ?? warpJob.Space.Views.FirstOrDefault()
-                    ?? throw new InvalidOperationException("The session's space has no view for its export.");
-                var template = particles ? (WarpExportJob)new WarpParticlesExportJob() : new WarpMicrographsExportJob();
-                template.SourceWarpJobId = warpJob.Id;
-                template.Manifest = manifest;
-                var created = _dataRepository.CreateJob(actor, warpJob.Space, view, template.TypeGuid, template);
-                exported = created.AsReadOnly();
-                exportView = view.AsReadOnly();
-                return Task.CompletedTask;
-            });
-            await JobCreated.InvokeHierarchy(exported, GroupName.JobHierarchy(job.Space.Project.Id, job.Space.Id, null));
-            await ViewUpdated.InvokeHierarchy(exportView, GroupName.ViewHierarchy(job.Space.Project.Id, job.Space.Id, exportView.Id));
-            await QueueLocalJob(user, exported);
-            return exported;
-        }
-        finally
-        {
-            try
-            {
-                await ExecuteWithLock(() =>
-                {
-                    _warpExportOperations.Remove(source);
-                    return Task.CompletedTask;
-                });
-            }
-            finally { operation.Dispose(); }
-        }
+        await JobCreated.InvokeHierarchy(exported, GroupName.JobHierarchy(job.Space.Project.Id, job.Space.Id, null));
+        await ViewUpdated.InvokeHierarchy(exportView, GroupName.ViewHierarchy(job.Space.Project.Id, job.Space.Id, exportView.Id));
+        await QueueLocalJob(user, exported);
+        return exported;
     }
+
+    /// <summary>
+    /// Writes the source session's accepted selection into the export job's directory, as it is now. The session's job
+    /// may be processing meanwhile; it cannot be cleared or deleted while one of its exports is queued or running
+    /// (<see cref="HasPendingWarpExport"/>), so the files the export reads stay.
+    /// </summary>
+    private async Task RunWarpExportAsync(WarpExportJob export, CancellationToken token)
+    {
+        var source = export.Space.FindJob(export.SourceWarpJobId) as WarpJob
+            ?? throw new InvalidOperationException($"Warp session J{export.SourceWarpJobId} no longer exists.");
+        if (source.Status is JobStatus.Deleted or JobStatus.Clearing)
+            throw new InvalidOperationException($"Warp session J{source.Id} is being removed.");
+        using var lease = WarpSessions.Acquire(source.Identity, source.Settings);
+        var session = lease.Session;
+        // The lease spans the job update, so views redraw with the new manifest when it ends.
+        using var operation = session.BeginExportOperation();
+        string root = export.Space.RootDirectory;
+        var manifest = await session.ExportAsync(export.Particles, export.DirectoryPath, root, operation, token);
+        export.Summarize(manifest);
+        // Saved relative to the space, like the export's files, so the job's outputs hold when the space moves.
+        _dataRepository.UpdateJob(export.UpdatedBy, export, _ => export.Manifest = manifest.RelativeTo(root));
+        await JobUpdated.InvokeHierarchy(export.AsReadOnly(), GroupName.JobHierarchy(export.Space.Project.Id, export.Space.Id, export.Id));
+    }
+
+    /// <summary>An export job reading this Warp session's files is queued or running.</summary>
+    private bool HasPendingWarpExport(Job job) => job is WarpJob && job.Space != null &&
+        job.Space.Jobs.Any(other => other is WarpExportJob export && export.SourceWarpJobId == job.Id && HasPendingExecution(export));
 }

@@ -19,7 +19,7 @@ function point(s, event, insideOnly = false) {
 }
 export function initialize(canvas, id, dotnet) {
     dispose(id);
-    const s = { canvas, dotnet, bins: [], cols: 64, rows: 48, powerMaximum: 1, bounds: [0, 1, 0, 1], pointerId: null, disposed: false };
+    const s = { canvas, dotnet, bins: [], cols: 64, rows: 48, powerMaximum: 1, bounds: [0, 1, 0, 1], applied: null, pointerId: null, disposed: false };
     states.set(id, s);
     s.observer = new ResizeObserver(() => draw(s));
     s.observer.observe(canvas);
@@ -62,11 +62,12 @@ export function initialize(canvas, id, dotnet) {
     canvas.addEventListener('pointerup', s.up);
     canvas.addEventListener('pointercancel', s.cancel);
 }
-export function update(id, bins, cols, rows, powerMaximum, bounds) {
+// bounds: the edited [minCorrelation, maxCorrelation, minPower, maxPower]; applied: the bounds extraction uses, when different.
+export function update(id, bins, cols, rows, powerMaximum, bounds, applied) {
     const s = states.get(id);
     if (!s || s.disposed) return;
     if (bins) s.bins = bins;
-    s.cols = cols; s.rows = rows; s.powerMaximum = powerMaximum; s.bounds = bounds;
+    s.cols = cols; s.rows = rows; s.powerMaximum = powerMaximum; s.bounds = bounds; s.applied = applied;
     draw(s);
 }
 function draw(s){
@@ -78,13 +79,16 @@ function draw(s){
     // The plot area spans the astigmatism circle's height (same --plot-inset); tick labels keep the
     // polar plot's 6 px gap, so "0.0 0.5 1.0" share a line with its "45°".
     const gap=6,line=fontSize*1.2,inset=parseFloat(style.getPropertyValue('--plot-inset'))||8;
-    const l=s.l=52,t=s.t=inset,w=s.w=r.width-l,h=s.h=r.height-t-gap-2*line;
+    // Left margin for tick labels and the axis title; with --axis-margin the canvas hangs that far out of its panel.
+    const l=s.l=parseFloat(style.getPropertyValue('--axis-margin'))||52,t=s.t=inset,w=s.w=r.width-l,h=s.h=r.height-t-gap-2*line;
     ctx.fillStyle='#122837';ctx.fillRect(l,t,w,h);
     const max=Math.max(1,...s.bins),scale=Math.log1p(max);
     for(let y=0;y<s.rows;y++)for(let x=0;x<s.cols;x++){const n=s.bins[y*s.cols+x];if(!n)continue;ctx.fillStyle=color(Math.log1p(n)/scale);ctx.fillRect(l+x*w/s.cols,t+(s.rows-1-y)*h/s.rows,Math.ceil(w/s.cols),Math.ceil(h/s.rows));}
     let b=s.bounds;if(s.start)b=[Math.min(s.start[0],s.end[0]),Math.max(s.start[0],s.end[0]),Math.min(s.start[1],s.end[1]),Math.max(s.start[1],s.end[1])];
     const x1=l+clamp(b[0],0,1)*w,x2=l+clamp(b[1],0,1)*w,y1=t+(1-clamp(b[3]/s.powerMaximum,0,1))*h,y2=t+(1-clamp(b[2]/s.powerMaximum,0,1))*h;
     ctx.fillStyle='#0009';ctx.fillRect(l,t,x1-l,h);ctx.fillRect(x2,t,l+w-x2,h);ctx.fillRect(x1,t,x2-x1,y1-t);ctx.fillRect(x1,y2,x2-x1,t+h-y2);ctx.strokeStyle='#fff';ctx.lineWidth=1;ctx.strokeRect(x1+.5,y1+.5,Math.max(0,x2-x1-1),Math.max(0,y2-y1-1));
+    if(s.applied){const a=s.applied,ax1=l+clamp(a[0],0,1)*w,ax2=l+clamp(a[1],0,1)*w,ay1=t+(1-clamp(a[3]/s.powerMaximum,0,1))*h,ay2=t+(1-clamp(a[2]/s.powerMaximum,0,1))*h;
+        ctx.save();ctx.setLineDash([4,3]);ctx.strokeStyle='#f3e796';ctx.strokeRect(ax1+.5,ay1+.5,Math.max(0,ax2-ax1-1),Math.max(0,ay2-ay1-1));ctx.restore();}
     ctx.fillStyle=style.getPropertyValue('--colorNeutralForeground3').trim()||'#666';ctx.font=`${style.fontSize} ${style.fontFamily}`;
     ctx.textAlign='right';ctx.textBaseline='middle';for(const y of [0,.5,1])ctx.fillText((y*s.powerMaximum).toLocaleString(undefined,{maximumSignificantDigits:3}),l-gap,t+(1-y)*h);
     // Alphabetic baseline at the glyph top plus its ascent, so the gap is measured to the digits.

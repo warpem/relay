@@ -16,7 +16,8 @@
         @if (FollowChanged.HasDelegate) { <FluentSwitch Class="follow-latest" Value="Follow" ValueChanged="@((bool v) => FollowChanged.InvokeAsync(v))" Label="Follow latest" title="Show each new result as it arrives" /> }
     </div>
     <div class="evidence-controls">
-        <div class="view-modes segmented" role="group" aria-label="Micrograph"><FluentButton Class="@(!ShowEnhanced ? "selected" : null)" Appearance="ButtonAppearance.Subtle" OnClick="@(() => _enhanced = false)">Average</FluentButton><FluentButton Class="@(ShowEnhanced ? "selected" : null)" Appearance="ButtonAppearance.Subtle" Disabled="@(!Movie.Done.HasFlag(WarpStage.Enhance))" OnClick="@(() => _enhanced = true)" Title="Deconvolved and, when available, denoised">@DenoisedLabel</FluentButton></div>
+        @if (Session.Settings.PickingEnabled) { <FluentCheckbox Class="show-particles" @bind-Value="_showParticles" Label="Particles" title="Show the particles extracted from this micrograph" Disabled="@(!Session.HasCurrentExtraction(Movie))" /> }
+        @if (Session.Settings.Denoise) { <div class="view-modes segmented" role="group" aria-label="Micrograph"><FluentButton Class="@(!ShowEnhanced ? "selected" : null)" Appearance="ButtonAppearance.Subtle" OnClick="@(() => _enhanced = false)">Average</FluentButton><FluentButton Class="@(ShowEnhanced ? "selected" : null)" Appearance="ButtonAppearance.Subtle" Disabled="@(!Movie.Done.HasFlag(WarpStage.Enhance))" OnClick="@(() => _enhanced = true)">Denoised</FluentButton></div> }
         <span class="spacer"></span>
         <span class="segmented-label" id="@_selectionLabel">Selection</span>
         <div class="disposition-controls segmented" role="group" aria-labelledby="@_selectionLabel"><FluentButton Class="@DispositionClass(WarpDisposition.Auto)" Appearance="ButtonAppearance.Subtle" Title="Accept or reject by the filter ranges" OnClick="@(() => SetDisposition(WarpDisposition.Auto))">Use filters</FluentButton><FluentButton Class="@DispositionClass(WarpDisposition.Keep)" Appearance="ButtonAppearance.Subtle" Title="Keep regardless of filters" OnClick="@(() => SetDisposition(WarpDisposition.Keep))">Keep</FluentButton><FluentButton Class="@DispositionClass(WarpDisposition.Exclude)" Appearance="ButtonAppearance.Subtle" Title="Exclude regardless of filters" OnClick="@(() => SetDisposition(WarpDisposition.Exclude))">Exclude</FluentButton></div>
@@ -25,15 +26,16 @@
     <dl class="readings">
         <div><dt>Motion</dt><dd>@Value(Movie.Motion, WarpStage.Motion) <span>Å/frame</span></dd></div>
         <div><dt>CTF fit</dt><dd>@Value(Movie.Ctf, WarpStage.Ctf) <span>Å</span></dd></div>
+        <div title="How many robust standard deviations the fitted CTF stands above decoy defoci; spectra without Thon rings score about 0–3"><dt>CTF signal</dt><dd>@Value(Movie.CtfSignal, WarpStage.Ctf, "F1") <span>σ</span></dd></div>
         <div><dt>Defocus</dt><dd>@Value(Movie.Defocus, WarpStage.Ctf) <span>µm</span></dd></div>
         <div><dt>Astigmatism</dt><dd>@Value(Movie.Astigmatism, WarpStage.Ctf, "F3") <span>µm</span></dd></div>
         <div><dt>Angle</dt><dd>@Value(Movie.AstigmatismAngle, WarpStage.Ctf, "F0")<span>°</span></dd></div>
         <div><dt>Ice</dt><dd>@Value(Movie.Ice, WarpStage.Ctf, "F0") <span>Å</span></dd></div>
-        <div><dt>Particles</dt><dd>@(Movie.Done.HasFlag(WarpStage.Pick) ? Movie.Picks.ToString("N0") : "—")</dd></div>
+        <div title="Particles extracted: the picks within the particle score bounds"><dt>Particles</dt><dd>@(Movie.Done.HasFlag(WarpStage.Extract) ? Movie.Particles.ToString("N0") : "—")</dd></div>
     </dl>
     <div class="diagnostic-grid">
         <figure class="micrograph-evidence">
-            <div class="micrograph-square image-well">@if (Movie.Done.HasFlag(WarpStage.Motion) && !string.IsNullOrEmpty(Movie.AveragePath)) { <MicrographViewer @key="Movie.Id" MicrographPath="@(ShowEnhanced ? Movie.EnhancedPath : Movie.AveragePath)" PreviewPath="@WarpSession.ExistingPreview(ShowEnhanced ? Movie.EnhancedPath : Movie.AveragePath)" ResultRevision="@(ShowEnhanced ? Movie.ResultRevision : Movie.MotionRevision)" ThumbnailPath="@Movie.ThumbnailPath" MinWidth="200" MinHeight="200" CanEditParticles="false" CanEditMask="false" /> } else { <div class="empty-evidence">Waiting for motion correction</div> }</div>
+            <div class="micrograph-square image-well">@if (Movie.Done.HasFlag(WarpStage.Motion) && !string.IsNullOrEmpty(Movie.AveragePath)) { <MicrographViewer @key="Movie.Id" MicrographPath="@(ShowEnhanced ? Movie.EnhancedPath : Movie.AveragePath)" PreviewPath="@WarpSession.ExistingPreview(ShowEnhanced ? Movie.EnhancedPath : Movie.AveragePath)" ResultRevision="@(ShowEnhanced ? Movie.ResultRevision : Movie.MotionRevision)" ThumbnailPath="@Movie.ThumbnailPath" ParticleStarPath="@(_showParticles && Session.Settings.PickingEnabled ? Session.GetExtractedParticleStar(Movie.Index, DisplayPixelSize) : null)" MinWidth="200" MinHeight="200" CanEditParticles="false" CanEditMask="false" CanControlParticleDisplay="false" DefaultParticleDiameter="@((double)Session.Settings.Diameter)" DefaultParticleBoxSize="@((double)(Session.Settings.Box * Session.Settings.TargetPixelSize))" /> } else { <div class="empty-evidence">Waiting for motion correction</div> }</div>
         </figure>
         <figure class="fourier-evidence">
             @if (Movie.Done.HasFlag(WarpStage.Ctf) && !string.IsNullOrEmpty(Movie.MetadataPath)) { <div class="real-spectrum"><div class="spectrum-key" aria-hidden="true"><span class="measured">Measured</span><span class="fitted">Fitted</span><span class="quality">Fit quality</span></div><AmplitudeSpectrumViewer @key="Movie.Id" ResultRevision="Movie.CtfRevision" MovieFilePath="@Movie.MetadataPath" FittingRangeMin="Session.Settings.CtfMin" FittingRangeMax="Session.Settings.CtfMax" /></div> } else { <div class="spectrum-placeholder image-well"><div class="empty-evidence">Waiting for CTF estimation</div></div> }
@@ -48,10 +50,12 @@
     [Parameter] public EventCallback<int> SelectedIndexChanged { get; set; }
     [Parameter] public bool Follow { get; set; }
     [Parameter] public EventCallback<bool> FollowChanged { get; set; }
-    private bool _enhanced;
+    private bool _enhanced, _showParticles = true;
+    // The extracted particles are static: they show what the applied bounds kept, not bounds being tried in Picking.
+    private double DisplayPixelSize => Math.Max(.001, ShowEnhanced ? Movie.EnhancedPixelSize : Movie.PixelSize);
     // Enhancement always deconvolves; it denoises only when the denoiser is enabled in Setup.
-    private string DenoisedLabel => Session.Settings.Denoise ? "Denoised" : "Deconvolved";
-    private bool ShowEnhanced => _enhanced && Movie.Done.HasFlag(WarpStage.Enhance) && !string.IsNullOrEmpty(Movie.EnhancedPath);
+    // Without denoising there is only the average.
+    private bool ShowEnhanced => Session.Settings.Denoise && _enhanced && Movie.Done.HasFlag(WarpStage.Enhance) && !string.IsNullOrEmpty(Movie.EnhancedPath);
     private string Value(double value, WarpStage stage, string format = "F2") => Movie.Done.HasFlag(stage) && double.IsFinite(value) ? value.ToString(format) : "—";
     private readonly string _selectionLabel = $"warp-selection-{Guid.NewGuid():N}";
     private string DispositionClass(WarpDisposition disposition) => Movie.Disposition == disposition ? "selected" : null;

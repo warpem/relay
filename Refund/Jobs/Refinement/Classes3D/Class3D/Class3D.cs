@@ -89,6 +89,7 @@ public class Class3D : RelionJob, IClusterJob, IPooledJob, IPoolStatus
     /// Accessed through the ReadOnlyJob wrapper in UI components.
     /// </remarks>
     public override bool IsIterative => true;
+    public override Refund.Services.Storage.IntermediateRule IntermediateRule => Refund.Services.Storage.IntermediateRules.Class3D;
 
     /// <summary>
     /// The UI component type to use for expanded view of this job.

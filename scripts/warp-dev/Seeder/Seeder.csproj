@@ -6,6 +6,8 @@
     <Nullable>enable</Nullable>
     <GenerateRuntimeConfigurationFiles>false</GenerateRuntimeConfigurationFiles>
     <GenerateDependencyFile>false</GenerateDependencyFile>
+    <!-- The launcher builds into the state directory; an obj/ left here by an IDE restore must not be compiled too. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);obj/**;bin/**</DefaultItemExcludes>
   </PropertyGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />

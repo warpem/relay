@@ -35,10 +35,13 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Configure Serilog for file logging with automatic routing by source context
 var timestamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+// The Settings overlay's Logs page shows recent events from memory and links this run's files.
+Refund.Services.Diagnostics.RelayLog.Directory = Path.GetFullPath(Path.Combine("logs", timestamp));
 Log.Logger = new LoggerConfiguration()
     .ReadFrom.Configuration(builder.Configuration)
     .Enrich.FromLogContext()
     .WriteTo.Console()
+    .WriteTo.Sink(Refund.Services.Diagnostics.RelayLog.Sink)
     .WriteTo.Map("SourceContext", (sourceContext, wt) => 
         wt.File($"logs/{timestamp}/{sourceContext}.log", 
             rollingInterval: RollingInterval.Infinite,
@@ -93,6 +96,10 @@ Job.PopulateStatic();
 builder.Services.AddSingleton<DataManager>(new DataManager(relayOptions, cli.DropUnloadableSpaces));
 builder.Services.AddSingleton(sp => sp.GetRequiredService<DataManager>().WarpSessions);
 
+// Measures every job folder in the background (Storage overlay); starts with the host and flushes measurements on stop.
+builder.Services.AddSingleton(sp => new Refund.Services.Storage.StorageService(sp.GetRequiredService<DataManager>(), relayOptions.Storage));
+builder.Services.AddHostedService(sp => sp.GetRequiredService<Refund.Services.Storage.StorageService>());
+
 // SecurityTokenService manages security tokens for user registration
 builder.Services.AddSingleton<SecurityTokenService>();
 builder.Services.AddHostedService<SecurityTokenService>();
@@ -116,11 +123,19 @@ builder.Services.AddServerSideBlazor()
 #endif
 
 // Configure SignalR options for Blazor Server
+// Browsers throttle background tabs' timers to about once a minute, which also slows the client's keep-alive pings
+// (every 15 s). A 30 s client timeout then drops tabs left in the background, and once their circuit is gone the page
+// reloads when the user returns. The timeout allows several throttled pings, and a dropped circuit waits long enough
+// for the user to come back to it; disposed circuits free their memory, and at most 20 wait at once.
 builder.Services.AddRazorComponents()
-       .AddInteractiveServerComponents()
+       .AddInteractiveServerComponents(options =>
+       {
+           options.DisconnectedCircuitRetentionPeriod = TimeSpan.FromMinutes(30);
+           options.DisconnectedCircuitMaxRetained = 20;
+       })
        .AddHubOptions(options =>
        {
-           options.ClientTimeoutInterval = TimeSpan.FromSeconds(30);
+           options.ClientTimeoutInterval = TimeSpan.FromMinutes(3);
            options.EnableDetailedErrors = true;
            options.HandshakeTimeout = TimeSpan.FromSeconds(15);
            options.KeepAliveInterval = TimeSpan.FromSeconds(15);
@@ -175,6 +190,11 @@ builder.Services.AddScoped<JobEditorService>();            // Manages job parame
 builder.Services.AddScoped<FactoryEditorService>();        // Manages factory instance parameter editing
 builder.Services.AddScoped<ExpandedJobViewService>();      // Manages expanded job view state
 builder.Services.AddScoped<JobStatusToaster>();            // Displays job status notifications
+
+// Diagnostics for the Settings overlay's State page
+builder.Services.AddSingleton<Refund.Services.Diagnostics.CircuitStats>();
+builder.Services.AddScoped<Microsoft.AspNetCore.Components.Server.Circuits.CircuitHandler, CircuitTracker>();
+builder.Services.AddSingleton<Refund.Services.Diagnostics.RelayStateCollector>();
 builder.Services.AddScoped<MenuActionService>();           // Manages context-sensitive actions
 builder.Services.AddScoped<ScatterHighlightService>();     // Manages scatter plot highlight state
 builder.Services.AddScoped<JobSortingService>();            // Manages job sort state in ViewScreen

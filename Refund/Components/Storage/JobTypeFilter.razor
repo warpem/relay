@@ -1,0 +1,93 @@
+@using Refund.Services.Storage
+@using Refund.Utils
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+
+<FluentButton id="@_anchor" Appearance="ButtonAppearance.Outline" IconEnd="@(new Icons.Regular.Size16.ChevronDown())"
+              OnClick="@(() => _open = !_open)" aria-haspopup="dialog" aria-expanded="@(_open ? "true" : "false")">
+    @ButtonText
+</FluentButton>
+
+<RelayPopover AnchorId="@_anchor" Opened="@_open" OpenedChanged="@(v => _open = v)" Position="Positioning.BelowStart" Gap="4" Class="type-filter-popover">
+    @if (_open)
+    {
+        <div class="type-filter" role="dialog" aria-label="Filter by job type">
+            <div class="type-filter-search">
+                <RelayTextInput Value="@_query" ValueChanged="@((string v) => _query = v ?? "")" Immediate="true" Placeholder="Find a job type" Style="width: 100%" aria-label="Find a job type" />
+            </div>
+            <div class="type-filter-list">
+                @foreach (var group in Groups())
+                {
+                    var state = GroupState(group.Lines);
+                    <div class="type-group">
+                        <FluentCheckbox ThreeState="true" ShowIndeterminate="false" CheckState="@state" CheckStateChanged="@((bool? v) => ToggleGroup(group.Lines, v != false))" Label="@group.Name" />
+                        <span class="type-size">@StorageFormat.Bytes(group.Lines.Sum(l => l.Allocated))</span>
+                    </div>
+                    @foreach (var line in group.Lines)
+                    {
+                        <div class="type-line">
+                            <FluentCheckbox Value="@Selected.Contains(line.Key)" ValueChanged="@((bool v) => Toggle(line.Key, v))" Label="@line.Name" />
+                            <span class="type-count">@line.Jobs.ToString("N0")</span>
+                            <span class="type-size">@StorageFormat.Bytes(line.Allocated)</span>
+                        </div>
+                    }
+                }
+                @if (!Groups().Any())
+                {
+                    <p class="type-empty">No job type matches.</p>
+                }
+            </div>
+            <div class="type-filter-footer">
+                <span>@(Selected.Count == 0 ? "Showing every type" : $"{Selected.Count} of {Types.Count} types")</span>
+                <FluentButton Appearance="ButtonAppearance.Subtle" Disabled="@(Selected.Count == 0)" OnClick="Clear">Show all types</FluentButton>
+            </div>
+        </div>
+    }
+</RelayPopover>
+
+@code {
+    /// <summary>Job types present, with their totals (the "by type" breakdown of everything in scope).</summary>
+    [Parameter] public IReadOnlyList<StorageBreakdownLine> Types { get; set; } = [];
+    /// <summary>Selected type GUIDs; empty means all types.</summary>
+    [Parameter] public HashSet<string> Selected { get; set; } = [];
+    [Parameter] public EventCallback<HashSet<string>> SelectedChanged { get; set; }
+
+    private readonly string _anchor = "type-filter-" + Guid.NewGuid().ToString("N");
+    private bool _open;
+    private string _query = "";
+
+    private string ButtonText => Selected.Count switch
+    {
+        0 => "All job types",
+        1 => Types.FirstOrDefault(t => Selected.Contains(t.Key))?.Name ?? "1 job type",
+        var n => $"{n} job types",
+    };
+
+    private IEnumerable<(string Name, List<StorageBreakdownLine> Lines)> Groups() =>
+        Types.Where(t => _query.Length == 0 || t.Name.Contains(_query, StringComparison.OrdinalIgnoreCase) || t.Group.Contains(_query, StringComparison.OrdinalIgnoreCase))
+             .GroupBy(t => t.Group)
+             .Select(g => (g.Key, g.OrderByDescending(l => l.Allocated).ToList()))
+             .OrderByDescending(g => g.Item2.Sum(l => l.Allocated));
+
+    private bool? GroupState(List<StorageBreakdownLine> lines)
+    {
+        int on = lines.Count(l => Selected.Contains(l.Key));
+        return on == 0 ? false : on == lines.Count ? true : null;
+    }
+
+    private Task Toggle(string key, bool on)
+    {
+        var next = new HashSet<string>(Selected);
+        if (on) next.Add(key); else next.Remove(key);
+        return SelectedChanged.InvokeAsync(next);
+    }
+
+    private Task ToggleGroup(List<StorageBreakdownLine> lines, bool on)
+    {
+        var next = new HashSet<string>(Selected);
+        foreach (var l in lines)
+            if (on) next.Add(l.Key); else next.Remove(l.Key);
+        return SelectedChanged.InvokeAsync(next);
+    }
+
+    private Task Clear() => SelectedChanged.InvokeAsync([]);
+}

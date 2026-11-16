@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Run actual Relay + disk queue + WarpWorker2 --mock in an isolated local workspace."""
+"""Run actual Relay + disk queue + WarpWorker2 in an isolated workspace: --mock workers on synthetic movies by
+default, or real GPU workers on a real movie folder with --settings (a JSON file of Warp settings overrides, kept
+outside the repository because it names data locations)."""
 from __future__ import annotations
 import argparse
 import array
@@ -23,7 +25,7 @@ import urllib.request
 import uuid
 
 MARKER = '.warp-development'
-CONDITIONS = ('normal', 'highmotion', 'badctf', 'thickice', 'fewparticles', 'fail')
+CONDITIONS = ('normal', 'highmotion', 'badctf', 'nosignal', 'thickice', 'fewparticles', 'fail')
 # Local mock sessions only: every new state directory gets the same easy login.
 DEV_USERNAME = 'warp-dev'
 DEV_PASSWORD = 'warp-dev'
@@ -84,15 +86,28 @@ def write_movie(path, index, size=256, frames=4):
 
 def terminate(process):
     # Handles belong to this live supervisor. No PID is loaded from persistent state.
-    if process.poll() is not None:
-        return
+    # A pool script exits at once, but its workers finish their current task before honoring SIGTERM, and a
+    # training task can run for many minutes: wait for the whole group, then kill what is left.
     try:
         os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        process.poll()
+        try:
+            os.killpg(process.pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(.2)
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    try:
         process.wait(timeout=5)
     except subprocess.TimeoutExpired:
-        os.killpg(process.pid, signal.SIGKILL)
-        process.wait(timeout=5)
-    except ProcessLookupError:
         pass
 
 
@@ -167,7 +182,7 @@ class Supervisor:
             count = len(list((self.state / 'input').glob('*.mrc')))
             if not self.paused and count < self.args.count:
                 # Occasional image-quality episodes, all explicitly mock data.
-                condition = {9: 'highmotion', 13: 'badctf', 17: 'thickice', 21: 'fewparticles'}.get(count, 'normal')
+                condition = {9: 'highmotion', 13: 'badctf', 17: 'thickice', 21: 'fewparticles', 7: 'nosignal'}.get(count, 'normal')
                 self.inject(condition)
                 delay = .05 if count + 1 < self.args.initial else self.args.interval
             else:
@@ -233,7 +248,11 @@ def run(args, state):
     command = shlex.join([sys.executable, script, '--state', str(state)])
     metadata_path = state / 'dev-session.json'
     metadata = json.loads(metadata_path.read_text()) if metadata_path.exists() else dict(username=DEV_USERNAME, password=DEV_PASSWORD)
-    worker_args = ['--mock', '--mock-delay-ms', str(args.mock_delay_ms)]
+    real = args.settings is not None
+    settings = json.loads(args.settings.expanduser().read_text()) if real else None
+    if real and not isinstance(settings, dict):
+        raise ValueError('--settings must hold a JSON object of Warp settings')
+    worker_args = [] if real else ['--mock', '--mock-delay-ms', str(args.mock_delay_ms)]
     if args.mock_fail_command:
         worker_args += ['--mock-fail-command', args.mock_fail_command]
     if args.mock_fail_path:
@@ -252,7 +271,8 @@ def run(args, state):
     relay = None
     try:
         if not (state / 'bootstrap-result.json').exists():
-            save_json(state / 'bootstrap.json', dict(state=str(state), schedulerCommand=command, username=metadata['username'], password=metadata['password']))
+            save_json(state / 'bootstrap.json', dict(state=str(state), schedulerCommand=command, username=metadata['username'], password=metadata['password'],
+                                                     settings=settings, pool=dict(size=args.pool, perDevice=args.per_device)))
             seeder = repo / 'scripts' / 'warp-dev' / 'Seeder' / 'Seeder.csproj'
             subprocess.run([dotnet, 'build', str(seeder), '-o', str(state / 'build'), '-p:RelayBuildDir=' + str(build), '-p:BaseIntermediateOutputPath=' + str(state / 'build' / 'obj') + '/', '--nologo', '-v', 'minimal'], check=True)
             subprocess.run([dotnet, 'exec', '--runtimeconfig', str(build / 'Relay.runtimeconfig.json'), '--depsfile', str(build / 'Relay.deps.json'), str(state / 'build' / 'Seeder.dll'), str(build), str(state / 'bootstrap.json')], cwd=state, env=supervisor.env, check=True)
@@ -262,7 +282,8 @@ def run(args, state):
         env = dict(supervisor.env, ASPNETCORE_ENVIRONMENT='Development', ASPNETCORE_URLS=metadata['url'], ASPNETCORE_CONTENTROOT=str(repo / 'Relay'))
         with (state / 'logs' / 'relay.log').open('ab') as log:
             relay = subprocess.Popen([dotnet, str(build / 'Relay.dll')], cwd=state, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
-        threading.Thread(target=supervisor.stream, daemon=True).start()
+        if not real:
+            threading.Thread(target=supervisor.stream, daemon=True).start()
         for _ in range(180):
             if relay.poll() is not None:
                 raise RuntimeError('Relay exited; see ' + str(state / 'logs' / 'relay.log'))
@@ -273,7 +294,7 @@ def run(args, state):
                 time.sleep(.5)
         else:
             raise RuntimeError('Relay did not become ready; see logs/relay.log')
-        print('\nMOCK Warp session: ' + metadata['url'] + metadata['route'], flush=True)
+        print(('\nWarp session with real GPU workers: ' if real else '\nMOCK Warp session: ') + metadata['url'] + metadata['route'], flush=True)
         print('Login: ' + metadata['username'] + ' / ' + metadata['password'], flush=True)
         print('Click Start processing in the Warp view. Ctrl+C stops this host and its owned workers.', flush=True)
         print('Runtime metadata: ' + str(metadata_path), flush=True)
@@ -303,6 +324,9 @@ def main():
     parser.add_argument('--mock-delay-ms', type=int, default=250)
     parser.add_argument('--mock-fail-command')
     parser.add_argument('--mock-fail-path')
+    parser.add_argument('--settings', type=Path, help='Real GPU workers: JSON object of Warp settings for a new state (input folder, gain, microscope)')
+    parser.add_argument('--pool', type=int, default=1, help='Worker processes in the pool (new state only)')
+    parser.add_argument('--per-device', type=int, default=1, help='Worker processes per GPU (new state only)')
     parser.add_argument('action', nargs='?', default='run', choices=('run', 'status', 'pause', 'resume', 'stop', 'inject', 'submit', 'job-status', 'cancel', 'list', 'worker'))
     parser.add_argument('value', nargs='?')
     parser.add_argument('--condition', choices=CONDITIONS, default='normal')

@@ -88,7 +88,7 @@ public class  PostProcess : RelionJob, IClusterJob
     /// </summary>
     [UiFieldGroup("Maps", 0)]
     [UiDecimal("angpix", "Calibrated pixel size", 
-               min: -1, max: 100000, stepSize: 0.001,
+               min: -1, max: 100000, stepSize: 0.0001,
                helpText: "Provide the final, calibrated pixel size in Angstroms. This value may be different from the " +
                          "pixel-size used thus far, e.g. when you have recalibrated the pixel size using the fit to a " +
                          "PDB model. The X-axis of the output FSC plot will use this calibrated value.")]
@@ -191,7 +191,7 @@ public class  PostProcess : RelionJob, IClusterJob
     /// The original pixel size (in Angstroms) of the raw micrographs from the detector.
     /// This value is used for proper scaling of the detector MTF correction.
     /// </summary>
-    [UiDecimal("mtf_angpix", "Original detector pixel size", 0, 10000, 0.001,
+    [UiDecimal("mtf_angpix", "Original detector pixel size", 0, 10000, 0.0001,
                isAdvanced: true,
                helpText: "This is the original pixel size (in Angstroms) in the raw (non-super-resolution!) micrographs.",
                Unit = "Å",

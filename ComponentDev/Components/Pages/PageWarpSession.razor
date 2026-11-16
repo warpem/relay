@@ -143,7 +143,7 @@
                         @if (Session.Exports.Count == 0 && !Session.Exporting) { <div class="export-empty"><h2>Ready to export @Session.Accepted.ToString("N0") micrographs</h2><p>Use the export buttons above. Processing can continue while the export is written.</p></div> }
                         @foreach (var export in Session.Exports.AsEnumerable().Reverse())
                         {
-                            <div class="export-row"><span class="export-job">J@export.Number</span><div><strong>@export.Kind</strong><div class="muted">@export.Movies.ToString("N0") micrographs · @export.Items.ToString("N0") rows · @export.Created.ToString("HH:mm:ss")</div></div><span class="spacer"></span><span class="export-done">✓ Finished</span><a href="@Files.GetUrl(export.Path)" download>Download STAR</a></div>
+                            <div class="export-row"><span class="export-job">J@(export.Number)</span><div><strong>@export.Kind</strong><div class="muted">@export.Movies.ToString("N0") micrographs · @export.Items.ToString("N0") rows · @export.Created.ToString("HH:mm:ss")</div></div><span class="spacer"></span><span class="export-done">✓ Finished</span><a href="@Files.GetUrl(export.Path)" download>Download STAR</a></div>
                         }
                         <p class="export-explanation">Exports appear here as finished jobs. The session stays resumable. This mockup writes real STAR tables referencing the reusable synthetic fixtures; it does not create jobs in a Relay project.</p>
                     }

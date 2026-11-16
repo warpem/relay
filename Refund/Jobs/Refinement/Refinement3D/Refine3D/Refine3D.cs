@@ -60,6 +60,7 @@ public class Refine3D : RelionJob, IClusterJob, IPooledJob, IPoolStatus
     /// by visualization components to show per-iteration results.
     /// </summary>
     public override bool IsIterative => true;
+    public override Refund.Services.Storage.IntermediateRule IntermediateRule => Refund.Services.Storage.IntermediateRules.Refine3D;
 
     /// <summary>
     /// The component type to use for expanded view of this job.

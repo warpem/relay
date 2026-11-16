@@ -48,7 +48,19 @@
                 @if (Draft.CorrectGain)
                 {
                     @P("GainPath", "Gain reference", SelectionMode.SingleFile)
-                    <div class="@Row("setting-row", "GainFlipX", "GainFlipY", "GainTranspose")" data-setting="GainOrientation"><label>Gain orientation</label><div class="setting-control wide checks">@C("GainFlipX", "Flip X")@C("GainFlipY", "Flip Y")@C("GainTranspose", "Transpose")</div></div>
+                    @B("GainFlipX", "Flip gain X")
+                    @B("GainFlipY", "Flip gain Y")
+                    @B("GainTranspose", "Transpose gain")
+                }
+                @B("EpuOpticsGroups", "Get optics groups from EPU")
+                @if (Draft.EpuOpticsGroups)
+                {
+                    @P("EpuMetadataPath", "EPU metadata folder, if not beside the movies", SelectionMode.SingleFolder)
+                    @if (_advanced)
+                    {
+                        <div class="advanced-label">Advanced</div>
+                        @D("EpuGroupRadius", "Beam shift grouping radius", .001, 10, .005, "a.u.", "0.05 groups by hole; about 0.01 by shot")
+                    }
                 }
             </div>
             @if (_checks != null)
@@ -66,7 +78,7 @@
                 @if (_advanced)
                 {
                     <div class="advanced-label">Advanced</div>
-                    @D("MotionMin", "Low-resolution limit", 1, 10000, 1, "Å") @D("MotionMax", "High-resolution limit", 1, 1000, .1, "Å") @D("MotionBfactor", "B-factor", -10000, 0, 10, "Å²")
+                    @D("MotionMin", "Low-resolution limit", 1, 10000, .1, "Å") @D("MotionMax", "High-resolution limit", 1, 1000, .1, "Å") @D("MotionBfactor", "B-factor", -10000, 0, 10, "Å²")
                 }
             </div>
         </section>
@@ -76,7 +88,7 @@
             <header><h3 id="@(_rootId + "-microscope")">Microscope &amp; camera</h3></header>
             <div class="field-grid">
                 @D("Pixel", "Pixel size", .01, 1000, .0001, "Å")
-                @D("TargetPixelSize", "Bin to pixel size", .01, 1000, .01, "Å")
+                @D("TargetPixelSize", "Bin to pixel size", .01, 1000, .0001, "Å")
                 @N("Voltage", "Voltage", 10, 2000, 10, "kV")
                 @D("Cs", "Spherical aberration", 0, 10, .01, "mm")
                 @D("Amplitude", "Amplitude contrast", 0, 1, .01)
@@ -94,8 +106,8 @@
             <div class="field-grid">
                 @D("CtfMin", "Low-resolution limit", 1, 1000, .1, "Å")
                 @D("CtfMax", "High-resolution limit", 1, 1000, .1, "Å")
-                @D("DefocusMin", "Minimum defocus", -100, 100, .1, "µm")
-                @D("DefocusMax", "Maximum defocus", -100, 100, .1, "µm")
+                @D("DefocusMin", "Minimum defocus", -100, 100, .01, "µm")
+                @D("DefocusMax", "Maximum defocus", -100, 100, .01, "µm")
                 @B("CtfGridAuto", "Automatic defocus grid")
                 @if (!Draft.CtfGridAuto) { @N("CtfGridX", "Grid width", 1, 100) @N("CtfGridY", "Grid height", 1, 100) }
                 @B("FitPhase", "Phase plate")
@@ -104,14 +116,13 @@
                     <div class="advanced-label">Advanced</div>
                     @N("CtfWindow", "Spectrum window", 128, 4096, 128, "px")
                     @B("FitThickness", "Fit ice thickness")
-                    @B("UseMovieSum", "Use movie-average spectrum")
                 }
             </div>
         </section>
       </div>
       <div class="setup-stack">
         <section class="settings-group enhancement" aria-labelledby="@(_rootId + "-denoise")">
-            <header><h3 id="@(_rootId + "-denoise")">Deconvolution &amp; denoising</h3></header>
+            <header><h3 id="@(_rootId + "-denoise")">Denoising</h3></header>
             <div class="field-grid">
                 @B("Denoise", "Denoise micrographs")
                 @N("TrainCount", "Training sample", 1, 10000, 1, "movies")
@@ -120,7 +131,7 @@
             <div class="training-state @(Session.Training ? "active" : Session.HasModel && Session.Settings.Denoise ? "ready" : "")">
                 <div><b>@TrainingTitle</b><span>@TrainingDetail</span></div>
                 <FluentButton Size="ButtonSize.Small" Disabled="@(!Session.Running || Session.Training || Session.StageCounts[1] < Session.Settings.TrainCount || !Session.Settings.Denoise)" OnClick="Train" Title="@TrainBlockedReason">@(Session.HasModel ? "Train new model" : "Train now")</FluentButton>
-                @if (Session.Training) { <progress aria-label="Training denoiser"></progress> }
+                @if (Session.Training) { @if (Session.TrainingProgress is { } progress) { <progress aria-label="Training denoiser" max="100" value="@progress.Percent"></progress> } else { <progress aria-label="Training denoiser"></progress> } }
                 @if (Session.OlderModelMovies is var older && older > 0)
                 {
                     <div class="redo-model">
@@ -142,8 +153,6 @@
             {
                 <div class="field-grid">
                     <div class="advanced-label">Advanced</div>
-                    @D("DeconvolutionStrength", "Deconvolution strength", 0, 10, .01)
-                    @D("DeconvolutionFalloff", "High-frequency falloff", 0, 10, .01)
                     @N("TrainingEpochs", "Training epochs", 1, 1000, 1)
                     @B("FineTune", "Periodic fine-tuning")
                     @if (Draft.FineTune) { @N("FineTuneEvery", "Fine-tune every", 1, 100000, 100, "movies") }
@@ -157,13 +166,13 @@
                 @D("Diameter", "Particle diameter", 1, 10000, 1, "Å")
                 @D("MinSeparation", "Minimum separation", .1, 5, .05, "× diam.", $"{Draft.Diameter * Draft.MinSeparation:0} Å between particle centers")
                 @N("Box", "Extraction box", 16, 4096, 8, "px", $"{Draft.Box * Draft.TargetPixelSize:0} Å at {Draft.TargetPixelSize:0.###} Å/px")
+                @B("RescaleParticles", "Rescale particles")
+                @if (Draft.RescaleParticles) { @N("RescaledBox", "Rescaled box", 16, 4096, 2, "px", $"{Draft.ParticlePixelSize:0.###} Å/px") }
                 @if (_advanced)
                 {
                     <div class="advanced-label">Advanced</div>
-                    @B("ExportStack", "Save aligned stack")
                     @N("SkipFirst", "Skip first", 0, 10000, 1, "frames")
                     @N("SkipLast", "Skip last", 0, 10000, 1, "frames")
-                    @if (Draft.ExportStack) { @N("StackGroup", "Stack grouping", 1, 10000, 1, "frames") }
                 }
             </div>
         </section>
@@ -199,9 +208,9 @@
     private WarpSettings _checkedSettings;
     private IReadOnlyList<WarpCalibrationPreset> _presets = [];
     private IEnumerable<string> PresetNames => _presets.Select(p => p.Name);
-    private string TrainingTitle => !Session.Settings.Denoise ? "Denoising is off" : Session.Training ? "Training a new model" : Session.HasModel ? $"Model v{Session.Model} ready" : $"Collecting training data: {Math.Min(Session.StageCounts[1], Session.Settings.TrainCount):N0} of {Session.Settings.TrainCount:N0} movies";
-    private string TrainBlockedReason => !Session.Settings.Denoise ? "Denoising is off" : !Session.Running ? "Start processing to train" : Session.Training ? "Training is in progress" : Session.StageCounts[1] < Session.Settings.TrainCount ? $"Needs {Session.Settings.TrainCount:N0} prepared movies" : null;
-    private string TrainingDetail => !Session.Settings.Denoise ? "Deconvolved micrographs are still produced." : Session.Training ? (Session.HasModel ? $"Model v{Session.Model} denoises new movies until training finishes." : "Motion and CTF continue; denoising waits for the first model.") : Session.HasModel ? $"Trained on {Session.Settings.TrainCount:N0} micrographs; it denoises new movies." : (Locked ? "Training starts automatically when enough CTF results are available." : "Training begins after processing starts and enough movies are ready.") + StartingModelNote;
+    private string TrainingTitle => !Session.Settings.Denoise ? "Denoising is off" : Session.Training ? (Session.TrainingProgress is { } progress ? $"Training a new model: {progress.Percent}%, epoch {progress.Epoch} of {progress.Epochs}" : "Training a new model") : Session.HasModel ? $"Model v{Session.Model} ready" : $"Collecting training data: {Math.Min(Session.StageCounts[1], Session.Settings.TrainCount):N0} of {Session.Settings.TrainCount:N0} movies";
+    private string TrainBlockedReason => !Session.Settings.Denoise ? "Denoising is off" : !Session.Running ? "Start processing to train" : Session.Training ? "Training is in progress" : Session.StageCounts[1] < Session.Settings.TrainCount ? $"Needs {Session.Settings.TrainCount:N0} movies with CTF results" : null;
+    private string TrainingDetail => !Session.Settings.Denoise ? "Picking uses the aligned averages." : Session.Training ? (Session.HasModel ? $"Model v{Session.Model} denoises new movies until training finishes." : "Movie processing pauses so the first model has the GPU; it resumes with denoising.") : Session.HasModel ? $"Trained on {Session.Settings.TrainCount:N0} micrographs; it denoises new movies." : (Locked ? "Training starts automatically when enough CTF results are available." : "Training begins after processing starts and enough movies are ready.") + StartingModelNote;
     private string StartingModelNote => string.IsNullOrWhiteSpace(Session.Settings.DenoiserStart) ? " The first model is trained from scratch." : $" The first model is fine-tuned from {System.IO.Path.GetFileName(Session.Settings.DenoiserStart)}.";
 
     protected override void OnParametersSet()
@@ -217,6 +226,9 @@
         if (Locked) return;
         var next = Draft with { };
         typeof(WarpSettings).GetProperty(name)!.SetValue(next, value);
+        // Rescaling starts from half the extraction box when the last rescaled box would not be smaller.
+        if (name == nameof(WarpSettings.RescaleParticles) && value is true && next.RescaledBox >= next.Box)
+            next = next with { RescaledBox = Math.Max(2, next.Box / 4 * 2) };
         await DraftChanged.InvokeAsync(next);
     }
 
@@ -241,7 +253,7 @@
     // A field whose value differs from the applied settings tints until Apply.
     private string Row(string classes, params string[] properties) => properties.Any(_changed.Contains) ? classes + " changed" : classes;
     private bool IsDisabled(string property) => Locked ||
-        (!Draft.PickingEnabled && property is "Diameter" or "MinSeparation" or "Box") ||
+        (!Draft.PickingEnabled && property is "Diameter" or "MinSeparation" or "Box" or "RescaleParticles" or "RescaledBox") ||
         (!Draft.CorrectGain && property is "GainPath" or "GainFlipX" or "GainFlipY" or "GainTranspose") ||
         (!Draft.Denoise && property is "TrainCount" or "FineTune" or "FineTuneEvery" or "TrainingEpochs" or "DenoiserStart");
     private RenderFragment B(string property, string label) => builder => {
@@ -254,14 +266,6 @@
         builder.AddAttribute(11, "ValueChanged", EventCallback.Factory.Create<bool>(this, v => SetProperty(property, v)));
         builder.AddAttribute(12, "aria-label", label); builder.AddAttribute(13, "Disabled", IsDisabled(property));
         builder.CloseComponent(); builder.CloseElement(); builder.CloseElement();
-    };
-    private RenderFragment C(string property, string label) => builder => {
-        builder.OpenComponent<FluentCheckbox>(0);
-        builder.AddAttribute(1, "Value", (bool)typeof(WarpSettings).GetProperty(property)!.GetValue(Draft));
-        builder.AddAttribute(2, "ValueChanged", EventCallback.Factory.Create<bool>(this, v => SetProperty(property, v)));
-        builder.AddAttribute(3, "Label", label); builder.AddAttribute(4, "Disabled", IsDisabled(property));
-        builder.SetKey(property);
-        builder.CloseComponent();
     };
     // Paths are long: the label sits above a full-width field with Relay's file browser.
     private RenderFragment P(string property, string label, SelectionMode mode) => builder => {

@@ -26,16 +26,20 @@ public sealed class MockWorkerEndToEndTests
         Assert.All(initial,m=>
         {
             Assert.Equal(WarpStage.All,m.Done);Assert.Equal(WarpStage.None,m.Stale);Assert.False(m.Failed,m.Error);
-            Assert.True(File.Exists(m.MetadataPath));Assert.True(File.Exists(m.ThumbnailPath));Assert.True(File.Exists(WarpSession.PreviewPath(m.AveragePath)));Assert.True(File.Exists(WarpSession.PreviewPath(m.EnhancedPath)));Assert.True(File.Exists(m.TrainingOddPath));Assert.True(File.Exists(m.TrainingEvenPath));
+            Assert.True(File.Exists(m.MetadataPath));Assert.True(File.Exists(m.ThumbnailPath));Assert.True(File.Exists(WarpSession.PreviewPath(m.AveragePath)));Assert.True(File.Exists(WarpSession.PreviewPath(m.EnhancedPath)));Assert.True(File.Exists(new Movie(m.ProcessingPath).AverageOddPath));Assert.True(File.Exists(new Movie(m.ProcessingPath).AverageEvenPath));Assert.False(File.Exists(new Movie(m.ProcessingPath).DeconvolvedPath));
             var average=MapHeader.ReadFromFile(m.AveragePath);var enhanced=MapHeader.ReadFromFile(m.EnhancedPath);var stack=MapHeader.ReadFromFile(m.ParticleStackPath);
             Assert.Equal(102,average.Dimensions.X);Assert.Equal(102,average.Dimensions.Y);Assert.Equal(1,average.Dimensions.Z);
             Assert.Equal(22,enhanced.Dimensions.X);Assert.Equal(22,enhanced.Dimensions.Y);
             Assert.Equal((float)fixture.Session.Settings.TargetPixelSize,average.PixelSize.X,5);
             Assert.Equal(MovieDenoising.Sampling((float)fixture.Session.Settings.TargetPixelSize),enhanced.PixelSize.X,5);
-            Assert.Equal(m.Picks,stack.Dimensions.Z);Assert.Equal(fixture.Session.Settings.Box,stack.Dimensions.X);
+            // The default bounds keep every pick; the extracted list is in the stack's order.
+            Assert.Equal(m.Picks,m.Particles);Assert.Equal(m.Particles,stack.Dimensions.Z);Assert.Equal(m.Particles,new Star(m.ExtractedStarPath).RowCount);
+            Assert.Equal(fixture.Session.Settings.Box,stack.Dimensions.X);
             Assert.Equal((float)fixture.Session.Settings.TargetPixelSize,stack.PixelSize.X,5);
             Assert.True(double.IsFinite(m.Motion)&&double.IsFinite(m.Ctf));
             var metadata=new Movie(m.ProcessingPath);Assert.NotEmpty(metadata.PS1D);Assert.NotEmpty(metadata.Simulated1D);
+            // Workers keep the metadata's data folder as discovery wrote it: relative to the space, leading to the raw movie's link.
+            Assert.False(Path.IsPathRooted(metadata.DataDirectoryName));Assert.True(File.Exists(Path.Combine(fixture.Root,metadata.DataPath)));
             using var spectrum=Image.FromFile(metadata.PowerSpectrumPath);Assert.True(spectrum.Dims.X>0);Assert.True(spectrum.GetHost(Intent.Read)[0].All(float.IsFinite));
         });
         Assert.True(fixture.Session.Model>0);Assert.All(initial,m=>Assert.Equal(fixture.Session.Model,m.DenoiseModel));Assert.Equal(0,fixture.Session.OlderModelMovies);
@@ -45,14 +49,11 @@ public sealed class MockWorkerEndToEndTests
             Assert.Equal("warpworker2-mock-denoiser",marker.RootElement.GetProperty("format").GetString());Assert.True(marker.RootElement.GetProperty("synthetic").GetBoolean());
             Assert.Equal(2,marker.RootElement.GetProperty("trainingMovies").GetArrayLength());Assert.Equal(3,marker.RootElement.GetProperty("epochs").GetInt32());
         }
-        long total=initial.Sum(m=>(long)m.Picks);Assert.Equal(total,fixture.Session.GetParticleHistogram().Total);
-        fixture.Session.SetParticleRange(.45,.85,0,null);
-        long expected=initial.Sum(m=>ParticleScores(m.ParticleStarPath).LongCount(c=>c>=.45&&c<=.85));
-        Assert.InRange(expected,1,total-1);
-        var export=await fixture.Session.ExportAsync(true);
-        Assert.Equal(expected,export.ParticleCount);Assert.Equal(expected,new Star(export.StarPath,"particles").RowCount);
-        Assert.All(new Star(export.StarPath,"particles").GetColumn("rlnImageName"),value=>Assert.True(File.Exists(value[(value.IndexOf('@')+1)..])));
-        var micrographs=await fixture.Session.ExportAsync(false);Assert.Equal(2,micrographs.MovieCount);
+        long total=initial.Sum(m=>(long)m.Picks);Assert.Equal(total,fixture.Session.GetParticleHistogram().Total);Assert.Equal(total,fixture.Session.ParticleCount);
+        var export=await fixture.Session.ExportAsync(true,fixture.ExportDirectory("particles"),fixture.Root);
+        Assert.Equal(total,export.ParticleCount);Assert.Equal(total,new Star(export.StarPath,"particles").RowCount);
+        Assert.All(new Star(export.StarPath,"particles").GetColumn("rlnImageName"),value=>Assert.True(File.Exists(Path.Combine(fixture.Root,value[(value.IndexOf('@')+1)..]))));
+        var micrographs=await fixture.Session.ExportAsync(false,fixture.ExportDirectory("micrographs"),fixture.Root);Assert.Equal(2,micrographs.MovieCount);
         Assert.Equal(2,JsonDocument.Parse(File.ReadAllText(micrographs.ProcessedItemsJson)).RootElement.GetArrayLength());
         await fixture.StopAsync();
         var averageWrites=initial.ToDictionary(m=>m.Id,m=>File.GetLastWriteTimeUtc(m.AveragePath));
@@ -61,6 +62,41 @@ public sealed class MockWorkerEndToEndTests
         foreach(var row in initial)File.Move(row.ParticleStarPath,row.ParticleStarPath+".held");
         try { fixture.Reload();Assert.Equal(total,fixture.Session.GetParticleHistogram().Total);Assert.Equal(2,fixture.Session.Movies.Count); }
         finally { foreach(var row in initial)File.Move(row.ParticleStarPath+".held",row.ParticleStarPath); }
+
+        // New score bounds and rescaling redo extraction alone: the picks, CTF and averages stay, and so does the histogram.
+        fixture.Session.Apply(fixture.Session.Settings with{ParticleBounds=new(.45,.85,0,null),RescaleParticles=true,RescaledBox=32});
+        Assert.All(fixture.Session.Movies,m=>Assert.Equal(WarpStage.Extract,m.Stale));Assert.Equal(total,fixture.Session.GetParticleHistogram().Total);
+        long expected=initial.Sum(m=>ParticleScores(m.ParticleStarPath).LongCount(c=>c>=.45&&c<=.85));
+        Assert.InRange(expected,1,total-1);
+        await fixture.StartAsync();
+        await fixture.UntilAsync(()=>fixture.Session.Complete==2&&fixture.Session.Movies.All(m=>m.ExtractionRevision>initial[m.Index].ExtractionRevision));
+        Assert.All(fixture.Session.Movies,m=>
+        {
+            Assert.Equal(initial[m.Index].PickingRevision,m.PickingRevision);Assert.Equal(initial[m.Index].CtfRevision,m.CtfRevision);
+            Assert.Equal(ParticleScores(m.ParticleStarPath).Count(c=>c>=.45&&c<=.85),m.Particles);
+            Assert.All(ParticleScores(m.ExtractedStarPath),c=>Assert.InRange(c,.45,.85));
+            if(m.Particles>0)
+            {
+                var stack=MapHeader.ReadFromFile(m.ParticleStackPath);
+                Assert.Equal(m.Particles,stack.Dimensions.Z);Assert.Equal(32,stack.Dimensions.X);
+                Assert.Equal((float)fixture.Session.Settings.TargetPixelSize*2,stack.PixelSize.X,4);
+            }
+            else Assert.False(File.Exists(m.ParticleStackPath));
+        });
+        Assert.Equal(expected,fixture.Session.ParticleCount);
+        var bounded=await fixture.Session.ExportAsync(true,fixture.ExportDirectory("bounded"),fixture.Root);
+        Assert.Equal(expected,bounded.ParticleCount);Assert.Equal(expected,new Star(bounded.StarPath,"particles").RowCount);
+        // Rescaled particles are at twice the pixel size; their coordinates stay in micrograph pixels.
+        var optics=new Star(bounded.StarPath,"optics");
+        Assert.Equal(2.5m,decimal.Parse(Assert.Single(optics.GetColumn("rlnImagePixelSize")),CultureInfo.InvariantCulture));
+        Assert.Equal(1.25m,decimal.Parse(Assert.Single(optics.GetColumn("rlnMicrographPixelSize")),CultureInfo.InvariantCulture));
+        Assert.Equal("32",Assert.Single(optics.GetColumn("rlnImageSize")));
+        // Particles name their movie in the processing folder, relative to the space.
+        Assert.All(new Star(bounded.StarPath,"particles").GetColumn("rlnMicrographName"),value=>Assert.Contains(Path.Combine(fixture.Root,value),fixture.Session.Movies.Select(m=>m.ProcessingPath)));
+        Assert.All(new Star(bounded.StarPath,"particles").GetColumn("rlnImageName"),value=>Assert.True(File.Exists(Path.Combine(fixture.Root,value[(value.IndexOf('@')+1)..]))));
+        await fixture.StopAsync();
+        initial=fixture.Session.Movies.ToArray();
+
         fixture.Session.Apply(fixture.Session.Settings with{CtfMax=3});
         Assert.All(fixture.Session.Movies,m=>{Assert.False(m.Stale.HasFlag(WarpStage.Motion));Assert.True(m.Stale.HasFlag(WarpStage.Ctf));});
         await fixture.StartAsync();
@@ -70,7 +106,7 @@ public sealed class MockWorkerEndToEndTests
             Assert.Equal(initial[m.Index].MotionRevision,m.MotionRevision);Assert.Equal(averageWrites[m.Id],File.GetLastWriteTimeUtc(m.AveragePath));
             Assert.Equal(fixture.Session.Settings.TargetPixelSize*2/3m,new Movie(m.ProcessingPath).OptionsCTF.RangeMax);
         });
-        Assert.Equal(expected,new Star(export.StarPath,"particles").RowCount);
+        Assert.Equal(total,new Star(export.StarPath,"particles").RowCount);
     }
 
     [Fact]
@@ -98,11 +134,13 @@ public sealed class MockWorkerEndToEndTests
         public WarpSessionManager Manager{get;}=new();
         public WarpSessionIdentity Identity{get;}
         public WarpSession Session{get;private set;}
+        /// <summary>Where an export job named <paramref name="name"/> would write.</summary>
+        public string ExportDirectory(string name)=>Path.Combine(Root,"exports",name);
         Process? _worker;Task? _run;CancellationTokenSource? _cancel;Task<string>? _stdout,_stderr;
         public Fixture()
         {
             string input=Path.Combine(Root,"input"),job=Path.Combine(Root,"session");Directory.CreateDirectory(input);
-            Identity=new(1,1,1,job,Path.Combine(job,"tasks"));Session=Manager.GetOrCreate(Identity);
+            Identity=new(1,1,1,job,Path.Combine(job,"tasks"),Root);Session=Manager.GetOrCreate(Identity);
             Session.Apply(new(){InputPath=input,InputPattern="*.mrc",Recursive=true,Pixel=1,TargetPixelSize=1.25m,TrainCount=2,TrainingEpochs=3,Diameter=20,Box=64});
             Session.FilterMetric("ctf-max",100);Session.FilterMetric("motion-max",100);
         }

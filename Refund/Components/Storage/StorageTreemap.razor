@@ -1,0 +1,37 @@
+@using Refund.Services.Storage
+@using Refund.Components
+
+<div class="treemap" role="img" aria-label="@AriaLabel">
+    <canvas @ref="_canvas" class="treemap-base"></canvas>
+    <canvas @ref="_overlay" class="treemap-overlay"></canvas>
+    <div @ref="_tooltip" class="treemap-tooltip" hidden></div>
+    <div @ref="_anchor" id="@_anchorId" class="treemap-anchor"></div>
+    @if (_preview.Current is { } job && _renderer != null)
+    {
+        <div class="treemap-card-host">
+            <RelayPopover @key="job" AnchorId="@_anchorId" Position="Positioning.After" Gap="14" Opened="true"
+                          OpenedChanged="@(open => open ? Task.CompletedTask : _preview.HideAsync())" Class="job-preview-popover">
+                <div class="treemap-card">
+                    @if (_summary is { Length: 4 } lines)
+                    {
+                        <div class="treemap-card-summary">
+                            <div class="tt-value">@lines[0]</div>
+                            <div class="tt-name">@lines[1]</div>
+                            @if (lines[2].Length > 0 && lines[2] != lines[1]) { <div class="tt-detail">@lines[2]</div> }
+                            @if (lines[3].Length > 0) { <div class="tt-detail">@lines[3]</div> }
+                        </div>
+                    }
+                    @_renderer.Render(job, _cardSuffix)
+                </div>
+            </RelayPopover>
+        </div>
+    }
+    @if (_failed != null)
+    {
+        <p class="treemap-empty">@_failed</p>
+    }
+    else if (Payload == null || Payload.Count <= 1)
+    {
+        <p class="treemap-empty">@EmptyText</p>
+    }
+</div>

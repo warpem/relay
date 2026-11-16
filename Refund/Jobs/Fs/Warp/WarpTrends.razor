@@ -6,7 +6,7 @@
 @inject IJSRuntime Js
 @implements IAsyncDisposable
 
-<section id="@_brushId" @ref="_root" class="session-trends @(Compact ? "compact" : "")" aria-label="Acquisition trends">
+<section id="@_brushId" @ref="_root" class="session-trends @(Compact ? "compact" : "")" style="--track-count: @Shown.Length" aria-label="Acquisition trends">
     <div class="trend-toolbar">
         <h3 class="trend-title">Acquisition</h3>
         <div class="window-buttons segmented" role="group" aria-label="Plotted movies">
@@ -16,7 +16,7 @@
         </div>
     </div>
     <div class="tracks">
-        @for (int metric = 0; metric < 4; metric++)
+        @foreach (int metric in Shown)
         {
             int row = metric;
             <div class="trend-track">
@@ -25,11 +25,17 @@
                     <span class="selected-reading" title="Selected movie">@SelectedReading(row)</span>
                     <span class="metric-filter range-input" title="Movies outside this range are filtered out">
                         <span class="range-label">Accept</span>
-                        @if (row == 3)
+                        @if (row == Particles)
                         {
                             <RobustFluentNumberField TValue="int" Value="@Session.MinParticles" ValueChanged="@(v => SetFilter(row, true, v))" Min="0" Max="@Invariant(Session.MaxParticles)" Step="10" aria-label="@FilterLabel(row, true)" title="@FilterLabel(row, true)" />
                             <span aria-hidden="true">–</span>
                             <RobustFluentNumberField TValue="int?" Value="@(Session.MaxParticles == int.MaxValue ? (int?)null : Session.MaxParticles)" ValueChanged="@(v => SetFilter(row, false, v ?? int.MaxValue))" Min="@Invariant(Session.MinParticles)" Step="10" Placeholder="∞" aria-label="@FilterLabel(row, false)" title="Maximum accepted particles; leave empty for no upper limit" />
+                        }
+                        else if (row == Signal)
+                        {
+                            <RobustFluentNumberField TValue="double" Value="@Session.MinCtfSignal" ValueChanged="@(v => SetFilter(row, true, v))" Min="0" Max="@(Session.MaxCtfSignal is double maximum ? Invariant(maximum) : null)" Step="@FilterStep(row)" aria-label="@FilterLabel(row, true)" title="Minimum accepted CTF signal: how many robust standard deviations the fitted CTF stands above decoy defoci. Spectra without Thon rings score about 0–3." />
+                            <span aria-hidden="true">–</span>
+                            <RobustFluentNumberField TValue="double?" Value="@Session.MaxCtfSignal" ValueChanged="@SetSignalMaximum" Min="@Invariant(Session.MinCtfSignal)" Step="@FilterStep(row)" Placeholder="∞" aria-label="@FilterLabel(row, false)" title="Maximum accepted CTF signal, for instance to look at poor fits only; leave empty for no upper limit" />
                         }
                         else
                         {
@@ -41,7 +47,7 @@
                 </div>
                 <div class="plot-frame">
                     @Plot(row)
-                    @if (row == 0 && !_hasWindowCtfResults)
+                    @if (row == Ctf && !_hasWindowCtfResults)
                     {
                         <div class="pending-window">
                             <span>No CTF results in this window yet</span>
@@ -112,13 +118,18 @@
     private bool _disposed, _windowNotificationPending;
     private IndexRange? _reportedWindow;
 
-    private static readonly string[] Labels = ["CTF fit", "Motion", "Ice thickness", "Particles"];
-    private static readonly string[] FilterKeys = ["ctf", "motion", "ice", "particles"];
-    private static readonly string[] Units = ["Å", "Å/frame", "Å", "per movie"];
-    private static readonly WarpStage[] RequiredStages = [WarpStage.Ctf, WarpStage.Motion, WarpStage.Ctf, WarpStage.Pick];
-    private static readonly double[] AxisFloors = [10, 5, 1600, 400];
-    private readonly List<ScatterPoint>[] _points = [[], [], [], []];
-    private readonly double[] _axisMax = new double[4];
+    private const int Ctf = 0, Signal = 1, Motion = 2, Ice = 3, Particles = 4;
+    private static readonly string[] Labels = ["CTF fit", "CTF signal", "Motion", "Ice thickness", "Particles"];
+    private static readonly string[] FilterKeys = ["ctf", "ctf-signal", "motion", "ice", "particles"];
+    private static readonly string[] Units = ["Å", "σ", "Å/frame", "Å", "per movie"];
+    private static readonly WarpStage[] RequiredStages = [WarpStage.Ctf, WarpStage.Ctf, WarpStage.Motion, WarpStage.Ctf, WarpStage.Extract];
+    private static readonly double[] AxisFloors = [10, 20, 5, 1600, 400];
+    private readonly List<ScatterPoint>[] _points = [[], [], [], [], []];
+    private readonly double[] _axisMax = new double[Labels.Length];
+    // Tracks for parameters the applied settings don't produce stay hidden: ice without thickness fitting, particles
+    // without picking.
+    private int[] Shown => Enumerable.Range(0, Labels.Length)
+        .Where(m => m switch { Ice => Session.Settings.FitThickness, Particles => Session.Settings.PickingEnabled, _ => true }).ToArray();
     private int _start, _end, _count, _projectionVersion;
     private int _latestCtfIndex = -1;
     private bool _hasWindowCtfResults;
@@ -211,13 +222,16 @@
         _previousWindow = View.WindowSize;
         _previousCenter = View.CenterIndex ?? -1;
         int total = Session.Movies.Count;
-        _count = View.WindowSize == 0 ? total : Math.Min(View.WindowSize, total);
-        _start = View.CenterIndex.HasValue ? Math.Clamp(View.CenterIndex.Value - _count / 2, 0, Math.Max(0, total - _count)) : total - _count;
+        // Last 200 / Last 1,000 end at the latest movie with results: movies discovered but not yet processed have
+        // nothing to plot. Before any results, they end at the latest discovered.
+        int latest = View.WindowSize > 0 && !View.CenterIndex.HasValue && Session.ProcessedEnd is > 0 and var processed ? processed : total;
+        _count = View.WindowSize == 0 ? total : Math.Min(View.WindowSize, latest);
+        _start = View.CenterIndex.HasValue ? Math.Clamp(View.CenterIndex.Value - _count / 2, 0, Math.Max(0, total - _count)) : latest - _count;
         _end = _start + _count;
         _windowNotificationPending = _reportedWindow != Window;
         _latestCtfIndex = -1;
         _hasWindowCtfResults = false;
-        for (int metric = 0; metric < 4; metric++)
+        for (int metric = 0; metric < Labels.Length; metric++)
         {
             _points[metric].Clear();
             if (_points[metric].Capacity < _count) _points[metric].Capacity = _count;
@@ -230,7 +244,7 @@
                 if (value.HasValue)
                 {
                     _axisMax[metric] = Math.Max(_axisMax[metric], Math.Ceiling(value.Value));
-                    if (metric == 0)
+                    if (metric == Ctf)
                     {
                         _latestCtfIndex = i;
                         if (i >= _start && i < _end) _hasWindowCtfResults = true;
@@ -247,12 +261,19 @@
         _projectionVersion++;
     }
 
-    private double FilterMinimum(int metric) => metric switch { 0 => Session.MinCtf, 1 => Session.MinMotion, 2 => Session.MinIce, _ => Session.MinParticles };
-    private double FilterMaximum(int metric) => metric switch { 0 => Session.MaxCtf, 1 => Session.MaxMotion, 2 => Session.MaxIce, _ => Session.MaxParticles };
+    private double FilterMinimum(int metric) => metric switch { Ctf => Session.MinCtf, Signal => Session.MinCtfSignal, Motion => Session.MinMotion, Ice => Session.MinIce, _ => Session.MinParticles };
+    // Without an upper CTF signal limit, the plot's accepted band still needs a finite edge, as for particles.
+    private double FilterMaximum(int metric) => metric switch { Ctf => Session.MaxCtf, Signal => Session.MaxCtfSignal ?? int.MaxValue, Motion => Session.MaxMotion, Ice => Session.MaxIce, _ => Session.MaxParticles };
     private string FilterLabel(int metric, bool minimum) => $"{(minimum ? "Minimum" : "Maximum")} accepted {Labels[metric].ToLowerInvariant()} ({Units[metric]})";
-    // Steps set each filter's precision: tenths of an Å for CTF fit and motion, tens for ice and particles.
-    private static string FilterStep(int metric) => metric < 2 ? "0.1" : "10";
+    // Steps set each filter's precision: tenths of an Å for CTF fit and motion, halves for CTF signal, tens for ice and particles.
+    private static string FilterStep(int metric) => metric switch { Ctf or Motion => "0.1", Signal => "0.5", _ => "10" };
     private static string Invariant(double value) => value.ToString(CultureInfo.InvariantCulture);
+    private async Task SetSignalMaximum(double? value)
+    {
+        if (value is < 0) return;
+        await Update(s => s.FilterCtfSignalMaximum(value));
+        UpdateProjection();
+    }
     private async Task SetFilter(int metric, bool minimum, double value)
     {
         if (!double.IsFinite(value) || value < 0) return;
@@ -263,7 +284,7 @@
     private static double? Metric(WarpMovie movie, int metric)
     {
         if (!movie.Done.HasFlag(RequiredStages[metric])) return null;
-        double value = metric switch { 0 => movie.Ctf, 1 => movie.Motion, 2 => movie.Ice, _ => movie.Picks };
+        double value = metric switch { Ctf => movie.Ctf, Signal => movie.CtfSignal, Motion => movie.Motion, Ice => movie.Ice, _ => movie.Particles };
         return double.IsFinite(value) ? value : null;
     }
 
@@ -274,7 +295,7 @@
         double? value = Metric(movie, metric);
         string label = $"#{SelectedIndex + 1:N0} ";
         if (!value.HasValue) return label + "pending";
-        string reading = value.Value.ToString(metric < 2 ? "F2" : "N0");
+        string reading = value.Value.ToString(metric switch { Ctf or Motion => "F2", Signal => "F1", _ => "N0" });
         return label + (Session.ActiveStale(movie).HasFlag(RequiredStages[metric]) ? reading + " (previous settings)" : reading);
     }
 

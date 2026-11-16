@@ -355,12 +355,20 @@ public partial class DataManager
     /// </remarks>
     public async Task ClearJob(ReadOnlyUser user, ReadOnlyJob job)
     {
+        var started = await StartClearing(user, job);
+        await FinishClearing(user, job, started);
+    }
+
+    /// <summary>
+    /// First half of <see cref="ClearJob"/>: checks that the job can be cleared and moves it to Clearing.
+    /// Returns the job to pass to <see cref="FinishClearing"/>.
+    /// </summary>
+    private async Task<Job> StartClearing(ReadOnlyUser user, ReadOnlyJob job)
+    {
         try
         {
             var originalUser = _userRepository.FindUser(user.Id);
             Job originalJob = null;
-
-            // First transition the job to the Clearing state
             await UpdateJob(user, job, resolvedJob =>
             {
                 EnsureNoPendingExecutions(
@@ -374,37 +382,45 @@ public partial class DataManager
                 resolvedJob.Status = JobStatus.Clearing;
                 originalJob = resolvedJob;
             } );
-
-            try
-            {
-                // Directory deletion is synchronous and can be slow, so keep it off the request context.
-                await Task.Run(originalJob.Clear);
-
-                // After successful clearing, transition the job back to the Building state
-                await UpdateJob(user, job, resolvedJob =>
-                {
-                    resolvedJob.AddEvent(EventType.ClearingFinished);
-                    resolvedJob.Status = JobStatus.Building;
-                } );
-            }
-            catch (Exception ex)
-            {
-                Log.ForContext<DataManager>().Error(ex, "Failed to clear files for job {JobId}", job.Id);
-                await originalJob.WriteToErrorLog("Failed to clear job:\n" + ex);
-
-                await UpdateJob(user, job, resolvedJob =>
-                {
-                    resolvedJob.AddEvent(EventType.Failed);
-                    resolvedJob.Status = JobStatus.Failed;
-                } );
-
-                // UI and API callers must not report a partially cleared job as a success.
-                throw;
-            }
+            return originalJob;
         }
         catch (Exception e)
         {
             Log.ForContext<DataManager>().Error(e, "Failed to clear job {JobId} by user {UserId}", job.Id, user.Id);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Second half of <see cref="ClearJob"/>: deletes the job's files and moves it to Building, or to Failed (and
+    /// rethrows) if that fails.
+    /// </summary>
+    private async Task FinishClearing(ReadOnlyUser user, ReadOnlyJob job, Job originalJob)
+    {
+        try
+        {
+            // Directory deletion is synchronous and can be slow, so keep it off the request context.
+            await Task.Run(originalJob.Clear);
+
+            // After successful clearing, transition the job back to the Building state
+            await UpdateJob(user, job, resolvedJob =>
+            {
+                resolvedJob.AddEvent(EventType.ClearingFinished);
+                resolvedJob.Status = JobStatus.Building;
+            } );
+        }
+        catch (Exception ex)
+        {
+            Log.ForContext<DataManager>().Error(ex, "Failed to clear files for job {JobId}", job.Id);
+            await originalJob.WriteToErrorLog("Failed to clear job:\n" + ex);
+
+            await UpdateJob(user, job, resolvedJob =>
+            {
+                resolvedJob.AddEvent(EventType.Failed);
+                resolvedJob.Status = JobStatus.Failed;
+            } );
+
+            // UI and API callers must not report a partially cleared job as a success.
             throw;
         }
     }

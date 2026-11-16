@@ -45,6 +45,24 @@ public class FrameSeriesCtfTests : IDisposable
     }
 
     [Fact]
+    public void MotionAndCtfProcessesOnlyTheMoviesASelectionLists()
+    {
+        JobRegistry.EnsurePopulated();
+        var space = new Space { RootDirectory = _root };
+        var job = new MotionAndCTF2D { Id = 12, Space = space };
+        Assert.False(job.ComposeCommandArguments().ContainsKey("input_data"));
+        // A Warp export's micrographs are a selection of the session's folder, listed beside its STAR.
+        string list = Path.Combine(_root, "7", "movies.txt");
+        var set = new Refund.JobResources.MicrographSet { DataSetFs = new Refund.JobResources.DataSetFs(), InputListPath = list };
+        var source = new PortOut(new Refund.Jobs.Common.Notes.Note.Note { Id = 7, Space = space }, typeof(Refund.JobResources.MicrographSet), "Micrographs", "Micrographs", _ => set);
+        var input = job.PortsIn[MotionAndCTF2D.PortInMicrographs];
+        input.Edges.Add(new Edge { Source = source, Target = input });
+        Assert.Equal(space.GetRelativePath(list), job.ComposeCommandArguments()["input_data"]);
+        set.InputListPath = "";
+        Assert.False(job.ComposeCommandArguments().ContainsKey("input_data"));
+    }
+
+    [Fact]
     public async Task Overview_LoadsThicknessFromSummaryAndRefreshesWithoutReadingXml()
     {
         JobRegistry.EnsurePopulated();

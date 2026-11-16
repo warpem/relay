@@ -104,7 +104,7 @@ public class CreateSpecies : WarpToolsJob, IClusterJob
     [UiDecimalNullable("angpix_resample", "Resample pixel size",
                        min: 0.1,
                        max: 1000,
-                       stepSize: 0.01,
+                       stepSize: 0.001,
                        unit: "Å",
                        helpText: "Resample half-maps and masks to this pixel size (in Angstrom). Leave empty to keep original pixel size")]
     [RelayProperty]

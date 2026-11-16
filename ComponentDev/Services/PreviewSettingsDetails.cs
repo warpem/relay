@@ -48,7 +48,6 @@ public sealed partial record PreviewSettings
     public decimal DefocusMax { get; init; } = 5;
     public bool FitPhase { get; init; }
     public bool FitThickness { get; init; } = true;
-    public bool UseMovieSum { get; init; }
     public decimal Thickness { get; init; }
     public bool ExportAverage { get; init; } = true;
     public bool ExportStack { get; init; }
@@ -60,5 +59,5 @@ public sealed partial record PreviewSettings
     public bool Denoise { get; init; } = true;
     public int FineTuneEvery { get; init; } = 1000;
     public int TrainCount { get; init; } = 100;
-    public int TrainingEpochs { get; init; } = 8;
+    public int TrainingEpochs { get; init; } = 4;
 }

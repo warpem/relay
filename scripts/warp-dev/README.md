@@ -29,7 +29,7 @@ python3 scripts/warp-dev.py inject --condition highmotion
 python3 scripts/warp-dev.py inject --condition badctf
 ```
 
-Use Start, Stop, worker count, settings, filters, and exports in the normal UI. `pause` stops new input arrivals, not workers. `--count` is the total input target, including files retained from a previous run. `inject` adds one extra input immediately, even when the source is paused or the count is reached. Other conditions are `normal`, `thickice`, `fewparticles`, and `fail`.
+Use Start, Stop, worker count, settings, filters, and exports in the normal UI. `pause` stops new input arrivals, not workers. `--count` is the total input target, including files retained from a previous run. `inject` adds one extra input immediately, even when the source is paused or the count is reached. Other conditions are `normal`, `nosignal` (no Thon rings, as in an empty hole), `thickice`, `fewparticles`, and `fail`.
 
 Inputs are valid, small float MRC stacks, written to temporary names and renamed into the watched directory. `--size` (default 256) and `--frames` (default 4) set input dimensions. The four-movie training trigger and ten training iterations keep a fresh session quick. Fresh sessions enable thickness fitting so the synthetic ice episode appears in its plot. Existing session settings are preserved on restart. `--mock-delay-ms` (default 250) adjusts mock command latency.
 

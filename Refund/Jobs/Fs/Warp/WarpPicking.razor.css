@@ -11,23 +11,27 @@
 .exposure-navigation ::deep fluent-button { min-width: 32px; }
 .picking-toolbar ::deep .follow-latest { flex: none; margin-left: var(--w-space-s); white-space: nowrap; }
 
-.picking-content { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: var(--w-space-l); align-items: start; }
+/* --axis-margin: the histogram's tick labels and axis title hang this far left of the sidebar, into the gap. */
+.picking-content { --axis-margin: 52px; display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: calc(var(--axis-margin) + var(--w-space-m)); align-items: start; }
+.picking-controls { display: flex; align-items: center; flex-wrap: wrap; gap: var(--w-space-s); min-height: 32px; margin-bottom: var(--w-space-s); }
 /* Left-aligned with the toolbar above it. */
 .picking-image-region { margin: 0; width: min(100%, calc(100dvh - 400px)); min-width: 320px; justify-self: start; }
 .picking-image { width: 100%; aspect-ratio: 1; }
 
 .picking-sidebar { display: flex; flex-direction: column; gap: var(--w-space-l); min-width: 0; }
-.picking-sidebar > section { display: flex; flex-direction: column; align-items: flex-start; gap: var(--w-space-s); }
-.picking-sidebar > section + section { padding-top: var(--w-space); border-top: 1px solid var(--w-rule); }
-.sidebar-histogram { align-items: stretch !important; --diagnostic-size: 240px; }
-.pick-facts { display: grid; grid-template-columns: 1fr auto; gap: var(--w-space-xs) var(--w-space-m); width: 100%; margin: 0 0 var(--w-space-xs); }
-.pick-facts > div { display: contents; }
-.pick-facts dt { color: var(--colorNeutralForeground2); }
-.pick-facts dd { margin: 0; text-align: right; font-weight: 600; }
-.result-note { font-size: var(--w-text-s); color: var(--w-warn); }
+.sidebar-histogram { display: flex; flex-direction: column; gap: var(--w-space-s); --diagnostic-size: 240px; }
+/* Apply bar for the score bounds, styled like Setup's. */
+.picking-sidebar > .draft-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--w-space-s); padding: var(--w-space-s) var(--w-space-m); margin-top: calc(-1 * var(--w-space-s)); border-radius: var(--borderRadiusMedium); background: var(--w-bar); }
+.draft-actions > div { display: flex; flex: 1 1 100%; flex-direction: column; min-width: 0; }
+.draft-actions > div > span { font-size: var(--w-text-s); color: var(--w-muted); }
+.draft-actions.dirty { background: var(--w-warn-bg); }
+.draft-actions.dirty b { color: var(--w-warn); font-weight: 600; }
+.draft-actions .error { color: var(--w-bad) !important; }
+.draft-actions ::deep fluent-button:first-of-type { margin-left: auto; }
 
 @container (max-width: 1000px) {
     .picking-content { grid-template-columns: 1fr; }
+    .picking-sidebar { padding-left: var(--axis-margin); }
     .picking-image-region { width: 100%; }
     .movie-name { display: none; }
 }

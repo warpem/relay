@@ -16,7 +16,9 @@ public class WarpJob : WarpToolsJobGpu, ILocalJob
     public override string TypeName => "Warp";
     public override string TypeNameShort => "Warp";
     public override string TypeDescription => "On-the-fly motion correction, CTF estimation, denoising and particle picking";
-    public override int2 CardSquareCount { get; set; } = new(2, 1);
+    // Wide enough for the movie status pie beside the session figures (WarpCardContent).
+    public override int2 CardSquareCount { get; set; } = new(4, 1);
+    public override Type CardViewType => typeof(WarpCardContent);
     public override JobQueueType QueueType => JobQueueType.Local;
     public override Type ExpandedViewType => typeof(WarpExpandedView);
     public override bool IsResumable => true;
@@ -30,8 +32,19 @@ public class WarpJob : WarpToolsJobGpu, ILocalJob
     [RelayProperty]
     public WarpSettings Settings { get; set; } = new();
 
+    /// <summary>
+    /// Clearing removes the session's results but keeps its filter thresholds, which are configuration like
+    /// <see cref="Settings"/>. The session was disposed (and its checkpoint saved) before this runs.
+    /// </summary>
+    public override void Clear()
+    {
+        var filters = WarpSession.ReadSavedFilters(DirectoryPath);
+        base.Clear();
+        if (filters != null) WarpSession.KeepFilters(DirectoryPath, filters);
+    }
+
     public WarpSessionIdentity Identity => new(Space.Project.Id, Space.Id, Id,
-        DirectoryPath, Path.Combine(DirectoryPath, "tasks"));
+        DirectoryPath, Path.Combine(DirectoryPath, "tasks"), Space.RootDirectory);
 
     public WarpJob()
     {

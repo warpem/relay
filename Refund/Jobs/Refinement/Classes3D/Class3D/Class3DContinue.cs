@@ -222,6 +222,9 @@ public class Class3DContinue : Class3D
         LogsAvailableIteration = predecessor.LogsAvailableIteration;
         VisAvailableIteration = predecessor.VisAvailableIteration;
         ContinuingFromIteration = predecessor.VisAvailableIteration + 1;
+        // The copied files are what cleaning left of the predecessor; earlier iterations have only logs and figures.
+        HasBeenCleaned = predecessor.HasBeenCleaned;
+        KeptIterations = predecessor.HasBeenCleaned ? predecessor.KeptIterations.ToArray() : [];
         
         if (File.Exists(PathStdOut))
             File.Delete(PathStdOut);

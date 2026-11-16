@@ -1,6 +1,6 @@
-/* Acquisition trends: four metric tracks sharing one acquisition axis. */
+/* Acquisition trends: up to five metric tracks sharing one acquisition axis; --track-count is how many are shown. */
 
-.session-trends { --warp-track-height: clamp(40px, calc((100dvh - 600px) / 7), 160px); --axis-width: 34px; min-width: 0; }
+.session-trends { --warp-track-height: clamp(36px, calc((100dvh - 600px) / (1.75 * var(--track-count, 5))), calc(640px / var(--track-count, 5))); --axis-width: 34px; min-width: 0; }
 
 .trend-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--w-space-m); margin-bottom: var(--w-space-s); }
 .trend-title { font-size: var(--w-text); font-weight: 600; }

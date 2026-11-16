@@ -2,6 +2,7 @@ using Microsoft.FluentUI.AspNetCore.Components;
 using Microsoft.JSInterop;
 using Refund.DataModel;
 using Refund.DataModel.ReadOnly;
+using Refund.Services.Core.DataManager;
 using Refund.Services.Core.Session;
 using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons;
 
@@ -882,7 +883,67 @@ public partial class MenuActionService
 
         #endregion
 
-        } // end if (!isBrowseMode) — resume with Clear, which is allowed
+        } // end if (!isBrowseMode) — resume with Clean intermediate and Clear, which are allowed
+
+        #region Clean intermediate files
+
+        {
+            var cleanable = jobs.Where(j => j.IntermediateRule != null).ToArray();
+            if (cleanable.Length > 0)
+            {
+                var freed = cleanable.Aggregate(default(UsagePart), (sum, j) => sum + DataManager.Cleanable(j));
+                bool measured = cleanable.All(j => j.Storage != null);
+                string size = measured && freed.Entries > 0 ? $" ({Refund.Utils.StorageFormat.Bytes(freed.Allocated)})" : "";
+                var actionClean = new MenuAction()
+                {
+                    // Short enough for the context menu; the selection already says how many jobs.
+                    Name = "Clean intermediate" + size,
+                    NeedsConfirmation = true,
+                    Appearance = null,
+                    TextColor = "var(--error)",
+                    BorderColor = "var(--error)",
+                    IconSmall = new Icons.Regular.Size16.BroomSparkle().WithColor("var(--error)"),
+                    IconLarge = new Icons.Regular.Size20.BroomSparkle().WithColor("var(--error)")
+                };
+
+                var blockers = cleanable.Select(j => _dataManager.CleanBlocker(_session.User, j)).ToArray();
+                if (blockers.All(b => b != null))
+                {
+                    actionClean.IsDisabled = true;
+                    actionClean.DisabledBecause = cleanable.Length == 1 || blockers.Distinct().Count() == 1
+                        ? $"Can't clean: {blockers[0].ToLowerInvariant()}"
+                        : "Can't clean any of these jobs right now";
+                }
+                else
+                    actionClean.Action = async () =>
+                    {
+                        var targets = cleanable.Where((j, i) => blockers[i] == null).ToArray();
+                        _ = Task.Run(async () =>
+                        {
+                            foreach (var job in targets)
+                            {
+                                try
+                                {
+                                    var result = await _dataManager.CleanIntermediate(_session.User, job);
+                                    _ = _toastService.ShowSuccessToastAsync(result.Removed == 0
+                                        ? $"{job.QualifiedName} had no intermediate files to remove"
+                                        : $"Cleaned {job.QualifiedName}" + (result.Estimated.Entries > 0
+                                            ? $": freed about {Refund.Utils.StorageFormat.Bytes(result.Estimated.Allocated)}" : ""));
+                                }
+                                catch (Exception exc)
+                                {
+                                    _ = _toastService.ShowErrorToastAsync($"Couldn't clean {job.QualifiedName}: {exc.Message}");
+                                }
+                            }
+                        });
+                        await Task.CompletedTask;
+                    };
+
+                result.Add(actionClean);
+            }
+        }
+
+        #endregion
 
         #region Clear
 

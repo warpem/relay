@@ -219,6 +219,25 @@ public static class JobStatusExtensions
         _ => status.ToString()
     };
 
+    /// <summary>
+    /// Describes the job's status for its icon's tooltip. A resumable job that was stopped shows a pause icon, so it reads
+    /// as paused rather than aborted.
+    /// </summary>
+    /// <summary>The job's status as a short label, e.g. for "Paused after 1:21"; see <see cref="GetStatusDescription(ReadOnlyJob)"/>.</summary>
+    public static string GetStatusLabel(this ReadOnlyJob job) => job.Status switch
+    {
+        JobStatus.Aborted when job.IsResumable => "Paused",
+        JobStatus.Aborting when job.IsResumable => "Pausing",
+        var status => status.ToString()
+    };
+
+    public static string GetStatusDescription(this ReadOnlyJob job) => job.Status switch
+    {
+        JobStatus.Aborted when job.IsResumable => "Paused",
+        JobStatus.Aborting when job.IsResumable => "Pausing",
+        var status => status.GetStatusDescription()
+    };
+
     public static string GetStatusHexColor(JobStatus status) => status switch
     {
         JobStatus.Building => "#888",

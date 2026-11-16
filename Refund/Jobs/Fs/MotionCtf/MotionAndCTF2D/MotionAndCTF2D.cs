@@ -73,7 +73,7 @@ public class MotionAndCTF2D : WarpToolsJobGpu, IClusterJob
     /// </summary>
     [UiFieldGroup("Motion Processing", 0)]
     [UiDecimal("m_range_min", "Minimum resolution",
-               helpText: "Minimum resolution in Angstrom to consider in motion fit",
+               stepSize: 0.1, helpText: "Minimum resolution in Angstrom to consider in motion fit",
                min: 1,
                max: 99999,
                unit: "Å")]
@@ -129,15 +129,6 @@ public class MotionAndCTF2D : WarpToolsJobGpu, IClusterJob
     public decimal CTFWindow { get; set; } = 512;
 
     /// <summary>
-    /// Controls whether to use the movie average spectrum instead of averaging individual frames' spectra.
-    /// This can help with low-signal data or when imaging without an energy filter.
-    /// </summary>
-    [UiBool("c_use_sum", "Use movie average",
-            "Use the movie average spectrum instead of the average of individual frames' spectra. Can help in the absence of an energy filter, or when signal is low.")]
-    [RelayProperty]
-    public bool CTFMovieSumEnable { get; set; }
-
-    /// <summary>
     /// The resolution of the defocus model grid in X and Y.
     /// Higher values allow modeling more complex defocus variations across the image.
     /// </summary>
@@ -154,7 +145,7 @@ public class MotionAndCTF2D : WarpToolsJobGpu, IClusterJob
                helpText: "Minimum resolution in Angstrom to consider in CTF fit",
                min: 1,
                max: 1000,
-               stepSize: 1,
+               stepSize: 0.1,
                unit: "Å")]
     [RelayProperty]
     public decimal CTFRangeMin { get; set; } = 30;
@@ -180,7 +171,7 @@ public class MotionAndCTF2D : WarpToolsJobGpu, IClusterJob
                helpText: "Minimum defocus value to explore during fitting",
                min: -1000,
                max: 1000,
-               stepSize: 0.1,
+               stepSize: 0.01,
                unit: "µm")]
     [RelayProperty]
     public decimal CTFZMin { get; set; } = 0.5M;
@@ -193,7 +184,7 @@ public class MotionAndCTF2D : WarpToolsJobGpu, IClusterJob
                helpText: "Maximum defocus value to explore during fitting",
                min: -1000,
                max: 1000,
-               stepSize: 0.1,
+               stepSize: 0.01,
                unit: "µm")]
     [RelayProperty]
     public decimal CTFZMax { get; set; } = 5.0M;
@@ -398,6 +389,11 @@ public class MotionAndCTF2D : WarpToolsJobGpu, IClusterJob
         result["c_grid"] = $"{CTFGridDims.X}x{CTFGridDims.Y}";
 
         result["out_thumbnails"] = "256";
+
+        // A selection of its folder's movies (e.g. a Warp export) lists them; WarpTools would otherwise take them all.
+        if (PortsIn[PortInMicrographs].HasResource<MicrographSet>() &&
+            PortsIn[PortInMicrographs].GetSingleResource<MicrographSet>() is { InputListPath: { Length: > 0 } list })
+            result["input_data"] = Space.GetRelativePath(list);
 
         return result;
     }

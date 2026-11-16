@@ -1,0 +1,74 @@
+@using System.Text.Json
+@using Refund.DataModel
+@using Refund.DataModel.ReadOnly
+@using Refund.Services
+@using Refund.Components.Jobs
+@inject FileService Files
+
+@* Until it has run (or after a clear) an export has nothing to show but its status. *@
+@if (Export?.Manifest == null || Export.Status is JobStatus.Failed or JobStatus.Aborted or JobStatus.Interrupted)
+{
+    <BasicJobCardContent Job="@Job" />
+}
+else
+{
+    var m = Export.Manifest;
+    <div class="export-card">
+        <div class="samples">
+            @foreach (var sample in _card?.Samples ?? [])
+            {
+                <div class="sample" style="aspect-ratio: @sample.Width / @sample.Height">
+                    <img src="@Files.GetUrl(Path.Combine(Export.Space.RootDirectory, sample.Thumbnail))" alt="" loading="lazy" />
+                    @if (sample.X.Length > 0)
+                    {
+                        // Positions are in the average's pixels, in the thumbnail's frame as the micrograph viewer draws them.
+                        double radius = (double)(m.Settings.Diameter / m.Settings.TargetPixelSize) / 2;
+                        <svg viewBox="0 0 @sample.Width @sample.Height" preserveAspectRatio="none" aria-hidden="true">
+                            @for (int i = 0; i < sample.X.Length; i++)
+                            {
+                                <circle cx="@Invariant(sample.X[i])" cy="@Invariant(sample.Y[i])" r="@Invariant(radius)" />
+                            }
+                        </svg>
+                    }
+                </div>
+            }
+        </div>
+        <div class="figures">
+            @if (m.Particles)
+            {
+                <b class="count">@m.ParticleCount.ToString("N0")</b><span class="what">particles</span>
+                <span>from @m.MovieCount.ToString("N0") micrographs</span>
+                <span>@m.Settings.ParticleBox px box, @m.Settings.ParticlePixelSize.ToString("0.###") Å/px</span>
+                <span>Ø @m.Settings.Diameter.ToString("0") Å</span>
+            }
+            else
+            {
+                <b class="count">@m.MovieCount.ToString("N0")</b><span class="what">micrographs</span>
+                @if (_card?.MedianResolution is { } resolution) { <span>CTF fit @resolution.ToString("0.0") Å median</span> }
+                @if (_card?.MedianMotion is { } motion) { <span>Motion @motion.ToString("0.00") Å/frame</span> }
+                @if (_card is { DefocusMin: { } low, DefocusMax: { } high }) { <span>Defocus @low.ToString("0.0")–@high.ToString("0.0") µm</span> }
+            }
+            <span class="source">from J@(Export.SourceWarpJobId), @m.Created.ToLocalTime().ToString("MMM d HH:mm")</span>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public ReadOnlyJob Job { get; set; }
+    private ReadOnlyWarpExportJob Export => Job as ReadOnlyWarpExportJob;
+    private WarpExportCard _card;
+    private string _cardKey;
+
+    // card.json is written with the manifest when the export runs.
+    protected override void OnParametersSet()
+    {
+        if (Export?.Manifest == null) return;
+        string key = $"{Export.CardPath}|{Export.Status}|{Export.UpdateDate.Ticks}";
+        if (key == _cardKey) return;
+        _cardKey = key;
+        try { _card = File.Exists(Export.CardPath) ? JsonSerializer.Deserialize<WarpExportCard>(File.ReadAllText(Export.CardPath)) : null; }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { _card = null; }
+    }
+
+    private static string Invariant(double value) => value.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+}

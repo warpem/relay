@@ -19,6 +19,7 @@ namespace Refund.Jobs.Refinement.Refinement3D.BeamRefine3D;
 public abstract class BeamParticleJob : Job, IClusterJob
 {
     public override bool IsIterative => true;
+    public override Refund.Services.Storage.IntermediateRule IntermediateRule => Refund.Services.Storage.IntermediateRules.BeamIterations;
     public override bool CanBeFinalized => true;
     public override JobQueueType QueueType => Device == BeamDevice.GPU ? JobQueueType.GPU : JobQueueType.CPU;
     public override string[] SupportedModules => ["beam", "gpu", "cpu"];
@@ -42,7 +43,7 @@ public abstract class BeamParticleJob : Job, IClusterJob
     [UiSymmetry("symmetry", "Symmetry")]
     [RelayProperty] public string Symmetry { get; set; } = "C1";
 
-    [UiDecimal("initial-resolution", "Initial low-pass", min: 1, max: 1000, unit: "Å",
+    [UiDecimal("initial-resolution", "Initial low-pass", min: 1, max: 1000, stepSize: 0.1, unit: "Å",
         helpText: "Initial low-pass resolution.")]
     [RelayProperty] public decimal InitialResolution { get; set; } = 40;
 
@@ -66,11 +67,11 @@ public abstract class BeamParticleJob : Job, IClusterJob
         ConditionalOnField = nameof(UsesLocalSearch), ConditionalOnValue = true)]
     [RelayProperty] public decimal LocalAngularRange { get; set; } = 5;
 
-    [UiDecimal("translation-range", "Translation range", min: 0.1, max: 1000, unit: "Å",
+    [UiDecimal("translation-range", "Translation range", min: 0.1, max: 1000, stepSize: 0.1, unit: "Å",
         ConditionalOnField = nameof(UsesGlobalSearch), ConditionalOnValue = true)]
     [RelayProperty] public decimal TranslationRange { get; set; } = 40;
 
-    [UiDecimal("translation-range", "Local translation range", min: 0.1, max: 1000, unit: "Å",
+    [UiDecimal("translation-range", "Local translation range", min: 0.1, max: 1000, stepSize: 0.1, unit: "Å",
         ConditionalOnField = nameof(UsesLocalSearch), ConditionalOnValue = true)]
     [RelayProperty] public decimal LocalTranslationRange { get; set; } = 10;
 

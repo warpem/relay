@@ -22,6 +22,8 @@ public partial class Class2DExpandedView : IDisposable
     private ReadOnlyBeamClass2D Beam => _job as ReadOnlyBeamClass2D;
     private int Iteration => _expandedViewService.CurrentVisIteration;
     private bool CanExport => Beam == null || Beam.CanExport(Iteration);
+    // Cleaning intermediate files keeps the cards and figures of every iteration but the class stacks of only a few.
+    private bool FilesRemoved => _job.HasBeenCleaned && !_job.HasResultFilesForIteration(Iteration);
     private string ClassStack => Beam?.ClassStack(Iteration) ?? ((ReadOnlyClass2D)_job).ResClassesFile(Iteration);
     private string ClassStats => Beam?.VisClassStats(Iteration) ?? ((ReadOnlyClass2D)_job).VisClassStats(Iteration);
     private int _pcaCount;

@@ -29,6 +29,13 @@ else
     {
         <p>Class selection becomes available after final particle assignment.</p>
     }
+    @if (FilesRemoved)
+    {
+        <p class="cleaned-iteration">Class images of this iteration were removed to save space. Its overview is below; the final iteration still has all classes.</p>
+        <ServerImage ServerPath="@_job.VisCard(Iteration)" Style="max-width: 100%;" />
+    }
+    else
+    {
     <Class2DSelection @key="(Beam != null ? ClassStack : null)" @ref="_class2DSelectionComponent"
                       MrcStackPath=@ClassStack
                       ImageNumbers=@_classNumbers
@@ -42,11 +49,12 @@ else
                       BorderColorSelected="#fd7e14"
                       BorderWidthPx="4"
                       OnSelectionChanged="@SelectionChanged"/>
+    }
     @if (ShowSubclasses && !Beam.SubclassSelectionAvailable && !Beam.SubclassesCollectedToCompletion)
     {
         <p>Completed parents appear as they finish. Subclass export becomes available when subclassification finishes or the job is finalized.</p>
     }
-    @if (Beam != null && _pcaCount > 0)
+    @if (Beam != null && _pcaCount > 0 && !FilesRemoved)
     {
         <h4 class="mt-4">Principal components</h4>
         <p>Mean followed by signed components from the latest PCA discovery fit.</p>

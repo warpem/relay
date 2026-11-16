@@ -170,6 +170,9 @@ public partial class Class3DExpandedView
         StateHasChanged();
     }
 
+    /// <summary>Whether cleaning removed this iteration's files, so a selection from it would have nothing to read.</summary>
+    private bool IterationCleaned => _job is { HasBeenCleaned: true } && !_job.HasResultFilesForIteration(_expandedViewService.CurrentVisIteration);
+
     /// <summary>
     /// Creates a new Class3DSelect job using the currently selected classes
     /// </summary>
