@@ -33,10 +33,6 @@
             {
                 <FluentButton Appearance="ButtonAppearance.Subtle" OnClick="MeasureShownFirst" Title="Measure the jobs that match the current filters before the rest">Measure these first</FluentButton>
             }
-            @if (IsAdmin && p.Enabled)
-            {
-                <FluentSwitch Value="@p.Paused" ValueChanged="@((bool v) => { Storage.Paused = v; Poll(); })" Label="Pause measuring" title="Stops walking job folders until switched back on (administrators only)" />
-            }
         }
     </div>
 

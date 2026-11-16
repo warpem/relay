@@ -317,7 +317,7 @@ public partial class OverlayStorage : ComponentBase, IAsyncDisposable
         string text = p.Measured >= p.Jobs && pending == 0
             ? $"All {p.Jobs:N0} jobs measured."
             : $"Measured {p.Measured:N0} of {p.Jobs:N0} jobs";
-        if (p.Paused) return text + " · Paused by an administrator.";
+        if (p.Paused) return text + (IsAdmin ? " · Paused; resume it in Settings › State." : " · Paused by an administrator.");
         if (p.Walking.Count > 0 || pending > 0)
         {
             text = text.TrimEnd('.');
