@@ -33,7 +33,9 @@ export function scrollBy(element, amount) {
 
 export function scrollTo(element, left) {
     if (element) {
-        element.scrollTo({ left: left, behavior: 'smooth' });
+        // Selection can jump tens of thousands of items. Move before .NET measures the
+        // virtual window; smooth scrolling leaves that window behind the viewport.
+        element.scrollTo({ left: left, behavior: 'instant' });
     }
 }
 

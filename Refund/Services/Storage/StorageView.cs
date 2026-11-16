@@ -109,6 +109,10 @@ public static class StorageView
                 foreach (var job in jobs)
                     foreach (var parent in job.Mutable.GetParents())
                         children[parent.Id] = children.GetValueOrDefault(parent.Id) + 1;
+                // Warp exports read the session's files without an edge.
+                foreach (var job in jobs)
+                    if (job.Mutable is Refund.Jobs.Fs.Warp.WarpExportJob export && export.SourceWarpJobId is > 0 and var source)
+                        children[source] = children.GetValueOrDefault(source) + 1;
                 foreach (var job in jobs)
                 {
                     if (job.Mutable.IsBlueprint) continue;

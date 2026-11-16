@@ -165,7 +165,7 @@
                              @onmouseenter="@(() => _hover = row)" @onmouseleave="@(() => { if (_hover == row) _hover = null; })">
                             <span class="c-check" role="cell"><FluentCheckbox Value="@_selected.Contains(Key(row))" ValueChanged="@((bool v) => Toggle(row, v))" aria-label="@($"Select {row.Job.QualifiedName}")" /></span>
                             <span class="c-job" role="cell">
-                                <FluentIcon Value="@row.Job.GetStatusIcon().WithStatusColor(row.Job)" Title="@row.Job.Status.GetStatusDescription()" />
+                                <FluentIcon Value="@row.Job.GetStatusIcon().WithStatusColor(row.Job)" Title="@row.Job.GetStatusLabel()" />
                                 <a href="@JobHref(row)" @onclick="@(e => OpenJob(row, e))" @onclick:preventDefault="true" title="@($"Open {row.Job.QualifiedName}")">@row.Job.QualifiedName</a>
                             </span>
                             <span class="c-type" role="cell" title="@row.TypeName">@row.TypeName</span>

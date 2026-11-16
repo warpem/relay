@@ -15,7 +15,7 @@ namespace Refund.Jobs.Ts.Reconstruction.ReconstructTomograms;
 /// This is based on the WarpTools ReconstructTiltseries command.
 /// </summary>
 [GenerateReadOnly]
-public class ReconstructTomograms : WarpJobGpu, IClusterJob
+public class ReconstructTomograms : WarpToolsJobGpu, IClusterJob
 {
     public override string TypeGuid => "24b1cc22-2a52-477a-b4c7-19fac71f669f";
     
@@ -46,7 +46,7 @@ public class ReconstructTomograms : WarpJobGpu, IClusterJob
     /// </summary>
     [RelayProperty]
     [UiFieldGroup("Reconstruction Parameters", 0)]
-    [UiDecimal("angpix", "Pixel size", min: 1, max: 100, stepSize: 0.1, unit: "Å",
+    [UiDecimal("angpix", "Pixel size", min: 1, max: 100, stepSize: 0.001, unit: "Å",
                helpText: "Pixel size of the reconstructed tomograms in Angstrom")]
     public decimal AngPix { get; set; } = 10;
 
@@ -62,7 +62,7 @@ public class ReconstructTomograms : WarpJobGpu, IClusterJob
     /// Strength of the deconvolution filter, if requested
     /// </summary>
     [RelayProperty]
-    [UiDecimal("deconv_strength", "Deconvolution strength", min: 0, max: 10, stepSize: 0.1,
+    [UiDecimal("deconv_strength", "Deconvolution strength", min: 0, max: 10, stepSize: 0.01,
                helpText: "Strength of the deconvolution filter, if requested")]
     public decimal DeconvStrength { get; set; } = 1.0M;
 
@@ -70,7 +70,7 @@ public class ReconstructTomograms : WarpJobGpu, IClusterJob
     /// Fall-off of the deconvolution filter, if requested
     /// </summary>
     [RelayProperty]
-    [UiDecimal("deconv_falloff", "Deconvolution falloff", min: 0, max: 10, stepSize: 0.1,
+    [UiDecimal("deconv_falloff", "Deconvolution falloff", min: 0, max: 10, stepSize: 0.01,
                helpText: "Fall-off of the deconvolution filter, if requested")]
     public decimal DeconvFalloff { get; set; } = 1.0M;
 

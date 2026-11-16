@@ -1,0 +1,115 @@
+@using Refund.DataModel
+@using Refund.Services
+@using Refund.Services.Core.Session
+@using Refund.Services.Diagnostics
+@using Refund.Components
+@using Serilog.Events
+@inject RelaySession Session
+@inject FileService Files
+@implements IDisposable
+
+@if (Session.User?.Role != UserRole.Admin)
+{
+    <p class="logs-note">Only administrators can see Relay's logs.</p>
+}
+else
+{
+    var shown = Shown();
+    <div class="logs-page">
+        <div class="log-filters">
+            <FluentSelect TOption="SelectOption<string>" TValue="string" Items="@LevelOptions" OptionText="@(o => o.Text)" OptionValue="@(o => o.Value)" Value="@_level.ToString()" ValueChanged="@((string v) => _level = Enum.Parse<LogEventLevel>(v))" Width="140px" aria-label="Minimum level" title="Minimum level" />
+            <FluentSelect TOption="SelectOption<string>" TValue="string" Items="@SourceOptions()" OptionText="@(o => o.Text)" OptionValue="@(o => o.Value)" Value="@_source" ValueChanged="@((string v) => _source = v)" Width="260px" aria-label="Source" title="Source" />
+            <RelayTextInput Value="@_query" ValueChanged="@((string v) => _query = v ?? "")" Immediate="true" Placeholder="Search messages" Style="width:260px" aria-label="Search messages" />
+            <FluentSwitch @bind-Value="_live" Label="Live" title="Show new events as they arrive" />
+            <span class="logs-note">@shown.Count.ToString("N0") of @_events.Length.ToString("N0") recent events@(shown.Count == MaxShown ? $" (newest {MaxShown:N0} shown)" : "")</span>
+        </div>
+        <div class="log-table" role="table" aria-label="Recent log events">
+            @foreach (var e in shown)
+            {
+                bool open = _expanded.Contains(e.Sequence);
+                <div class="log-row @LevelClass(e.Level) @(open ? "open" : "")" role="row" @onclick="@(() => Toggle(e.Sequence))">
+                    <span class="log-time" title="@e.Time.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss.fff")">@e.Time.ToLocalTime().ToString("HH:mm:ss")</span>
+                    <span class="log-level">@LevelName(e.Level)</span>
+                    <span class="log-source" title="@e.Source">@ShortSource(e.Source)</span>
+                    <span class="log-message">@e.Message@if (e.Exception != null && !open) { <span class="log-has-exception"> · exception</span> }</span>
+                    @if (open && e.Exception != null) { <pre class="log-exception">@e.Exception</pre> }
+                </div>
+            }
+            @if (shown.Count == 0) { <p class="logs-note">No events match.</p> }
+        </div>
+        <section class="log-files">
+            <h3>Log files of this run</h3>
+            @if (LogFiles() is { Count: > 0 } files)
+            {
+                <table class="log-files-table">
+                    @foreach (var f in files) { <tr><td><a href="@Files.GetUrl(f.FullName)" download="@f.Name">@f.Name</a></td><td>@Size(f.Length)</td></tr> }
+                </table>
+            }
+            else { <p class="logs-note">No log files found@(string.IsNullOrEmpty(RelayLog.Directory) ? "" : $" in {RelayLog.Directory}").</p> }
+        </section>
+    </div>
+}
+
+@code {
+    private const int MaxShown = 500;
+    private const string AllSources = "All sources", RelaySources = "Relay sources";
+    private static readonly SelectOption<string>[] LevelOptions = Enum.GetValues<LogEventLevel>().Select(l => new SelectOption<string> { Value = l.ToString(), Text = $"{LevelName(l)} and above" }).ToArray();
+    private RecentLogEvent[] _events = [];
+    private LogEventLevel _level = LogEventLevel.Information;
+    private string _source = RelaySources, _query = "";
+    private bool _live = true, _subscribed;
+    private int _arrived;
+    private readonly HashSet<long> _expanded = [];
+    private Timer _timer;
+
+    protected override void OnInitialized()
+    {
+        if (Session.User?.Role != UserRole.Admin) return;
+        _events = RelayLog.Sink.Snapshot();
+        RelayLog.Sink.Added += Arrived;
+        _subscribed = true;
+        // New events redraw at most once a second, and only while live.
+        _timer = new Timer(_ => { if (_live && Interlocked.Exchange(ref _arrived, 0) == 1) _ = InvokeAsync(() => { _events = RelayLog.Sink.Snapshot(); StateHasChanged(); }); }, null, 1000, 1000);
+    }
+
+    private void Arrived() => Interlocked.Exchange(ref _arrived, 1);
+
+    private List<RecentLogEvent> Shown()
+    {
+        var result = new List<RecentLogEvent>(MaxShown);
+        for (int i = _events.Length - 1; i >= 0 && result.Count < MaxShown; i--)
+        {
+            var e = _events[i];
+            if (e.Level < _level || !SourceMatches(e.Source)) continue;
+            if (_query.Length > 0 && !e.Message.Contains(_query, StringComparison.OrdinalIgnoreCase) && !(e.Exception?.Contains(_query, StringComparison.OrdinalIgnoreCase) ?? false)) continue;
+            result.Add(e);
+        }
+        return result;
+    }
+
+    // ASP.NET Core logs every request and static file at Information; "Relay sources" leaves the framework out.
+    private static bool IsFramework(string source) => source.StartsWith("Microsoft.") || source.StartsWith("System.");
+    private bool SourceMatches(string source) => _source switch { AllSources => true, RelaySources => !IsFramework(source), _ => source == _source };
+    private IEnumerable<SelectOption<string>> SourceOptions() => new[] { RelaySources, AllSources }.Concat(_events.Select(e => e.Source).Where(s => s.Length > 0).Distinct().Order())
+        .Select(s => new SelectOption<string> { Value = s, Text = s is AllSources or RelaySources ? s : ShortSource(s) });
+    private void Toggle(long sequence) { if (!_expanded.Remove(sequence)) _expanded.Add(sequence); }
+
+    private static List<FileInfo> LogFiles()
+    {
+        try { return string.IsNullOrEmpty(RelayLog.Directory) || !Directory.Exists(RelayLog.Directory) ? [] : new DirectoryInfo(RelayLog.Directory).GetFiles().OrderByDescending(f => f.Length).ToList(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return []; }
+    }
+
+    private static string ShortSource(string source) => source.Length == 0 ? "" : source[(source.LastIndexOf('.') + 1)..];
+    private static string LevelName(LogEventLevel level) => level switch { LogEventLevel.Verbose => "Trace", LogEventLevel.Information => "Info", LogEventLevel.Warning => "Warn", _ => level.ToString() };
+    private static string LevelClass(LogEventLevel level) => level switch { >= LogEventLevel.Error => "error", LogEventLevel.Warning => "warning", <= LogEventLevel.Debug => "debug", _ => "" };
+    private static string Size(long bytes) => bytes >= 1048576 ? $"{bytes / 1048576.0:N1} MB" : $"{bytes / 1024.0:N0} KB";
+
+    public void Dispose()
+    {
+        _timer?.Dispose();
+        // The sink lives for the whole process; a handler left on it would keep this page, and its circuit, alive.
+        if (_subscribed) RelayLog.Sink.Added -= Arrived;
+        _subscribed = false;
+    }
+}

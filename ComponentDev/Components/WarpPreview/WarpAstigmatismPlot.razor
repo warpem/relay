@@ -1,0 +1,73 @@
+@using ComponentDev.Services
+@inject IJSRuntime Js
+@implements IAsyncDisposable
+
+<section class="astigmatism" aria-label="Astigmatism distribution">
+    <div class="astigmatism-heading"><b>Astigmatism</b><span class="astigmatism-filter"><span>≤</span><FluentNumberInput TValue="double" Value="Session.MaxAstigmatism" ValueChanged="@(v => Session.FilterMetric("astigmatism", v))" Min="0" Max="10" Step="0.01" Immediate="true" ImmediateDelay="180" Style="width:68px" StepButtons="NumberInputStepVisibility.Hidden" aria-label="Maximum astigmatism in micrometers" /></span></div>
+    <div class="astigmatism-scale"><span title="@($"Outer ring: {Radius:F2} µm Δ defocus")">@Reading</span><span class="zoom-controls"><FluentButton Appearance="ButtonAppearance.Subtle" Title="Zoom out astigmatism" Disabled="@(_zoom == 1)" OnClick="@(() => Zoom(-1))">−</FluentButton><FluentButton Appearance="ButtonAppearance.Subtle" Title="Zoom in astigmatism" Disabled="@(_zoom == 8)" OnClick="@(() => Zoom(1))">+</FluentButton></span></div>
+    <canvas id="@_canvasId" @ref="_canvas" tabindex="0" aria-label="Astigmatism magnitude and axial angle. Zero and 180 degrees are identical; 45 degrees is down, 90 degrees left, and 135 degrees up. Click a movie to select it."></canvas>
+</section>
+
+@code {
+    [Parameter, EditorRequired] public WarpSessionPreview Session { get; set; }
+    [Parameter] public PreviewMovie Movie { get; set; }
+    [Parameter] public EventCallback<int> SelectedIndexChanged { get; set; }
+    private readonly string _canvasId = $"warp-astig-{Guid.NewGuid():N}";
+    private ElementReference _canvas;
+    private IJSObjectReference _module;
+    private DotNetObjectReference<WarpAstigmatismPlot> _self;
+    private int _version = -1, _catalog = -1, _selected = -1, _zoom = 1;
+    private bool _disposed, _dataChanged = true, _viewChanged = true;
+    private double _maximum = .1;
+    private double Radius => _maximum / _zoom;
+    private string Reading => Movie?.Done.HasFlag(PreviewStage.Ctf) == true ? $"{Movie.Astigmatism:F3} µm · {Movie.AstigmatismAngle:F0}°" : "—";
+    protected override void OnParametersSet()
+    {
+        if (_catalog != Session.CatalogVersion || _version != Session.PlotVersion)
+        {
+            _catalog = Session.CatalogVersion; _version = Session.PlotVersion;
+            _maximum = Math.Max(.05, Math.Ceiling(Session.Movies.Where(m => m.Done.HasFlag(PreviewStage.Ctf)).Select(m => Math.Abs(m.Astigmatism)).DefaultIfEmpty(.1).Max() * 20) / 20);
+            _dataChanged = true;
+        }
+        if (_selected != (Movie?.Index ?? -1)) { _selected = Movie?.Index ?? -1; _viewChanged = true; }
+    }
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        try { await RenderAsync(firstRender); }
+        catch (JSDisconnectedException) { }
+        catch (ObjectDisposedException) when (_disposed) { }
+    }
+    private async Task RenderAsync(bool firstRender)
+    {
+        if (_disposed) return;
+        if (firstRender)
+        {
+            var module = await Js.InvokeAsync<IJSObjectReference>("import", "./Components/WarpPreview/WarpAstigmatismPlot.razor.js");
+            if (_disposed) { await module.DisposeAsync(); return; }
+            _module = module;
+            _self = DotNetObjectReference.Create(this);
+            await _module.InvokeVoidAsync("initialize", _canvas, _self, _canvasId);
+        }
+        if (_module == null || _disposed) return;
+        if (_dataChanged)
+        {
+            _dataChanged = false;
+            // Preserve desktop Warp's axial convention: Δ*cos(2θ), Δ*sin(2θ), positive Y downward.
+            var points = Session.Movies.Where(m => m.Done.HasFlag(PreviewStage.Ctf)).Select(m => new object[] {
+                m.Index, m.Astigmatism * Math.Cos(m.AstigmatismAngle * Math.PI / 90),
+                m.Astigmatism * Math.Sin(m.AstigmatismAngle * Math.PI / 90), Session.StatusColor(m), m.AstigmatismAngle, m.Astigmatism
+            }).ToArray();
+            await _module.InvokeVoidAsync("setData", _canvasId, points, Radius, _selected);
+            _viewChanged = false;
+        }
+        else if (_viewChanged) { _viewChanged = false; await _module.InvokeVoidAsync("setView", _canvasId, Radius, _selected); }
+    }
+    private void Zoom(int change) { _zoom = Math.Clamp(_zoom + change, 1, 8); _viewChanged = true; }
+    [JSInvokable] public Task SelectMovie(int index) => _disposed ? Task.CompletedTask : SelectedIndexChanged.InvokeAsync(index);
+    public async ValueTask DisposeAsync()
+    {
+        _disposed = true;
+        if (_module != null) { try { await _module.InvokeVoidAsync("dispose", _canvasId); await _module.DisposeAsync(); } catch (JSDisconnectedException) { } catch (ObjectDisposedException) { } }
+        _self?.Dispose();
+    }
+}

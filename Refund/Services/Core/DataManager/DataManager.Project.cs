@@ -147,6 +147,8 @@ public partial class DataManager
                     originalProject.Spaces.SelectMany(space => space.Jobs),
                     $"Project {originalProject.Alias}");
 
+                foreach (var warpJob in originalProject.Spaces.SelectMany(space => space.Jobs).OfType<Refund.Jobs.Fs.Warp.WarpJob>())
+                    WarpSessions.Remove(warpJob.Identity);
                 _dataRepository.DeleteProject(originalProject);
             }
             catch (Exception e)

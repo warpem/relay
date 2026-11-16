@@ -71,7 +71,7 @@ public class ImportDataSetFs : Job, ILocalJob
     [RelayProperty]
     public int EerFrames { get; set; } = 40;
 
-    [UiDecimal("", "Exposure per group", min: 0.001, max: 100000, stepSize: 0.1,
+    [UiDecimal("", "Exposure per group", min: 0.001, max: 100000, stepSize: 0.01,
                helpText: "Only if importing EER files: desired exposure per group. The number of groups is the overall exposure divided by this value, rounded up, matching --eer_groupexposure.",
                Unit = "e-/Å²",
                ConditionalOnField = nameof(EerGrouping),
@@ -121,7 +121,7 @@ public class ImportDataSetFs : Job, ILocalJob
     [UiDecimal("", "Pixel size",
                min: 0.001,
                max: 1000.0,
-               stepSize: 0.001,
+               stepSize: 0.0001,
                helpText: "The image pixel size in Angstrom, not accounting for any super-resolution.",
                Unit = "Å")]
     [RelayProperty]

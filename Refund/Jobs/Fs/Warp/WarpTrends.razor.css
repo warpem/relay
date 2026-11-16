@@ -1,0 +1,49 @@
+/* Acquisition trends: up to five metric tracks sharing one acquisition axis; --track-count is how many are shown. */
+
+.session-trends { --warp-track-height: clamp(36px, calc((100dvh - 600px) / (1.75 * var(--track-count, 5))), calc(640px / var(--track-count, 5))); --axis-width: 34px; min-width: 0; }
+
+.trend-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--w-space-m); margin-bottom: var(--w-space-s); }
+.trend-title { font-size: var(--w-text); font-weight: 600; }
+
+.tracks { display: flex; flex-direction: column; gap: var(--w-space-s); }
+.track-label { display: flex; align-items: center; gap: var(--w-space-s); min-height: 28px; }
+.metric-name { font-weight: 600; white-space: nowrap; }
+.unit { font-weight: 400; color: var(--w-muted); }
+.selected-reading { color: var(--colorNeutralForeground2); font-size: var(--w-text-s); white-space: nowrap; }
+.metric-filter { margin-left: auto; flex: none; }
+.range-label { font-size: var(--w-text-s); margin-right: 2px; }
+
+.plot-frame { position: relative; }
+.session-trends ::deep .y-axis-column { width: var(--axis-width); }
+.session-trends ::deep .axis-label { font-size: var(--w-text-s); right: 5px; color: var(--w-muted); }
+/* The marginal density shares the narrow tick column and would collide with the labels. */
+.session-trends ::deep .histogram { display: none; }
+.session-trends ::deep .range-highlight { opacity: .06; }
+
+/* The scatter pads its nice axis range by 8% on each side; overlays span only the gridded range. */
+.selected-rule-frame, .interval-frame { position: absolute; z-index: 6; inset: calc(100% * .08 / 1.16) 0 calc(100% * .08 / 1.16) var(--axis-width); pointer-events: none; }
+.selected-rule { display: block; position: absolute; top: 0; bottom: 0; width: 1px; background: var(--colorNeutralForeground1); opacity: .45; }
+.interval-shade { display: none; position: absolute; top: 0; bottom: 0; left: var(--interval-left, 0%); width: var(--interval-width, 0%); box-sizing: border-box; background: color-mix(in srgb, var(--colorBrandBackground) 14%, transparent); border-inline: 1px solid var(--colorBrandStroke1); }
+.has-interval .interval-shade { display: block; }
+.is-brushing { user-select: none; }
+.is-brushing .plot-frame { cursor: crosshair; }
+.is-brushing ::deep .highlight-circle { visibility: hidden; }
+
+.pending-window { position: absolute; z-index: 7; inset: 0 0 0 var(--axis-width); display: flex; align-items: center; justify-content: center; gap: var(--w-space-s); color: var(--colorNeutralForeground2); font-size: var(--w-text-s); pointer-events: none; }
+.pending-window > span { background: var(--w-surface); padding: 2px 6px; border-radius: 2px; }
+.pending-window ::deep fluent-button { pointer-events: auto; }
+
+.shared-axis { display: flex; justify-content: space-between; gap: var(--w-space-m); text-align: center; margin: var(--w-space-xs) 0 0 var(--axis-width); font-size: var(--w-text-s); color: var(--w-muted); }
+/* Points sit half a step in from each edge; the end numbers centre under the first and last point. */
+.shared-axis > span:first-child { position: relative; left: var(--half-step, 0); transform: translateX(-50%); }
+.shared-axis > span:last-child { position: relative; right: var(--half-step, 0); transform: translateX(50%); }
+.window-context { display: flex; align-items: center; flex-wrap: wrap; gap: var(--w-space-xs) var(--w-space-s); min-height: 32px; font-size: var(--w-text-s); color: var(--w-muted); }
+.selected-context { color: var(--colorNeutralForeground2); }
+
+.compact .tracks { gap: var(--w-space-xs); }
+.compact .track-label { min-height: 24px; }
+
+@container (max-width: 560px) {
+    .track-label { flex-wrap: wrap; row-gap: 2px; }
+    .axis-hint { display: none; }
+}

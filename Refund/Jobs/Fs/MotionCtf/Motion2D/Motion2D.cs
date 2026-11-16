@@ -7,7 +7,7 @@ using Warp.Tools;
 namespace Refund.Jobs.Fs.MotionCtf.Motion2D;
 
 [GenerateReadOnly]
-public class Motion2D : WarpJobGpu, IClusterJob
+public class Motion2D : WarpToolsJobGpu, IClusterJob
 {
     public override int2 CardSquareCount { get; set; } = new int2(2, 1);
     public override string TypeGuid => "d0aa29ff-0397-4c7e-b239-fe9426b8b10e";
@@ -24,14 +24,14 @@ public class Motion2D : WarpJobGpu, IClusterJob
     
     [UiFieldGroup("Fitting parameters", 0)]
     [UiDecimal("range_min", "Minimum resolution",
-        helpText: "Minimum resolution in Angstrom to consider in motion fit",
+        stepSize: 0.1, helpText: "Minimum resolution in Angstrom to consider in motion fit",
         min: 1,
         max: 1,
         unit: "Å")]
     public decimal MotionRangeMin { get; set; } = 500;
 
     [UiDecimal("range_max", "Maximum resolution",
-        helpText: "Maximum resolution in Angstrom to consider in motion fit",
+        stepSize: 0.1, helpText: "Maximum resolution in Angstrom to consider in motion fit",
         min: 1,
         unit: "Å")]
     public decimal MotionRangeMax { get; set; } = 10;

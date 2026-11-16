@@ -23,7 +23,7 @@ public enum TiltStackFormat
 /// This is based on the WarpTools ExportParticlesTiltseries command.
 /// </summary>
 [GenerateReadOnly]
-public class ExtractParticles : WarpJobGpu, IClusterJob
+public class ExtractParticles : WarpToolsJobGpu, IClusterJob
 {
     public override string TypeGuid => "a3cc57ee-0308-4181-bc9c-2675874e354d";
     
@@ -70,7 +70,7 @@ public class ExtractParticles : WarpJobGpu, IClusterJob
     /// </summary>
     [RelayProperty]
     [UiFieldGroup("Output Parameters", 1)]
-    [UiDecimal("output_angpix", "Output pixel size", min: 0.1, max: 999999, stepSize: 0.01, unit: "Å",
+    [UiDecimal("output_angpix", "Output pixel size", min: 0.1, max: 999999, stepSize: 0.001, unit: "Å",
                helpText: "Pixel size at which to export particles")]
     public decimal OutputPixelSize { get; set; } = 2.0M;
     

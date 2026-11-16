@@ -77,11 +77,11 @@
             </div>
         </div>
 
-        <img src="@_imageSource"
-             class="power-spectrum"
-             width="512px"
-             height="512px"
-             style="opacity: @(_isLoading ? "0" : "1")"
-             alt="Power spectrum visualization"/>
+        @* Drawn by renderSpectrum, which reveals it once the plane has loaded. *@
+        <canvas @ref="_spectrumCanvas"
+                class="power-spectrum"
+                style="width: 512px; height: 512px; opacity: 0"
+                role="img"
+                aria-label="Power spectrum"></canvas>
     }
 </div>

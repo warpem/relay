@@ -1,0 +1,5 @@
+.warp-plots { display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px;padding:10px 12px 6px;border-bottom:1px solid var(--colorNeutralStroke2); }
+.plot-heading {display:flex;justify-content:space-between;font-size:12px;margin-bottom:8px;font-weight:600;}
+.muted,.plot-axis {color:var(--colorNeutralForeground3);font-weight:400;}
+.plot-axis {display:flex;justify-content:space-between;font-size:9px;margin:5px 0 0 24px;}
+@media(max-width:1000px) {.warp-plots {grid-template-columns:repeat(2,minmax(0,1fr));}}

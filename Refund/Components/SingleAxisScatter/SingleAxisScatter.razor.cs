@@ -56,6 +56,10 @@ public partial class SingleAxisScatter : IAsyncDisposable
     /// </summary>
     [Parameter] public double Zoom { get; set; } = 1.0;
 
+    /// <summary>Disable independent wheel/synchronized zoom for plots with an externally managed shared domain.</summary>
+    [Parameter] public bool EnableZoom { get; set; } = true;
+    private bool _previousEnableZoom = true;
+
     /// <summary>
     /// Custom tooltip template for hovered points.
     /// </summary>
@@ -158,6 +162,8 @@ public partial class SingleAxisScatter : IAsyncDisposable
     protected override async Task OnParametersSetAsync()
     {
         bool pointsChanged = false;
+        bool zoomModeChanged = EnableZoom != _previousEnableZoom;
+        _previousEnableZoom = EnableZoom;
         
         // Check if the legacy Points property has changed
         if (_previousPoints == null || 
@@ -214,7 +220,7 @@ public partial class SingleAxisScatter : IAsyncDisposable
         _previousPoints = Points.ToList();
 
         // Update JS if points or other parameters changed
-        if (pointsChanged)
+        if (pointsChanged || zoomModeChanged)
             await UpdateScatterAsync();
 
         await base.OnParametersSetAsync();
@@ -295,6 +301,7 @@ public partial class SingleAxisScatter : IAsyncDisposable
         {
             pointRadius = PointRadius,
             zoom = Zoom,
+            enableZoom = EnableZoom,
             rangeMin = RangeHighlightMin,
             rangeMax = RangeHighlightMax,
             pointCollections = GetPointCollectionsData(),

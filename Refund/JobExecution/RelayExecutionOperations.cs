@@ -10,6 +10,7 @@ public sealed class RelayExecutionOperations : IExecutionOperations
 {
     private readonly Func<JobAddress, Job> _findJob;
     private readonly Func<Job, Action<Job>, Task> _updateJob;
+    private readonly Func<Job, CancellationToken, Task> _runLocal;
     private readonly ManagedExecutionHost _managed = new();
     private readonly ConcurrentDictionary<Guid, LocalExecution> _local = new();
     private readonly object _localGate = new();
@@ -18,10 +19,12 @@ public sealed class RelayExecutionOperations : IExecutionOperations
 
     public RelayExecutionOperations(
         Func<JobAddress, Job> findJob,
-        Func<Job, Action<Job>, Task> updateJob)
+        Func<Job, Action<Job>, Task> updateJob,
+        Func<Job, CancellationToken, Task> runLocal = null)
     {
         _findJob = findJob;
         _updateJob = updateJob;
+        _runLocal = runLocal;
     }
 
     public bool DependenciesReady(ExecutionAttemptSnapshot attempt) =>
@@ -264,7 +267,10 @@ public sealed class RelayExecutionOperations : IExecutionOperations
 
     private static async Task PrepareLocalAsync(Job job, CancellationToken cancellationToken)
     {
-        job.ResetWorkingDirectory();
+        if (job.IsResumable)
+            job.EnsureWorkingDirectory();
+        else
+            job.ResetWorkingDirectory();
         Directory.CreateDirectory(job.RelayResultsDirectoryPath);
         await job.WriteToLifecycleLog("Preparation started");
         cancellationToken.ThrowIfCancellationRequested();
@@ -287,7 +293,10 @@ public sealed class RelayExecutionOperations : IExecutionOperations
             {
                 try
                 {
-                    localJob.RunLocal(cancellation.Token);
+                    if (_runLocal != null)
+                        await _runLocal(job, cancellation.Token);
+                    else
+                        localJob.RunLocal(cancellation.Token);
                 }
                 catch (Exception exception)
                 {

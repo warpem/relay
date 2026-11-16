@@ -25,6 +25,9 @@ public class JobTaxonomyTests
         ["Motion2D"]               = "Frame-series.Motion & CTF.Motion",
         ["CTF2D"]                  = "Frame-series.Motion & CTF.CTF",
         ["MotionAndCTF2D"]         = "Frame-series.Motion & CTF.Motion and CTF",
+        ["WarpJob"]             = "Frame-series.Motion & CTF.Warp",
+        ["WarpMicrographsExportJob"] = "Frame-series.Export.Warp micrographs",
+        ["WarpParticlesExportJob"] = "Frame-series.Export.Warp particles",
         ["BoxNetInference2D"]      = "Frame-series.Picking.BoxNet",
         ["ExtractParticles2D"]     = "Frame-series.Extraction.Extract particles",
 

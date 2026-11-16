@@ -2,7 +2,8 @@
 @inherits BufferedInputBase<TValue>
 @using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
 
-<FluentNumberInput @ref="_input" TValue="TValue"
+<RelayNumberInput @ref="_input" TValue="TValue"
+                   @attributes="AdditionalAttributes"
                    Value="@EditingValue"
                    ValueChanged="@SetValueAsync"
                    Class="@Class"
@@ -29,4 +30,4 @@
             </div>
         }
     </EndTemplate>
-</FluentNumberInput>
+</RelayNumberInput>

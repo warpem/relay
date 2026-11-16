@@ -420,6 +420,9 @@ public abstract class Job : RelayBase, IFolderContent
     /// </summary>
     public virtual int CoreCount => 1;
 
+    /// <summary>Local queue execution slots. Async background coordinators may reserve zero.</summary>
+    public virtual int LocalQueueSlotCount => 1;
+
     /// <summary>
     /// Amount of memory in gigabytes to allocate when running this job.
     /// Default is 16 GB, but can be overridden by job implementations with higher memory requirements.
@@ -724,6 +727,9 @@ public abstract class Job : RelayBase, IFolderContent
     /// </summary>
     public virtual bool IsResumable => false;
 
+    /// <summary>Execution and configuration are controlled inside the expanded view.</summary>
+    public virtual bool ControlsOwnExecution => false;
+
     /// <summary>
     /// Indicates whether this job runs in multiple iterations.
     /// Default is false, but can be overridden for jobs that produce incremental results.
@@ -765,6 +771,9 @@ public abstract class Job : RelayBase, IFolderContent
         FileUtils.DeleteDirectoryWithRetry(directoryPath);
         Directory.CreateDirectory(directoryPath);
     }
+
+    /// <summary>Creates the validated job directory without discarding resumable state.</summary>
+    internal void EnsureWorkingDirectory() => Directory.CreateDirectory(GetCanonicalDirectoryPath());
 
     private string GetCanonicalDirectoryPath()
     {

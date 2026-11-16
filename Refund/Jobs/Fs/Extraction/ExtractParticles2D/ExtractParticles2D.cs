@@ -11,7 +11,7 @@ using Warp.Tools;
 namespace Refund.Jobs.Fs.Extraction.ExtractParticles2D;
 
 [GenerateReadOnly]
-public class ExtractParticles2D : WarpJobGpu, IClusterJob
+public class ExtractParticles2D : WarpToolsJobGpu, IClusterJob
 {
     public override int2 CardSquareCount { get; set; } = new int2(2, 1);
     public override string TypeGuid => "21f9daa1-3e5a-4f04-94b4-63204b1c74b5";
@@ -28,7 +28,7 @@ public class ExtractParticles2D : WarpJobGpu, IClusterJob
     [UiDecimalNullable("angpix_out", "Output pixel size",
                        helpText: "Pixel size the extracted particles will be scaled to; leave empty to use binned pixel size from input settings",
                        min: 0,
-                       stepSize: 0.1,
+                       stepSize: 0.001,
                        unit: "Å")]
     [RelayProperty]
     public decimal? AngpixOut { get; set; } = null;

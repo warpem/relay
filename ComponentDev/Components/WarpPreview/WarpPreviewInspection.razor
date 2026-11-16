@@ -1,0 +1,101 @@
+@using ComponentDev.Services
+@using Refund.Components.ThumbnailPanel
+@using Refund.Components.MicrographViewer
+@using Refund.Components.FourierSpace
+@using Refund.Components.SingleAxisScatter
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+
+<WarpPreviewPlots Session="Session" Version="Session.PlotVersion" PointClicked="PickPoint" />
+<div class="filmstrip" @key="Session.CatalogVersion">
+    <ThumbnailPanel @ref="_strip" Thumbnails="Session.Thumbnails" SelectedThumbnail="Session.Thumbnails[_index]"
+                    SelectedThumbnailChanged="PickThumbnail" ShowStatusBar="false" ThumbnailSize="82" />
+</div>
+<div class="selected-bar">
+    <FluentButton Title="Previous micrograph" IconOnly="true" IconStart="@(new Icons.Regular.Size16.ChevronLeft())" OnClick="@(() => Select(_index - 1))" />
+    <span class="jump"><FluentNumberInput TValue="int" Value="@(_index + 1)" ValueChanged="@(v => Select(v - 1))" Min="1" Max="Session.Movies.Count" aria-label="Micrograph number" /></span>
+    <span class="muted">/ @Session.Movies.Count.ToString("N0")</span>
+    <FluentButton Title="Next micrograph" IconOnly="true" IconStart="@(new Icons.Regular.Size16.ChevronRight())" OnClick="@(() => Select(_index + 1))" />
+    <strong class="filename">@Selected.Name</strong>
+    <span class="selected-status">@Session.Status(Selected)</span>
+    <FluentButton Appearance="ButtonAppearance.Subtle" OnClick="@(() => Session.Exclude(_index))">@(Selected.Excluded ? "Include" : "Exclude")</FluentButton>
+</div>
+<div class="inspection">
+    <div class="spectrum-column">
+        <div class="pane-heading"><strong>CTF</strong><span>@Selected.Ctf.ToString("F2") Å · @Selected.Defocus.ToString("F2") µm</span></div>
+        <div class="spectrum">
+            @if (Selected.Done.HasFlag(PreviewStage.Ctf))
+            {
+            <AmplitudeSpectrumViewer MovieFilePath="@Session.Fixtures.Movie(_index)" FittingRangeMin="Session.Settings.CtfMin" FittingRangeMax="Session.Settings.CtfMax" />
+            }
+            else { <div class="awaiting">Waiting for CTF fitting</div> }
+        </div>
+        <div class="ctf-legend"><span class="experimental">― Measured</span><span class="fitted">― Fit</span><span>― Quality</span></div>
+        <dl class="metrics"><dt>Astigmatism</dt><dd>0.06 µm</dd><dt>Ice thickness</dt><dd>@Selected.Ice.ToString("F0") Å</dd><dt>Frame motion</dt><dd>@Selected.Motion.ToString("F2") Å</dd></dl>
+    </div>
+    <div class="image-column">
+        <div class="image-toolbar">
+            <FluentButton Appearance="@(_enhanced ? ButtonAppearance.Subtle : ButtonAppearance.Primary)" OnClick="@(() => _enhanced = false)">Average</FluentButton>
+            <FluentButton Appearance="@(_enhanced ? ButtonAppearance.Primary : ButtonAppearance.Subtle)" Disabled="@(!Selected.Done.HasFlag(PreviewStage.Enhance))" OnClick="@(() => _enhanced = true)">Deconvolved + denoised</FluentButton>
+            <span class="spacer"></span>
+            <FluentCheckbox @bind-Value="_picks" Disabled="@(!Selected.Done.HasFlag(PreviewStage.Pick))" Label="Picks" />
+        </div>
+        <div class="micrograph">
+            @if (Selected.Done.HasFlag(PreviewStage.Motion))
+            {
+            <MicrographViewer MicrographPath="@Session.Fixtures.Image(_index, ShowEnhanced)" ThumbnailPath="@Session.Fixtures.Thumbnail(_index)"
+                              ParticleStarPath="@(_picks && Selected.Done.HasFlag(PreviewStage.Pick) ? Session.Fixtures.Particles(_index) : null)" MinWidth="280" MinHeight="380"
+                              DefaultParticleDiameter="64" DefaultParticleBoxSize="96" CanEditMask="false" CanEditParticles="false" />
+            }
+            else { <div class="awaiting">Waiting for motion correction</div> }
+        </div>
+        <div class="image-caption"><span>@(ShowEnhanced ? $"Denoiser v{Session.Model} · deconvolved" : "Dose-weighted average")</span><span>Wheel to zoom · drag to pan</span></div>
+    </div>
+    <div class="detail-column">
+        <div class="pane-heading"><strong>Processing</strong><span>@Session.Status(Selected)</span></div>
+        @for (int s = 0; s < 5; s++)
+        {
+            var stage = (PreviewStage)(1 << s);
+            string state = Session.StageState(Selected, stage);
+            <div class="stage-row"><span>@StageNames[s]</span><span class="stage-state @state.ToLowerInvariant()">@(state == "Done" ? "✓" : state)</span></div>
+        }
+        <div class="detail-note">@(Selected.Done.HasFlag(PreviewStage.Pick) ? Selected.Picks.ToString("N0") : "—") particles<br />Extraction uses the original average.</div>
+        @if (Selected.Failed)
+        {
+            <div class="failure">Worker lost during CTF fitting.<br /><FluentButton OnClick="Session.RetryFailures">Retry failed movies</FluentButton></div>
+        }
+        <div class="section-label">Session</div>
+        @for (int s = 0; s < 5; s++)
+        {
+            <div class="stage-total"><span>@StageNames[s]</span><span>@Session.StageCounts[s].ToString("N0")</span></div>
+            <progress max="@Session.Movies.Count" value="@Session.StageCounts[s]"></progress>
+        }
+        <div class="detail-note">@(Session.Running ? $"{Session.Workers} workers · simulated processing" : "Stopped · ready to resume")</div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public WarpSessionPreview Session { get; set; }
+    [Parameter] public int InitialIndex { get; set; } = 5831;
+    private int _index;
+    private int _lastInitial = -1, _lastCatalog = -1;
+    private bool _positionStrip;
+    private ThumbnailPanel _strip;
+    private bool _enhanced = true, _picks;
+    private bool ShowEnhanced => _enhanced && Selected.Done.HasFlag(PreviewStage.Enhance);
+    private PreviewMovie Selected => Session.Movies[_index];
+    private static readonly string[] StageNames = ["Motion", "CTF", "Denoise / deconv.", "Blob picking", "Extraction"];
+    protected override void OnParametersSet()
+    {
+        if (_lastInitial != InitialIndex) { _index = Math.Clamp(InitialIndex, 0, Session.Movies.Count - 1); _lastInitial = InitialIndex; }
+        _index = Math.Clamp(_index, 0, Session.Movies.Count - 1);
+        if (_lastCatalog != Session.CatalogVersion) { _lastCatalog = Session.CatalogVersion; _positionStrip = true; }
+    }
+    protected override async Task OnAfterRenderAsync(bool firstRender) { if (_positionStrip && _strip != null) { _positionStrip = false; await Task.Delay(250); await _strip.SetSelectedThumbnailAsync(Session.Thumbnails[_index]); } }
+    private async Task Select(int index)
+    {
+        _index = Math.Clamp(index, 0, Session.Movies.Count - 1);
+        if (_strip != null) await _strip.SetSelectedThumbnailAsync(Session.Thumbnails[_index]);
+    }
+    private Task PickPoint(ScatterPoint point) => point.Metadata is PreviewMovie movie ? Select(movie.Index) : Task.CompletedTask;
+    private Task PickThumbnail(ThumbnailData thumbnail) { if (thumbnail != null) _index = thumbnail.Index; return Task.CompletedTask; }
+}

@@ -34,7 +34,7 @@ public class PooledJobConfigurationTests
     public void MissAlignment_IsNotPooled_ButStillGpu()
     {
         // MissAlignment runs a single GPU command outside the WarpTools per-item worker-pool model,
-        // so it must NOT inherit pool support (which lives on WarpJobGpu) — while remaining a GPU job.
+        // so it must NOT inherit pool support (which lives on WarpToolsJobGpu) — while remaining a GPU job.
         var job = new MissAlignmentJob();
         Assert.IsNotAssignableFrom<IPooledJob>(job);
         Assert.Equal(JobQueueType.GPU, job.QueueType);
@@ -130,7 +130,7 @@ public class PooledJobConfigurationTests
     {
         EnsurePopulated();
 
-        // Both a WarpTools job (WarpJob-derived) and MissAlignment (standalone Job) report item
+        // Both a WarpTools job (WarpToolsJob-derived) and MissAlignment (standalone Job) report item
         // counts, so their generated read-only wrappers must expose IItemProgress. This is what lets
         // the job card gate the item-count display on the capability + non-null counts, not on a
         // concrete job type. Also proves the ReadOnly source generator replicated the interface.

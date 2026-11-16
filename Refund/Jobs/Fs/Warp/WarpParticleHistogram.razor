@@ -1,0 +1,83 @@
+@using Refund.Services.Warp
+@using Microsoft.JSInterop
+@inject IJSRuntime Js
+@implements IAsyncDisposable
+
+<section class="particle-histogram" aria-label="Particle correlation and power histogram">
+    <div class="plot-heading"><h3>Particle scores</h3><FluentButton Appearance="ButtonAppearance.Subtle" OnClick="Reset" Title="Keep every pick">Keep all</FluentButton></div>
+    <div class="histogram-filters">
+        <span class="range-input" title="Pearson correlation with the blob template">
+            <span class="range-label">Correlation</span>
+            <RobustFluentNumberField TValue="double" Value="Bounds.MinCorrelation" ValueChanged="@(v => Change(Bounds with { MinCorrelation = Math.Min(v, Bounds.MaxCorrelation) }))" Min="0" Max="@Invariant(Bounds.MaxCorrelation)" Step="0.01" aria-label="Minimum particle correlation" />
+            <span aria-hidden="true">–</span>
+            <RobustFluentNumberField TValue="double" Value="Bounds.MaxCorrelation" ValueChanged="@(v => Change(Bounds with { MaxCorrelation = v }))" Min="@Invariant(Bounds.MinCorrelation)" Max="1" Step="0.01" aria-label="Maximum particle correlation" />
+        </span>
+        <span class="range-input" title="Local variance within twice the blob radius, in input intensity squared">
+            <span class="range-label">Local power</span>
+            <RobustFluentNumberField TValue="double" Value="Bounds.MinPower" ValueChanged="@(v => Change(Bounds with { MinPower = Math.Min(v, Bounds.MaxPower ?? double.MaxValue) }))" Min="0" Step="@Invariant(PowerStep)" aria-label="Minimum particle power" />
+            <span aria-hidden="true">–</span>
+            <RobustFluentNumberField TValue="double?" Value="Bounds.MaxPower" ValueChanged="@(v => Change(Bounds with { MaxPower = v }))" Min="@Invariant(Bounds.MinPower)" Step="@Invariant(PowerStep)" Placeholder="∞" aria-label="Maximum particle power" />
+        </span>
+    </div>
+    <canvas id="@_id" @ref="_canvas" aria-label="Joint histogram: Pearson correlation on X, local power on Y. Drag a rectangle to keep the picks within both ranges."></canvas>
+    <div class="histogram-key"><span title="Estimated from histogram bins; extraction uses each pick's exact scores">≈@_data.CountWithin(Bounds).ToString("N0") of @_data.Total.ToString("N0") picks within these bounds, from @_data.Movies.ToString("N0") micrographs</span>@if (Applied is { } applied && applied != Bounds) { <span class="applied-key"><i aria-hidden="true"></i>Applied bounds</span> }</div>
+</section>
+
+@code {
+    [Parameter, EditorRequired] public WarpSession Session { get; set; }
+    /// <summary>The bounds being edited; extraction uses them only once they are applied.</summary>
+    [Parameter, EditorRequired] public WarpParticleBounds Bounds { get; set; }
+    [Parameter] public EventCallback<WarpParticleBounds> BoundsChanged { get; set; }
+    /// <summary>The bounds extraction uses, outlined when they differ from <see cref="Bounds"/>.</summary>
+    [Parameter] public WarpParticleBounds Applied { get; set; }
+    private readonly string _id = $"warp-particle-histogram-{Guid.NewGuid():N}";
+    private ElementReference _canvas;
+    private IJSObjectReference _module;
+    private DotNetObjectReference<WarpParticleHistogram> _self;
+    private Refund.Services.Warp.WarpParticleHistogram _data;
+    private int[] _sentBins;
+    private bool _disposed;
+    protected override void OnParametersSet() => _data = Session.GetParticleHistogram();
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        try { await RenderAsync(firstRender); }
+        catch (JSDisconnectedException) { }
+        catch (ObjectDisposedException) when (_disposed) { }
+        catch (OperationCanceledException) when (_disposed) { }
+    }
+    private async Task RenderAsync(bool firstRender)
+    {
+        if (_disposed) return;
+        if (firstRender)
+        {
+            _module = await Js.InvokeAsync<IJSObjectReference>("import", "./_content/Refund/Jobs/Fs/Warp/WarpParticleHistogram.razor.js");
+            if (_disposed) { await _module.DisposeAsync(); return; }
+            _self = DotNetObjectReference.Create(this);
+            await _module.InvokeVoidAsync("initialize", _canvas, _id, _self);
+        }
+        if (_module == null) return;
+        await _module.InvokeVoidAsync("update", _id, ReferenceEquals(_sentBins, _data.Bins) ? null : _data.Bins, _data.Columns, _data.Rows, _data.PowerMaximum,
+            Corners(Bounds), Applied is { } applied && applied != Bounds ? Corners(applied) : null);
+        _sentBins = _data.Bins;
+    }
+    // Power has no fixed scale, so its step is a power of ten giving about 100 steps across the histogram.
+    private double PowerStep => _data.PowerMaximum > 0 ? Math.Max(1e-6, Math.Pow(10, Math.Floor(Math.Log10(_data.PowerMaximum / 100)))) : 1;
+    private double[] Corners(WarpParticleBounds b) => [b.MinCorrelation, b.MaxCorrelation, b.MinPower, b.MaxPower ?? _data.PowerMaximum];
+    private Task Change(WarpParticleBounds bounds) => BoundsChanged.InvokeAsync(bounds.Clamped());
+    private static string Invariant(double value) => value.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture);
+    private double RoundPower(double value) => Math.Round(Math.Round(value / PowerStep) * PowerStep, 6);
+    // Dragged bounds are rounded to the fields' precision; dragging to the top leaves power unbounded.
+    [JSInvokable] public Task SelectRange(double minCorrelation, double maxCorrelation, double minPower, double maxPower)
+    {
+        if (_disposed) return Task.CompletedTask;
+        double? upper = maxPower >= _data.PowerMaximum * .999 ? null : RoundPower(maxPower);
+        return InvokeAsync(() => Change(new(Math.Round(minCorrelation, 2), Math.Round(maxCorrelation, 2), RoundPower(minPower), upper)));
+    }
+    private Task Reset() => Change(new());
+    public async ValueTask DisposeAsync()
+    {
+        _disposed = true;
+        if (_module != null) try { await _module.InvokeVoidAsync("dispose", _id); await _module.DisposeAsync(); } catch (JSDisconnectedException) { } catch (OperationCanceledException) { }
+        _self?.Dispose();
+    }
+}

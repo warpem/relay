@@ -9,7 +9,7 @@ namespace Refund.Components;
 public partial class RobustFluentNumberField<TValue> : BufferedInputBase<TValue>, IAsyncDisposable where TValue : new()
 {
     [Inject] private IJSRuntime JS { get; set; }
-    private FluentNumberInput<TValue> _input;
+    private RelayNumberInput<TValue> _input;
     private static readonly Dictionary<int, FluentNumberInputCultureInfo> Cultures = new();
     /// <summary>Fluent's own default precision, which every field keeps at least.</summary>
     private const int DefaultDecimals = 2;
@@ -26,6 +26,8 @@ public partial class RobustFluentNumberField<TValue> : BufferedInputBase<TValue>
     [Parameter] public bool Immediate { get; set; }
     [Parameter] public int ImmediateDelay { get; set; } = 200;
     [Parameter] public string? AutoComplete { get; set; }
+    /// <summary>Passed to the input, e.g. aria-label and title.</summary>
+    [Parameter(CaptureUnmatchedValues = true)] public IReadOnlyDictionary<string, object>? AdditionalAttributes { get; set; }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {

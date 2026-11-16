@@ -18,7 +18,7 @@ namespace Refund.Jobs.Fs.MotionCtf.CTF2D;
 /// serving as a more lightweight alternative to the combined MotionAndCTF2D job.
 /// </summary>
 [GenerateReadOnly]
-public class CTF2D : WarpJobGpu, IClusterJob
+public class CTF2D : WarpToolsJobGpu, IClusterJob
 {
     /// <summary>
     /// Defines the square size for the job card display in the workflow view.
@@ -81,15 +81,6 @@ public class CTF2D : WarpJobGpu, IClusterJob
     public decimal CTFWindow { get; set; } = 512;
 
     /// <summary>
-    /// Controls whether to use the movie average for CTF estimation.
-    /// Using the average can improve signal in challenging conditions like beam-sensitive 
-    /// samples or when working without an energy filter.
-    /// </summary>
-    [UiBool("use_sum", "Use movie average",
-        "Use the movie average spectrum instead of the average of individual frames' spectra. Can help in the absence of an energy filter, or when signal is low.")]
-    public bool CTFMovieSumEnable { get; set; }
-
-    /// <summary>
     /// Specifies the resolution of the defocus model grid in X and Y.
     /// Higher grid dimensions provide more localized CTF estimation but require more 
     /// signal and computational resources.
@@ -107,7 +98,7 @@ public class CTF2D : WarpJobGpu, IClusterJob
         helpText: "Minimum resolution in Angstrom to consider in CTF fit",
         min: 1,
         max: 1000,
-        stepSize: 1,
+        stepSize: 0.1,
         unit: "Å")]
     public decimal CTFRangeMin { get; set; } = 30;
 
@@ -119,7 +110,7 @@ public class CTF2D : WarpJobGpu, IClusterJob
         helpText: "Maximum resolution in Angstrom to consider in CTF fit",
         min: 1,
         max: 1000,
-        stepSize: 1,
+        stepSize: 0.1,
         unit: "Å")]
     public decimal? CTFRangeMax { get; set; } = 4.0M;
 
@@ -131,7 +122,7 @@ public class CTF2D : WarpJobGpu, IClusterJob
         helpText: "Minimum defocus value to explore during fitting",
         min: -1000,
         max: 1000,
-        stepSize: 0.1,
+        stepSize: 0.01,
         unit: "µm")]
     public decimal CTFZMin { get; set; } = 0.5M;
 
@@ -143,7 +134,7 @@ public class CTF2D : WarpJobGpu, IClusterJob
         helpText: "Maximum defocus value to explore during fitting",
         min: -1000,
         max: 1000,
-        stepSize: 0.1,
+        stepSize: 0.01,
         unit: "µm")]
     public decimal CTFZMax { get; set; } = 5.0M;
 

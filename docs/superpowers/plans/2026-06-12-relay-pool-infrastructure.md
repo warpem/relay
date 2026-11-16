@@ -31,7 +31,7 @@
 | `Refund/JobQueues/ClusterQueue.cs` | Refactor `ProcessSubmissionScript` + `SubmitJob`; add `BuildWorkerScript`, `SubmitScript`, `ListActiveJobIds`, `CancelJobs`; add two new `[RelayProperty]` fields |
 | `Refund/JobQueues/ReadOnly/ReadOnlyClusterQueue.cs` | Expose `ListJobsTemplate`, `CancelManyJobsTemplate` |
 | `Refund/DataModel/Job.cs` | Add `IPooledJob` interface |
-| `Refund/Jobs/Abstract.cs` | Add `PoolQueueId`, `PoolSize`, `PoolWorkersAlive`, `PoolWorkersSubmitted` to `WarpJobGpu`; implement `IPooledJob` |
+| `Refund/Jobs/Abstract.cs` | Add `PoolQueueId`, `PoolSize`, `PoolWorkersAlive`, `PoolWorkersSubmitted` to `WarpToolsJobGpu`; implement `IPooledJob` |
 | `Refund/Services/Core/Repositories/QueueRepository.cs` | Shrink to constructor + fields + `LoadQueues` + `FindQueue` + `SaveQueues` + auto-save + dispose; add `_workerPools` field |
 
 ---
@@ -455,7 +455,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ---
 
-## Task 3: Add `IPooledJob` to `Job.cs` and implement on `WarpJobGpu`
+## Task 3: Add `IPooledJob` to `Job.cs` and implement on `WarpToolsJobGpu`
 
 **Files:**
 - Modify: `Refund/DataModel/Job.cs`
@@ -521,9 +521,9 @@ public interface IPooledJob
 }
 ```
 
-- [ ] **Step 3: Add pool fields to `WarpJobGpu` in `Abstract.cs`**
+- [ ] **Step 3: Add pool fields to `WarpToolsJobGpu` in `Abstract.cs`**
 
-Add after the existing `PerDevice` field in `WarpJobGpu`:
+Add after the existing `PerDevice` field in `WarpToolsJobGpu`:
 
 ```csharp
 [UiFieldGroup("Resources", 999)]
@@ -550,14 +550,14 @@ public int PoolWorkersAlive { get; set; }
 public int PoolWorkersSubmitted { get; set; }
 ```
 
-- [ ] **Step 4: Implement `IPooledJob` on `WarpJobGpu`**
+- [ ] **Step 4: Implement `IPooledJob` on `WarpToolsJobGpu`**
 
 Change the class declaration:
 ```csharp
-public abstract class WarpJobGpu : WarpJob, IPooledJob
+public abstract class WarpToolsJobGpu : WarpToolsJob, IPooledJob
 ```
 
-Add the explicit interface implementation at the end of `WarpJobGpu`:
+Add the explicit interface implementation at the end of `WarpToolsJobGpu`:
 
 ```csharp
 // IPooledJob
@@ -572,9 +572,9 @@ string IPooledJob.GetWorkerCommand(int deviceIndex) =>
     $"WarpWorker2 --task_dir {Path.Combine(DirectoryPath, "tasks")} --device {deviceIndex}";
 ```
 
-- [ ] **Step 5: Override `ComposeCommandArguments` in `WarpJobGpu` to append `--external_provisioner`**
+- [ ] **Step 5: Override `ComposeCommandArguments` in `WarpToolsJobGpu` to append `--external_provisioner`**
 
-Add (or extend if already overriding) in `WarpJobGpu`:
+Add (or extend if already overriding) in `WarpToolsJobGpu`:
 
 ```csharp
 public override Dictionary<string, string> ComposeCommandArguments()
@@ -655,7 +655,7 @@ Expected: 0 build errors, all tests pass.
 git add Refund/DataModel/Job.cs \
         Refund/Jobs/Abstract.cs \
         Refund.Tests/JobQueues/WorkerPoolTests.cs
-git commit -m "feat: add IPooledJob interface and WarpJobGpu pool fields
+git commit -m "feat: add IPooledJob interface and WarpToolsJobGpu pool fields
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```
@@ -910,11 +910,11 @@ public class WorkerPool
     {
         _poolQueue = poolQueue;
         _job       = job;
-        // IPooledJob is always also a Job (WarpJobGpu); retrieve DirectoryPath via helper
+        // IPooledJob is always also a Job (WarpToolsJobGpu); retrieve DirectoryPath via helper
         _jobDir    = GetJobDirectory(job);
     }
 
-    // WorkerPool is only constructed with WarpJobGpu instances (which are Jobs).
+    // WorkerPool is only constructed with WarpToolsJobGpu instances (which are Jobs).
     // We access DirectoryPath through a helper to keep IPooledJob minimal.
     private static string GetJobDirectory(IPooledJob job)
     {
@@ -1279,8 +1279,8 @@ if (job is IPooledJob pooledJob && pooledJob.PoolQueueId > 0)
     var (alive, submitted) = await GetOrCreatePool(job).Tick();
     _jobUpdateCallback(job, j =>
     {
-        ((WarpJobGpu)j).PoolWorkersAlive     = alive;
-        ((WarpJobGpu)j).PoolWorkersSubmitted = submitted;
+        ((WarpToolsJobGpu)j).PoolWorkersAlive     = alive;
+        ((WarpToolsJobGpu)j).PoolWorkersSubmitted = submitted;
     });
 }
 ```
@@ -1464,11 +1464,11 @@ private static List<(int id, string alias)>? GetAvailableQueues(ReadOnlyJob _) =
     QueueListProvider?.Invoke();
 ```
 
-- [ ] **Step 2: Set `dataDelegateName` on the `[UiQueue]` field declarations in `WarpJobGpu`**
+- [ ] **Step 2: Set `dataDelegateName` on the `[UiQueue]` field declarations in `WarpToolsJobGpu`**
 
 The `UiFieldBase` constructor accepts a `dataDelegateName` parameter that the reflection setup uses to bind a method on the declaring type as the `DataDelegate`. For a static delegate like `GetAvailableQueues`, the reflection lookup path in `Job.cs` (line ~790) finds it via `pair.Key.GetMethod(DataDelegateName)`.
 
-Change the `[UiQueue]` attribute in `WarpJobGpu` to include the delegate name:
+Change the `[UiQueue]` attribute in `WarpToolsJobGpu` to include the delegate name:
 
 ```csharp
 [UiQueue("Pool Queue",
@@ -1580,7 +1580,7 @@ Expected: passes.
 
 ```bash
 git add Refund.Tests/JobQueues/WorkerPoolTests.cs
-git commit -m "test: add JSON round-trip test for WarpJobGpu pool fields
+git commit -m "test: add JSON round-trip test for WarpToolsJobGpu pool fields
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```
@@ -1600,7 +1600,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 | §4.5 `ListActiveJobIds`, `CancelJobs` | Task 2 |
 | §5 `IPooledJob` interface | Task 3 |
 | §6 `[UiQueue]` attribute | Task 7 |
-| §7 `WarpJobGpu` pool fields + `IPooledJob` impl | Task 3 |
+| §7 `WarpToolsJobGpu` pool fields + `IPooledJob` impl | Task 3 |
 | §8 `WorkerPool` (Initialize, Tick, Dissolve, persistence) | Task 4 |
 | §10 `QueueRepository` partial class split | Task 5 |
 | §11 `QueueRepository.Pool.cs`, validation, tick wiring, dissolution | Task 6 |

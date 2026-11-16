@@ -98,7 +98,7 @@ public class ImportMap : Job, ILocalJob
     [UiDecimalNullable("", "Pixel size",
                        min: 0.001,
                        max: 1000.0,
-                       stepSize: 0.001,
+                       stepSize: 0.0001,
                        helpText: "Override the pixel size value stored in the map's header.",
                        Unit = "Å")]
     [RelayProperty]

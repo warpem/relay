@@ -1,0 +1,12 @@
+const {chromium} = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
+import assert from 'node:assert/strict';
+const url=process.env.WARP_PREVIEW_URL || 'http://127.0.0.1:5237/warp-session';
+const b=await chromium.launch({executablePath:process.env.CHROMIUM_EXECUTABLE || undefined,headless:true});const checks=[],errors=[]; checks.push=(...items)=>{console.log(items.join("\n"));return Array.prototype.push.apply(checks,items)};
+try{const c=await b.newContext({viewport:{width:1512,height:982},acceptDownloads:true});const p=await c.newPage();p.on('pageerror',e=>errors.push(e.message));
+const btn=(text,scope=p)=>scope.locator('fluent-button').filter({hasText:new RegExp('^\\s*'+text+'\\s*$')});
+const nav=async v=>{await p.locator('.workspace-nav>button').filter({hasText:new RegExp('^'+v+'$')}).click();await p.waitForTimeout(250)};
+const scenario=async v=>{await p.locator('.study-footer [role=combobox]').click();await p.locator('fluent-option[value="'+v+'"]').click();await p.waitForTimeout(350)};
+const fill=async(el,v)=>{await el.fill(String(v));await el.press('Tab');await p.waitForTimeout(220)};
+await p.goto(url+'?view=Setup');await p.waitForTimeout(700);await scenario('Stable collection');await nav('Setup');
+const enabled=p.locator('[data-setting=PickingEnabled] fluent-switch');await enabled.click();await btn('Apply changes').click();await p.waitForTimeout(250);assert.doesNotMatch(await p.locator('.telemetry').innerText(),/outdated/);checks.push('Disabled picking does not leave inactive stages permanently outdated');
+await enabled.click();await btn('Apply changes').click();await scenario('Denoiser startup');await p.locator('#processing-toggle').click();await p.waitForFunction(()=>document.querySelector('.training-banner')?.innerText.includes('Training'));await p.locator('#processing-toggle').click();await nav('Setup');const denoise=p.locator('[data-setting=Denoise] fluent-switch');await denoise.click();await btn('Apply changes').click();await p.waitForTimeout(250);assert.equal(await p.locator('.training-banner').count(),0);assert.match(await p.locator('.training-link').innerText(),/Off/);checks.push('Disabling denoising cancels paused training');await denoise.click();await btn('Apply changes').click();await scenario('Quality shift');await nav('Setup');assert.deepEqual(errors,[]);console.log(JSON.stringify({checks,errors},null,2));}finally{await b.close()}

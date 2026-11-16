@@ -18,7 +18,7 @@ namespace Refund.Jobs.Ts.Reconstruction.ReconstructMap;
 /// This is based on the WarpTools EtomoPatchTrackTiltseries command.
 /// </summary>
 [GenerateReadOnly]
-public class ReconstructMap : WarpJobGpu, IClusterJob
+public class ReconstructMap : WarpToolsJobGpu, IClusterJob
 {
     public override string TypeGuid => "b09a6298-d84b-46f4-b1aa-4547b71bb715";
 

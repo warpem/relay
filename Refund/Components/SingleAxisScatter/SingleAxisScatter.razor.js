@@ -3,10 +3,12 @@ const scatterPlots = new Map();
 /** Simple debounce helper */
 function debounce(fn, wait) {
     let t;
-    return function (...args) {
+    const debounced = function (...args) {
         clearTimeout(t);
         t = setTimeout(() => fn.apply(this, args), wait);
     };
+    debounced.cancel = () => clearTimeout(t);
+    return debounced;
 }
 
 /** Round the axis bounds to nice round numbers for labeling. */
@@ -24,12 +26,14 @@ function computeNiceAxisBounds(dataMin, dataMax) {
     return {min: niceMin, max: niceMax, center};
 }
 
-/** Simple numeric formatter for axis labels. */
-function formatNumber(val) {
-    const abs = Math.abs(val);
-    if (abs < 10) return val.toFixed(2);
-    if (abs < 100) return val.toFixed(1);
-    return val.toFixed(0);
+/** Formats an axis's labels with one shared precision: the fewest decimals that represent all of them,
+ *  capped by magnitude, so 0-10 reads "10 / 5 / 0" rather than "10.0 / 5.00 / 0.00". */
+function formatAxisLabels(values) {
+    const largest = Math.max(...values.map(v => Math.abs(v)));
+    const cap = largest < 10 ? 2 : largest < 100 ? 1 : 0;
+    let digits = 0;
+    while (digits < cap && values.some(v => { const scaled = v * 10 ** digits; return Math.abs(scaled - Math.round(scaled)) > 1e-6; })) digits++;
+    return values.map(v => v.toFixed(digits));
 }
 
 class ScatterPlot {
@@ -57,8 +61,10 @@ class ScatterPlot {
 
         // Set up debounced blazor calls
         this._debouncedPointHover = debounce((idx) => {
-            if (dotNetRef) {
-                dotNetRef.invokeMethodAsync("OnPointHovered", idx);
+            if (dotNetRef && !this.disposed) {
+                dotNetRef.invokeMethodAsync("OnPointHovered", idx).catch(error => {
+                    if (!this.disposed) console.error(error);
+                });
             }
         }, 50);
 
@@ -76,6 +82,7 @@ class ScatterPlot {
         this.pointCollections = [];   // Array of collections of points
         this.pointRadius = 2.5;
         this.zoom = 1.0;
+        this.enableZoom = true;
         this.rangeMin = 0;
         this.rangeMax = 1;
         this.opacity = 1.0;
@@ -171,7 +178,12 @@ class ScatterPlot {
         
         // Make sure names match the JSON from Blazor
         this.pointRadius = config.pointRadius;
-        this.zoom = config.zoom;
+        this.enableZoom = config.enableZoom !== false;
+        this.zoom = this.enableZoom ? config.zoom : 1;
+        if (!this.enableZoom) {
+            this._debounceWheel.cancel();
+            this._accumWheelDelta = 0;
+        }
         this.rangeMin = config.rangeMin;
         this.rangeMax = config.rangeMax;
         this.opacity = config.opacity;
@@ -551,11 +563,14 @@ class ScatterPlot {
         this.topLine.style.top = `${topY}px`;
         this.centerLine.style.top = `${centerY}px`;
         this.bottomLine.style.top = `${bottomY}px`;
+        // Each label is centred on its own gridline (the CSS translates it up by half its height).
+        this.topLabel.style.top = `${topY}px`;
+        this.centerLabel.style.top = `${centerY}px`;
+        this.bottomLabel.style.top = `${bottomY}px`;
 
         // labels
-        this.topLabel.textContent = formatNumber(this.axisMax);
-        this.centerLabel.textContent = formatNumber(this.axisCenter);
-        this.bottomLabel.textContent = formatNumber(this.axisMin);
+        [this.topLabel.textContent, this.centerLabel.textContent, this.bottomLabel.textContent] =
+            formatAxisLabels([this.axisMax, this.axisCenter, this.axisMin]);
     }
 
     renderRangeHighlight() {
@@ -565,8 +580,10 @@ class ScatterPlot {
             this.rangeHighlight.style.height = "0px";
             return;
         }
-        const hiMin = Math.max(this.plotMin, this.rangeMin);
-        const hiMax = Math.min(this.plotMax, this.rangeMax);
+        // Clamp to the gridded axis range, which holds every point; past it the band would run into
+        // the plot's padding and overshoot the gridlines.
+        const hiMin = Math.max(this.axisMin, this.rangeMin);
+        const hiMax = Math.min(this.axisMax, this.rangeMax);
         const topPx = (this.plotMax - hiMax) / pRange * this.currentHeight;
         const heightPx = (hiMax - hiMin) / pRange * this.currentHeight;
 
@@ -696,6 +713,7 @@ class ScatterPlot {
 
     /** Debounced trackpad zoom accumulation */
     handleWheel(e) {
+        if (!this.enableZoom) return;
         if (e.ctrlKey || e.shiftKey) {
             e.preventDefault();
             this._accumWheelDelta += e.deltaY;
@@ -705,6 +723,7 @@ class ScatterPlot {
 
     // Helper method to apply zoom changes, used by both wheel zoom and sync zoom
     applyZoomChange(newZoom, useMousePosition = false) {
+        if (!this.enableZoom) return;
         if (newZoom === this.zoom) return; // No change needed
         
         // Store old zoom for comparison
@@ -835,6 +854,8 @@ class ScatterPlot {
     }
 
     dispose() {
+        this.disposed = true;
+        this._debouncedPointHover.cancel();
         this.canvas.removeEventListener("mousemove", this.handleMouseMove);
         this.canvas.removeEventListener("mouseleave", this.handleMouseLeave);
         this.canvas.removeEventListener("click", this.handleClick);

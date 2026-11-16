@@ -40,3 +40,20 @@
     transform: translate(-50%, -50%);
     pointer-events: none;
 }
+/* Full-resolution load after a preview: a thin bar along the top edge. */
+.micrograph-viewer-container ::deep .micrograph-progress {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: color-mix(in srgb, var(--colorNeutralBackground1) 40%, transparent);
+    pointer-events: none;
+}
+.micrograph-viewer-container ::deep .micrograph-progress[hidden] { display: none; }
+.micrograph-viewer-container ::deep .micrograph-progress > div {
+    height: 100%;
+    width: 0;
+    background: var(--colorBrandBackground, #0f6cbd);
+    transition: width .1s linear;
+}

@@ -15,6 +15,12 @@ public class MicrographSet : Resource
     public DataSetFs DataSetFs { get; set; }
 
     public bool HasMetadata { get; set; } = false;
+
+    /// <summary>
+    /// When the set is a selection of the movies in <see cref="DataSetFs"/>'s folder, a text file listing them, one path
+    /// per line, which WarpTools takes as --input_data; empty when the set is every movie the folder holds.
+    /// </summary>
+    public string InputListPath { get; set; } = "";
     
     public string ProcessedItemsJson { get; set; }
     public string FailedItemsJson { get; set; }

@@ -1,0 +1,16 @@
+.state-page { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 1.25rem; padding: 0.5rem; }
+.state-page section { display: flex; flex-direction: column; gap: 0.75rem; min-width: 0; }
+.state-page header { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+.state-page h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.state-note { color: var(--colorNeutralForeground3); margin: 0; }
+
+.figures { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 0.6rem 1rem; margin: 0; }
+.figures > div { display: flex; flex-direction: column; min-width: 0; }
+.figures dt { color: var(--colorNeutralForeground3); font-size: 12px; }
+.figures dd { margin: 0; font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.figures small { color: var(--colorNeutralForeground3); font-size: 11px; }
+
+.state-table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.state-table th { text-align: left; font-weight: 600; color: var(--colorNeutralForeground3); font-size: 12px; padding: 4px 8px; border-bottom: 1px solid var(--colorNeutralStroke2); }
+.state-table td { padding: 4px 8px; border-bottom: 1px solid var(--colorNeutralStroke3); font-variant-numeric: tabular-nums; }
+.state-table td small { color: var(--colorNeutralForeground3); }

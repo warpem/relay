@@ -1,0 +1,143 @@
+@page "/warp-session"
+@page "/warp-study"
+@layout ComponentDev.Components.Layout.WarpPreviewLayout
+@using ComponentDev.Services
+@using ComponentDev.Components.WarpPreview
+@using Refund.Services
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@inject WarpSessionPreview Session
+@inject FileService Files
+@inject IThemeService Theme
+@inject IJSRuntime Js
+@implements IDisposable
+@implements IAsyncDisposable
+
+<PageTitle>Warp · Apoferritin</PageTitle>
+<div class="study-page">
+    <header class="session-header">
+        <a class="relay" href="/">relay</a><span class="divider">/</span><strong class="warp-title">Warp</strong>
+        <span class="session-identity">Apoferritin <span>J42 · @Session.Settings.Preset</span></span><span class="spacer"></span>
+        @if (Dirty) { <button class="unsaved" @onclick="@(() => ChangeView(_draftView))">Unsaved settings</button> }
+        <span class="run-label"><i class="@(Session.Running ? "active" : "")"></i>@(Session.Running ? "Processing" : "Stopped")</span>
+        <div class="pool-menu"><FluentButton Appearance="ButtonAppearance.Subtle" OnClick="@(() => _poolOpen = !_poolOpen)">@Session.Workers workers ⌄</FluentButton>
+            @if (_poolOpen) { <div class="pool-popover"><span>GPU queue</span><FluentButton Title="Remove worker" OnClick="@(() => Session.Resize(Session.Workers - 1))">−</FluentButton><b id="worker-count">@Session.Workers</b><FluentButton Title="Add worker" OnClick="@(() => Session.Resize(Session.Workers + 1))">+</FluentButton></div> }
+        </div>
+        <FluentButton Id="processing-toggle" Appearance="ButtonAppearance.Primary" OnClick="Session.ToggleRunning" Disabled="@(!Session.Running && Dirty)">@(Session.Running ? "Stop processing" : "Start processing")</FluentButton>
+        <FluentButton IconOnly="true" Title="Toggle theme" Appearance="ButtonAppearance.Subtle" IconStart="@(new Icons.Regular.Size20.DarkTheme())" OnClick="ToggleTheme" />
+    </header>
+    <div class="telemetry">
+        <span class="@(InputLate ? "input-alert" : "")"><i class="signal-dot"></i><b>Input</b> @Age(Session.LastInputAt)</span>
+        <span><b>Processing</b> @ProcessingSummary</span>
+        <button class="training-link @(Session.Training || Session.AwaitingDenoiser > 0 ? "training-alert" : "")" @onclick="@(() => ChangeView("Setup"))"><b>Denoiser</b> @Session.DenoiserStatus</button>
+        <span class="spacer"></span><span><b id="movie-count">@Session.Movies.Count.ToString("N0")</b> received</span><span><b>@Session.Accepted.ToString("N0")</b> accepted</span>
+        @if (Session.Failed > 0) { <button class="error-link" @onclick="ShowFailures">! @Session.Failed errors</button> }
+    </div>
+    <nav class="workspace-nav" aria-label="Session workspace">
+        @foreach (var view in Views) { <button class="@(_view == view ? "selected" : "")" @onclick="@(() => ChangeView(view))" aria-current="@(_view == view ? "page" : null)">@view</button> }
+        <span class="spacer"></span>
+        @if (_view is "Monitor" or "Picking") { <FluentButton Appearance="ButtonAppearance.Subtle" OnClick="FollowLatest">@(_follow ? "Following latest" : "Return to latest")</FluentButton> }
+    </nav>
+    @if (Session.Training || Session.AwaitingDenoiser > 0)
+    {
+        <div class="training-banner"><strong>@Session.DenoiserStatus</strong>
+            @if (Session.Training) { <progress max="100" value="@Session.TrainingPercent"></progress> }
+            @if (Session.AwaitingDenoiser > 0) { <span>@Session.AwaitingDenoiser.ToString("N0") micrographs awaiting denoising</span> } else if (Session.Model > 0) { <span>Model v@(Session.Model) remains in use</span> }
+            @if (!Session.Running) { <span>Processing stopped</span> }
+            <span class="spacer"></span><FluentButton Appearance="ButtonAppearance.Subtle" OnClick="@(() => ChangeView("Setup"))">Training settings</FluentButton>
+        </div>
+    }
+    <main>
+        @if (_view == "Setup")
+        {
+            <WarpStudySetup Session="Session" Draft="_draft" DraftChanged="DraftChanged" Apply="ApplySettings" Revert="RevertSettings" Error="@_parameterError" />
+        }
+        else if (_view == "Monitor")
+        {
+            <div class="monitor-grid">
+                <section class="trends-column">
+                    <div class="section-intro"><div><h1>Collection quality</h1><span>@($"{WindowResults:N0} results · {WindowPending:N0} pending · {WindowFailed} failed")</span></div><div class="recent-yield @(WindowResults > 0 && (double)WindowAccepted / WindowResults < .8 ? "attention" : "")"><b>@(WindowResults == 0 ? "—" : $"{WindowAccepted:N0} / {WindowResults:N0}")</b><span>accepted in window</span></div></div>
+                    <WarpSessionTrends @ref="_trends" Session="Session" SelectedIndex="_selected" SelectedIndexChanged="SelectMovie" State="_trendState" WindowChanged="WindowChanged" RangeChanged="RangeChanged" />
+                    @if (_trendState.RangeStart.HasValue && _trendState.RangeEnd.HasValue)
+                    {
+                        <div class="range-actions"><b>@((_trendState.RangeEnd.Value - _trendState.RangeStart.Value).ToString("N0")) selected</b><span class="spacer"></span><FluentButton Title="Apply filtering criteria" OnClick="@(() => CurateRange(PreviewDisposition.Auto))">Filter rules</FluentButton><FluentButton Title="Keep regardless of filters" OnClick="@(() => CurateRange(PreviewDisposition.Keep))">Keep</FluentButton><FluentButton OnClick="@(() => CurateRange(PreviewDisposition.Exclude))">Exclude</FluentButton><FluentButton Appearance="ButtonAppearance.Subtle" OnClick="ClearRange">Clear</FluentButton></div>
+                    }
+                    <div class="collection-diagnostics" aria-label="Whole collection diagnostics">
+                        <WarpAstigmatismPlot Session="Session" Movie="Selected" SelectedIndexChanged="SelectMovie" />
+                        <WarpParticleHistogram Session="Session" />
+                    </div>
+                    <div class="status-key">@foreach (var status in WarpSessionPreview.StatusNames) { <span><i style="background:@WarpSessionPreview.StatusColorFor(status)"></i>@status</span> }</div>
+                </section>
+                <section class="preview-column">
+                    <div class="preview-title"><h2>@(_follow ? "Latest result" : "Selected micrograph")</h2></div>
+                    <WarpStudyEvidence Session="Session" Movie="Selected" SelectedIndexChanged="SelectMovie" />
+                </section>
+            </div>
+        }
+        else if (_view == "Picking")
+        {
+            <WarpStudyPicking OpenSetup="@(() => ChangeView("Setup"))" Session="Session" Movie="Selected" SelectedIndexChanged="SelectMovie" />
+        }
+        else if (_view == "Movies")
+        {
+            <div class="movies-layout"><WarpStudyMovies Session="Session" SelectedIndex="_selected" SelectedIndexChanged="SelectMovie" OpenMovie="OpenMovie" State="_movieState" />@if (_wideScreen) { <aside class="table-evidence"><WarpStudyEvidence Session="Session" Movie="Selected" SelectedIndexChanged="SelectMovie" /></aside> }</div>
+        }
+        else if (_view == "Exports")
+        {
+            <div class="exports-workspace"><h1>Export available results</h1><div class="export-actions"><span>@Session.Accepted.ToString("N0") accepted micrographs · whole session</span><span class="spacer"></span><FluentButton Appearance="ButtonAppearance.Primary" Disabled="Session.Exporting" OnClick="@(() => Session.ExportAsync(false))">Export micrographs</FluentButton><FluentButton Disabled="Session.Exporting" OnClick="@(() => Session.ExportAsync(true))">Export particle coordinates</FluentButton></div>
+                @if (Session.Exporting) { <p><FluentSpinner /> Writing STAR…</p> }
+                @foreach (var export in Session.Exports.AsEnumerable().Reverse()) { <div class="export-entry"><b>J@(export.Number)</b><div>@export.Kind<span>@export.Movies.ToString("N0") micrographs · @export.Created.ToString("HH:mm")</span></div><span class="spacer"></span><span>@export.Items.ToString("N0") rows</span><a href="@Files.GetUrl(export.Path)" download>Download STAR</a></div> }
+            </div>
+        }
+    </main>
+    <footer class="study-footer"><span>Prototype · synthetic data</span><span role="status">@Session.Notice</span><span class="spacer"></span><label>Scenario <FluentSelect TOption="string" TValue="string" Items="Scenarios" Value="@Session.StudyScenario" ValueChanged="ScenarioChanged" /></label><a href="/warp-session-previous">Previous layout</a></footer>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "view")] public string InitialView { get; set; }
+    private static readonly string[] Views = ["Setup", "Monitor", "Picking", "Movies", "Exports"];
+    private static readonly string[] Scenarios = ["Stable collection", "Quality shift", "No incoming movies", "Processing backlog", "Denoiser startup"];
+    private const string ViewStorageKey = "relay.warp.preview.J42.view";
+    private string _view = "Setup", _draftView = "Setup", _parameterError;
+    private readonly string _layoutId = Guid.NewGuid().ToString("N");
+    private IJSObjectReference _layoutModule;
+    private DotNetObjectReference<PageWarpStudy> _layoutSelf;
+    private bool _wideScreen;
+    private bool _poolOpen, _follow = true, _dark, _disposed, _clientReady;
+    private int _selected;
+    private PreviewSettings _draft, _lastSettings;
+    private WarpStudyMovies.ViewState _movieState = new();
+    private WarpSessionTrends _trends;
+    private WarpSessionTrends.ViewState _trendState = new();
+    private WarpSessionTrends.IndexRange _window;
+    private bool Dirty => _draft != Session.Settings;
+    private bool InputLate => DateTime.UtcNow - Session.LastInputAt > TimeSpan.FromMinutes(3);
+    private PreviewMovie Selected => Session.Movies[Math.Clamp(_selected, 0, Session.Movies.Count - 1)];
+    private IEnumerable<PreviewMovie> WindowMovies => Session.Movies.Skip(_window.Start).Take(_window.Count);
+    private int WindowResults => WindowMovies.Count(m => m.Done.HasFlag(PreviewStage.Ctf) && !m.Failed);
+    private int WindowFailed => WindowMovies.Count(m => m.Failed);
+    private int WindowPending => WindowMovies.Count(m => !m.Done.HasFlag(PreviewStage.Ctf) && !m.Failed);
+    private int WindowAccepted => WindowMovies.Count(m => m.Done.HasFlag(PreviewStage.Ctf) && Session.Passes(m));
+    private int LatestIndex => Session.Movies.LastOrDefault(m => m.Done.HasFlag(PreviewStage.Ctf) && !m.Failed)?.Index ?? 0;
+    private string ProcessingSummary => !Session.Running ? $"stopped · {Session.Pending:N0} waiting" + (Session.Outdated > 0 ? $" · {Session.Outdated:N0} outdated" : "") : Session.Pending == 0 && Session.Outdated == 0 ? "caught up" : $"{Session.Pending + Session.Outdated:N0} waiting · result {Age(Session.LastResultAt)}";
+    private static string Age(DateTime timestamp) { var age = DateTime.UtcNow - timestamp; return age.TotalMinutes >= 1 ? $"{(int)age.TotalMinutes} min ago" : $"{Math.Max(0, (int)age.TotalSeconds)} s ago"; }
+    protected override void OnInitialized() { _draft = _lastSettings = Session.Settings; _selected = LatestIndex; _window = new(Math.Max(0, Session.Movies.Count - 1000), Session.Movies.Count); if (InitialView == "Inspect") _view = "Monitor"; else if (Views.Contains(InitialView)) _view = InitialView; Session.Changed += Updated; Session.Attach(); }
+    protected override async Task OnAfterRenderAsync(bool firstRender) { if (!firstRender) return; _clientReady = true; _layoutModule = await Js.InvokeAsync<IJSObjectReference>("import", "./Components/Pages/PageWarpStudy.razor.js"); if (_disposed) { await _layoutModule.DisposeAsync(); return; } _layoutSelf = DotNetObjectReference.Create(this); await _layoutModule.InvokeVoidAsync("observe", _layoutId, _layoutSelf); if (string.IsNullOrEmpty(InitialView)) { try { var saved = await Js.InvokeAsync<string>("localStorage.getItem", ViewStorageKey); if (saved == "Inspect") saved = "Monitor"; if (Views.Contains(saved)) { _view = saved; StateHasChanged(); } } catch (JSException) { } } }
+    private void Updated() { if (!_disposed) _ = InvokeAsync(() => { if (_draft == _lastSettings) _draft = Session.Settings; _lastSettings = Session.Settings; if (_follow) _selected = LatestIndex; _selected = Math.Clamp(_selected, 0, Session.Movies.Count - 1); StateHasChanged(); }); }
+    private async Task ChangeView(string view) { _view = view; if (_clientReady) { try { await Js.InvokeVoidAsync("localStorage.setItem", ViewStorageKey, view); } catch (JSException) { } } }
+    private Task SelectMovie(int index) { _selected = Math.Clamp(index, 0, Session.Movies.Count - 1); _follow = false; return Task.CompletedTask; }
+    private Task OpenMovie(int index) { _selected = index; _follow = false; if (index < _window.Start || index >= _window.End) _trendState.CenterIndex = index; return ChangeView("Monitor"); }
+    private void FollowLatest() { _follow = true; _selected = LatestIndex; _trendState.CenterIndex = null; }
+    private async Task ToggleTheme() { _dark = !_dark; await Theme.SetThemeAsync(_dark ? ThemeMode.Dark : ThemeMode.Light); }
+    private void DraftChanged(PreviewSettings value) { _draft = value; _draftView = _view is "Setup" or "Picking" ? _view : "Setup"; _parameterError = null; }
+    private void RevertSettings() { _draft = _lastSettings = Session.Settings; _parameterError = null; }
+    private void ApplySettings() { _parameterError = WarpSessionPreview.ValidateSettings(_draft); if (_parameterError != null) return; Session.Apply(_draft); }
+    private async Task ScenarioChanged(string scenario) { Session.SetStudyScenario(scenario); _trendState = new(); _window = new(Math.Max(0, Session.Movies.Count - 1000), Session.Movies.Count); _selected = LatestIndex; _follow = true; _draft = _lastSettings = Session.Settings; await ChangeView("Monitor"); }
+    private void WindowChanged(WarpSessionTrends.IndexRange window) => _window = window;
+    private void RangeChanged(WarpSessionTrends.IndexRange? range) { if (range.HasValue) { _follow = false; _selected = Session.Movies.Skip(range.Value.Start).Take(range.Value.Count).FirstOrDefault(m => m.Done.HasFlag(PreviewStage.Ctf))?.Index ?? range.Value.Start; } }
+    private void CurateRange(PreviewDisposition disposition) { if (_trendState.RangeStart.HasValue) Session.SetDisposition(Enumerable.Range(_trendState.RangeStart.Value, _trendState.RangeEnd.Value - _trendState.RangeStart.Value), disposition); }
+    private async Task ClearRange() { if (_trends != null) await _trends.ClearRange(); }
+    private Task ShowFailures() { _movieState.Query = ""; _movieState.Status = "Failed"; _movieState.PageIndex = 0; _movieState.Selected.Clear(); return ChangeView("Movies"); }
+    [JSInvokable] public Task WideScreenChanged(bool wide) { _wideScreen = wide; return InvokeAsync(StateHasChanged); }
+    public async ValueTask DisposeAsync() { Dispose(); if (_layoutModule != null) { try { await _layoutModule.InvokeVoidAsync("dispose", _layoutId); await _layoutModule.DisposeAsync(); } catch (JSDisconnectedException) { } } _layoutSelf?.Dispose(); }
+    public void Dispose() { if (_disposed) return; _disposed = true; Session.Changed -= Updated; Session.Detach(); }
+}

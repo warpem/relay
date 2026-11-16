@@ -6,7 +6,7 @@ using Refund.Utils;
 namespace Refund.Jobs;
 
 [GenerateReadOnly]
-public abstract class WarpJobGpu : WarpJob, IPooledJob, IPoolStatus
+public abstract class WarpToolsJobGpu : WarpToolsJob, IPooledJob, IPoolStatus
 {
     /// <summary>
     /// True when this job runs as a pool Manager — a CPU-only orchestrator that populates the
@@ -177,13 +177,15 @@ public abstract class WarpJobGpu : WarpJob, IPooledJob, IPoolStatus
         string queueDir = Path.Combine(DirectoryPath, "tasks");
         string logDir   = Path.Combine(DirectoryPath, "logs");
 
-        var lines = new List<string> { $"cd {RunDirectory}" };
+        var lines = new List<string> { $"cd {QuoteShellPath(RunDirectory)}" };
         for (int i = 0; i < PerDevice; i++)
             lines.Add(
-                $"WarpWorker2 --queue-dir {queueDir} --device {deviceIndex} --log-dir {logDir} " +
+                $"WarpWorker2 --queue-dir {QuoteShellPath(queueDir)} --device {deviceIndex} --log-dir {QuoteShellPath(logDir)} " +
                 $"--persistent --worker-id \"$(hostname)-$$-{deviceIndex}-{i}\" &");
         lines.Add("wait");
 
         return string.Join("\n", lines);
     }
+    private static string QuoteShellPath(string value) => "'" + value.Replace("'", "'\"'\"'") + "'";
+
 }

@@ -211,7 +211,11 @@ public partial class DataManager
                     job.FactoryInstanceId = null;
 
                 foreach (var job in subJobs)
+                {
+                    if (job is Refund.Jobs.Fs.Warp.WarpJob warpJob)
+                        WarpSessions.Remove(warpJob.Identity);
                     _dataRepository.DeleteJob(originalUser, job);
+                }
 
                 foreach (var v in originalSpace.Views)
                     v.RemoveFactoryInstance(originalInst);

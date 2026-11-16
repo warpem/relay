@@ -15,7 +15,7 @@ namespace Refund.Jobs.Ts.Reconstruction.Denoising;
 /// This is based on the WarpTools ReconstructTiltseries command.
 /// </summary>
 [GenerateReadOnly]
-public class Denoising : WarpJob, IClusterJob
+public class Denoising : WarpToolsJob, IClusterJob
 {
     public override string TypeGuid => "ef2ac481-e330-4f3c-9238-8f5e270e2d58";
     

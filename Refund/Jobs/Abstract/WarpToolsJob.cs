@@ -14,7 +14,7 @@ namespace Refund.Jobs;
 /// This class extends the base Job class with Warp-specific module requirements.
 /// </remarks>
 [GenerateReadOnly]
-public abstract class WarpJob : Job, IItemProgress
+public abstract class WarpToolsJob : Job, IItemProgress
 {
     /// <summary>
     /// Number of items processed by the job so far (null until the job starts reporting).
@@ -42,7 +42,7 @@ public abstract class WarpJob : Job, IItemProgress
         ? Math.Max(0L, (long)processed - (NItemsFailed ?? 0))
         : null;
 
-    protected WarpJob()
+    protected WarpToolsJob()
     {
         MemoryPerWorker = DefaultMemoryPerWorker;
     }

@@ -78,7 +78,7 @@ public class BeamClass2D : Job, IClusterJob
     [UiFieldGroup("Alignment", 1)]
     [UiDecimal("translation-range", "Translation range", min: 0, max: 1000, unit: "Å")]
     [RelayProperty] public decimal TranslationRange { get; set; } = 100;
-    [UiDecimal("initial-angular-sampling", "Initial angular sampling", min: 0.1, max: 180, unit: "°", isAdvanced: true)]
+    [UiDecimal("initial-angular-sampling", "Initial angular sampling", min: 0.1, max: 180, unit: "°", isAdvanced: true, stepSize: 0.1)]
     [RelayProperty] public decimal AngularSampling { get; set; } = 20;
     [UiBool("marginalize-poses", "Marginalize poses", isAdvanced: true)]
     [RelayProperty] public bool MarginalizePoses { get; set; }

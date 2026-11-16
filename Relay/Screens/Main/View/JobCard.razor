@@ -265,12 +265,12 @@
                 }
                 else if (Job.Status == JobStatus.Aborting && previousEvent != null)
                 {
-                    <span>Aborting for </span>
+                    <span>@(Job.IsResumable ? "Pausing" : "Aborting") for </span>
                     <DurationText Timestamp="@relevantEvent.Timestamp"/>
                 }
                 else if (Job.Status == JobStatus.Aborted && previousEvent != null)
                 {
-                    <span>Aborted after </span>
+                    <span>@(Job.IsResumable ? "Paused" : "Aborted") after </span>
                     @((relevantEvent.Timestamp - previousEvent.Timestamp).ToStringAdaptive())
                 }
                 else if (Job.Status == JobStatus.Failed && previousEvent != null)

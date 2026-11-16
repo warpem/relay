@@ -1,8 +1,9 @@
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.Logging;
 using Microsoft.JSInterop;
-using SkiaSharp;
 using System.Collections.ObjectModel;
+using System.Globalization;
+using Refund.Services;
 using Warp;
 using Warp.Headers;
 using Warp.Tools;
@@ -18,6 +19,7 @@ namespace Refund.Components.FourierSpace;
 public partial class AmplitudeSpectrumViewer : IAsyncDisposable
 {
     [Inject] private ILogger<AmplitudeSpectrumViewer> Logger { get; set; }
+    [Inject] private FileService FileService { get; set; }
     /// <summary>
     /// Minimum range for CTF fitting in Fourier space, expressed as a fraction 
     /// of Nyquist frequency. This defines the starting point for the fitted region.
@@ -36,6 +38,9 @@ public partial class AmplitudeSpectrumViewer : IAsyncDisposable
     /// This parameter is used for standard movie mode.
     /// </summary>
     [Parameter] public string? MovieFilePath { get; set; }
+    /// <summary>Reload a live CTF result when its metadata/spectrum files are overwritten.</summary>
+    [Parameter] public long? ResultRevision { get; set; }
+    private long? _previousResultRevision;
     
     /// <summary>
     /// Path to the tilt series file for which to display the amplitude spectrum.
@@ -49,7 +54,9 @@ public partial class AmplitudeSpectrumViewer : IAsyncDisposable
     private DotNetObjectReference<AmplitudeSpectrumViewer>? _dotNetRef;
     private string _previousMoviePath = string.Empty;
     private string _previousTiltSeriesPath = string.Empty;
-    private string _imageSource = string.Empty;
+    private ElementReference _spectrumCanvas;
+    // The browser loads and draws the 2D spectrum from its MRC file; tilt series pick a plane per tilt.
+    private SpectrumSource? _spectrum;
     private readonly int _chartWidth = 400;
     private readonly int _chartHeight = 400;
     private bool _isChartInitialized;
@@ -60,13 +67,8 @@ public partial class AmplitudeSpectrumViewer : IAsyncDisposable
     private float[] _tiltAngles = [];
     private int _zeroTiltIndex = 0;
     private int _currentTiltIndex = 0;
-    private Dictionary<int, string> _cachedTiltSpectrumImages = new();
     private Dictionary<int, WarpSeriesData> _cachedTiltSeriesData = new();
 
-    // Reusable buffers for image processing
-    private byte[]? _monoBuffer;
-    private byte[]? _rightHalfBuffer;
-    private SKBitmap? _reusableBitmap;
     private decimal? _specimenThicknessAngstrom;
     
     /// <summary>
@@ -145,9 +147,10 @@ public partial class AmplitudeSpectrumViewer : IAsyncDisposable
         bool needsUpdate = false;
         
         // Check if movie path has changed
-        if (MovieFilePath != null && MovieFilePath != _previousMoviePath)
+        if (MovieFilePath != null && (MovieFilePath != _previousMoviePath || ResultRevision != _previousResultRevision))
         {
             _previousMoviePath = MovieFilePath;
+            _previousResultRevision = ResultRevision;
             needsUpdate = true;
         }
         
@@ -155,7 +158,6 @@ public partial class AmplitudeSpectrumViewer : IAsyncDisposable
         if (TiltSeriesPath != null && TiltSeriesPath != _previousTiltSeriesPath)
         {
             _previousTiltSeriesPath = TiltSeriesPath;
-            _cachedTiltSpectrumImages.Clear();
             _cachedTiltSeriesData.Clear();
             needsUpdate = true;
         }
@@ -222,12 +224,9 @@ public partial class AmplitudeSpectrumViewer : IAsyncDisposable
         }
         _currentTiltIndex = _zeroTiltIndex;
         
-        // Preload all tilt power spectrum images
+        _spectrum = SpectrumFor(tiltSeries.PowerSpectrumPath, tiltSeries.OptionsCTF.RangeMin, tiltSeries.OptionsCTF.RangeMax, 0);
         for (int tiltIndex = 0; tiltIndex < _tiltCount; tiltIndex++)
         {
-            var powerSpectrumImage = GetTiltPowerSpectrumImage(tiltSeries, tiltIndex);
-            _cachedTiltSpectrumImages[tiltIndex] = powerSpectrumImage;
-            
             var warpSeriesData = GetTiltWarpSeries(tiltSeries, tiltIndex, FittingRangeMin, FittingRangeMax);
             _cachedTiltSeriesData[tiltIndex] = warpSeriesData;
         }
@@ -243,9 +242,6 @@ public partial class AmplitudeSpectrumViewer : IAsyncDisposable
             
         try
         {
-            if (_cachedTiltSpectrumImages.TryGetValue(_currentTiltIndex, out var imageSource))
-                _imageSource = imageSource;
-                
             if (_cachedTiltSeriesData.TryGetValue(_currentTiltIndex, out var warpSeries))
             {
                 _specimenThicknessAngstrom = warpSeries.SpecimenThicknessAngstrom;
@@ -269,6 +265,8 @@ public partial class AmplitudeSpectrumViewer : IAsyncDisposable
                         SimulatedValues = warpSeries.SimulatedValues.Select(v => float.IsNaN(v) ? 0f : MathF.Round(v, 2)).ToArray(),
                         QualityValues = warpSeries.QualityValues
                     });
+                if (_spectrum != null)
+                    await RenderSpectrumAsync(_spectrum with { Layer = _currentTiltIndex });
             }
             else
             {
@@ -296,8 +294,8 @@ public partial class AmplitudeSpectrumViewer : IAsyncDisposable
             
         try
         {
-            var powerSpectrumImage = GetPowerSpectrumImage(movieFilePath);
-            _imageSource = powerSpectrumImage;
+            var movie = new Movie(movieFilePath);
+            var spectrum = _spectrum = SpectrumFor(movie.PowerSpectrumPath, movie.OptionsCTF.RangeMin, movie.OptionsCTF.RangeMax, 0);
 
             var warpSeries = GetWarpSeries(movieFilePath, FittingRangeMin, FittingRangeMax);
             _specimenThicknessAngstrom = warpSeries.SpecimenThicknessAngstrom;
@@ -322,6 +320,7 @@ public partial class AmplitudeSpectrumViewer : IAsyncDisposable
                     SimulatedValues = warpSeries.SimulatedValues.Select(v => float.IsNaN(v) ? 0f : MathF.Round(v, 2)).ToArray(),
                     QualityValues = warpSeries.QualityValues
                 });
+            await RenderSpectrumAsync(spectrum);
 
             _isChartInitialized = true;
         }
@@ -333,233 +332,26 @@ public partial class AmplitudeSpectrumViewer : IAsyncDisposable
         }
     }
 
+    private sealed record SpectrumSource(string Url, int Layer, decimal RangeMin, decimal RangeMax);
+
     /// <summary>
-    /// Processes the power spectrum image from a movie file and converts it to a base64-encoded PNG string
-    /// for display in the browser.
+    /// Points the browser at a spectrum file. The write time busts the browser cache when a rerun
+    /// overwrites the file under the same URL.
     /// </summary>
-    /// <param name="basePath">Path to the movie file</param>
-    /// <returns>A data URL containing the base64-encoded PNG of the power spectrum</returns>
-    private string GetPowerSpectrumImage(string basePath)
+    private SpectrumSource SpectrumFor(string path, decimal rangeMin, decimal rangeMax, int layer) =>
+        new(FileService.GetUrl(path) + "?v=" + File.GetLastWriteTimeUtc(path).Ticks.ToString(CultureInfo.InvariantCulture),
+            layer, rangeMin, rangeMax);
+
+    private async Task RenderSpectrumAsync(SpectrumSource spectrum)
     {
-        var movie = new Movie(basePath);
-        var header = MapHeader.ReadFromFile(movie.PowerSpectrumPath);
-        var data = Image.FromFile(movie.PowerSpectrumPath).GetHostContinuousCopy();
-
-        var width = header.Dimensions.X;
-        var halfWidth = width / 2;
-        var height = header.Dimensions.Y;
-
-        var radiusMin2 = (int)(movie.OptionsCTF.RangeMin * halfWidth);
-        radiusMin2 *= radiusMin2;
-        var radiusMax2 = (int)(movie.OptionsCTF.RangeMax * halfWidth);
-        radiusMax2 *= radiusMax2;
-
-        // Calculate statistics
-        double sum1 = 0, sum2 = 0;
-        var samples = 0;
-        var index = 0;
-
-        for (var y = 0; y < height; y++)
+        try
         {
-            for (var x = 0; x < width; x++)
-            {
-                var xCentered = x - halfWidth;
-                var yCentered = height - 1 - y;
-                var radius2 = xCentered * xCentered + yCentered * yCentered;
-
-                if (radius2 >= radiusMin2 && radius2 <= radiusMax2)
-                {
-                    sum1 += data[index];
-                    sum2 += data[index] * data[index];
-                    samples++;
-                }
-                index++;
-            }
+            await _jsModule!.InvokeAsync<bool>("renderSpectrum", _spectrumCanvas, spectrum);
         }
-
-        var mean = (float)(sum1 / samples);
-        var std = (float)(Math.Sqrt(samples * sum2 - sum1 * sum1) / samples);
-        var valueMin = mean - 1.5f * std;
-        var valueMax = mean + 3.0f * std;
-        var range = valueMax - valueMin;
-
-        if (range <= 0f)
-            return "data:image/jpeg;base64," + Convert.ToBase64String(new byte[data.Length]);
-
-        // Reuse or create mono buffer
-        if (_monoBuffer == null || _monoBuffer.Length != data.Length)
-            _monoBuffer = new byte[data.Length];
-
-        // Convert to grayscale
-        for (var y = 0; y < height; y++)
+        catch (JSException ex)
         {
-            for (var x = 0; x < width; x++)
-            {
-                _monoBuffer[(height - 1 - y) * width + x] = 
-                    (byte)(Math.Max(Math.Min(1f, (data[y * width + x] - valueMin) / range), 0f) * 255f);
-            }
+            Logger.LogWarning(ex, "Couldn't load power spectrum {Url}", spectrum.Url);
         }
-
-        // Reuse or create right half buffer
-        var rightHalfSize = _monoBuffer.Length / 2;
-        if (_rightHalfBuffer == null || _rightHalfBuffer.Length != rightHalfSize)
-            _rightHalfBuffer = new byte[rightHalfSize];
-
-        // Extract right half
-        var dataIndex = 0;
-        var rightIndex = 0;
-        for (var y = 0; y < height; y++)
-        {
-            for (var x = 0; x < width; x++)
-            {
-                if (x >= halfWidth)
-                    _rightHalfBuffer[rightIndex++] = _monoBuffer[dataIndex];
-                dataIndex++;
-            }
-        }
-
-        var pngBytes = CreatePngFromMonoBytes(_rightHalfBuffer, halfWidth, height);
-        return "data:image/png;base64," + Convert.ToBase64String(pngBytes);
-    }
-    
-    /// <summary>
-    /// Processes the power spectrum image from a tilt series file for a specific tilt and converts it to a base64-encoded PNG string
-    /// for display in the browser.
-    /// </summary>
-    /// <param name="tiltSeries">The tilt series object</param>
-    /// <param name="tiltIndex">The index of the tilt to process</param>
-    /// <returns>A data URL containing the base64-encoded PNG of the power spectrum for the specified tilt</returns>
-    private string GetTiltPowerSpectrumImage(TiltSeries tiltSeries, int tiltIndex)
-    {
-        var header = MapHeader.ReadFromFile(tiltSeries.PowerSpectrumPath);
-        var powerSpectrumImage = Image.FromFile(tiltSeries.PowerSpectrumPath);
-        
-        // Get the slice corresponding to the specific tilt
-        var data = powerSpectrumImage.GetHost(Intent.Read)[tiltIndex];
-
-        var width = header.Dimensions.X;
-        var halfWidth = width / 2;
-        var height = header.Dimensions.Y;
-
-        var radiusMin2 = (int)(tiltSeries.OptionsCTF.RangeMin * halfWidth);
-        radiusMin2 *= radiusMin2;
-        var radiusMax2 = (int)(tiltSeries.OptionsCTF.RangeMax * halfWidth);
-        radiusMax2 *= radiusMax2;
-
-        // Calculate statistics
-        double sum1 = 0, sum2 = 0;
-        var samples = 0;
-        var index = 0;
-
-        for (var y = 0; y < height; y++)
-        {
-            for (var x = 0; x < width; x++)
-            {
-                var xCentered = x - halfWidth;
-                var yCentered = height - 1 - y;
-                var radius2 = xCentered * xCentered + yCentered * yCentered;
-
-                if (radius2 >= radiusMin2 && radius2 <= radiusMax2)
-                {
-                    sum1 += data[index];
-                    sum2 += data[index] * data[index];
-                    samples++;
-                }
-                index++;
-            }
-        }
-
-        var mean = (float)(sum1 / samples);
-        var std = (float)(Math.Sqrt(samples * sum2 - sum1 * sum1) / samples);
-        var valueMin = mean - 1.5f * std;
-        var valueMax = mean + 3.0f * std;
-        var range = valueMax - valueMin;
-
-        if (range <= 0f)
-            return "data:image/jpeg;base64," + Convert.ToBase64String(new byte[data.Length]);
-
-        // Reuse or create mono buffer
-        if (_monoBuffer == null || _monoBuffer.Length != data.Length)
-            _monoBuffer = new byte[data.Length];
-
-        // Convert to grayscale
-        for (var y = 0; y < height; y++)
-        {
-            for (var x = 0; x < width; x++)
-            {
-                _monoBuffer[(height - 1 - y) * width + x] = 
-                    (byte)(Math.Max(Math.Min(1f, (data[y * width + x] - valueMin) / range), 0f) * 255f);
-            }
-        }
-
-        // Reuse or create right half buffer
-        var rightHalfSize = _monoBuffer.Length / 2;
-        if (_rightHalfBuffer == null || _rightHalfBuffer.Length != rightHalfSize)
-            _rightHalfBuffer = new byte[rightHalfSize];
-
-        // Extract right half
-        var dataIndex = 0;
-        var rightIndex = 0;
-        for (var y = 0; y < height; y++)
-        {
-            for (var x = 0; x < width; x++)
-            {
-                if (x >= halfWidth)
-                    _rightHalfBuffer[rightIndex++] = _monoBuffer[dataIndex];
-                dataIndex++;
-            }
-        }
-
-        var pngBytes = CreatePngFromMonoBytes(_rightHalfBuffer, halfWidth, height);
-        return "data:image/png;base64," + Convert.ToBase64String(pngBytes);
-    }
-    
-    /// <summary>
-    /// Converts a raw byte array of grayscale values to a compressed PNG image. 
-    /// Each byte in the input array represents a grayscale pixel value (0-255).
-    /// Uses Gray8 color type for efficient memory usage and reuses bitmap when possible.
-    /// </summary>
-    /// <param name="rawBytes">The raw grayscale bytes to convert</param>
-    /// <param name="width">Width of the image in pixels</param>
-    /// <param name="height">Height of the image in pixels</param>
-    /// <returns>Byte array containing the PNG-encoded image data</returns>
-    private byte[] CreatePngFromMonoBytes(byte[] rawBytes, int width, int height)
-    {
-        // Create or reuse SKBitmap with Gray8 color type (8-bit grayscale)
-        if (_reusableBitmap == null || 
-            _reusableBitmap.Width != width || 
-            _reusableBitmap.Height != height || 
-            _reusableBitmap.ColorType != SKColorType.Gray8)
-        {
-            _reusableBitmap?.Dispose();
-            _reusableBitmap = new SKBitmap(width, height, SKColorType.Gray8, SKAlphaType.Opaque);
-        }
-        
-        // Get direct access to bitmap pixels
-        IntPtr pixelsAddr = _reusableBitmap.GetPixels();
-        
-        // Copy bytes directly - Gray8 format means one byte per pixel
-        System.Runtime.InteropServices.Marshal.Copy(rawBytes, 0, pixelsAddr, rawBytes.Length);
-
-        // Create image data
-        using var stream = SkBitmapToMemoryStream(_reusableBitmap);
-        return stream.ToArray();
-    }
-    
-    /// <summary>
-    /// Encodes an SkiaSharp bitmap to a JPEG in a memory stream.
-    /// </summary>
-    /// <param name="bitmap">The bitmap to encode</param>
-    /// <returns>A memory stream containing the JPEG-encoded bitmap</returns>
-    private static MemoryStream SkBitmapToMemoryStream(SKBitmap bitmap)
-    {
-        using var image = SKImage.FromBitmap(bitmap);
-        using var data = image.Encode(SKEncodedImageFormat.Jpeg, 80);
-
-        var memoryStream = new MemoryStream();
-        data.SaveTo(memoryStream);
-
-        return memoryStream;
     }
 
     /// <summary>
@@ -684,6 +476,10 @@ public partial class AmplitudeSpectrumViewer : IAsyncDisposable
             await _jsModule.InvokeVoidAsync("destroyChart");
             _isChartInitialized = false;
         }
+        catch (JSDisconnectedException)
+        {
+            // The browser is gone, and the chart with it.
+        }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error destroying chart");
@@ -705,12 +501,11 @@ public partial class AmplitudeSpectrumViewer : IAsyncDisposable
                 await _jsModule.DisposeAsync();
 
             _dotNetRef?.Dispose();
-            _monoBuffer = null;
-            _rightHalfBuffer = null;
-            _reusableBitmap?.Dispose();
-            _reusableBitmap = null;
-            _cachedTiltSpectrumImages.Clear();
             _cachedTiltSeriesData.Clear();
+        }
+        catch (JSDisconnectedException)
+        {
+            // Disposal after the circuit closed has nothing left to release in the browser.
         }
         catch (Exception ex)
         {

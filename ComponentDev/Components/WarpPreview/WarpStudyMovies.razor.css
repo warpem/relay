@@ -1,0 +1,58 @@
+.study-movies {min-width:0;width:100%;max-width:2200px;color:var(--colorNeutralForeground1);font-size:12px;}
+.movies-toolbar,.batch-toolbar,.pagination {display:flex;align-items:center;gap:10px;}
+.movies-toolbar {min-height:40px;margin-bottom:6px;}
+.movies-toolbar ::deep .movie-search {width:290px;}
+.movies-toolbar ::deep .status-filter {width:148px;}
+.match-count,.selection-count {font-variant-numeric:tabular-nums;white-space:nowrap;}
+.match-count,.hidden-selection {color:var(--colorNeutralForeground3);}
+.toolbar-space {flex:1;}
+.batch-toolbar {min-height:38px;gap:6px;padding-bottom:8px;}
+.batch-toolbar ::deep fluent-button {font-size:12px;}
+.batch-divider {height:20px;width:1px;background:var(--colorNeutralStroke2);margin:0 6px;}
+.movie-table-scroll {overflow:auto;max-height:calc(100dvh - 292px);border-block:1px solid var(--colorNeutralStroke2);}
+.movie-table {border-collapse:separate;border-spacing:0;width:100%;min-width:1200px;font-size:13px;table-layout:fixed;font-variant-numeric:tabular-nums;}
+.movie-table th {position:sticky;top:0;z-index:2;height:34px;background:var(--colorNeutralBackground2);border-bottom:1px solid var(--colorNeutralStroke2);font-weight:500;font-size:12px;white-space:nowrap;}
+.movie-table th button {display:flex;align-items:center;justify-content:flex-end;gap:3px;width:100%;border:0;background:none;color:inherit;font:inherit;cursor:pointer;padding:0;}
+.movie-table .filename-column button,.movie-table .status-column button {justify-content:flex-start;}
+.sort-arrow {font-size:11px;min-width:8px;}
+.movie-table td {height:34px;border-bottom:1px solid var(--colorNeutralStroke2);}
+.movie-table td,.movie-table th {padding:0 9px;overflow:hidden;text-overflow:ellipsis;}
+.movie-table tbody tr:hover {background:var(--colorNeutralBackground1Hover);}
+.movie-table tbody .checked-movie {background:var(--colorBrandBackground2);}
+.movie-table tbody .active-movie td:first-child {box-shadow:inset 3px 0 var(--colorBrandStroke1);}
+.movie-table .check-column {width:34px;text-align:center;padding:0 6px;}
+.movie-table .number-column {width:64px;text-align:right;}
+.movie-table .filename-column {width:auto;min-width:240px;}
+.movie-table .status-column {width:112px;text-align:left;}
+.movie-table .metric-column {width:92px;text-align:right;}
+.movie-table .defocus-column {width:102px;}
+.movie-table .motion-column {width:124px;text-align:right;}
+.movie-table .inspect-column {width:38px;text-align:center;padding:0;}
+.movie-table .inspect-column ::deep fluent-button {min-width:28px;padding:0 4px;}
+.filename {display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:none;border:0;padding:0;color:var(--colorNeutralForeground1);font:inherit;text-align:left;cursor:pointer;}
+.filename:hover {color:var(--colorBrandForeground1);text-decoration:underline;}
+.movie-status {display:inline-flex;align-items:center;gap:7px;white-space:nowrap;}
+.movie-status i {display:inline-block;flex:none;width:8px;height:8px;border-radius:2px;background:var(--movie-status);}
+.movie-table .empty-table {height:100px;text-align:center;color:var(--colorNeutralForeground3);}
+.pagination {min-height:46px;font-size:12px;gap:5px;}
+.pagination ::deep fluent-button {min-width:28px;padding:0 5px;}
+.page-size,.page-number {display:flex;align-items:center;gap:7px;white-space:nowrap;}
+.page-size {margin-right:12px;}
+.page-size ::deep .fluent-select {width:70px;}
+.page-number {margin:0 4px;font-variant-numeric:tabular-nums;}
+.visually-hidden {position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}
+@media(max-width:1200px) {.movies-toolbar {flex-wrap:wrap;gap:7px;}.hidden-selection {font-size:11px;}.movie-table-scroll {max-height:calc(100dvh - 310px);}}
+
+@media(min-width:2000px) {
+    .study-movies,.pagination {font-size:14px;}
+    .movie-table {font-size:14px;min-width:1380px;}
+    .movie-table th {font-size:13px;}
+    .movie-table td,.movie-table th {height:38px;}
+    .movie-table .number-column {width:76px;}
+    .movie-table .status-column {width:124px;}
+    .movie-table .metric-column {width:104px;}
+    .movie-table .defocus-column {width:116px;}
+    .movie-table .motion-column {width:136px;}
+    .batch-toolbar ::deep fluent-button {font-size:13px;}
+    .movie-status i {width:9px;height:9px;}
+}

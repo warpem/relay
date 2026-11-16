@@ -18,7 +18,7 @@ namespace Refund.Jobs.Ts.Ctf;
 /// This is based on the WarpTools CTFTiltseries command.
 /// </summary>
 [GenerateReadOnly]
-public class Ctf : WarpJobGpu, IClusterJob
+public class Ctf : WarpToolsJobGpu, IClusterJob
 {
     public override string TypeGuid => "5b6053ff-f377-458c-99dc-bdf8e3b92699";
     public override string TypeCategory => "Tilt-series.CTF.CTF";
@@ -57,7 +57,7 @@ public class Ctf : WarpJobGpu, IClusterJob
     /// Lowest (worst) resolution in Angstrom to consider in fit
     /// </summary>
     [RelayProperty]
-    [UiDecimal("range_low", "Minimum resolution", min: 1, max: 999, stepSize: 1, unit: "Å",
+    [UiDecimal("range_low", "Minimum resolution", min: 1, max: 999, stepSize: 0.1, unit: "Å",
                helpText: "Lowest (worst) resolution in Angstrom to consider in fit")]
     public decimal RangeMin { get; set; } = 30;
 
@@ -65,7 +65,7 @@ public class Ctf : WarpJobGpu, IClusterJob
     /// Highest (best) resolution in Angstrom to consider in fit
     /// </summary>
     [RelayProperty]
-    [UiDecimal("range_high", "Maximum resolution", min: 1, max: 100, stepSize: 1, unit: "Å",
+    [UiDecimal("range_high", "Maximum resolution", min: 1, max: 100, stepSize: 0.1, unit: "Å",
                helpText: "Highest (best) resolution in Angstrom to consider in fit")]
     public decimal RangeMax { get; set; } = 4;
 
@@ -73,7 +73,7 @@ public class Ctf : WarpJobGpu, IClusterJob
     /// Minimum defocus value in µm to explore during fitting (positive = underfocus)
     /// </summary>
     [RelayProperty]
-    [UiDecimal("defocus_min", "Minimum defocus", min: 0, max: 10, stepSize: 0.1, unit: "µm",
+    [UiDecimal("defocus_min", "Minimum defocus", min: 0, max: 10, stepSize: 0.01, unit: "µm",
                helpText: "Minimum defocus value to explore during fitting (positive = underfocus)")]
     public decimal ZMin { get; set; } = 0.5M;
 
@@ -81,7 +81,7 @@ public class Ctf : WarpJobGpu, IClusterJob
     /// Maximum defocus value in µm to explore during fitting (positive = underfocus)
     /// </summary>
     [RelayProperty]
-    [UiDecimal("defocus_max", "Maximum defocus", min: 0, max: 20, stepSize: 0.1, unit: "µm",
+    [UiDecimal("defocus_max", "Maximum defocus", min: 0, max: 20, stepSize: 0.01, unit: "µm",
                helpText: "Maximum defocus value to explore during fitting (positive = underfocus)")]
     public decimal ZMax { get; set; } = 5.0M;
 

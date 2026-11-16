@@ -1,0 +1,365 @@
+@using Refund.Services.Warp
+@using Microsoft.JSInterop
+@using Refund.Components.SingleAxisScatter
+@using Microsoft.AspNetCore.Components.Rendering
+@using System.Globalization
+@inject IJSRuntime Js
+@implements IAsyncDisposable
+
+<section id="@_brushId" @ref="_root" class="session-trends @(Compact ? "compact" : "")" style="--track-count: @Shown.Length" aria-label="Acquisition trends">
+    <div class="trend-toolbar">
+        <h3 class="trend-title">Acquisition</h3>
+        <div class="window-buttons segmented" role="group" aria-label="Plotted movies">
+            <FluentButton Class="@WindowClass(200)" Appearance="ButtonAppearance.Subtle" OnClick="@(() => SetWindow(200))">Last 200</FluentButton>
+            <FluentButton Class="@WindowClass(1000)" Appearance="ButtonAppearance.Subtle" OnClick="@(() => SetWindow(1000))">Last 1,000</FluentButton>
+            <FluentButton Class="@WindowClass(0)" Appearance="ButtonAppearance.Subtle" OnClick="@(() => SetWindow(0))">All</FluentButton>
+        </div>
+    </div>
+    <div class="tracks">
+        @foreach (int metric in Shown)
+        {
+            int row = metric;
+            <div class="trend-track">
+                <div class="track-label">
+                    <span class="metric-name">@Labels[row] <span class="unit">(@Units[row])</span></span>
+                    <span class="selected-reading" title="Selected movie">@SelectedReading(row)</span>
+                    <span class="metric-filter range-input" title="Movies outside this range are filtered out">
+                        <span class="range-label">Accept</span>
+                        @if (row == Particles)
+                        {
+                            <RobustFluentNumberField TValue="int" Value="@Session.MinParticles" ValueChanged="@(v => SetFilter(row, true, v))" Min="0" Max="@Invariant(Session.MaxParticles)" Step="10" aria-label="@FilterLabel(row, true)" title="@FilterLabel(row, true)" />
+                            <span aria-hidden="true">–</span>
+                            <RobustFluentNumberField TValue="int?" Value="@(Session.MaxParticles == int.MaxValue ? (int?)null : Session.MaxParticles)" ValueChanged="@(v => SetFilter(row, false, v ?? int.MaxValue))" Min="@Invariant(Session.MinParticles)" Step="10" Placeholder="∞" aria-label="@FilterLabel(row, false)" title="Maximum accepted particles; leave empty for no upper limit" />
+                        }
+                        else if (row == Signal)
+                        {
+                            <RobustFluentNumberField TValue="double" Value="@Session.MinCtfSignal" ValueChanged="@(v => SetFilter(row, true, v))" Min="0" Max="@(Session.MaxCtfSignal is double maximum ? Invariant(maximum) : null)" Step="@FilterStep(row)" aria-label="@FilterLabel(row, true)" title="Minimum accepted CTF signal: how many robust standard deviations the fitted CTF stands above decoy defoci. Spectra without Thon rings score about 0–3." />
+                            <span aria-hidden="true">–</span>
+                            <RobustFluentNumberField TValue="double?" Value="@Session.MaxCtfSignal" ValueChanged="@SetSignalMaximum" Min="@Invariant(Session.MinCtfSignal)" Step="@FilterStep(row)" Placeholder="∞" aria-label="@FilterLabel(row, false)" title="Maximum accepted CTF signal, for instance to look at poor fits only; leave empty for no upper limit" />
+                        }
+                        else
+                        {
+                            <RobustFluentNumberField TValue="double" Value="@FilterMinimum(row)" ValueChanged="@(v => SetFilter(row, true, v))" Min="0" Max="@Invariant(FilterMaximum(row))" Step="@FilterStep(row)" aria-label="@FilterLabel(row, true)" title="@FilterLabel(row, true)" />
+                            <span aria-hidden="true">–</span>
+                            <RobustFluentNumberField TValue="double" Value="@FilterMaximum(row)" ValueChanged="@(v => SetFilter(row, false, v))" Min="@Invariant(FilterMinimum(row))" Step="@FilterStep(row)" aria-label="@FilterLabel(row, false)" title="@FilterLabel(row, false)" />
+                        }
+                    </span>
+                </div>
+                <div class="plot-frame">
+                    @Plot(row)
+                    @if (row == Ctf && !_hasWindowCtfResults)
+                    {
+                        <div class="pending-window">
+                            <span>No CTF results in this window yet</span>
+                            @if (_latestCtfIndex >= 0)
+                            {
+                                <FluentButton Appearance="ButtonAppearance.Subtle" OnClick="@(() => ShowAround(_latestCtfIndex))">Show latest results</FluentButton>
+                            }
+                        </div>
+                    }
+                    <div class="interval-frame" aria-hidden="true"><i class="interval-shade"></i></div>
+                    @if (SelectedInWindow)
+                    {
+                        <div class="selected-rule-frame" aria-hidden="true"><i class="selected-rule" style="left:@SelectedPercent%"></i></div>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+    <div class="shared-axis" style="--half-step: calc(100% / @(Math.Max(1, 2 * _count)))"><span>@((_start + 1).ToString("N0"))</span><span>@(_count == Session.Movies.Count ? $"All {_count:N0} movies" : $"{_count:N0} of {Session.Movies.Count:N0} movies") in acquisition order<span class="axis-hint">@(View.RangeStart.HasValue ? "" : "; drag across a plot to select a range")</span></span><span>@_end.ToString("N0")</span></div>
+    @if (!SelectedInWindow || View.CenterIndex.HasValue)
+    {
+    <div class="window-context">
+        <span class="spacer"></span>
+        @if (!SelectedInWindow)
+        {
+            <span class="selected-context">#@((SelectedIndex + 1).ToString("N0")) is outside this window</span>
+            <FluentButton Appearance="ButtonAppearance.Subtle" OnClick="@(() => ShowAround(SelectedIndex))">Show selected</FluentButton>
+        }
+        @if (View.CenterIndex.HasValue)
+        {
+            <FluentButton Appearance="ButtonAppearance.Subtle" OnClick="@(() => SetWindow(View.WindowSize))">Back to latest</FluentButton>
+        }
+    </div>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public WarpSession Session { get; set; }
+    [Parameter, EditorRequired] public Func<Action<WarpSession>, Task> Update { get; set; }
+    [Parameter] public int SelectedIndex { get; set; }
+    [Parameter] public EventCallback<int> SelectedIndexChanged { get; set; }
+    [Parameter] public bool Compact { get; set; }
+    [Parameter] public ViewState State { get; set; }
+    [Parameter] public EventCallback<IndexRange> WindowChanged { get; set; }
+    [Parameter] public EventCallback<IndexRange?> RangeChanged { get; set; }
+
+    public sealed class ViewState
+    {
+        public int WindowSize { get; set; } = 1000;
+        public int? CenterIndex { get; set; }
+        public int? RangeStart { get; set; }
+        public int? RangeEnd { get; set; }
+    }
+
+    /// <summary>Original movie indices, with an inclusive start and exclusive end.</summary>
+    public readonly record struct IndexRange(int Start, int End)
+    {
+        public int Count => Math.Max(0, End - Start);
+    }
+
+    private readonly ViewState _localState = new();
+    private ViewState View => State ?? _localState;
+    public IndexRange Window => new(_start, _end);
+    private readonly string _brushId = $"warp-trends-{Guid.NewGuid():N}";
+    private ElementReference _root;
+    private IJSObjectReference _module;
+    private DotNetObjectReference<WarpTrends> _dotNet;
+    private bool _disposed, _windowNotificationPending;
+    private IndexRange? _reportedWindow;
+
+    private const int Ctf = 0, Signal = 1, Motion = 2, Ice = 3, Particles = 4;
+    private static readonly string[] Labels = ["CTF fit", "CTF signal", "Motion", "Ice thickness", "Particles"];
+    private static readonly string[] FilterKeys = ["ctf", "ctf-signal", "motion", "ice", "particles"];
+    private static readonly string[] Units = ["Å", "σ", "Å/frame", "Å", "per movie"];
+    private static readonly WarpStage[] RequiredStages = [WarpStage.Ctf, WarpStage.Ctf, WarpStage.Motion, WarpStage.Ctf, WarpStage.Extract];
+    private static readonly double[] AxisFloors = [10, 20, 5, 1600, 400];
+    private readonly List<ScatterPoint>[] _points = [[], [], [], [], []];
+    private readonly double[] _axisMax = new double[Labels.Length];
+    // Tracks for parameters the applied settings don't produce stay hidden: ice without thickness fitting, particles
+    // without picking.
+    private int[] Shown => Enumerable.Range(0, Labels.Length)
+        .Where(m => m switch { Ice => Session.Settings.FitThickness, Particles => Session.Settings.PickingEnabled, _ => true }).ToArray();
+    private int _start, _end, _count, _projectionVersion;
+    private int _latestCtfIndex = -1;
+    private bool _hasWindowCtfResults;
+    private int _catalogVersion = -1, _plotVersion = -1, _previousWindow = -1, _previousCenter = -1;
+    private bool SelectedInWindow => SelectedIndex >= _start && SelectedIndex < _end;
+    private string SelectedPercent => ((_count == 0 ? 0 : (SelectedIndex - _start + .5) / _count) * 100).ToString("F5", CultureInfo.InvariantCulture);
+
+    protected override void OnParametersSet() => UpdateProjection();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        try { await RenderAsync(firstRender); }
+        catch (JSDisconnectedException) { }
+        catch (ObjectDisposedException) when (_disposed) { }
+        catch (OperationCanceledException) when (_disposed) { }
+    }
+    private async Task RenderAsync(bool firstRender)
+    {
+        if (_disposed) return;
+        if (firstRender)
+        {
+            _module = await Js.InvokeAsync<IJSObjectReference>("import", "./_content/Refund/Jobs/Fs/Warp/WarpTrends.razor.js");
+            if (_disposed) { await _module.DisposeAsync(); return; }
+            _dotNet = DotNetObjectReference.Create(this);
+            await _module.InvokeVoidAsync("initialize", _root, _dotNet);
+        }
+        if (_module != null)
+            await _module.InvokeVoidAsync("update", _root, new { start = _start, end = _end, rangeStart = View.RangeStart, rangeEnd = View.RangeEnd });
+        if (_windowNotificationPending)
+        {
+            _windowNotificationPending = false;
+            _reportedWindow = Window;
+            await WindowChanged.InvokeAsync(Window);
+        }
+    }
+
+    /// <summary>Keep a historical selection in a 1,000-movie shared window.</summary>
+    public Task ShowAround(int index)
+    {
+        View.WindowSize = 1000;
+        View.CenterIndex = Math.Clamp(index, 0, Math.Max(0, Session.Movies.Count - 1));
+        UpdateProjection();
+        return InvokeAsync(StateHasChanged);
+    }
+
+    public Task ShowRange(int start, int end)
+    {
+        if (Session.Movies.Count == 0) return Task.CompletedTask;
+        start = Math.Clamp(start, 0, Math.Max(0, Session.Movies.Count - 1));
+        end = Math.Clamp(end, start + 1, Session.Movies.Count);
+        View.WindowSize = end - start;
+        View.CenterIndex = start + View.WindowSize / 2;
+        UpdateProjection();
+        return InvokeAsync(StateHasChanged);
+    }
+
+    public async Task ClearRange()
+    {
+        View.RangeStart = View.RangeEnd = null;
+        await RangeChanged.InvokeAsync(null);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public async Task SelectInterval(int start, int end)
+    {
+        if (_disposed || Session.Movies.Count == 0) return;
+        start = Math.Clamp(start, 0, Session.Movies.Count - 1);
+        end = Math.Clamp(end, start + 1, Session.Movies.Count);
+        View.RangeStart = start;
+        View.RangeEnd = end;
+        await RangeChanged.InvokeAsync(new IndexRange(start, end));
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void SetWindow(int size)
+    {
+        View.WindowSize = size;
+        View.CenterIndex = null;
+        UpdateProjection();
+    }
+
+    private string WindowClass(int size) => View.WindowSize == size && !View.CenterIndex.HasValue ? "selected" : null;
+
+    private void UpdateProjection()
+    {
+        if (_catalogVersion == Session.CatalogVersion && _plotVersion == Session.PlotVersion && _previousWindow == View.WindowSize && _previousCenter == (View.CenterIndex ?? -1)) return;
+        _catalogVersion = Session.CatalogVersion;
+        _plotVersion = Session.PlotVersion;
+        _previousWindow = View.WindowSize;
+        _previousCenter = View.CenterIndex ?? -1;
+        int total = Session.Movies.Count;
+        // Last 200 / Last 1,000 end at the latest movie with results: movies discovered but not yet processed have
+        // nothing to plot. Before any results, they end at the latest discovered.
+        int latest = View.WindowSize > 0 && !View.CenterIndex.HasValue && Session.ProcessedEnd is > 0 and var processed ? processed : total;
+        _count = View.WindowSize == 0 ? total : Math.Min(View.WindowSize, latest);
+        _start = View.CenterIndex.HasValue ? Math.Clamp(View.CenterIndex.Value - _count / 2, 0, Math.Max(0, total - _count)) : latest - _count;
+        _end = _start + _count;
+        _windowNotificationPending = _reportedWindow != Window;
+        _latestCtfIndex = -1;
+        _hasWindowCtfResults = false;
+        for (int metric = 0; metric < Labels.Length; metric++)
+        {
+            _points[metric].Clear();
+            if (_points[metric].Capacity < _count) _points[metric].Capacity = _count;
+            // Stable physical ranges across Last 200 / Last 1,000 / All avoid implying a change
+            // in variability merely because the operator changes the acquisition window.
+            _axisMax[metric] = AxisFloors[metric];
+            for (int i = 0; i < total; i++)
+            {
+                double? value = Metric(Session.Movies[i], metric);
+                if (value.HasValue)
+                {
+                    _axisMax[metric] = Math.Max(_axisMax[metric], Math.Ceiling(value.Value));
+                    if (metric == Ctf)
+                    {
+                        _latestCtfIndex = i;
+                        if (i >= _start && i < _end) _hasWindowCtfResults = true;
+                    }
+                }
+            }
+            for (int i = _start; i < _end; i++)
+            {
+                var movie = Session.Movies[i];
+                var color = System.Drawing.ColorTranslator.FromHtml(Session.StatusColor(movie));
+                _points[metric].Add(new ScatterPoint(Metric(movie, metric), color, movie));
+            }
+        }
+        _projectionVersion++;
+    }
+
+    private double FilterMinimum(int metric) => metric switch { Ctf => Session.MinCtf, Signal => Session.MinCtfSignal, Motion => Session.MinMotion, Ice => Session.MinIce, _ => Session.MinParticles };
+    // Without an upper CTF signal limit, the plot's accepted band still needs a finite edge, as for particles.
+    private double FilterMaximum(int metric) => metric switch { Ctf => Session.MaxCtf, Signal => Session.MaxCtfSignal ?? int.MaxValue, Motion => Session.MaxMotion, Ice => Session.MaxIce, _ => Session.MaxParticles };
+    private string FilterLabel(int metric, bool minimum) => $"{(minimum ? "Minimum" : "Maximum")} accepted {Labels[metric].ToLowerInvariant()} ({Units[metric]})";
+    // Steps set each filter's precision: tenths of an Å for CTF fit and motion, halves for CTF signal, tens for ice and particles.
+    private static string FilterStep(int metric) => metric switch { Ctf or Motion => "0.1", Signal => "0.5", _ => "10" };
+    private static string Invariant(double value) => value.ToString(CultureInfo.InvariantCulture);
+    private async Task SetSignalMaximum(double? value)
+    {
+        if (value is < 0) return;
+        await Update(s => s.FilterCtfSignalMaximum(value));
+        UpdateProjection();
+    }
+    private async Task SetFilter(int metric, bool minimum, double value)
+    {
+        if (!double.IsFinite(value) || value < 0) return;
+        await Update(s => s.FilterMetric(FilterKeys[metric] + (minimum ? "-min" : "-max"), value));
+        UpdateProjection();
+    }
+
+    private static double? Metric(WarpMovie movie, int metric)
+    {
+        if (!movie.Done.HasFlag(RequiredStages[metric])) return null;
+        double value = metric switch { Ctf => movie.Ctf, Signal => movie.CtfSignal, Motion => movie.Motion, Ice => movie.Ice, _ => movie.Particles };
+        return double.IsFinite(value) ? value : null;
+    }
+
+    private string SelectedReading(int metric)
+    {
+        if (SelectedIndex < 0 || SelectedIndex >= Session.Movies.Count) return "";
+        var movie = Session.Movies[SelectedIndex];
+        double? value = Metric(movie, metric);
+        string label = $"#{SelectedIndex + 1:N0} ";
+        if (!value.HasValue) return label + "pending";
+        string reading = value.Value.ToString(metric switch { Ctf or Motion => "F2", Signal => "F1", _ => "N0" });
+        return label + (Session.ActiveStale(movie).HasFlag(RequiredStages[metric]) ? reading + " (previous settings)" : reading);
+    }
+
+    private Task OnPointClicked(ScatterPoint point) => point.Metadata is WarpMovie movie ? SelectedIndexChanged.InvokeAsync(movie.Index) : Task.CompletedTask;
+
+    public async ValueTask DisposeAsync()
+    {
+        _disposed = true;
+        try
+        {
+            if (_module != null)
+            {
+                await _module.InvokeVoidAsync("dispose", _brushId);
+                await _module.DisposeAsync();
+            }
+        }
+        catch (JSDisconnectedException) { }
+        catch (OperationCanceledException) { }
+        finally { _dotNet?.Dispose(); }
+    }
+
+    private RenderFragment Plot(int metric) => builder =>
+    {
+        builder.OpenComponent<StableScatter>(0);
+        builder.AddAttribute(1, nameof(StableScatter.Points), _points[metric]);
+        builder.AddAttribute(2, nameof(StableScatter.Revision), _projectionVersion);
+        builder.AddAttribute(3, nameof(StableScatter.Compact), Compact);
+        builder.AddAttribute(4, nameof(StableScatter.Maximum), _axisMax[metric]);
+        builder.AddAttribute(5, nameof(StableScatter.ThresholdMin), FilterMinimum(metric));
+        builder.AddAttribute(6, nameof(StableScatter.Radius), _count > 2000 ? 2.5 : 3.5);
+        builder.AddAttribute(7, nameof(StableScatter.PointClicked), EventCallback.Factory.Create<ScatterPoint>(this, OnPointClicked));
+        builder.AddAttribute(8, nameof(StableScatter.ThresholdMax), FilterMaximum(metric));
+        builder.CloseComponent();
+    };
+
+    // SingleAxisScatter owns JS plots and copies its input lists on parameter changes. Keep
+    // those children untouched when only the selected reading and vertical rules change.
+    public sealed class StableScatter : ComponentBase
+    {
+        [Parameter] public List<ScatterPoint> Points { get; set; }
+        [Parameter] public int Revision { get; set; }
+        [Parameter] public bool Compact { get; set; }
+        [Parameter] public double Maximum { get; set; }
+        [Parameter] public double ThresholdMin { get; set; }
+        [Parameter] public double ThresholdMax { get; set; }
+        [Parameter] public double Radius { get; set; }
+        [Parameter] public EventCallback<ScatterPoint> PointClicked { get; set; }
+        private int _rendered = -1;
+        private bool _renderedCompact;
+        protected override bool ShouldRender() => Revision != _rendered || Compact != _renderedCompact;
+        protected override void OnAfterRender(bool firstRender) { _rendered = Revision; _renderedCompact = Compact; }
+        protected override void BuildRenderTree(RenderTreeBuilder builder)
+        {
+            builder.OpenComponent<SingleAxisScatter>(0);
+            builder.AddAttribute(1, nameof(SingleAxisScatter.Points), Points);
+            builder.AddAttribute(2, nameof(SingleAxisScatter.PointClicked), PointClicked);
+            builder.AddAttribute(3, nameof(SingleAxisScatter.YAxisMin), (double?)0);
+            builder.AddAttribute(4, nameof(SingleAxisScatter.YAxisMax), (double?)Maximum);
+            builder.AddAttribute(5, nameof(SingleAxisScatter.RangeHighlightMin), ThresholdMin);
+            builder.AddAttribute(6, nameof(SingleAxisScatter.RangeHighlightMax), ThresholdMax);
+            builder.AddAttribute(7, nameof(SingleAxisScatter.PointRadius), Radius);
+            builder.AddAttribute(8, nameof(SingleAxisScatter.EnableZoom), false);
+            builder.AddAttribute(9, nameof(SingleAxisScatter.Style), Compact ? "width:100%;height:35px" : "width:100%;height:var(--warp-track-height,80px)");
+            builder.CloseComponent();
+        }
+    }
+}

@@ -56,7 +56,7 @@ public partial class MenuActionService
 
         {
             // If no job is in building state, don't add the action at all
-            if (jobs.Any(j => j.Status == JobStatus.Building))
+            if (jobs.All(j => !j.ControlsOwnExecution) && jobs.Any(j => j.Status == JobStatus.Building))
             {
                 bool allLocal = jobs.All(j => typeof(ILocalJob).IsAssignableFrom(j.GetOriginalType()));
                 bool allCluster = jobs.All(j => typeof(IClusterJob).IsAssignableFrom(j.GetOriginalType()));
@@ -158,7 +158,7 @@ public partial class MenuActionService
 
         #region Edit
 
-        if (jobs.Count() == 1 && jobs.First().Status == JobStatus.Building &&
+        if (jobs.Count() == 1 && !jobs.First().ControlsOwnExecution && jobs.First().Status == JobStatus.Building &&
             (inCurrentView || jobs.First().Space.Views.Any(v => v.Jobs.Contains(jobs.First()))))
         {
             var actionEdit = new MenuAction()

@@ -1,0 +1,55 @@
+/* Movies: one toolbar (search, status, selection actions), a sortable table, pagination. */
+
+.study-movies { display: flex; flex-direction: column; min-width: 0; width: 100%; padding: var(--w-space) var(--w-space) 0; }
+
+.movies-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--w-space-s); min-height: 40px; margin-bottom: var(--w-space-m); }
+.movies-toolbar ::deep .movie-search { width: 280px; }
+.match-count { color: var(--w-muted); white-space: nowrap; margin-left: var(--w-space-xs); }
+.toolbar-space { flex: 1; }
+.batch-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--w-space-xs); }
+.batch-toolbar ::deep fluent-button { min-width: 0; }
+.batch-toolbar.has-selection { padding: 2px 2px 2px var(--w-space-m); border-radius: var(--borderRadiusMedium); background: var(--w-selected-bg); }
+.selection-count { margin-right: var(--w-space-s); white-space: nowrap; }
+.selection-count b { font-weight: 600; }
+.hidden-selection { color: var(--w-muted); }
+.batch-divider { width: 1px; height: 20px; margin: 0 var(--w-space-xs); background: var(--colorNeutralStroke1); }
+
+.movie-table-scroll { overflow: auto; max-height: calc(100dvh - 300px); border-top: 1px solid var(--w-rule); }
+.movie-table { width: 100%; min-width: 960px; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
+.movie-table th { position: sticky; top: 0; z-index: 2; height: 36px; background: var(--w-bar); border-bottom: 1px solid var(--colorNeutralStroke1); font-weight: 600; font-size: var(--w-text-s); color: var(--colorNeutralForeground2); white-space: nowrap; }
+.movie-table th button { display: flex; align-items: center; justify-content: flex-end; gap: 4px; width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+.movie-table th button:hover { color: var(--colorNeutralForeground1); }
+.movie-table .filename-column button, .movie-table .status-column button { justify-content: flex-start; }
+.sort-arrow { min-width: 8px; color: var(--w-selected-fg); }
+.movie-table td { height: 36px; border-bottom: 1px solid var(--w-rule); }
+.movie-table td, .movie-table th { padding: 0 var(--w-space-s); overflow: hidden; text-overflow: ellipsis; }
+.movie-table tbody tr { cursor: default; }
+.movie-table tbody tr:hover { background: var(--colorSubtleBackgroundHover); }
+.movie-table tbody .checked-movie { background: var(--w-selected-bg); }
+.movie-table tbody .active-movie td:first-child { box-shadow: inset 3px 0 var(--colorCompoundBrandStroke); }
+.movie-table .check-column { width: 36px; text-align: center; padding: 0 var(--w-space-xs); }
+.movie-table .number-column { width: 64px; text-align: right; }
+.movie-table .filename-column { width: auto; }
+.movie-table .status-column { width: 100px; text-align: left; }
+.movie-table .metric-column { width: 84px; text-align: right; }
+.movie-table .defocus-column { width: 100px; }
+.movie-table .motion-column { width: 124px; text-align: right; }
+.movie-table .inspect-column { width: 40px; text-align: center; padding: 0; }
+.movie-table .inspect-column ::deep fluent-button { min-width: 32px; }
+.filename { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0; border: 0; background: none; color: var(--colorNeutralForeground1); font: inherit; text-align: left; cursor: pointer; }
+.filename:hover { color: var(--colorBrandForegroundLink); text-decoration: underline; }
+.movie-status i { background: var(--movie-status); border-radius: 50%; }
+.movie-table .empty-table { height: 120px; text-align: center; color: var(--w-muted); }
+
+.pagination { display: flex; align-items: center; gap: var(--w-space-xs); min-height: 48px; color: var(--colorNeutralForeground2); }
+.pagination ::deep fluent-button { min-width: 32px; }
+.page-size, .page-number { display: flex; align-items: center; gap: var(--w-space-s); white-space: nowrap; }
+.page-size { margin-right: var(--w-space-m); }
+.page-number { margin: 0 var(--w-space-xs); }
+.page-number ::deep fluent-text-input { width: 64px; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+@container (max-width: 1000px) {
+    .movies-toolbar ::deep .movie-search { width: 100%; flex-basis: 100%; }
+    .toolbar-space { display: none; }
+}

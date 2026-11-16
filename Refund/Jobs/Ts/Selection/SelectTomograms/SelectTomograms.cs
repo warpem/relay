@@ -12,7 +12,7 @@ using WarpHelper = Warp.Tools.Helper;
 namespace Refund.Jobs.Ts.Selection.SelectTomograms;
 
 [GenerateReadOnly]
-public class SelectTomograms : WarpJob, ILocalJob
+public class SelectTomograms : WarpToolsJob, ILocalJob
 {
     public override string TypeGuid => "a3f8c1d2-7e5b-4a9f-b6c3-2d1e0f9a8b7c";
 

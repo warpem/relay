@@ -49,7 +49,7 @@ Refund/JobQueues/
 Refund/DataModel/
   └── Job.cs                         — IPooledJob interface
 
-Refund/Jobs/Abstract.cs             — WarpJobGpu gains PoolQueueId + PoolSize fields
+Refund/Jobs/Abstract.cs             — WarpToolsJobGpu gains PoolQueueId + PoolSize fields
 
 Refund/UIFields/
   └── UiQueueAttribute.cs           — new [UiQueue] attribute + renderer
@@ -205,9 +205,9 @@ Stores a `ClusterQueue` ID as an `int` `[RelayProperty]`. The UI renderer (where
 
 ---
 
-## 7. `WarpJobGpu` additions
+## 7. `WarpToolsJobGpu` additions
 
-Two new fields on `WarpJobGpu` in `Refund/Jobs/Abstract.cs`, appended to the "Resources" `UiFieldGroup`:
+Two new fields on `WarpToolsJobGpu` in `Refund/Jobs/Abstract.cs`, appended to the "Resources" `UiFieldGroup`:
 
 ```csharp
 [UiFieldGroup("Resources", 999)]
@@ -224,7 +224,7 @@ public int PoolQueueId { get; set; } = -1;
 public int PoolSize { get; set; } = 8;
 ```
 
-`WarpJobGpu` implements `IPooledJob` when `PoolQueueId > 0`:
+`WarpToolsJobGpu` implements `IPooledJob` when `PoolQueueId > 0`:
 
 ```csharp
 // IPooledJob
@@ -239,7 +239,7 @@ string IPooledJob.GetWorkerCommand(int deviceIndex) =>
     $"WarpWorker2 --task_dir {Path.Combine(DirectoryPath, "tasks")} --device {deviceIndex}";
 ```
 
-`ComposeCommandArguments()` in `WarpJobGpu` appends `--external_provisioner` when `PoolQueueId > 0`, which tells WarpTools to use the `ExternalProvisioner` (no-op) instead of the `LocalProvisioner`. When `PoolQueueId == -1` the flag is absent and WarpTools spawns local workers as today.
+`ComposeCommandArguments()` in `WarpToolsJobGpu` appends `--external_provisioner` when `PoolQueueId > 0`, which tells WarpTools to use the `ExternalProvisioner` (no-op) instead of the `LocalProvisioner`. When `PoolQueueId == -1` the flag is absent and WarpTools spawns local workers as today.
 
 ---
 
@@ -415,8 +415,8 @@ if (job is IPooledJob pooledJob && pooledJob.PoolQueueId > 0
     var (alive, submitted) = await GetOrCreatePool(job).Tick();
     _jobUpdateCallback(job, j =>
     {
-        ((WarpJobGpu)j).PoolWorkersAlive     = alive;
-        ((WarpJobGpu)j).PoolWorkersSubmitted = submitted;
+        ((WarpToolsJobGpu)j).PoolWorkersAlive     = alive;
+        ((WarpToolsJobGpu)j).PoolWorkersSubmitted = submitted;
     });
 }
 ```
@@ -444,7 +444,7 @@ The Manager job card shows two additional counters when the job is pooled and ru
 - **Workers running** — `PoolWorkersAlive`: how many pool workers the last `Tick()` confirmed alive.
 - **Workers submitted** — `PoolWorkersSubmitted`: cumulative submissions since the job started (useful for spotting a sick-worker churn scenario approaching the cap).
 
-Two new `[RelayProperty]` `[Clearable]` fields on `WarpJobGpu`:
+Two new `[RelayProperty]` `[Clearable]` fields on `WarpToolsJobGpu`:
 
 ```csharp
 [RelayProperty] [Clearable] public int PoolWorkersAlive     { get; set; }

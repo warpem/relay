@@ -23,8 +23,8 @@ a shared directory (`--pool_dir`), no MPI, no sockets. It is a **separate binary
 - `--j` (threads) is forwarded unchanged to every process, so **cores-per-worker maps directly to
   `--j`**.
 
-Relay already drives an analogous manager+fleet model for WarpTools GPU jobs via `WarpJobGpu :
-WarpJob, IPooledJob` and the queue-agnostic `WorkerPool`/`QueueRepository` wiring. RELION's disk-pool
+Relay already drives an analogous manager+fleet model for WarpTools GPU jobs via `WarpToolsJobGpu :
+WarpToolsJob, IPooledJob` and the queue-agnostic `WorkerPool`/`QueueRepository` wiring. RELION's disk-pool
 lines up with that machinery almost exactly; the differences are (1) workers are **CPU** not GPU,
 (2) the worker command is the **full science command** plus role flags, not a thin queue-poller, and
 (3) a new **`relion-pool`** submission-template module.
@@ -66,7 +66,7 @@ All changes are in `Refund/Jobs/Refinement/Classes3D/Class3D/Class3D.cs` unless 
   per-worker CPU core request (and the manager's core request).
 - `[UiInt] NWorkers` (default `4`) — shown when `UseWorkerPool`; pool fleet size (`= PoolSize`).
 - `PoolWorkersAlive` / `PoolWorkersRunning` / `PoolWorkersSubmitted` (`[RelayProperty][Clearable]`)
-  — live counters written by `QueueRepository`, same as `WarpJobGpu`.
+  — live counters written by `QueueRepository`, same as `WarpToolsJobGpu`.
 
 Visibility (via existing `ConditionalOnField`/`ConditionalOnValue`, which is transitive):
 - Pool fields (`PoolQueueId`, `CoresPerWorker`, `NWorkers`) conditional on `UseWorkerPool == true`.
@@ -134,9 +134,9 @@ The manager command carries no `--worker` / `--half` (those are appended only by
 
 ### 5. Generalize the pool-counter coupling
 
-`QueueRepository.StateHandlers.cs` currently hard-casts the pooled job to `WarpJobGpu` to read/write
+`QueueRepository.StateHandlers.cs` currently hard-casts the pooled job to `WarpToolsJobGpu` to read/write
 `PoolWorkers{Alive,Running,Submitted}` (lines ~170, ~182–191). Lift those three counters onto the
-`IPooledJob` interface (get/set) and change the casts to use `pooledJob`. `WarpJobGpu` already
+`IPooledJob` interface (get/set) and change the casts to use `pooledJob`. `WarpToolsJobGpu` already
 declares the properties (satisfies the interface); `Class3D` adds them. This is unavoidable once a
 non-Warp job pools.
 

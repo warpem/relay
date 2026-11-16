@@ -46,6 +46,9 @@ public partial class DataManager
     /// The local queue is used for executing jobs on the same machine where Relay is running.
     /// </summary>
     public ReadOnlyJobQueue LocalQueue => _queueRepository.LocalQueue.AsReadOnly();
+
+    /// <summary>Every execution attempt the runtime holds now (queued, running or finishing), for diagnostics.</summary>
+    public IReadOnlyList<Refund.JobExecution.ExecutionAttemptSnapshot> ExecutionAttempts => _queueRepository.ExecutionAttempts;
     
     /// <summary>
     /// Gets a read-only collection of all cluster queues configured in the system.
@@ -274,7 +277,7 @@ public partial class DataManager
             _dataRepository.UpdateJob(job.UpdatedBy, job, action);
             await JobUpdated.InvokeHierarchy(job.AsReadOnly(),
                 GroupName.JobHierarchy(job.Space.Project.Id, job.Space.Id, job.Id));
-        });
+        }, RunLocalJobAsync);
         _queueRepository.LoadQueues(_dataRepository);
 
         // Detect and remove any cyclic edges that would cause infinite recursion
@@ -385,7 +388,7 @@ public partial class DataManager
 
         // A dependency waiter cannot advance while its parent is unfinished. Do not
         // exempt Preparing/Queued attempts, which also project to the Waiting status.
-        if (jobs.Any(job => job.Status == JobStatus.Clearing || HasPendingExecution(job) ||
+        if (jobs.Any(job => job.Status == JobStatus.Clearing || HasPendingWarpExport(job) || HasPendingExecution(job) ||
                             job.GetChildren().Any(child =>
                                 (HasPendingExecution(child) && !CanWaitForParent(job, child)) ||
                                 (!allowClearingDependents && child.Status == JobStatus.Clearing))))
@@ -554,6 +557,7 @@ public partial class DataManager
     public async Task ShutdownAsync()
     {
         await _queueRepository.ShutdownAsync();
+        WarpSessions.Dispose();
         // Measurements wait up to a few minutes to be written; don't lose them on a normal shutdown.
         FlushChanges();
     }

@@ -19,7 +19,7 @@
                     <div style="display: flex; flex-wrap: nowrap; align-items: center;">
                         <div style="display: flex; flex-shrink: 0; align-items: center; justify-content: center; width: @((int)IconSize)px; height: @((int)IconSize)px;">
                             <FluentIcon Value="@Job.GetStatusIcon(IconSize).WithStatusColor(Job)"
-                                        Title="@Job.Status.GetStatusDescription()"/>
+                                        Title="@Job.GetStatusDescription()"/>
                         </div>
                         <div class="job-name"
                              style="font-size: @(FontSize);
@@ -49,17 +49,17 @@
                         {
                             @if (Job.Status.IsUnsettled() || Job.Status == JobStatus.Building)
                             {
-                                <span>@Job.Status for </span>
+                                <span>@Job.GetStatusLabel() for </span>
                                 <DurationText Timestamp="@timeStamp.Value"/>
                             }
                             else
                             {
-                                <span>@Job.Status @FormatTimestamp(timeStamp.Value)</span>
+                                <span>@Job.GetStatusLabel() @FormatTimestamp(timeStamp.Value)</span>
                             }
                         }
                         else
                         {
-                            <span>@Job.Status</span>
+                            <span>@Job.GetStatusLabel()</span>
                         }
                     </div>
                 }
@@ -90,7 +90,7 @@ else
                 <div style="display: flex; flex-wrap: nowrap; align-items: center;">
                     <div style="display: flex; flex-shrink: 0; align-items: center; justify-content: center; width: @((int)IconSize)px; height: @((int)IconSize)px;">
                         <FluentIcon Value="@Job.GetStatusIcon(IconSize).WithStatusColor(Job)"
-                                    Title="@Job.Status.GetStatusDescription()"/>
+                                    Title="@Job.GetStatusDescription()"/>
                     </div>
                     <div class="job-name"
                          style="font-size: @(FontSize);
@@ -120,17 +120,17 @@ else
                     {
                         @if (Job.Status.IsUnsettled() || Job.Status == JobStatus.Building)
                         {
-                            <span>@Job.Status for </span>
+                            <span>@Job.GetStatusLabel() for </span>
                             <DurationText Timestamp="@timeStamp.Value"/>
                         }
                         else
                         {
-                            <span>@Job.Status @FormatTimestamp(timeStamp.Value)</span>
+                            <span>@Job.GetStatusLabel() @FormatTimestamp(timeStamp.Value)</span>
                         }
                     }
                     else
                     {
-                        <span>@Job.Status</span>
+                        <span>@Job.GetStatusLabel()</span>
                     }
                 </div>
             }

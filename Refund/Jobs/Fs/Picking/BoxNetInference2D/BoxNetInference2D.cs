@@ -10,7 +10,7 @@ using Warp.Tools;
 namespace Refund.Jobs.Fs.Picking.BoxNetInference2D;
 
 [GenerateReadOnly]
-public class BoxNetInference2D : WarpJobGpu, IClusterJob
+public class BoxNetInference2D : WarpToolsJobGpu, IClusterJob
 {
     public override int2 CardSquareCount { get; set; } = new int2(2, 1);
     public override string TypeGuid => "2ae4d014-7b22-40df-b6cf-dbff8d0e4243";
@@ -76,7 +76,7 @@ public class BoxNetInference2D : WarpJobGpu, IClusterJob
             ParticlesMultiStarDirectory = Path.Combine(DirectoryPath, Movie.MatchingDirName),
             ToMultiStarPath = path => Path.Combine(DirectoryPath, 
                                                    Movie.MatchingDirName, 
-                                                   $"{Warp.Tools.Helper.PathToName(path)}.star"),
+                                                   $"{(global::Warp.Tools.Helper.PathToName(path))}.star"),
         };
     }
 

@@ -213,7 +213,7 @@ public class ImportParticles : Job, IClusterJob
     {
         var stderrUpdate = base.TrackProgressLogs();
         if (!File.Exists(PathStdOut)) return stderrUpdate;
-        // Like WarpJob, read stdout on every poll, including the final collection.
+        // Like WarpToolsJob, read stdout on every poll, including the final collection.
         // Import logs are small, and cached file lengths on cluster filesystems
         // must not prevent the last output from reaching Relay's own log.
         var lines = JobTools.CleanProgressBarLines(File.ReadAllText(PathStdOut).Split('\n'));

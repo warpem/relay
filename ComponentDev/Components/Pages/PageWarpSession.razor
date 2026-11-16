@@ -1,0 +1,188 @@
+@page "/warp-session-previous"
+@layout ComponentDev.Components.Layout.WarpPreviewLayout
+@using ComponentDev.Services
+@using ComponentDev.Components.WarpPreview
+@using Refund.Components.MicrographViewer
+@using Refund.Services
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@inject WarpSessionPreview Session
+@inject FileService Files
+@inject IThemeService Theme
+@implements IDisposable
+
+<PageTitle>Warp · Relay prototype</PageTitle>
+<div class="warp-page">
+    <header class="job-header">
+        <a href="/" class="relay-link">relay</a><span class="slash">/</span><span>Apoferritin</span><span class="slash">/</span>
+        <span class="job-id">J42</span><h1>Warp</h1><span class="job-alias">Continuous preprocessing</span>
+        <span class="spacer"></span><span class="prototype-label">UI prototype · synthetic data</span>
+        <FluentButton Title="Toggle theme" IconOnly="true" IconStart="@(new Icons.Regular.Size20.DarkTheme())" OnClick="ToggleTheme" Appearance="ButtonAppearance.Subtle" />
+        <a href="/warp-session" target="_blank" title="Open another view of this session" class="open-view">↗</a>
+    </header>
+    <div class="session-toolbar">
+        <span class="run-state"><i class="@(Session.Running ? "running" : "stopped")"></i>@(Session.Running ? "Processing" : "Stopped")</span>
+        <span class="worker-control"><span>Workers</span><FluentButton Style="min-width:28px;width:28px" Title="Remove worker" OnClick="@(() => Session.Resize(Session.Workers - 1))" Disabled="@(Session.Workers == 1)">−</FluentButton><strong id="worker-count">@Session.Workers</strong><FluentButton Style="min-width:28px;width:28px" Title="Add worker" OnClick="@(() => Session.Resize(Session.Workers + 1))">+</FluentButton></span>
+        <span class="queue-name">GPU queue</span>
+        <FluentButton Appearance="ButtonAppearance.Primary" IconStart="@(Session.Running ? new Icons.Regular.Size20.Stop() : (Icon)new Icons.Regular.Size20.Play())" OnClick="Session.ToggleRunning" Disabled="@(!Session.Running && _draft != Session.Settings)" Id="processing-toggle">@(Session.Running ? "Stop" : "Start processing")</FluentButton>
+        <span class="spacer"></span>
+        <FluentButton Appearance="@(_parameters ? ButtonAppearance.Primary : ButtonAppearance.Subtle)" OnClick="ToggleParameters" IconStart="@(new Icons.Regular.Size20.Settings())">Parameters</FluentButton>
+        <FluentButton Appearance="@(_filters ? ButtonAppearance.Primary : ButtonAppearance.Subtle)" OnClick="@(() => _filters = !_filters)" IconStart="@(new Icons.Regular.Size20.Filter())">Selection</FluentButton>
+        <FluentButton OnClick="@(() => Export(false))" Disabled="Session.Exporting">Export micrographs</FluentButton>
+        <FluentButton OnClick="@(() => Export(true))" Disabled="Session.Exporting">Export picks</FluentButton>
+    </div>
+    <div class="session-counts">
+        <span><b id="movie-count">@Session.Movies.Count.ToString("N0")</b> movies</span>
+        <span><i class="dot good"></i><b>@Session.Accepted.ToString("N0")</b> accepted</span>
+        <span><i class="dot filtered"></i>@Session.Movies.Count(m => !Session.Passes(m) && !m.Failed).ToString("N0") filtered / excluded</span>
+        <span><i class="dot pending"></i>@Session.Pending.ToString("N0") pending</span>
+        @if (Session.Outdated > 0) { <span class="outdated-count">@Session.Outdated.ToString("N0") to update</span> }
+        <button class="text-action" @onclick="ShowFailures"><i class="dot failed"></i>@Session.Failed failed</button>
+        <span class="spacer"></span><span><b>@Session.ParticleCount.ToString("N0")</b> particles</span>
+    </div>
+    @if (_filters)
+    {
+        <div class="selection-controls">
+            <span>Accept up to</span><label>CTF <FluentNumberInput TValue="double" Value="Session.MaxCtf" ValueChanged="@(v => Session.Filter(v, Session.MaxMotion))" Min="2" Max="20" Step="0.1" aria-label="Maximum CTF resolution" /> Å</label>
+            <label>Motion <FluentNumberInput TValue="double" Value="Session.MaxMotion" ValueChanged="@(v => Session.Filter(Session.MaxCtf, v))" Min="0.1" Max="20" Step="0.1" aria-label="Maximum motion" /> Å/frame</label>
+            <span class="muted">Selection affects exports. Processing continues.</span>
+        </div>
+    }
+    <div class="workspace @(_parameters ? "with-parameters" : "")">
+        @if (_parameters)
+        {
+            <aside class="parameters">
+                <div class="parameter-header"><strong>Parameters</strong><FluentButton Title="Close parameters" IconOnly="true" IconStart="@(new Icons.Regular.Size16.Dismiss())" Appearance="ButtonAppearance.Subtle" OnClick="@(() => _parameters = false)" /></div>
+                <div class="parameter-hint">@(Session.Running ? "Stop processing to edit." : "Changes apply on the next start.")</div>
+                <details open><summary>Input & motion</summary>
+                    <div class="source-path" title="/data/krios/apoferritin/">/data/krios/apoferritin/*.eer</div>
+                    <WarpPreviewParameter Label="Pixel size · Å" Value="_draft.Pixel" ValueChanged="@(v => _draft = _draft with { Pixel = v })" Disabled="Session.Running" Min="0.1m" Step="0.01m" />
+                    <WarpPreviewParameter Label="Dose · e⁻/Å²/frame" Value="_draft.Dose" ValueChanged="@(v => _draft = _draft with { Dose = v })" Disabled="Session.Running" Min="0.1m" Step="0.1m" />
+                    <WarpPreviewParameter Label="Motion grid · X/Y" Value="_draft.MotionGrid" ValueChanged="@(v => _draft = _draft with { MotionGrid = (int)v })" Disabled="Session.Running" Min="1" Max="15" />
+                    <div class="parameter-hint">EER grouping 10 · gain corrected</div>
+                </details>
+                <details open><summary>CTF</summary>
+                    <WarpPreviewParameter Label="Fit from · Å" Value="_draft.CtfMin" ValueChanged="@(v => _draft = _draft with { CtfMin = v })" Disabled="Session.Running" Min="5" Max="100" />
+                    <WarpPreviewParameter Label="Fit to · Å" Value="_draft.CtfMax" ValueChanged="@(v => _draft = _draft with { CtfMax = v })" Disabled="Session.Running" Min="2" Max="10" Step="0.1m" />
+                    <div class="parameter-hint">300 kV · Cs 2.7 mm · amplitude 0.10</div>
+                </details>
+                <details open><summary>Denoising & deconvolution</summary>
+                    <WarpPreviewParameter Label="Training sample" Value="_draft.TrainCount" ValueChanged="@(v => _draft = _draft with { TrainCount = (int)v })" Disabled="Session.Running" Min="20" Max="500" Step="10" />
+                    <FluentCheckbox Value="_draft.FineTune" ValueChanged="@(v => _draft = _draft with { FineTune = v })" Disabled="Session.Running" Label="Fine-tune every 2,000 movies" />
+                    <div class="parameter-hint">Denoised micrographs are always produced.</div>
+                </details>
+                <details open><summary>Blob picking</summary>
+                    <WarpPreviewParameter Label="Diameter · Å" Value="_draft.Diameter" ValueChanged="@(v => _draft = _draft with { Diameter = v })" Disabled="Session.Running" Min="20" Max="1000" Step="5" />
+                    <WarpPreviewParameter Label="Threshold" Value="_draft.Threshold" ValueChanged="@(v => _draft = _draft with { Threshold = v })" Disabled="Session.Running" Min="0.01m" Max="1" Step="0.05m" />
+                    <div class="parameter-hint">On deconvolved, denoised micrographs.</div>
+                </details>
+                <details open><summary>Extraction</summary>
+                    <WarpPreviewParameter Label="Box size · px" Value="_draft.Box" ValueChanged="@(v => _draft = _draft with { Box = (int)v })" Disabled="Session.Running" Min="32" Max="1024" Step="16" />
+                </details>
+                @if (_draft != Session.Settings) { <div class="change-impact">@ChangeImpact</div> }
+                @if (_parameterError != null) { <div class="change-impact">@_parameterError</div> }
+                <FluentButton OnClick="ApplyParameters" Disabled="@(Session.Running || _draft == Session.Settings)" Appearance="ButtonAppearance.Primary" Style="width:100%">Apply changes</FluentButton>
+            </aside>
+        }
+        <main class="session-content">
+            <FluentTabs @bind-ActiveTabId="_tab">
+                <FluentTab Id="inspect" Header="Inspect">
+                    @if (_tab == "inspect") { <WarpPreviewInspection Session="Session" InitialIndex="_inspectIndex" /> }
+                </FluentTab>
+                <FluentTab Id="movies" Header="Micrographs">
+                    @if (_tab == "movies")
+                    {
+                        <div class="list-toolbar">
+                            <FluentTextInput Placeholder="Find movie or #" Value="@_query" ValueChanged="Search" Immediate="true" ImmediateDelay="250" aria-label="Find movie" />
+                            <FluentSelect TOption="string" TValue="string" Items="_statuses" Value="@_status" ValueChanged="FilterList" aria-label="Movie status" />
+                            <span class="muted">@VisibleMovies.Count.ToString("N0") movies</span><span class="spacer"></span>
+                            <FluentButton OnClick="Session.RetryFailures" Disabled="@(Session.Failed == 0)">Retry @Session.Failed failed</FluentButton>
+                        </div>
+                        <div class="movie-table" role="table" aria-label="Micrographs">
+                            <div class="movie-row table-head" role="row"><span>#</span><span>Movie</span><span>State</span><span>Defocus · µm</span><span>CTF · Å</span><span>Motion · Å</span><span>Particles</span></div>
+                            <div class="movie-scroll">
+                                <Virtualize Items="VisibleMovies" Context="movie" ItemSize="36" OverscanCount="6">
+                                    <div class="movie-row" role="row" @key="movie.Index">
+                                        <span>@((movie.Index + 1).ToString("N0"))</span><button class="movie-link" @onclick="@(() => Inspect(movie.Index))">@movie.Name</button>
+                                        <span class="state-@Session.Status(movie).ToLowerInvariant()">@Session.Status(movie)</span>
+                                        <span>@movie.Defocus.ToString("F2")</span><span>@movie.Ctf.ToString("F2")</span><span>@movie.Motion.ToString("F2")</span><span>@movie.Picks</span>
+                                    </div>
+                                </Virtualize>
+                            </div>
+                        </div>
+                    }
+                </FluentTab>
+                <FluentTab Id="denoiser" Header="Denoiser">
+                    @if (_tab == "denoiser")
+                    {
+                        <div class="training-toolbar"><strong>@(Session.Training ? $"Training denoiser v{Session.Model + 1}" : Session.Model == 0 ? "Waiting for training data" : $"Denoiser v{Session.Model}")</strong>
+                            <span class="muted">@(Session.Training ? $"Training · {Session.TrainingPercent}%" : Session.Model == 0 ? $"{Session.StageCounts[1]} / {Session.Settings.TrainCount} micrographs" : "100 micrographs · 8,000 patches · odd/even averages")</span><span class="spacer"></span>
+                            <FluentButton OnClick="Session.Train" Disabled="@(!Session.Running || Session.Training || Session.StageCounts[1] < Session.Settings.TrainCount)">Fine-tune now</FluentButton></div>
+                        <progress class="training-progress" max="100" value="@(Session.Training ? Session.TrainingPercent : Session.Model > 0 ? 100 : Session.StageCounts[1] * 100 / Session.Settings.TrainCount)"></progress>
+                        <div class="denoiser-comparison">
+                            <div><div class="pane-title">Dose-weighted average</div><div class="comparison-view"><MicrographViewer MicrographPath="@Session.Fixtures.Image(5, false)" ThumbnailPath="@Session.Fixtures.Thumbnail(5)" MinWidth="280" MinHeight="320" CanEditParticles="false" CanEditMask="false" /></div></div>
+                            <div><div class="pane-title">Deconvolved + denoised</div><div class="comparison-view">@if (Session.Model > 0) { <MicrographViewer MicrographPath="@Session.Fixtures.Image(5, true)" ThumbnailPath="@Session.Fixtures.Thumbnail(5)" MinWidth="280" MinHeight="320" CanEditParticles="false" CanEditMask="false" /> } else { <div class="awaiting-model">@(Session.Training ? $"Training first model · {Session.TrainingPercent}%" : $"Waiting for {Session.Settings.TrainCount} micrographs")</div> }</div></div>
+                        </div>
+                        <div class="denoiser-bottom"><div><h2>Training sample</h2><div class="training-sample">@for (int i = 0; i < 16; i++) { <img src="@Files.GetUrl(Session.Fixtures.Thumbnail(i))" alt="Synthetic training micrograph @(i + 1)" /> }</div></div>
+                            <div class="training-notes"><h2>After a model update</h2><p>Recreate denoised micrographs, picks and extracted particles. Keep motion correction and CTF results.</p><p>@(Session.Settings.FineTune ? "Fine-tuning scheduled every 2,000 new movies." : "Automatic fine-tuning is off.")</p><p class="muted">This prototype simulates training. The comparisons use synthetic image fixtures.</p></div></div>
+                    }
+                </FluentTab>
+                <FluentTab Id="classes" Header="2D">
+                    @if (_tab == "classes")
+                    {
+                        <div class="training-toolbar"><strong>2D classification</strong><span class="muted">Beam · periodic batches</span><span class="spacer"></span><FluentButton OnClick="Run2D" Disabled="_classifying">@(_classifying ? "Classifying…" : "Classify current particles")</FluentButton></div>
+                        <div class="class-summary">@(_classifying ? "Processing a new batch…" : $"Batch {_classBatch} · 100,000 particles · 16 classes")<span class="muted">Illustrative class averages · no Beam process is launched</span></div>
+                        <div class="class-grid">@for (int i = 0; i < 16; i++) { int c = i; <button class="class-tile @(_selectedClass == c ? "selected" : "")" @onclick="@(() => _selectedClass = c)"><img src="@Files.GetUrl(Session.Fixtures.Class(c))" alt="Synthetic class @(c + 1)" /><span><b>@(c + 1)</b><span>@((9.1 - c * .38).ToString("F1"))%</span></span></button> }</div>
+                        <div class="class-detail"><b>Class @(_selectedClass + 1)</b><span>@((9.1 - _selectedClass * .38).ToString("F1"))% of batch</span><span>@((5.5 + _selectedClass * .22).ToString("F1")) Å</span><span class="muted">The next batch can run while preprocessing continues.</span></div>
+                    }
+                </FluentTab>
+                <FluentTab Id="exports" Header="Exports">
+                    @if (_tab == "exports")
+                    {
+                        <div class="training-toolbar"><strong>@Session.Exports.Count exports</strong><span class="muted">Current selection · available results at the time of export</span></div>
+                        @if (Session.Exporting) { <div class="export-empty"><FluentSpinner /> Copying available results and writing STAR…</div> }
+                        @if (Session.Exports.Count == 0 && !Session.Exporting) { <div class="export-empty"><h2>Ready to export @Session.Accepted.ToString("N0") micrographs</h2><p>Use the export buttons above. Processing can continue while the export is written.</p></div> }
+                        @foreach (var export in Session.Exports.AsEnumerable().Reverse())
+                        {
+                            <div class="export-row"><span class="export-job">J@(export.Number)</span><div><strong>@export.Kind</strong><div class="muted">@export.Movies.ToString("N0") micrographs · @export.Items.ToString("N0") rows · @export.Created.ToString("HH:mm:ss")</div></div><span class="spacer"></span><span class="export-done">✓ Finished</span><a href="@Files.GetUrl(export.Path)" download>Download STAR</a></div>
+                        }
+                        <p class="export-explanation">Exports appear here as finished jobs. The session stays resumable. This mockup writes real STAR tables referencing the reusable synthetic fixtures; it does not create jobs in a Relay project.</p>
+                    }
+                </FluentTab>
+            </FluentTabs>
+        </main>
+    </div>
+    <footer class="prototype-footer"><span role="status">@Session.Notice</span><span class="spacer"></span><span>@(Session.SavedAt == default ? "" : $"Saved {Session.SavedAt:HH:mm:ss}")</span><span>Shared session</span><FluentButton Appearance="ButtonAppearance.Subtle" OnClick="@(() => SetScenario(false))">12,480 movies</FluentButton><FluentButton Appearance="ButtonAppearance.Subtle" OnClick="@(() => SetScenario(true))">Training startup</FluentButton></footer>
+</div>
+
+@code {
+    private string _tab = "inspect", _query = "", _status = "All";
+    private bool _parameters, _filters, _dark, _classifying, _disposed;
+    private int _inspectIndex = 5831, _selectedClass, _classBatch = 3;
+    private PreviewSettings _draft, _lastSettings;
+    private string _parameterError;
+    private List<PreviewMovie> _filteredMovies;
+    private readonly CancellationTokenSource _cancel = new();
+    private static readonly string[] _statuses = ["All", "Ready", "Filtered", "Excluded", "Failed", "Outdated", "Waiting", "Processing"];
+    private List<PreviewMovie> VisibleMovies => _filteredMovies ?? Session.Movies;
+    private string ChangeImpact => _draft.Pixel != Session.Settings.Pixel || _draft.Dose != Session.Settings.Dose || _draft.MotionGrid != Session.Settings.MotionGrid ? "Redo motion → CTF → denoise → pick → extract" : _draft.CtfMin != Session.Settings.CtfMin || _draft.CtfMax != Session.Settings.CtfMax ? "Redo CTF → denoise → pick → extract. Keep motion." : _draft.Diameter != Session.Settings.Diameter || _draft.Threshold != Session.Settings.Threshold ? "Redo picking → extraction. Keep motion, CTF and denoising." : _draft.Box != Session.Settings.Box ? "Redo extraction only." : "Update training schedule.";
+    protected override void OnInitialized() { _draft = _lastSettings = Session.Settings; Session.Changed += OnSessionChanged; Session.Attach(); }
+    private void OnSessionChanged() { if (!_disposed) _ = InvokeAsync(() => { if (_draft == _lastSettings) _draft = Session.Settings; _lastSettings = Session.Settings; if (_filteredMovies != null) RefreshList(); StateHasChanged(); }); }
+    private void ToggleParameters() { if (!_parameters) _draft = Session.Settings; _parameters = !_parameters; }
+    private void ApplyParameters() { if (_draft.CtfMin <= _draft.CtfMax) { _parameterError = "Fit from must be larger than fit to."; return; } _parameterError = null; Session.Apply(_draft); }
+    private async Task ToggleTheme() { _dark = !_dark; await Theme.SetThemeAsync(_dark ? ThemeMode.Dark : ThemeMode.Light); }
+    private void SetScenario(bool startup) { Session.Scenario(startup); _inspectIndex = startup ? 45 : 5831; _filteredMovies = null; _query = ""; _status = "All"; _tab = startup ? "denoiser" : "inspect"; }
+    private void Search(string value) { _query = value ?? ""; RefreshList(); }
+    private void FilterList(string value) { _status = value; RefreshList(); }
+    private void RefreshList() => _filteredMovies = _query.Length == 0 && _status == "All" ? null : Session.Movies.Where(m => (_status == "All" || Session.Status(m) == _status) && (_query.Length == 0 || m.Name.Contains(_query, StringComparison.OrdinalIgnoreCase) || (m.Index + 1).ToString() == _query)).ToList();
+    private void Inspect(int index) { _inspectIndex = index; _tab = "inspect"; }
+    private void ShowFailures() { _status = "Failed"; _query = ""; RefreshList(); _tab = "movies"; }
+    private async Task Export(bool picks) { _tab = "exports"; await Session.ExportAsync(picks); }
+    private async Task Run2D()
+    {
+        _classifying = true;
+        try { await Task.Delay(3500, _cancel.Token); _classBatch++; }
+        catch (OperationCanceledException) { }
+        finally { _classifying = false; }
+    }
+    public void Dispose() { _disposed = true; Session.Changed -= OnSessionChanged; Session.Detach(); _cancel.Cancel(); _cancel.Dispose(); }
+}

@@ -625,7 +625,8 @@ public partial class TomogramViewer : IDisposable
         // If zoom changes, we're no longer in "fit to viewport" mode
         isFitToViewport = false;
         
-        ZoomLevel = newZoom;
+        // The zoom buttons only request a zoom; these limits are the ones they used to apply.
+        ZoomLevel = Math.Clamp(newZoom, 0.1, 10);
         
         // Update plane transforms in JS
         await UpdateAllPlaneTransforms();

@@ -18,7 +18,7 @@ namespace Refund.Jobs.Ts.Alignment.StackTilts;
 /// This is based on the WarpTools EtomoPatchTrackTiltseries command.
 /// </summary>
 [GenerateReadOnly]
-public class StackTilts : WarpJobGpu, IClusterJob
+public class StackTilts : WarpToolsJobGpu, IClusterJob
 {
     public override string TypeGuid => "9907836e-9757-4c00-9c01-59b68de62ae0";
 

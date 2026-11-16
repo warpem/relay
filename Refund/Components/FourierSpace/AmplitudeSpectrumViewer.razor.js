@@ -357,3 +357,6 @@ export function destroyChart() {
         chart = null;
     }
 }
+
+// Spectrum drawing lives in a plain module so it can be tested without Chart.js.
+export { renderSpectrum } from '../../js/amplitude-spectrum.js';

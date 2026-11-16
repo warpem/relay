@@ -17,7 +17,7 @@ namespace Refund.Jobs.Ts.Picking.TemplateMatch;
 /// This is based on the WarpTools TemplateMatchTiltseries command.
 /// </summary>
 [GenerateReadOnly]
-public class TemplateMatch : WarpJobGpu, IClusterJob
+public class TemplateMatch : WarpToolsJobGpu, IClusterJob
 {
     public override string TypeGuid => "b44eae53-19e2-4c67-bd59-b9c7b3f52f2e";
     
@@ -74,7 +74,7 @@ public class TemplateMatch : WarpJobGpu, IClusterJob
     /// Pixel size of the template in Angstrom; leave empty to use value from map header
     /// </summary>
     [RelayProperty]
-    [UiDecimalNullable("template_angpix", "Template pixel size", min: 0.1, max: 10, stepSize: 0.1, unit: "Å", isAdvanced: true,
+    [UiDecimalNullable("template_angpix", "Template pixel size", min: 0.1, max: 10, stepSize: 0.0001, unit: "Å", isAdvanced: true,
                        helpText: "Pixel size of the template in Angstrom; leave empty to use value from map header")]
     public decimal? TemplateAngPix { get; set; } = null;
 
@@ -112,7 +112,7 @@ public class TemplateMatch : WarpJobGpu, IClusterJob
 
     [RelayProperty]
     [UiDecimalNullable("optimize_poses_angpix", "Pixel size for pose refinement",
-                       min: 0.1, max: 99999.0, stepSize: 0.1, unit: "Å",
+                       min: 0.1, max: 99999.0, stepSize: 0.001, unit: "Å",
                        helpText: "Minimum pixel size for pose refinement, no larger than the coarse-search pixel size. Leave empty to use the coarse-search pixel size.")]
     public decimal? OptimizePosesAngpix { get; set; } = null;
 
@@ -132,7 +132,7 @@ public class TemplateMatch : WarpJobGpu, IClusterJob
     public bool RefineFitBfactor { get; set; } = false;
 
     [RelayProperty]
-    [UiDecimal("refine_fit_highpass", "Envelope fitting high-pass", min: 0, max: 10000, stepSize: 1, unit: "Å", isAdvanced: true,
+    [UiDecimal("refine_fit_highpass", "Envelope fitting high-pass", min: 0, max: 10000, stepSize: 0.1, unit: "Å", isAdvanced: true,
                helpText: "Use frequencies above 1/value for amplitude/B-factor fitting; 0 uses the full refinement band. Must be coarser than the final refinement resolution.",
                ConditionalOnField = nameof(RefineFitBfactor), ConditionalOnValue = true)]
     public decimal RefineFitHighpass { get; set; } = 30;

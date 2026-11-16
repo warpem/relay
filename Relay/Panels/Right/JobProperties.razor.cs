@@ -66,7 +66,7 @@ public partial class JobProperties : ComponentBase, IDisposable
     private bool _resultIterationSetManually = false;
     
     /// <summary>
-    /// Whether the timeline is expanded to show all events or collapsed to hide events before the most recent clearing.
+    /// Whether the timeline is expanded to show all events or collapsed to show only the latest attempt.
     /// </summary>
     private bool _timelineExpanded = false;
 
@@ -323,47 +323,23 @@ public partial class JobProperties : ComponentBase, IDisposable
     /// <returns>A tuple containing the visible events and the count of collapsed events.</returns>
     private (List<ReadOnlyJobEvent> VisibleEvents, int CollapsedCount) GetTimelineEvents(ReadOnlyJob job)
     {
-        var allEvents = job.GetEvents(null);
-        
-        if (!allEvents.Any())
-            return (new List<ReadOnlyJobEvent>(), 0);
-            
-        // If timeline is expanded, show all events
-        if (_timelineExpanded)
-            return (allEvents.ToList(), 0);
-            
-        // Find the most recent clearing event
-        var mostRecentClearing = allEvents
-            .Where(e => e.Type == EventType.ClearingStarted)
-            .LastOrDefault();
-            
-        if (mostRecentClearing == null)
-        {
-            // No clearing events, show all events
-            return (allEvents.ToList(), 0);
-        }
-        
-        // Find the created event (should always be first)
-        var createdEvent = allEvents.FirstOrDefault(e => e.Type == EventType.Created);
-        
-        // Show: Created event + events after the most recent clearing
-        var visibleEvents = new List<ReadOnlyJobEvent>();
-        
-        if (createdEvent != null)
-            visibleEvents.Add(createdEvent);
-            
-        var eventsAfterClearing = allEvents
-            .Where(e => e.Timestamp > mostRecentClearing.Timestamp)
-            .ToList();
-            
-        visibleEvents.AddRange(eventsAfterClearing);
-        
-        // Count collapsed events (from after creation up to and including the most recent clearing)
-        var collapsedEvents = allEvents
-            .Where(e => e.Type != EventType.Created && e.Timestamp <= mostRecentClearing.Timestamp)
-            .ToList();
-            
-        return (visibleEvents, collapsedEvents.Count);
+        var events = job.GetEvents(null).ToList();
+        if (events.Count == 0 || _timelineExpanded)
+            return (events, 0);
+
+        // Show Created and the latest attempt. Earlier history ends at the most recent clearing (hidden
+        // with it) or before the most recent run start (shown), whichever is later; jobs that restart
+        // without clearing, such as Warp sessions, would otherwise grow without bound.
+        int clearing = events.FindLastIndex(e => e.Type == EventType.ClearingStarted);
+        int runStart = events.FindLastIndex(e => e.Type == EventType.WaitingStarted);
+        int firstVisible = Math.Max(clearing + 1, runStart);
+        int collapsed = events.Take(firstVisible).Count(e => e.Type != EventType.Created);
+        if (collapsed == 0)
+            return (events, 0);
+
+        var visibleEvents = events.Where(e => e.Type == EventType.Created).Take(1).ToList();
+        visibleEvents.AddRange(events.Skip(firstVisible));
+        return (visibleEvents, collapsed);
     }
     
     /// <summary>

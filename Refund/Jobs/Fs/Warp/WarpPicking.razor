@@ -1,0 +1,73 @@
+@using Refund.Services.Warp
+@using Microsoft.JSInterop
+@using Refund.Components.MicrographViewer
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+
+<div class="picking-workspace">
+    <div class="picking-toolbar exposure-heading">
+        <span class="exposure-number" title="Movie number"><FluentNumberInput TValue="int" Value="@(Movie.Index + 1)" ValueChanged="@(v => Select(v - 1))" Min="1" Max="Session.Movies.Count" StepButtons="NumberInputStepVisibility.Hidden" aria-label="Movie number" /></span>
+        <span class="movie-total">of @Session.Movies.Count.ToString("N0")</span>
+        <span class="movie-name" title="@Movie.Name">@Movie.Name</span>
+        <span class="status-chip movie-state"><i style="background:@Session.StatusColor(Movie)"></i>@Session.Status(Movie)</span>
+        <span class="exposure-navigation">
+            <FluentButton Title="Previous exposure" Appearance="ButtonAppearance.Subtle" IconStart="@(new Icons.Filled.Size16.ChevronLeft())" OnClick="@(() => Select(Movie.Index - 1))" Disabled="@(Movie.Index == 0)" />
+            <FluentButton Title="Next exposure" Appearance="ButtonAppearance.Subtle" IconStart="@(new Icons.Filled.Size16.ChevronRight())" OnClick="@(() => Select(Movie.Index + 1))" Disabled="@(Movie.Index == Session.Movies.Count - 1)" />
+        </span>
+        @if (FollowChanged.HasDelegate) { <FluentSwitch Class="follow-latest" Value="Follow" ValueChanged="@((bool v) => FollowChanged.InvokeAsync(v))" Label="Follow latest" title="Show each newly picked micrograph as it arrives" /> }
+    </div>
+    <div class="picking-content">
+        <figure class="picking-image-region">
+            @* View controls at the top left, as in the Monitor. *@
+            <div class="picking-controls">
+                <FluentCheckbox @bind-Value="_showPicks" Label="Picks" title="Show the picks within the bounds being tried" Disabled="@(!Session.HasCurrentParticleMetrics(Movie))" />
+                @if (Session.Settings.Denoise) { <div class="view-modes segmented" role="group" aria-label="Micrograph"><FluentButton Class="@(!ShowEnhanced ? "selected" : null)" Appearance="ButtonAppearance.Subtle" OnClick="@(() => _enhanced = false)">Average</FluentButton><FluentButton Class="@(ShowEnhanced ? "selected" : null)" Appearance="ButtonAppearance.Subtle" Disabled="@(!Movie.Done.HasFlag(WarpStage.Enhance))" OnClick="@(() => _enhanced = true)">Denoised</FluentButton></div> }
+            </div>
+            <div class="picking-image image-well">
+                @if (Movie.Done.HasFlag(WarpStage.Motion) && !string.IsNullOrEmpty(Movie.AveragePath))
+                {
+                    <MicrographViewer @key="ViewerKey" MicrographPath="@(ShowEnhanced ? Movie.EnhancedPath : Movie.AveragePath)" PreviewPath="@WarpSession.ExistingPreview(ShowEnhanced ? Movie.EnhancedPath : Movie.AveragePath)" ResultRevision="@(ShowEnhanced ? Movie.ResultRevision : Movie.MotionRevision)" ThumbnailPath="@Movie.ThumbnailPath" ParticleStarPath="@(_showPicks ? Session.GetPicksWithinStar(Movie.Index, Bounds, DisplayPixelSize) : null)" MinWidth="300" MinHeight="300" CanEditParticles="false" CanEditMask="false" CanControlParticleDisplay="false" DefaultParticleDiameter="@((double)Session.Settings.Diameter )" DefaultParticleBoxSize="@((double)(Session.Settings.Box * Session.Settings.TargetPixelSize) )" />
+                }
+                else { <div class="empty-evidence">Waiting for motion correction</div> }
+            </div>
+        </figure>
+        <aside class="picking-sidebar" aria-label="Picking">
+            <section class="sidebar-histogram">
+                <WarpParticleHistogram Session="Session" Bounds="Bounds" BoundsChanged="BoundsChanged" Applied="Session.Settings.ParticleBounds" />
+            </section>
+            <footer class="draft-actions @(Dirty ? "dirty" : "")">
+                <div>
+                    @if (Dirty) { <b>Unapplied bounds</b><span>@Session.GetParticleBoundsImpact(Bounds)</span>@if (Locked) { <span>Stop processing to apply them.</span> } }
+                    else { <span>Bounds applied</span> }
+                    @if (!string.IsNullOrEmpty(Error)) { <span class="error" role="alert">@Error</span> }
+                </div>
+                <FluentButton Disabled="@(!Dirty)" OnClick="Revert">Revert</FluentButton>
+                <FluentButton Appearance="ButtonAppearance.Primary" Disabled="@(!Dirty || Locked)" OnClick="Apply" Title="@(Locked ? "Stop processing to apply the bounds" : null)">Apply</FluentButton>
+            </footer>
+        </aside>
+    </div>
+</div>
+
+@code {
+    [Parameter] public WarpSession Session { get; set; }
+    /// <summary>The particle score bounds being tried; extraction uses <see cref="WarpSettings.ParticleBounds"/> until they are applied.</summary>
+    [Parameter, EditorRequired] public WarpParticleBounds Bounds { get; set; }
+    [Parameter] public EventCallback<WarpParticleBounds> BoundsChanged { get; set; }
+    [Parameter] public EventCallback Apply { get; set; }
+    [Parameter] public EventCallback Revert { get; set; }
+    /// <summary>Processing is running, so the bounds can be tried but not applied.</summary>
+    [Parameter] public bool Locked { get; set; }
+    [Parameter] public string Error { get; set; }
+    [Parameter] public WarpMovie Movie { get; set; }
+    [Parameter] public EventCallback<int> SelectedIndexChanged { get; set; }
+    [Parameter] public bool Follow { get; set; }
+    [Parameter] public EventCallback<bool> FollowChanged { get; set; }
+    // Enhancement always deconvolves; it denoises only when the denoiser is enabled in Setup.
+    private bool _enhanced = true, _showPicks = true;
+    // Without denoising, picking ran on the average, and there is nothing else to show.
+    private bool ShowEnhanced => Session.Settings.Denoise && _enhanced && Movie.Done.HasFlag(WarpStage.Enhance) && !string.IsNullOrEmpty(Movie.EnhancedPath);
+    // Convert physical geometry using the actual sampling of the displayed image.
+    private double DisplayPixelSize => Math.Max(.001, ShowEnhanced ? Movie.EnhancedPixelSize : Movie.PixelSize);
+    private string ViewerKey => $"{Movie.Id}-{Movie.MotionRevision}-{(ShowEnhanced ? Movie.ResultRevision : 0)}-{ShowEnhanced}-{Session.Settings.Diameter}-{Session.Settings.Box}-{Session.Settings.TargetPixelSize}";
+    private bool Dirty => Bounds != Session.Settings.ParticleBounds;
+    private Task Select(int index) => SelectedIndexChanged.InvokeAsync(Math.Clamp(index, 0, Session.Movies.Count - 1));
+}

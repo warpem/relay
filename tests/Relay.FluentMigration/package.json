@@ -7,7 +7,8 @@
     "test:bindings": "node --test numeric-steps.test.mjs && node input-bindings.mjs",
     "test:beam-layout": "node beam-classification-layout.mjs",
     "test:class2d-mrc": "node class2d-mrc.mjs",
-    "test:micrograph": "node --test micrograph-worker.test.mjs viewer-lifecycle.test.mjs && node micrograph-viewer.mjs"
+    "test:micrograph": "node --test micrograph-worker.test.mjs micrograph-overlay.test.mjs viewer-lifecycle.test.mjs && node micrograph-viewer.mjs",
+    "test:spectrum": "node --test amplitude-spectrum.test.mjs"
   },
   "devDependencies": {
     "playwright": "1.56.1"

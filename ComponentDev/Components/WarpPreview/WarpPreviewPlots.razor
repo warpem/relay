@@ -1,0 +1,34 @@
+@using Refund.Components.SingleAxisScatter
+@using ComponentDev.Services
+
+<div class="warp-plots">
+    @for (int i = 0; i < 4; i++)
+    {
+        int plot = i;
+        <div class="warp-plot">
+            <div class="plot-heading"><span>@Titles[plot]</span><span class="muted">@Units[plot]</span></div>
+            <SingleAxisScatter Points="Session.Plots[plot]" PointClicked="PointClicked" PointRadius="1.4"
+                               RangeHighlightMin="0" RangeHighlightMax="@(plot == 1 ? Session.MaxCtf : plot == 2 ? Session.MaxMotion : 0)"
+                               Style="width:100%;height:78px">
+                <TooltipTemplate Context="point">
+                    @if (point?.Metadata is PreviewMovie movie)
+                    {
+                        <div style="padding:7px;font-size:12px">#@((movie.Index + 1).ToString("N0")) · @point.Value.Value?.ToString("F2") @Units[plot]</div>
+                    }
+                </TooltipTemplate>
+            </SingleAxisScatter>
+            <div class="plot-axis"><span>1</span><span>acquisition order</span><span>@Session.Movies.Count.ToString("N0")</span></div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public WarpSessionPreview Session { get; set; }
+    [Parameter] public int Version { get; set; }
+    [Parameter] public EventCallback<ScatterPoint> PointClicked { get; set; }
+    private int _rendered = -1;
+    private static readonly string[] Titles = ["Defocus", "CTF fit", "Motion", "Particles"];
+    private static readonly string[] Units = ["µm", "Å", "Å/frame", "/ micrograph"];
+    protected override bool ShouldRender() => _rendered != Version;
+    protected override void OnAfterRender(bool firstRender) => _rendered = Version;
+}

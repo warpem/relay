@@ -1,0 +1,53 @@
+/* Selected micrograph: identity, view and selection controls, readings, then the two figures.
+   The CTF column is two thirds of the micrograph width, so a 2:1 profile above a square
+   spectrum ends at the same height as the square micrograph. */
+
+.evidence { min-width: 0; }
+
+.exposure-heading { display: flex; align-items: center; gap: var(--w-space-s); min-height: 32px; }
+.exposure-number b { font-size: var(--w-text-l); font-weight: 600; }
+.file-name { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--colorNeutralForeground2); }
+.exposure-navigation { display: inline-flex; gap: 2px; flex: none; }
+.exposure-navigation ::deep fluent-button { min-width: 32px; }
+/* Following belongs to the navigation it overrides. */
+.exposure-heading ::deep .follow-latest { flex: none; margin-left: var(--w-space-s); white-space: nowrap; }
+
+.evidence-controls { display: flex; align-items: center; flex-wrap: wrap; gap: var(--w-space-s); margin: var(--w-space-s) 0 var(--w-space-m); }
+
+.movie-error { margin-bottom: var(--w-space-m); padding: var(--w-space-s) var(--w-space-m); border-radius: var(--borderRadiusMedium); background: var(--w-bad-bg); color: var(--w-bad); overflow-wrap: anywhere; }
+
+.readings { display: flex; flex-wrap: wrap; gap: var(--w-space-xs) var(--w-space-l); margin: 0 0 var(--w-space-m); }
+.readings > div { display: flex; flex-direction: column; }
+.readings dt { font-size: var(--w-text-s); color: var(--w-muted); }
+.readings dd { margin: 0; font-weight: 600; white-space: nowrap; }
+.readings dd span { font-weight: 400; color: var(--w-muted); }
+
+.diagnostic-grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: var(--w-space); align-items: start; max-width: calc((100dvh - 330px) * 1.667); }
+.diagnostic-grid figure { margin: 0; min-width: 0; }
+
+.micrograph-square { width: 100%; aspect-ratio: 1; }
+.spectrum-placeholder { width: 100%; aspect-ratio: 2 / 3; }
+
+/* No image well here: outside the quarter circle the spectrum is clipped to the panel, as in Motion & CTF. */
+.real-spectrum { position: relative; width: 100%; aspect-ratio: 2 / 3; }
+.real-spectrum ::deep .container { width: 100%; min-height: 0; gap: 0; }
+.real-spectrum ::deep .container > div:first-child:not(.chart-container) { display: none; }
+.real-spectrum ::deep .chart-container { width: 100%; background: var(--w-surface); }
+.real-spectrum ::deep canvas.chart { width: 100% !important; height: auto !important; aspect-ratio: 2 / 1 !important; }
+.real-spectrum ::deep .power-spectrum { display: block; width: 100% !important; height: auto !important; aspect-ratio: 1; }
+
+/* The curve key sits in the profile's headroom, so both figures end flush with their images. */
+.spectrum-key {
+    position: absolute; z-index: 1; top: 6px; right: 8px; display: flex; gap: var(--w-space-m); padding: 0 4px; border-radius: 2px;
+    background: color-mix(in srgb, var(--w-surface) 85%, transparent); font-size: var(--w-text-s); line-height: var(--lineHeightBase200); color: var(--w-muted); pointer-events: none;
+}
+.spectrum-key > span { display: inline-flex; align-items: center; gap: 6px; }
+.spectrum-key > span::before { content: ""; width: 14px; height: 2px; border-radius: 1px; }
+.spectrum-key .measured::before { background: rgb(0, 191, 255); }
+.spectrum-key .fitted::before { background: rgb(255, 20, 147); }
+.spectrum-key .quality::before { background: rgb(160, 160, 160); }
+
+@container (max-width: 720px) {
+    .diagnostic-grid { grid-template-columns: 1fr; max-width: none; }
+    .file-name { display: none; }
+}

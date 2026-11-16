@@ -28,6 +28,7 @@ builder.Services.AddScoped<GlobalTooltipService>();
 
 // Add file service for secure file access
 builder.Services.AddSingleton<FileService>();
+builder.Services.AddSingleton<ComponentDev.Services.WarpSessionPreview>();
 
 var app = builder.Build();
 

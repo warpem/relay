@@ -11,8 +11,8 @@ feel chaotic to navigate and maintain. Four axes are tangled together today:
 
 | Axis | Question it answers | Where it lives |
 |------|--------------------|----------------|
-| Execution model | How does the job run? (local / CPU / GPU / pool) | Base classes `LocalJob`/`RelionJob`/`WarpJob`/`WarpJobGpu` + interfaces |
-| Tool backend | What external software does it wrap? | Same base classes (`RelionJob` vs `WarpJob`) |
+| Execution model | How does the job run? (local / CPU / GPU / pool) | Base classes `LocalJob`/`RelionJob`/`WarpToolsJob`/`WarpToolsJobGpu` + interfaces |
+| Tool backend | What external software does it wrap? | Same base classes (`RelionJob` vs `WarpToolsJob`) |
 | Workflow domain | Where in the science pipeline? | `TypeCategory` string |
 | On-disk location | Where is the file? | `/Jobs/...` folders |
 
@@ -42,8 +42,8 @@ Concrete symptoms:
 - Capability/interface model (`ILocalJob`/`IClusterJob`/`IPooledJob` vs the
   `QueueType` property). Noted below under *Deferred* for context, but **not**
   changed here.
-- Base-class inheritance restructuring (`LocalJob`/`RelionJob`/`WarpJob`/
-  `WarpJobGpu` stay exactly as they are).
+- Base-class inheritance restructuring (`LocalJob`/`RelionJob`/`WarpToolsJob`/
+  `WarpToolsJobGpu` stay exactly as they are).
 
 **Mechanism decision:** Keep the existing `abstract string TypeCategory`
 mechanism unchanged. A structured/enum/derived-from-namespace scheme was

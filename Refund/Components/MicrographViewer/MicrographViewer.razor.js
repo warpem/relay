@@ -58,6 +58,9 @@ function releaseImages(state) {
     clearTimeout(state.loadTimer);
     state.worker?.terminate();
     state.worker = null;
+    state.particleWorker?.terminate();
+    state.particleWorker = null;
+    state.particleGeneration = (state.particleGeneration ?? 0) + 1;
     for (const level of state.levels) level.close();
     state.levels = [];
     state.mask?.close();
@@ -66,6 +69,20 @@ function releaseImages(state) {
     state.width = state.height = 0;
     state.thumbnail.onload = state.thumbnail.onerror = null;
     state.thumbnail.removeAttribute('src');
+    state.preview = false;
+    showProgress(state, null);
+}
+
+// A bar along the top edge while the full-resolution plane streams in; null hides it.
+function showProgress(state, fraction) {
+    if (!state.progress) return;
+    state.progress.hidden = fraction === null;
+    state.progressBar.style.width = `${Math.round(Math.max(0, Math.min(1, fraction ?? 0)) * 100)}%`;
+}
+
+// Previews are drawn until the view changes; then the full plane replaces them.
+function ensureFullResolution(state) {
+    if (state.preview && !state.worker && !state.disposed) startPlane(state, state.options, state.generation, true);
 }
 
 function notifyViewport(state) {
@@ -86,14 +103,17 @@ function fit(state) {
     schedule(state);
     notifyViewport(state);
 }
-function zoom(state, value) {
+// Zooms to value (clamped to 5% or the fit, up to 200% or the fit), keeping the image point at viewport position
+// (px, py) in place: the pointer for wheel zoom, the centre otherwise. The applied zoom is reported back to .NET.
+function zoom(state, value, px = state.viewWidth / 2, py = state.viewHeight / 2) {
     if (!state.width) return;
+    ensureFullResolution(state);
     const fitZoom = Math.min(state.viewWidth / state.width, state.viewHeight / state.height);
     const next = Math.max(Math.min(.05, fitZoom), Math.min(Math.max(2, fitZoom), value));
-    const x = (state.viewWidth / 2 - state.tx) / state.zoom, y = (state.viewHeight / 2 - state.ty) / state.zoom;
+    const x = (px - state.tx) / state.zoom, y = (py - state.ty) / state.zoom;
     state.zoom = next;
-    state.tx = state.viewWidth / 2 - x * next;
-    state.ty = state.viewHeight / 2 - y * next;
+    state.tx = px - x * next;
+    state.ty = py - y * next;
     state.fitted = false;
     schedule(state);
     notifyViewport(state);
@@ -188,20 +208,31 @@ function create(root, callback) {
     const status = document.createElement('div');
     status.className = 'micrograph-status';
     status.setAttribute('role', 'status');
-    surface.append(canvas, mini, status);
-    const state = { root, surface, canvas, mini, status, callback, thumbnail: new Image(), levels: [], particles: [],
+    const progress = document.createElement('div');
+    progress.className = 'micrograph-progress';
+    progress.setAttribute('role', 'progressbar');
+    progress.setAttribute('aria-label', 'Loading full resolution');
+    progress.hidden = true;
+    const progressBar = document.createElement('div');
+    progress.append(progressBar);
+    surface.append(canvas, mini, status, progress);
+    const state = { root, surface, canvas, mini, status, progress, progressBar, callback, thumbnail: new Image(), levels: [], particles: [],
         width: 0, height: 0, viewWidth: 1, viewHeight: 1, zoom: 1, tx: 0, ty: 0, fitted: true,
         listeners: new AbortController(), generation: 0 };
     const signal = state.listeners.signal;
     canvas.addEventListener('wheel', event => {
         event.preventDefault();
         const factor = 1 + Math.abs(event.deltaY) / 50;
-        zoom(state, state.zoom * (event.deltaY < 0 ? factor : 1 / factor));
+        const rect = canvas.getBoundingClientRect();
+        const px = rect.width ? (event.clientX - rect.left) * state.viewWidth / rect.width : state.viewWidth / 2;
+        const py = rect.height ? (event.clientY - rect.top) * state.viewHeight / rect.height : state.viewHeight / 2;
+        zoom(state, state.zoom * (event.deltaY < 0 ? factor : 1 / factor), px, py);
     }, { passive: false, signal });
     canvas.addEventListener('pointerdown', event => {
         if (event.button !== 1) return;
         event.preventDefault();
         canvas.setPointerCapture(event.pointerId);
+        ensureFullResolution(state);
         state.pan = { x: event.clientX, y: event.clientY };
         canvas.style.cursor = 'grabbing';
     }, { signal });
@@ -218,6 +249,7 @@ function create(root, callback) {
     canvas.addEventListener('pointerup', stopPan, { signal });
     canvas.addEventListener('lostpointercapture', stopPan, { signal });
     mini.addEventListener('click', event => {
+        ensureFullResolution(state);
         const rect = mini.getBoundingClientRect();
         state.tx = state.viewWidth / 2 - (event.clientX - rect.left) / rect.width * state.width * state.zoom;
         state.ty = state.viewHeight / 2 - (event.clientY - rect.top) / rect.height * state.height * state.zoom;
@@ -229,12 +261,92 @@ function create(root, callback) {
     return state;
 }
 
+function updateParticles(state) {
+    state.particleWorker?.terminate();
+    state.particleWorker = null;
+    const generation = state.particleGeneration = (state.particleGeneration ?? 0) + 1;
+    state.particles = [];
+    schedule(state);
+    if (!state.options.particlesUrl || !state.width || state.disposed) return;
+    const worker = state.particleWorker = new Worker(new URL('../../js/micrograph-worker.js', import.meta.url), { type: 'module' });
+    worker.onmessage = ({ data }) => {
+        if (state.disposed || generation !== state.particleGeneration) return;
+        if (data.type === 'particles') { state.particles = data.particles; state.status.textContent = ''; }
+        else state.status.textContent = data.message;
+        schedule(state);
+    };
+    worker.onerror = event => {
+        if (!state.disposed && generation === state.particleGeneration)
+            state.status.textContent = `Unable to load particles: ${event.message}`;
+    };
+    worker.postMessage({ type: 'particles', particlesUrl: state.options.particlesUrl, width: state.width, height: state.height });
+}
+
+function showImage(state, levels, width, height, pixelSize) {
+    const upgrade = state.levels.length > 0 && state.width === width && state.height === height;
+    for (const level of state.levels) level.close();
+    state.levels = levels;
+    state.width = width; state.height = height; state.pixelSize = pixelSize;
+    state.status.textContent = '';
+    state.root.setAttribute('aria-busy', 'false');
+    resize(state);
+    // Replacing a preview keeps the particles: they are in the same pixel frame.
+    if (!upgrade) updateParticles(state);
+}
+
+// The header gives the plane's frame (size, sampling); the PNG is drawn stretched to it.
+async function startPreview(state, options, generation) {
+    try {
+        const [{ loadPlaneInfo }, response] = await Promise.all([import('../../js/mrc-parser.js'), fetch(options.previewUrl)]);
+        if (!response.ok) throw new Error(`Preview request failed (${response.status})`);
+        const [info, preview] = await Promise.all([loadPlaneInfo(options.url, options.layer), response.blob().then(blob => createImageBitmap(blob))]);
+        if (state.disposed || generation !== state.generation) { preview.close(); return; }
+        showImage(state, [preview], info.width, info.height, info.pixelSize);
+        state.preview = true;
+        schedule(state);
+    } catch {
+        if (!state.disposed && generation === state.generation) startPlane(state, options, generation, false);
+    }
+}
+
+function startPlane(state, options, generation, upgrade) {
+    const worker = state.worker = new Worker(new URL('../../js/micrograph-worker.js', import.meta.url), { type: 'module' });
+    if (upgrade) showProgress(state, 0);
+    worker.onmessage = ({ data }) => {
+        if (state.disposed || generation !== state.generation) {
+            data.levels?.forEach(level => level.close()); data.mask?.close(); return;
+        }
+        if (data.type === 'progress') { if (upgrade) showProgress(state, data.loaded / data.total); return; }
+        if (data.type === 'image') {
+            showImage(state, data.levels, data.width, data.height, data.pixelSize);
+            state.preview = false;
+            showProgress(state, null);
+        } else if (data.type === 'mask') state.mask = data.mask;
+        else if (data.type === 'particles') state.particles = data.particles;
+        else {
+            // A failed upgrade leaves the preview in place.
+            if (!upgrade) state.status.textContent = data.message;
+            state.root.setAttribute('aria-busy', 'false');
+            showProgress(state, null);
+        }
+        schedule(state);
+    };
+    worker.onerror = event => {
+        if (state.disposed || generation !== state.generation) return;
+        if (!upgrade) state.status.textContent = `Unable to load micrograph: ${event.message}`;
+        state.root.setAttribute('aria-busy', 'false');
+        showProgress(state, null);
+    };
+    // Masks load with the first image; an upgrade only needs the plane.
+    worker.postMessage({ ...options, maskUrl: upgrade ? null : options.maskUrl, particlesUrl: null });
+}
+
 export function update(root, options, callback) {
     const state = viewers.get(root.id) ?? create(root, callback);
     state.callback = callback;
     const previous = state.options;
     state.options = options;
-    const key = JSON.stringify([options.url, options.layer, options.maskUrl, options.particlesUrl, options.thumbnailUrl]);
+    const key = JSON.stringify([options.url, options.layer, options.maskUrl, options.thumbnailUrl, options.previewUrl]);
     if (key !== state.sourceKey) {
         state.sourceKey = key;
         releaseImages(state);
@@ -246,39 +358,17 @@ export function update(root, options, callback) {
             const generation = state.generation;
             // Browsing quickly cancels both pending work and any in-progress fetch/processing.
             state.loadTimer = setTimeout(() => {
-                const worker = state.worker = new Worker(new URL('../../js/micrograph-worker.js', import.meta.url), { type: 'module' });
-                worker.onmessage = ({ data }) => {
-                    if (state.disposed || generation !== state.generation) {
-                        data.levels?.forEach(level => level.close()); data.mask?.close(); return;
-                    }
-                    if (data.type === 'image') {
-                        state.levels = data.levels;
-                        state.width = data.width; state.height = data.height; state.pixelSize = data.pixelSize;
-                        state.status.textContent = '';
-                        state.root.setAttribute('aria-busy', 'false');
-                        resize(state);
-                    } else if (data.type === 'mask') state.mask = data.mask;
-                    else if (data.type === 'particles') state.particles = data.particles;
-                    else {
-                        state.status.textContent = data.message;
-                        state.root.setAttribute('aria-busy', 'false');
-                    }
-                    schedule(state);
-                };
-                worker.onerror = event => {
-                    if (state.disposed || generation !== state.generation) return;
-                    state.status.textContent = `Unable to load micrograph: ${event.message}`;
-                    state.root.setAttribute('aria-busy', 'false');
-                };
-                worker.postMessage(options);
                 if (options.thumbnailUrl) {
                     state.thumbnail.onload = () => schedule(state);
                     state.thumbnail.onerror = () => schedule(state);
                     state.thumbnail.src = options.thumbnailUrl;
                 }
+                if (options.previewUrl) startPreview(state, options, generation);
+                else startPlane(state, options, generation, false);
             }, 50);
         }
     }
+    else if (previous?.particlesUrl !== options.particlesUrl) updateParticles(state);
     if (!previous) state.observer.observe(root);
     if (!previous || previous.minWidth !== options.minWidth || previous.minHeight !== options.minHeight) resize(state);
     schedule(state);

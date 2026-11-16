@@ -29,7 +29,8 @@ public sealed class QueueRepository
 
     public QueueRepository(
         string statePath,
-        Func<Job, Action<Job>, Task> updateJob)
+        Func<Job, Action<Job>, Task> updateJob,
+        Func<Job, CancellationToken, Task> runLocal = null)
     {
         _statePath = statePath;
         _updateJob = updateJob;
@@ -41,7 +42,7 @@ public sealed class QueueRepository
                 address.ProjectId,
                 address.SpaceId,
                 address.JobId),
-            updateJob);
+            updateJob, runLocal);
         _runtime = new ExecutionRuntime(
             _coordinator,
             _operations,
@@ -340,6 +341,9 @@ public sealed class QueueRepository
             AddressOf(job),
             desiredCount,
             cancellationToken);
+
+    /// <summary>Every execution attempt the runtime holds now, for diagnostics.</summary>
+    public IReadOnlyList<ExecutionAttemptSnapshot> ExecutionAttempts => _runtime.Attempts;
 
     public bool HasExecutionAttempt(Job job) =>
         _runtime.Attempts.Any(attempt => attempt.Job == AddressOf(job));
@@ -691,10 +695,14 @@ public sealed class QueueRepository
             cluster.ToJson().ToJsonString());
     }
 
-    private static ResourceVector RequestFor(Job job, JobQueue queue)
+    internal static ResourceVector RequestFor(Job job, JobQueue queue)
     {
         if (queue is LocalQueue)
-            return new ResourceVector(1, 0, 0);
+        {
+            if (job.LocalQueueSlotCount < 0)
+                throw new InvalidOperationException("Local execution slots cannot be negative.");
+            return new ResourceVector(job.LocalQueueSlotCount, 0, 0);
+        }
 
         long cores = Math.Min(
             (long)Math.Max(0, job.ProcessCount) * Math.Max(0, job.CoreCount),
