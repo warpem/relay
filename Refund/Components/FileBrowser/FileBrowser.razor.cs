@@ -878,7 +878,7 @@ public partial class FileBrowser : ComponentBase, IAsyncDisposable
     /// Initiates the folder creation process by showing the create folder dialog.
     /// Sets a default unique folder name.
     /// </summary>
-    private async void CreateFolderAsync()
+    private void ShowCreateFolderPopover()
     {
         NewFolderName = GetUniqueFolderName(CurrentFolder, "New Folder");
         IsCreateFolderModalVisible = true;
@@ -1066,7 +1066,7 @@ public partial class FileBrowser : ComponentBase, IAsyncDisposable
     /// <summary>
     /// Shows the delete confirmation dialog.
     /// </summary>
-    private async void ShowDeleteConfirmation()
+    private void ShowDeleteConfirmation()
     {
         IsDeleteConfirmationVisible = true;
     }

@@ -1,0 +1,29 @@
+.file-browser-error {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    width: min(1000px, calc(100vw - 80px));
+    max-width: 100%;
+    padding: 1rem 0;
+}
+
+.file-browser-error h4 {
+    margin: 0;
+}
+
+.file-browser-error-message {
+    color: var(--colorPaletteRedForeground1);
+    margin: 0;
+    word-break: break-word;
+}
+
+.file-browser-error-folder {
+    margin: 0;
+    word-break: break-all;
+}
+
+.file-browser-error-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 0.5rem;
+}

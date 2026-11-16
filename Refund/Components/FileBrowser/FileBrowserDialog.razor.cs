@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Web;
 using Microsoft.FluentUI.AspNetCore.Components;
 
 namespace Refund.Components.FileBrowser;
@@ -28,6 +29,30 @@ public partial class FileBrowserDialog : ComponentBase
     /// Cancels the dialog without a result.
     /// </summary>
     private Task SelectionCanceled() => Dialog?.CancelAsync() ?? Task.CompletedTask;
+
+    /// <summary>
+    /// Contains file browser failures to this dialog. Caught exceptions are logged by the framework.
+    /// </summary>
+    private ErrorBoundary _errorBoundary;
+
+    private bool IsAtTopLevelFolder => string.IsNullOrEmpty(Content.CurrentFolder) ||
+        string.Equals(Path.TrimEndingDirectorySeparator(Content.CurrentFolder),
+                      Path.TrimEndingDirectorySeparator(Content.TopLevelFolder ?? ""), StringComparison.Ordinal);
+
+    /// <summary>
+    /// Recreates the file browser at the last folder it reached.
+    /// </summary>
+    private void Retry() => _errorBoundary?.Recover();
+
+    /// <summary>
+    /// Recreates the file browser at the top-level folder, for when the current folder itself keeps failing.
+    /// </summary>
+    private void GoToTopLevelFolder()
+    {
+        // The recreated browser reports the folder through CurrentFolderChanged itself.
+        Content.CurrentFolder = Content.TopLevelFolder;
+        _errorBoundary?.Recover();
+    }
 
     /// <summary>
     /// Handles folder navigation changes from the file browser.

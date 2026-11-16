@@ -2,14 +2,38 @@
 
 
 <FluentDialogBody Style="height: 100%;">
-    <FileBrowser SelectionMode="@Content.SelectionMode"
-                 ShowFiles="@Content.ShowFiles"
-                 ShowFolders="@Content.ShowFolders"
-                 AllowedExtensions="@Content.AllowedExtensions"
-                 TopLevelFolder="@Content.TopLevelFolder"
-                 CurrentFolder="@Content.CurrentFolder"
-                 OnSelectionConfirmed="@SelectionConfirmed"
-                 OnSelectionCanceled="@SelectionCanceled"
-                 ShowSelectionButtons="@Content.ShowSelectionButtons"
-                 CurrentFolderChanged="@HandleCurrentFolderChanged" />
+    @* The browser has to absorb whatever the file system throws at it (files vanishing mid-listing,
+       permissions, stale mounts...). Contain failures here so they don't tear down the whole page. *@
+    <ErrorBoundary @ref="_errorBoundary">
+        <ChildContent>
+            <FileBrowser SelectionMode="@Content.SelectionMode"
+                         ShowFiles="@Content.ShowFiles"
+                         ShowFolders="@Content.ShowFolders"
+                         AllowedExtensions="@Content.AllowedExtensions"
+                         TopLevelFolder="@Content.TopLevelFolder"
+                         CurrentFolder="@Content.CurrentFolder"
+                         OnSelectionConfirmed="@SelectionConfirmed"
+                         OnSelectionCanceled="@SelectionCanceled"
+                         ShowSelectionButtons="@Content.ShowSelectionButtons"
+                         CurrentFolderChanged="@HandleCurrentFolderChanged" />
+        </ChildContent>
+        <ErrorContent Context="exception">
+            <div class="file-browser-error" role="alert">
+                <h4>The file browser ran into a problem</h4>
+                <p class="file-browser-error-message">@exception.Message</p>
+                @if (!string.IsNullOrEmpty(Content.CurrentFolder))
+                {
+                    <p class="file-browser-error-folder">In folder: <code>@Content.CurrentFolder</code></p>
+                }
+                <div class="file-browser-error-actions">
+                    <FluentButton Appearance="ButtonAppearance.Primary" OnClick="Retry">Try again</FluentButton>
+                    @if (!IsAtTopLevelFolder)
+                    {
+                        <FluentButton OnClick="GoToTopLevelFolder">Go to top folder</FluentButton>
+                    }
+                    <FluentButton OnClick="SelectionCanceled">Close</FluentButton>
+                </div>
+            </div>
+        </ErrorContent>
+    </ErrorBoundary>
 </FluentDialogBody>

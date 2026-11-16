@@ -231,13 +231,14 @@ public partial class FolderColumn : ComponentBase
     /// </summary>
     /// <param name="e">The mouse event arguments</param>
     /// <param name="item">The item that was clicked</param>
-    private void OnItemClicked(MouseEventArgs e, FileSystemItem item)
+    private Task OnItemClicked(MouseEventArgs e, FileSystemItem item)
     {
         if (!IsItemClickable(item))
-            return;
-            
+            return Task.CompletedTask;
+
+        // Return the task so a failure reaches the dialog's error boundary instead of being dropped.
         var args = new ItemSelectedEventArgs { Item = item, LevelIndex = LevelIndex, MouseEventArgs = e };
-        OnItemSelected.InvokeAsync(args);
+        return OnItemSelected.InvokeAsync(args);
     }
     
     /// <summary>
