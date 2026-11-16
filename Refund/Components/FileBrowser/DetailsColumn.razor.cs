@@ -17,6 +17,22 @@ public partial class DetailsColumn : ComponentBase
     [Parameter]
     public RenderFragment EditAction { get; set; }
 
+    private FileSystemItem _shownItem;
+
+    /// <summary>
+    /// Re-reads the selected item's metadata when the selection changes, so a file deleted after
+    /// the folder was listed (or after its metadata was cached for sorting) shows as missing.
+    /// </summary>
+    protected override void OnParametersSet()
+    {
+        var item = Items?.Count == 1 ? Items[0] : null;
+        if (!ReferenceEquals(item, _shownItem))
+        {
+            _shownItem = item;
+            item?.Refresh();
+        }
+    }
+
     /// <summary>
     /// Converts a file size in bytes to a human-readable string with appropriate units.
     /// Formats the size in B, KB, MB, or GB with one decimal place for better readability.

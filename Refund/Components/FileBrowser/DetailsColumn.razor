@@ -5,7 +5,14 @@
     {
         var item = Items.First();
         
-        @if (!item.IsDirectory)
+        @if (!item.Exists)
+        {
+            <p style="line-height: 1.8;">
+                <span style="word-wrap: break-word; white-space: normal; font-weight: bold;">@item.Name</span><br/>
+                This @(item.IsDirectory ? "folder" : "file") no longer exists. Refresh the folder to update the listing.
+            </p>
+        }
+        else if (!item.IsDirectory)
         {
             @* File Preview *@
             <FilePreview Item="@item" />

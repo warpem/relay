@@ -38,67 +38,104 @@ public class FileSystemItem
     /// </summary>
     public bool IsHidden { get; set; }
     
+    private bool _metadataLoaded;
+    private bool _exists;
+    private long _sizeInByte;
+    private DateTime _creationTime;
+    private DateTime _lastWriteTime;
+
     /// <summary>
-    /// Cached file size to avoid repeated file system queries.
+    /// Whether the item still existed when its metadata was last read. A listing can outlive the
+    /// files in it (e.g. scratch files of running jobs), so callers rendering metadata should check
+    /// this instead of assuming the path is still there. Call <see cref="Refresh"/> to re-read.
     /// </summary>
-    private long? _sizeInByte;
-    
+    public bool Exists
+    {
+        get
+        {
+            LoadMetadata();
+            return _exists;
+        }
+    }
+
     /// <summary>
     /// Gets the size of the item in bytes.
-    /// For files, returns the actual file size.
-    /// For directories, returns 0 (directory size calculation is not implemented).
+    /// For files, returns the actual file size; for directories and missing items, returns 0.
     /// Lazily loaded on first access for performance.
     /// </summary>
     public long SizeInByte
     {
         get
         {
-            if (_sizeInByte == null)
-                _sizeInByte = !IsDirectory ? new FileInfo(Path).Length : 0;
-
-            return _sizeInByte.Value;
+            LoadMetadata();
+            return _sizeInByte;
         }
     }
-    
+
     /// <summary>
-    /// Cached creation time to avoid repeated file system queries.
-    /// </summary>
-    private DateTime? _creationTime;
-    
-    /// <summary>
-    /// Gets the creation time of the file system item.
-    /// Uses Directory.GetCreationTime for directories and File.GetCreationTime for files.
+    /// Gets the creation time of the file system item, or <see cref="DateTime.MinValue"/> if it no longer exists.
     /// Lazily loaded on first access for performance.
     /// </summary>
     public DateTime CreationTime
     {
         get
         {
-            if (_creationTime == null)
-                _creationTime = Directory.Exists(Path) ? Directory.GetCreationTime(Path) : File.GetCreationTime(Path);
-
-            return _creationTime.Value;
+            LoadMetadata();
+            return _creationTime;
         }
     }
 
     /// <summary>
-    /// Cached last write time to avoid repeated file system queries.
-    /// </summary>
-    private DateTime? _lastWriteTime;
-    
-    /// <summary>
-    /// Gets the last write time of the file system item.
-    /// Uses Directory.GetLastWriteTime for directories and File.GetLastWriteTime for files.
+    /// Gets the last write time of the file system item, or <see cref="DateTime.MinValue"/> if it no longer exists.
     /// Lazily loaded on first access for performance.
     /// </summary>
     public DateTime LastWriteTime
     {
         get
         {
-            if (_lastWriteTime == null)
-                _lastWriteTime = Directory.Exists(Path) ? Directory.GetLastWriteTime(Path) : File.GetLastWriteTime(Path);
-            
-            return _lastWriteTime.Value;
+            LoadMetadata();
+            return _lastWriteTime;
+        }
+    }
+
+    /// <summary>
+    /// Discards cached metadata so the next access re-reads it from the file system.
+    /// </summary>
+    public void Refresh() => _metadataLoaded = false;
+
+    /// <summary>
+    /// Reads size and timestamps in a single stat. Never throws: an item that vanished or became
+    /// unreadable since it was listed reports <see cref="Exists"/> = false with empty metadata.
+    /// </summary>
+    private void LoadMetadata()
+    {
+        if (_metadataLoaded)
+            return;
+        _metadataLoaded = true;
+
+        _exists = false;
+        _sizeInByte = 0;
+        _creationTime = DateTime.MinValue;
+        _lastWriteTime = DateTime.MinValue;
+
+        try
+        {
+            FileSystemInfo info = IsDirectory ? new DirectoryInfo(Path) : new FileInfo(Path);
+            if (!info.Exists)
+                return;
+
+            // Exists populated the info's cached stat, so these don't touch the disk again.
+            _sizeInByte = info is FileInfo file ? file.Length : 0;
+            _creationTime = info.CreationTime;
+            _lastWriteTime = info.LastWriteTime;
+            _exists = true;
+        }
+        catch (Exception exc) when (exc is IOException or UnauthorizedAccessException)
+        {
+            _exists = false;
+            _sizeInByte = 0;
+            _creationTime = DateTime.MinValue;
+            _lastWriteTime = DateTime.MinValue;
         }
     }
 
@@ -111,14 +148,16 @@ public class FileSystemItem
         Path = path;
         Name = System.IO.Path.GetFileName(path);
         IsDirectory = Directory.Exists(path);
-        
-        if (IsDirectory)
+
+        try
         {
-            IsHidden = new DirectoryInfo(path).Attributes.HasFlag(FileAttributes.Hidden);
+            FileSystemInfo info = IsDirectory ? new DirectoryInfo(path) : new FileInfo(path);
+            // Attributes reads as -1 (every flag set) for a missing item; don't hide it for that.
+            IsHidden = info.Exists && info.Attributes.HasFlag(FileAttributes.Hidden);
         }
-        else
+        catch (Exception exc) when (exc is IOException or UnauthorizedAccessException)
         {
-            IsHidden = new FileInfo(path).Attributes.HasFlag(FileAttributes.Hidden);
+            IsHidden = false;
         }
     }
 
