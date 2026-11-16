@@ -2,6 +2,7 @@ using Microsoft.FluentUI.AspNetCore.Components;
 using Refund.DataModel;
 using Refund.DataModel.ReadOnly;
 using Refund.Services.Core.Session;
+using Refund.Utils;
 using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons;
 
 namespace Refund.Services;
@@ -132,19 +133,7 @@ public partial class MenuActionService
                 IconLarge = new Icons.Regular.Size20.Color()
             };
 
-            var palette = new (string Hex, string Label)[]
-            {
-                ("#F5A8A8", "Red"),
-                ("#F5CDA8", "Orange"),
-                ("#F5E6A8", "Yellow"),
-                ("#A8F5B8", "Green"),
-                ("#A8E6F5", "Teal"),
-                ("#A8B8F5", "Blue"),
-                ("#CDA8F5", "Purple"),
-                ("#F5A8E6", "Pink")
-            };
-
-            foreach (var (hex, label) in palette)
+            foreach (var (hex, label) in ColorTags.Palette)
             {
                 var color = hex;
                 actionColor.SubActions.Add(new MenuAction()

@@ -20,6 +20,10 @@ public enum JobSortCriterion
 public class JobSortingService
 {
     public JobSortCriterion Criterion { get; private set; } = JobSortCriterion.Custom;
+    /// <summary>
+    /// Grid direction, not sort order: items are always sorted ascending. True (default)
+    /// lays them out from bottom-left to top-right; false from top-left to bottom-right.
+    /// </summary>
     public bool IsAscending { get; private set; } = true;
 
     public event Func<Task> OnSortChanged;

@@ -21,7 +21,7 @@
                            Title="@GetTitle()"
                            CreateButtonText="@GetCreateButtonText()"
                            Items="@GetItems()"
-                           ReverseGrid="false"
+                           ReverseGrid="@SortingService.IsAscending"
                            OnCreateClick="@ShowCreateDialogAsync"
                            OnContextMenu="@OnContextMenu">
                 <ItemTemplate>

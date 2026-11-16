@@ -157,42 +157,31 @@ public partial class ViewScreen : ListingScreenLogic<IViewItem>
         if (items == null)
             return Enumerable.Empty<IViewItem>();
 
-        // Custom sort: return items in stored order (already intermixed in data model)
+        // Every criterion yields one ascending sequence; the sort direction never reorders
+        // it, only flips the grid. Default (IsAscending) uses flex-wrap: wrap-reverse, so
+        // the sequence starts bottom-left and runs left-to-right, then upward, ending
+        // top-right (same as the project/space/view listings). Inverse uses plain
+        // flex-wrap: it starts top-left and ends bottom-right. Rows always read
+        // left-to-right, and the Move left/right buttons match the screen in Custom sort.
+
+        // Custom sort: items in stored order (already intermixed in data model)
         if (SortingService.Criterion == JobSortCriterion.Custom)
             return items;
 
-        // The grid uses plain flex-wrap (no reverse): array index 0 is the first item
-        // laid out, i.e. top-left of screen; later indices fill left-to-right then wrap
-        // to the next row down. Nulls/empty values sort to the array end (bottom-right)
-        // so they stay out of the way regardless of sort direction.
+        // Color follows the Color menu's palette order. Items without a name or color go
+        // at the end of the sequence.
         IOrderedEnumerable<IViewItem> sorted = SortingService.Criterion switch
         {
-            JobSortCriterion.Id => SortingService.IsAscending
-                ? items.OrderBy(i => i.Id)
-                : items.OrderByDescending(i => i.Id),
-            JobSortCriterion.LastModified => SortingService.IsAscending
-                ? items.OrderBy(i => i.UpdateDate)
-                : items.OrderByDescending(i => i.UpdateDate),
-            JobSortCriterion.Status => SortingService.IsAscending
-                ? items.OrderBy(GetStatusPriority)
-                : items.OrderByDescending(GetStatusPriority),
-            JobSortCriterion.Type => SortingService.IsAscending
-                ? items.OrderBy(GetTypeCategory, StringComparer.OrdinalIgnoreCase)
-                : items.OrderByDescending(GetTypeCategory, StringComparer.OrdinalIgnoreCase),
-            JobSortCriterion.Name => SortingService.IsAscending
-                ? items.OrderBy(i => string.IsNullOrWhiteSpace(i.Alias) ? 1 : 0)
-                       .ThenBy(i => i.Alias, StringComparer.OrdinalIgnoreCase)
-                       .ThenBy(i => i.Id)
-                : items.OrderBy(i => string.IsNullOrWhiteSpace(i.Alias) ? 1 : 0)
-                       .ThenByDescending(i => i.Alias, StringComparer.OrdinalIgnoreCase)
-                       .ThenByDescending(i => i.Id),
-            JobSortCriterion.Color => SortingService.IsAscending
-                ? items.OrderBy(i => string.IsNullOrWhiteSpace(GetColorTag(i)) ? 1 : 0)
-                       .ThenBy(GetColorTag, StringComparer.OrdinalIgnoreCase)
-                       .ThenBy(i => i.Id)
-                : items.OrderBy(i => string.IsNullOrWhiteSpace(GetColorTag(i)) ? 1 : 0)
-                       .ThenByDescending(GetColorTag, StringComparer.OrdinalIgnoreCase)
-                       .ThenByDescending(i => i.Id),
+            JobSortCriterion.Id => items.OrderBy(i => i.Id),
+            JobSortCriterion.LastModified => items.OrderBy(i => i.UpdateDate),
+            JobSortCriterion.Status => items.OrderBy(GetStatusPriority),
+            JobSortCriterion.Type => items.OrderBy(GetTypeCategory, StringComparer.OrdinalIgnoreCase),
+            JobSortCriterion.Name => items.OrderBy(i => string.IsNullOrWhiteSpace(i.Alias) ? 1 : 0)
+                                          .ThenBy(i => i.Alias, StringComparer.OrdinalIgnoreCase)
+                                          .ThenBy(i => i.Id),
+            JobSortCriterion.Color => items.OrderBy(i => ColorTags.SortIndex(GetColorTag(i)))
+                                           .ThenBy(GetColorTag, StringComparer.OrdinalIgnoreCase)
+                                           .ThenBy(i => i.Id),
             _ => items.OrderBy(i => i.Id)
         };
 
