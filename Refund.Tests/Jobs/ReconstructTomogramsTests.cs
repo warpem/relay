@@ -90,6 +90,67 @@ public class ReconstructTomogramsTests : IDisposable
     }
 
     [Fact]
+    public void RunningWithFirstOfManyTomograms_WaitsForTheSecond()
+    {
+        var job = CreateJob(1);
+        job.Status = JobStatus.Running;
+        job.NItemsProcessed = 1;
+        job.NItemsTotal = 33;
+
+        Assert.Null(job.TrackProgressResults());
+        Assert.Equal(0, job.RenderCalls);
+        Assert.Equal(-1, job.VisAvailableIteration);
+
+        File.WriteAllText(job.ResProcessedItemsJson, JsonSerializer.Serialize(
+            Enumerable.Range(1, 2).Select(i => new { Path = $"TS_{i:00}.tomostar" })));
+        File.WriteAllText(Thumbnail(job, 2), "thumbnail");
+        var update = job.TrackProgressResults();
+
+        Assert.NotNull(update);
+        update();
+        Assert.Equal((Thumbnail(job, 1), Thumbnail(job, 2)), job.RenderedThumbnails);
+        Assert.Equal(0, job.VisAvailableIteration);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(1)]
+    public void RunningWithoutKnownTotal_WaitsUnlessOnlyOneTomogramExpected(int? total)
+    {
+        var job = CreateJob(1);
+        job.Status = JobStatus.Running;
+        job.NItemsProcessed = 1;
+        job.NItemsTotal = total;
+
+        var update = job.TrackProgressResults();
+
+        if (total == null)
+        {
+            Assert.Null(update);
+            Assert.Equal(0, job.RenderCalls);
+            return;
+        }
+        Assert.NotNull(update);
+        update();
+        Assert.Equal((Thumbnail(job, 1), Thumbnail(job, 1)), job.RenderedThumbnails);
+    }
+
+    [Fact]
+    public void FinalizingWithOneTomogram_UsesItForBothSlots()
+    {
+        var job = CreateJob(1);
+        job.Status = JobStatus.Finalizing;
+        job.NItemsProcessed = 1;
+        job.NItemsTotal = 33;
+
+        var update = job.TrackProgressResults();
+
+        Assert.NotNull(update);
+        update();
+        Assert.Equal((Thumbnail(job, 1), Thumbnail(job, 1)), job.RenderedThumbnails);
+    }
+
+    [Fact]
     public void MissingThumbnail_DefersRenderingUntilItExists()
     {
         var job = CreateJob();

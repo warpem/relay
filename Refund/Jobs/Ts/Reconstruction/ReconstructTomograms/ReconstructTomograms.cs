@@ -302,6 +302,11 @@ public class ReconstructTomograms : WarpToolsJobGpu, IClusterJob
             if (processedItems is not { Count: > 0 })
                 return baseUpdate;
 
+            // The card is rendered once, so only show a single tomogram in both slots when no
+            // second one can still arrive; otherwise wait for the second reconstruction.
+            if (processedItems.Count == 1 && MoreTomogramsMayArrive)
+                return baseUpdate;
+
             TomogramSet tomogramSet = GetTomogramResource(0);
             string first = tomogramSet.ToTomogramThumbnailPath(processedItems[0].Path);
             string second = processedItems.Count > 1
@@ -321,4 +326,8 @@ public class ReconstructTomograms : WarpToolsJobGpu, IClusterJob
             VisAvailableIteration = 0;
         };
     }
+
+    private bool MoreTomogramsMayArrive =>
+        Status is JobStatus.Staging or JobStatus.Running or JobStatus.Aborting &&
+        !(NItemsTotal is { } total && NItemsProcessed >= total);
 }
