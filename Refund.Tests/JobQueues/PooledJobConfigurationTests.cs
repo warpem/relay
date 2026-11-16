@@ -49,6 +49,7 @@ public class PooledJobConfigurationTests
         {
             Space = new Space { RootDirectory = "/tmp/relay-test" },
             Id = 1,
+            DoTraining = true,
             NGpus = 4,
             PerDevice = 3,
             NWorkers = 4,
@@ -73,8 +74,10 @@ public class PooledJobConfigurationTests
         Assert.False(args.ContainsKey("strict"));
     }
 
-    [Fact]
-    public void MissAlignment_WorkerPool_EmitsNClusterWorkers_OnlyWhenEnabled()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void MissAlignment_WorkerPool_EmitsNClusterWorkers_OnlyWhenEnabled(bool doTraining)
     {
         EnsurePopulated();
 
@@ -83,6 +86,7 @@ public class PooledJobConfigurationTests
         {
             Space = new Space { RootDirectory = "/tmp/relay-test" },
             Id = 1,
+            DoTraining = doTraining,
             UseWorkerPool = false,
             PoolSize = 6,
         };
@@ -93,6 +97,7 @@ public class PooledJobConfigurationTests
         {
             Space = new Space { RootDirectory = "/tmp/relay-test" },
             Id = 1,
+            DoTraining = doTraining,
             UseWorkerPool = true,
             PoolSize = 6,
         };
@@ -115,6 +120,7 @@ public class PooledJobConfigurationTests
         {
             Space = new Space { RootDirectory = "/tmp/relay-test" },
             Id = 1,
+            DoTraining = true,
             NGpus = nGpus,
             PerDevice = perDevice,
         };

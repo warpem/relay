@@ -1508,7 +1508,8 @@ public abstract class Job : RelayBase, IFolderContent
 
     public void ReadFromJson(JsonNode reader, ReadOnlyCollection<User> users)
     {
-        base.ReadFromJson(reader);
+        // Allow job-specific migrations to run when loading saved jobs as well as direct reads.
+        ReadFromJson(reader);
         _serializedDirectoryName = reader["DirectoryName"]?.Deserialize<string>() ?? "";
 
         // Handle UpdatedBy

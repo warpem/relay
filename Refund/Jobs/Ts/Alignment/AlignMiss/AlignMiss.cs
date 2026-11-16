@@ -17,8 +17,8 @@ namespace Refund.Jobs.Ts.Alignment.AlignMiss;
 /// <summary>
 /// Job that prepares tilt series stacks and runs MissAlignment (a learning-based tilt-series
 /// alignment tool) to improve tilt-series alignments. MissAlignment is a standalone GPU tool
-/// outside the WarpTools ecosystem, so this job derives directly from <see cref="Job"/> rather
-/// than the WarpTools <c>WarpToolsJobGpu</c> base (and therefore does not support GPU worker pools).
+/// outside the WarpTools ecosystem, so this job derives directly from <see cref="Job"/> and uses
+/// MissAlignment's own worker pool rather than the WarpTools <c>WarpToolsJobGpu</c> pool.
 /// </summary>
 [GenerateReadOnly]
 public class AlignMiss : Job, IClusterJob, IItemProgress
@@ -47,9 +47,13 @@ public class AlignMiss : Job, IClusterJob, IItemProgress
     // CPU cores follow miss-alignment's documented sizing:
     // len(reconstruction-devices) + n_training_devices * dataloaders_per_trainer, plus a small
     // orchestrator overhead.
-    public override int CoreCount => ReconstructionDevices.Length + TrainingDevices.Length * NWorkers + 2;
+    public override int CoreCount => DoTraining
+        ? ReconstructionDevices.Length + TrainingDevices.Length * NWorkers + 2
+        : NGpus * 2 + 2;
 
-    public override int MemoryGb => ReconstructionDevices.Length * 4 + TrainingDevices.Length * NWorkers + 8;
+    public override int MemoryGb => DoTraining
+        ? ReconstructionDevices.Length * 4 + TrainingDevices.Length * NWorkers + 8
+        : NGpus * 4 + 8;
 
     // MissAlignment lives outside the WarpTools ecosystem, so it does not inherit WarpToolsJob's module
     // set. It still needs the "warp" module in its runtime environment for now; drop "warp" here if
@@ -95,29 +99,45 @@ public class AlignMiss : Job, IClusterJob, IItemProgress
     
     #region Parameters
 
+    [RelayProperty]
+    [UiFieldGroup("Model", 0)]
+    [UiBool("", "Train models",
+            "Train models on this dataset before alignment. Leave off to use existing models.")]
+    public bool DoTraining { get; set; } = false;
+
+    [RelayProperty]
+    [UiBool("", "Use general pretrained models",
+            "Use the general easymode models by Mart So-Last and their eight-step alignment schedule. " +
+            "Turn off to use the connected model run and its original schedule.",
+            ConditionalOnField = nameof(DoTraining), ConditionalOnValue = false)]
+    public bool UseGeneralModel { get; set; } = true;
+
     /// <summary>
     /// Rescale tilt images to this pixel size; normally 10–15 for cryo data
     /// </summary>
     [RelayProperty]
-    [UiFieldGroup("Pre-processing", 0)]
+    [UiFieldGroup("Pre-processing", 1)]
     [UiDecimal("", "Pixel size", min: 1, max: 100000, stepSize: 0.1, unit: "Å",
                "Rescale tilt images to this pixel size; normally 10–15 A for cryo data")]
     public decimal AngPix { get; set; } = 10;
     
-    [UiFieldGroup("Alignment", 1)]
+    [UiFieldGroup("Alignment", 2)]
     [RelayProperty]
     [UiInt("", "Coarse iterations", min: 0,
-            helpText: "Number of coarse iterations done on 2x downsampled data before fine iterations")]
+            helpText: "Number of coarse iterations done on 2x downsampled data before fine iterations",
+           ConditionalOnField = nameof(DoTraining), ConditionalOnValue = true)]
     public int NCoarse { get; set; } = 2;
     
     [RelayProperty]
     [UiInt("", "Fine iterations", min: 0,
-           helpText: "Number of fine iterations done at the full requested resolution after coarse iterations")]
+           helpText: "Number of fine iterations done at the full requested resolution after coarse iterations",
+           ConditionalOnField = nameof(DoTraining), ConditionalOnValue = true)]
     public int NFine { get; set; } = 1;
     
     [RelayProperty]
     [UiBool("", "Model local deformations",
-            "Fit local deformations using Warp's spline grid model")]
+            "Fit local deformations using Warp's spline grid model",
+           ConditionalOnField = nameof(DoTraining), ConditionalOnValue = true)]
     public bool DoLocalDeformations { get; set; } = true;
 
     [RelayProperty]
@@ -150,35 +170,41 @@ public class AlignMiss : Job, IClusterJob, IItemProgress
     public int3 AlternativeTomogramDimensions { get; set; } = new(4096, 4096, 1000);
     
     [RelayProperty]
+    [UiFieldGroup("Training", 3)]
     [UiInt("", "Batch size", min: 0,
-           helpText: "Mini-batch size used during model training")]
+           helpText: "Mini-batch size used during model training",
+           ConditionalOnField = nameof(DoTraining), ConditionalOnValue = true)]
     public int BatchSize { get; set; } = 32;
     
     [RelayProperty]
     [UiInt("", "Window size", min: 0,
-           helpText: "Size of the reconstructed sub-volumes (in pixels) used for training and alignment")]
+           helpText: "Size of the reconstructed sub-volumes (in pixels) used for training and alignment",
+           ConditionalOnField = nameof(DoTraining), ConditionalOnValue = true)]
     public int WindowSize { get; set; } = 96;
     
     [RelayProperty]
     [UiInt("", "Maximum number of epochs", min: 0,
-           helpText: "Training in each iteration will continue for this many epochs, unless convergence is reached earlier")]
+           helpText: "Training in each iteration will continue for this many epochs, unless convergence is reached earlier",
+           ConditionalOnField = nameof(DoTraining), ConditionalOnValue = true)]
     public int MaxEpochs { get; set; } = 30;
     
     [RelayProperty]
     [UiDecimal("", "Learning rate", min: 0, stepSize: 1e-5,
-           helpText: "Learning rate at the beginning of training")]
+           helpText: "Learning rate at the beginning of training",
+           ConditionalOnField = nameof(DoTraining), ConditionalOnValue = true)]
     public decimal LearningRate { get; set; } = 1e-3M;
 
     [RelayProperty]
     [UiInt("", "Steps", min: 1,
-            helpText: "Number of steps per epoch")]
+            helpText: "Number of steps per epoch",
+           ConditionalOnField = nameof(DoTraining), ConditionalOnValue = true)]
     public int NSteps { get; set; } = 1000;
 
     /// <summary>
     /// Disable tilts that contain less than this fraction of the tomogram's field of view due to excessive shifts
     /// </summary>
     [RelayProperty]
-    [UiFieldGroup("Post-processing", 2)]
+    [UiFieldGroup("Post-processing", 4)]
     [UiDecimal("", "Minimum FOV fraction", 0, 1, 0.01,
                helpText: "Disable tilts that contain less than this fraction of the tomogram's field of view due to excessive shifts")]
     public decimal MinFov { get; set; } = 0;
@@ -197,26 +223,28 @@ public class AlignMiss : Job, IClusterJob, IItemProgress
     [UiInt("", "Reconstruction workers per GPU",
            helpText: "Number of reconstruction workers to run on each GPU. Higher values may improve " +
                      "GPU utilization but increase GPU memory consumption.",
-           min: 1)]
+           min: 1,
+           ConditionalOnField = nameof(DoTraining), ConditionalOnValue = true)]
     [RelayProperty]
     public int PerDevice { get; set; } = 8;
 
     [UiInt("", "DataLoader workers per trainer",
            helpText: "Number of CPU data-loading workers per training GPU (--dataloaders-per-trainer).",
            min: 1,
-           max: 99999)]
+           max: 99999,
+           ConditionalOnField = nameof(DoTraining), ConditionalOnValue = true)]
     [RelayProperty]
     public int NWorkers { get; set; } = 5;
 
     [UiFieldGroup("Resources", 999)]
     [UiBool("", "Use worker pool",
-            "Let MissAlignment spawn its own cluster worker pool for the inference steps during training " +
+            "Let MissAlignment spawn its own cluster worker pool for stack preparation and alignment " +
             "(the tool's internal --n-cluster-workers pool, managed inside the run — not a Relay pool).")]
     [RelayProperty]
     public bool UseWorkerPool { get; set; } = false;
 
     [UiInt("n-cluster-workers", "Pool size", min: 1,
-           helpText: "Number of cluster workers in MissAlignment's reconstruction pool.",
+           helpText: "Number of cluster workers in MissAlignment's alignment pool.",
            ConditionalOnField = nameof(UseWorkerPool), ConditionalOnValue = true)]
     [RelayProperty]
     public int PoolSize { get; set; } = 4;
@@ -228,7 +256,8 @@ public class AlignMiss : Job, IClusterJob, IItemProgress
     public AlignMiss()
     {
         var portInTiltSeriesSet = new PortIn(this, typeof(TiltSeriesSet), PortInTiltSeriesSet, "Pre-aligned tilt-series", 1, 1);
-        var portInModel = new PortIn(this, typeof(MissAlignmentModel), PortInModel, "Pre-trained model", 0, 1);
+        var portInModel = new PortIn(this, typeof(MissAlignmentModel), PortInModel, "Trained models", 0, 1,
+            isActiveDelegate: job => ((AlignMiss)job).DoTraining || !((AlignMiss)job).UseGeneralModel);
 
         PortsIn = new(new Dictionary<string, PortIn>
         {
@@ -237,7 +266,7 @@ public class AlignMiss : Job, IClusterJob, IItemProgress
         });
 
         var portOutTiltSeriesSet = new PortOut(this, typeof(TiltSeriesSet), PortOutTiltSeriesSet, "Improved alignments", GetTiltSeriesResource);
-        var portOutModel = new PortOut(this, typeof(MissAlignmentModel), PortOutModel, "Updated model", GetModelResource);
+        var portOutModel = new PortOut(this, typeof(MissAlignmentModel), PortOutModel, "Trained models", GetModelResource);
 
         PortsOut = new(new Dictionary<string, PortOut>
         {
@@ -275,9 +304,14 @@ public class AlignMiss : Job, IClusterJob, IItemProgress
     
     private MissAlignmentModel GetModelResource(int iter)
     {
-        return new MissAlignmentModel()
+        if (!DoTraining)
+            return UseGeneralModel ? null : PortsIn[PortInModel].GetSingleResource<MissAlignmentModel>();
+
+        return new MissAlignmentModel
         {
-            ModelPath = ResModelPath
+            ModelPath = ResModelPath,
+            ModelRunDirectory = DirectoryPath,
+            ConfigPath = ResConfigPath
         };
     }
 
@@ -285,10 +319,9 @@ public class AlignMiss : Job, IClusterJob, IItemProgress
     public override string CommandSuffix => $" && touch {PathSuccess}";
 
     /// <summary>
-    /// Gets the command used to run MissAlignment training (the `train` subcommand of the
-    /// `miss-alignment` CLI).
+    /// Selects training or inference using MissAlignment's corresponding CLI subcommand.
     /// </summary>
-    public override string CommandName => "miss-alignment train";
+    public override string CommandName => DoTraining ? "miss-alignment train" : "miss-alignment infer";
 
     // miss-alignment takes explicit device-index lists, not counts. The cluster exposes the requested
     // GPUs as indices 0..NGpus-1. Training runs on a single GPU (device 0); every other GPU is
@@ -313,11 +346,30 @@ public class AlignMiss : Job, IClusterJob, IItemProgress
         result["config-file"] = ResConfigPath;
         result["prepare-stacks"] = AngPix.ToString(CultureInfo.InvariantCulture);
 
-        result["training-devices"] = string.Join(",", TrainingDevices);
-        result["reconstruction-devices"] = string.Join(",", ReconstructionDevices);
-        result["dataloaders-per-trainer"] = NWorkers.ToString(CultureInfo.InvariantCulture);
+        if (DoTraining)
+        {
+            result["training-devices"] = string.Join(",", TrainingDevices);
+            result["reconstruction-devices"] = string.Join(",", ReconstructionDevices);
+            result["dataloaders-per-trainer"] = NWorkers.ToString(CultureInfo.InvariantCulture);
+        }
 
         return result;
+    }
+
+    public override void ReadFromJson(JsonNode reader)
+    {
+        base.ReadFromJson(reader);
+        // Older saved jobs always trained; only newly created jobs default to inference.
+        if (reader[nameof(DoTraining)] == null)
+            DoTraining = true;
+    }
+
+    public override Dictionary<string, List<string>> ValidatePortInputs()
+    {
+        var errors = base.ValidatePortInputs();
+        if (!DoTraining && !UseGeneralModel && !PortsIn[PortInModel].IsConnected)
+            AddPortValidationError(errors, PortInModel, "Connect a trained model run or enable the general pretrained models.");
+        return errors;
     }
 
     public override void Stage()
@@ -325,13 +377,19 @@ public class AlignMiss : Job, IClusterJob, IItemProgress
         base.Stage();
 
         var tiltSeriesSet = PortsIn[PortInTiltSeriesSet].GetSingleResource<TiltSeriesSet>();
-        var modelResource = PortsIn[PortInModel].GetSingleResource<MissAlignmentModel>();
+        var modelResource = PortsIn[PortInModel].IsActive()
+            ? PortsIn[PortInModel].GetSingleResource<MissAlignmentModel>()
+            : null;
 
         if (tiltSeriesSet == null)
             throw new InvalidOperationException("Tilt-series input not found.");
         
         if (!tiltSeriesSet.HasMetadata)
             throw new InvalidOperationException("Tilt-series input must have metadata.");
+
+        // Validate the selected model before copying or changing any tilt-series metadata.
+        string inferenceConfig = DoTraining ? null
+            : GenerateInferenceConfig(modelResource, tiltSeriesSet.HasCtf && UseCtf);
 
         Directory.CreateDirectory(DirectoryPath);
         
@@ -353,6 +411,12 @@ public class AlignMiss : Job, IClusterJob, IItemProgress
         }
         
         #endregion
+
+        if (!DoTraining)
+        {
+            File.WriteAllText(ResConfigPath, inferenceConfig);
+            return;
+        }
 
         List<MissIterationSetting> iterationSettings = new();
 
@@ -390,6 +454,59 @@ public class AlignMiss : Job, IClusterJob, IItemProgress
                        NSteps,
                        "default");
     }
+
+    private string GenerateInferenceConfig(MissAlignmentModel model, bool useCtf)
+    {
+        var general = new Dictionary<string, object>
+        {
+            ["data_directory"] = DirectoryPath,
+            ["apply_ctf"] = useCtf,
+            ["seed"] = 123
+        };
+        var config = new Dictionary<string, object> { ["general"] = general };
+
+        if (!UseGeneralModel)
+        {
+            if (model == null)
+                throw new InvalidOperationException("Connect a trained model run or enable the general pretrained models.");
+            string modelRunDirectory = model.ModelRunDirectory;
+            if (string.IsNullOrWhiteSpace(modelRunDirectory) && !string.IsNullOrWhiteSpace(model.ModelPath))
+                modelRunDirectory = Path.GetDirectoryName(model.ModelPath);
+            if (string.IsNullOrWhiteSpace(modelRunDirectory))
+                throw new InvalidOperationException("The connected model does not identify a training run.");
+            string configPath = string.IsNullOrWhiteSpace(model.ConfigPath)
+                ? Path.Combine(modelRunDirectory, "config.yaml")
+                : model.ConfigPath;
+            if (!File.Exists(configPath))
+                throw new InvalidOperationException("Inference requires the connected model's complete training run, " +
+                    "including config.yaml and iterN/model.ckpt files; a single checkpoint is insufficient.");
+            var trained = YamlSerializer.Deserialize<MissAlignmentConfig>(File.ReadAllBytes(configPath));
+            var iterations = trained?.General?.IterationSettings;
+            if (iterations == null || iterations.Count == 0 || trained.TiltSeriesAlignment == null)
+                throw new InvalidDataException("The connected model run is missing its alignment schedule or patch settings.");
+            for (int i = 1; i <= iterations.Count; i++)
+            {
+                string checkpoint = Path.Combine(modelRunDirectory, $"iter{i}", "model.ckpt");
+                if (!File.Exists(checkpoint))
+                    throw new FileNotFoundException($"The connected model run is missing iteration {i}.", checkpoint);
+            }
+            general["model_run_directory"] = modelRunDirectory;
+            general["iteration_settings"] = iterations.Select(setting => new Dictionary<string, object>
+            {
+                ["downsample"] = setting.Downsample,
+                ["alignment"] = setting.Alignment
+            }).ToArray();
+            config["tilt_series_alignment"] = new Dictionary<string, object>
+            {
+                ["patch_size"] = trained.TiltSeriesAlignment.PatchSize,
+                ["patch_overlap"] = trained.TiltSeriesAlignment.PatchOverlap,
+                ["batch_size"] = trained.TiltSeriesAlignment.BatchSize
+            };
+        }
+        // Omit schedule/model keys for the general models so the CLI uses its pinned defaults.
+        return YamlSerializer.SerializeToString(config);
+    }
+
     private void GenerateConfig(string outputPath, 
                                     string trainingDir,
                                     List<MissIterationSetting> iterations,
