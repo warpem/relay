@@ -37,15 +37,19 @@
                 <div class="queue-item @(isSelected ? "selected" : "")"
                      @onclick="() => SelectQueue(queue)">
                     <span class="queue-name">@queue.Alias</span>
-                    <ConfirmButton Id="@("delete-queue-" + queue.Id)" Class="delete-button"
-                                   Appearance="ButtonAppearance.Transparent"
-                                   IconEnd="@(isSelected ? 
-                                                  new Icons.Regular.Size20.Delete().WithColor("var(--colorNeutralForegroundOnBrand)") :
-                                                  new Icons.Regular.Size20.Delete())"
-                                   Disabled="@(!queue.IsEmpty)"
-                                   Style="@(isSelected ? "color: var(--colorNeutralForegroundOnBrand);" : "")"
-                                   OnClick="@(() => DeleteQueue(queue))"/>
-                    
+                    @* The delete button and its confirmation popover live inside the row; without this, the
+                       confirming click also reaches the row and re-selects the queue being deleted. *@
+                    <span style="display: contents;" @onclick:stopPropagation="true">
+                        <ConfirmButton Id="@("delete-queue-" + queue.Id)" Class="delete-button"
+                                       Appearance="ButtonAppearance.Transparent"
+                                       IconEnd="@(isSelected ?
+                                                      new Icons.Regular.Size20.Delete().WithColor("var(--colorNeutralForegroundOnBrand)") :
+                                                      new Icons.Regular.Size20.Delete())"
+                                       Disabled="@(!queue.IsEmpty)"
+                                       Style="@(isSelected ? "color: var(--colorNeutralForegroundOnBrand);" : "")"
+                                       OnClick="@(() => DeleteQueue(queue))"/>
+                    </span>
+
                     @if (!queue.IsEmpty)
                     {
                         <FluentTooltip Anchor="@("delete-queue-" + queue.Id)">

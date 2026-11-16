@@ -11,12 +11,15 @@ using Refund.Services.Core.DataManager;
 
 namespace Relay.Screens.Overlay.Settings;
 
-public partial class QueueEditor
+public partial class QueueEditor : IDisposable
 {
     [Inject]
     private INotificationService ToastService { get; set; }
 
     private ReadOnlyClusterQueue _selectedQueue;
+    /// <summary>Subscriptions for the whole queue list, held for the component's lifetime.</summary>
+    private readonly List<GroupEventSubscription> _listSubscriptions = new();
+    /// <summary>Subscriptions for the selected queue, replaced on every selection.</summary>
     private readonly List<GroupEventSubscription> _subscriptions = new();
     
     private bool CanMoveQueueUp => _selectedQueue != null && 
@@ -50,49 +53,53 @@ public partial class QueueEditor
     protected override async Task OnInitializedAsync()
     {
         await base.OnInitializedAsync();
-        
-        await SelectQueue(DataManager.ClusterQueues.FirstOrDefault(q => q is ReadOnlyClusterQueue));
+
+        // Queue notifications arrive on thread-pool threads; every handler below hops onto the
+        // renderer's dispatcher before touching component state, so a render never sees
+        // _selectedQueue change underneath it.
+        _listSubscriptions.Add(DataManager.QueueCreated.Add(GroupName.Queue(null), HandleQueueListChanged));
+        _listSubscriptions.Add(DataManager.QueueDeleted.Add(GroupName.Queue(null), HandleQueueDeleted));
+
+        SelectQueue(DataManager.ClusterQueues.FirstOrDefault(q => q is ReadOnlyClusterQueue));
     }
 
-    private async Task SelectQueue(ReadOnlyJobQueue queue)
+    /// <summary>Must run on the renderer's dispatcher (event handler or inside InvokeAsync).</summary>
+    private void SelectQueue(ReadOnlyJobQueue queue)
     {
         _selectedQueue = queue as ReadOnlyClusterQueue;
-        
-        foreach (var sub in _subscriptions)
-            sub.Unsubscribe();
-        _subscriptions.Clear();
-        
-        _subscriptions.Add(DataManager.QueueCreated.Add(GroupName.Queue(null), HandleQueueCreated));
+        _submissionScriptCursorPosition = -1;
+
+        _subscriptions.UnsubscribeAndClear();
 
         if (_selectedQueue != null)
-        {
-            _subscriptions.Add(DataManager.QueueUpdated.Add(GroupName.Queue(queue.Id), HandleQueueUpdated));
-            _subscriptions.Add(DataManager.QueueDeleted.Add(GroupName.Queue(queue.Id), HandleQueueDeleted));
-        }
-        
-        await InvokeAsync(StateHasChanged);
-    }
-    
-    #region Queue events
-    
-    private async Task HandleQueueCreated(GroupEventArgs<ReadOnlyJobQueue> args)
-    {
-        await InvokeAsync(StateHasChanged);
+            _subscriptions.Add(DataManager.QueueUpdated.Add(GroupName.Queue(_selectedQueue.Id), HandleQueueUpdated));
+
+        StateHasChanged();
     }
 
-    private async Task HandleQueueUpdated(GroupEventArgs<ReadOnlyJobQueue> args)
+    public void Dispose()
     {
-        await InvokeAsync(StateHasChanged);
+        _listSubscriptions.UnsubscribeAndClear();
+        _subscriptions.UnsubscribeAndClear();
     }
-    
-    private async Task HandleQueueDeleted(GroupEventArgs<ReadOnlyJobQueue> args)
-    {
-        if (_selectedQueue == args.Object)
-            SelectQueue(null);
-        else
-            await InvokeAsync(StateHasChanged);
-    }
-    
+
+    #region Queue events
+
+    private Task HandleQueueListChanged(GroupEventArgs<ReadOnlyJobQueue> args) =>
+        InvokeAsync(StateHasChanged);
+
+    private Task HandleQueueUpdated(GroupEventArgs<ReadOnlyJobQueue> args) =>
+        InvokeAsync(StateHasChanged);
+
+    private Task HandleQueueDeleted(GroupEventArgs<ReadOnlyJobQueue> args) =>
+        InvokeAsync(() =>
+        {
+            if (_selectedQueue != null && _selectedQueue.Id == args.Object.Id)
+                SelectQueue(null);
+            else
+                StateHasChanged();
+        });
+
     #endregion
     
     #region Queue operations
@@ -105,7 +112,7 @@ public partial class QueueEditor
         };
 
         var newQueue = await DataManager.CreateClusterQueue(template);
-        await SelectQueue(newQueue);
+        SelectQueue(newQueue);
     }
 
     private async Task CopySelectedQueue()
@@ -120,7 +127,7 @@ public partial class QueueEditor
         try
         {
             var newQueue = await DataManager.CreateClusterQueue(template);
-            await SelectQueue(newQueue);
+            SelectQueue(newQueue);
         }
         catch (InvalidOperationException exc)
         {
@@ -141,7 +148,7 @@ public partial class QueueEditor
         }
 
         if (queue.Id == _selectedQueue?.Id)
-            _selectedQueue = null;
+            SelectQueue(null);
     }
 
     private async Task MoveQueueUp()
