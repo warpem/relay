@@ -577,7 +577,7 @@ public sealed class SessionServiceTests
         Assert.True(Assert.Single(tasks,t=>t.TaskId.Contains($"-{training.Index:D8}-")).Priority);
         Assert.False(Assert.Single(tasks,t=>t.TaskId.Contains($"-{other.Index:D8}-")).Priority);
     }
-    private static ulong ModelKeyOf(WarpSession session)=>(ulong)typeof(WarpSession).GetProperty("ModelKey",BindingFlags.Static|BindingFlags.NonPublic)!.GetValue(null)!;
+    private static ulong ModelKeyOf(WarpSession session)=>(ulong)typeof(WarpSession).GetProperty("ModelKey",BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(session)!;
     private static TaskItem[] PendingTasks(QueueLayout layout)=>Directory.GetFiles(layout.Pending,"*.json").Select(p=>TaskItem.FromJson(File.ReadAllText(p))).ToArray();
     [Fact]
     public void NewerModelLeavesDenoisedMoviesCurrent()
@@ -730,6 +730,64 @@ public sealed class SessionServiceTests
         var train=Assert.Single(PendingTasks(layout),t=>t.Stage=="train");
         string previous=(string)train.Main.Single(c=>c.Name==WorkerCommandNames.TrainMovieDenoiser).Content[2];
         Assert.Equal(expected switch{"start"=>start,"current"=>Field<string>(f.Session,"_modelPath"),_=>""},previous);
+    }
+    [Fact]
+    public void TurningObjectErasureOffRedoesDenoisingAndTrainsANewModel()
+    {
+        using var f=new Fixture();InstallModel(f.Session,f.Root,2);var movie=f.AddMovie();movie.DenoiseModel=2;
+        var next=f.Session.Settings with{EraseObjects=false};
+        Assert.Equal("Redo denoising, picking, extraction. Train a new denoiser.",f.Session.GetSettingsImpact(next));
+        f.Session.Apply(next);
+        // The model learned from erased inputs; the next one is trained without erasure.
+        Assert.Equal(0,f.Session.Model);Assert.False(f.Session.HasModel);
+        Assert.Equal(WarpStage.Enhance|WarpStage.Pick|WarpStage.Extract,movie.Stale);
+        f.Manager.Remove(f.Identity);var restored=f.Manager.GetOrCreate(f.Identity);
+        Assert.False(restored.Settings.EraseObjects);Assert.Equal(0,restored.Model);
+        Assert.Equal(WarpStage.Enhance|WarpStage.Pick|WarpStage.Extract,restored.Movies[0].Stale);
+    }
+    [Fact]
+    public void ObjectErasureStaysOnForSessionsSavedBeforeTheOption()
+    {
+        Assert.True(System.Text.Json.JsonSerializer.Deserialize<WarpSettings>("{\"Box\":128}")!.EraseObjects);
+        // A model trained before the option (erasing, as it does by default) is kept after loading.
+        using var f=new Fixture();InstallModel(f.Session,f.Root,2);f.Session.Apply(f.Session.Settings with{CtfMax=f.Session.Settings.CtfMax+1});
+        f.Manager.Remove(f.Identity);Assert.Equal(2,f.Manager.GetOrCreate(f.Identity).Model);
+    }
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void WorkersAreToldToKeepObjectsOnlyWhenErasureIsOff(bool erase)
+    {
+        using var f=new Fixture();string start=Path.Combine(f.Root,"corpus.pt");File.WriteAllText(start,"weights");
+        f.Session.Apply(f.Session.Settings with{EraseObjects=erase,TrainCount=1,DenoiserStart=start});InstallModel(f.Session,f.Root,1);
+        var layout=new QueueLayout(f.Identity.QueueDirectory);layout.EnsureDirectories();var queue=new TaskQueue(layout);
+        var movie=f.AddMovie();movie.Completed.Clear();movie.Done=0;movie.EnhancedPixelSize=5;
+        Invoke(f.Session,"Dispatch",queue,CancellationToken.None);
+        var denoise=Assert.Single(PendingTasks(layout)).Main.Single(c=>c.Name==WorkerCommandNames.MovieDenoise);
+        var trainer=f.AddMovie();trainer.TrainingPairReady=true;
+        SetField(f.Session,"<Running>k__BackingField",true);f.Session.Train();
+        Invoke(f.Session,"Dispatch",queue,CancellationToken.None);
+        var train=Assert.Single(PendingTasks(layout),t=>t.Stage=="train").Main.Single(c=>c.Name==WorkerCommandNames.TrainMovieDenoiser);
+        // Erasing is what workers from before the option do, so then the commands are the ones they know.
+        if(erase){Assert.Equal(5,denoise.Content.Length);Assert.Equal(7,train.Content.Length);}
+        else{Assert.Equal(false,denoise.Content[5]);Assert.Equal(false,train.Content[7]);}
+    }
+    [Fact]
+    public async Task ProcessingRidesOutAQueueFolderThatCannotBeWritten()
+    {
+        // Over NFS the queue folders can fail to read for a moment ("Stale file handle"); a heartbeat folder that is a file
+        // stands in for that. The run must keep going, and resume its heartbeat once the folder is back.
+        using var f=new Fixture();using var cancel=new CancellationTokenSource(TimeSpan.FromMinutes(2));
+        var layout=new QueueLayout(f.Identity.QueueDirectory);
+        var run=f.Manager.RunAsync(f.Identity,f.Session.Settings,cancel.Token);
+        while(!Directory.Exists(layout.Heartbeat)||!Directory.EnumerateFiles(layout.Heartbeat,"tick-*").Any())await Task.Delay(100);
+        Directory.Delete(layout.Heartbeat,true);File.WriteAllText(layout.Heartbeat,"");
+        await Task.Delay(3500);
+        Assert.False(run.IsCompleted);Assert.True(f.Session.Running);Assert.Equal("",Field<string>(f.Session,"_runProblem"));
+        File.Delete(layout.Heartbeat);Directory.CreateDirectory(layout.Heartbeat);
+        while(!Directory.EnumerateFiles(layout.Heartbeat,"tick-*").Any())await Task.Delay(100);
+        cancel.Cancel();await run;
+        Assert.False(f.Session.Running);Assert.Equal("",Field<string>(f.Session,"_runProblem"));
     }
     [Fact]
     public void MissingStartingModelIsRejected()

@@ -154,6 +154,7 @@
                 <div class="field-grid">
                     <div class="advanced-label">Advanced</div>
                     @N("TrainingEpochs", "Training epochs", 1, 1000, 1)
+                    @B("EraseObjects", "Erase carbon, ice and gold")
                     @B("FineTune", "Periodic fine-tuning")
                     @if (Draft.FineTune) { @N("FineTuneEvery", "Fine-tune every", 1, 100000, 100, "movies") }
                 </div>
@@ -255,7 +256,7 @@
     private bool IsDisabled(string property) => Locked ||
         (!Draft.PickingEnabled && property is "Diameter" or "MinSeparation" or "Box" or "RescaleParticles" or "RescaledBox") ||
         (!Draft.CorrectGain && property is "GainPath" or "GainFlipX" or "GainFlipY" or "GainTranspose") ||
-        (!Draft.Denoise && property is "TrainCount" or "FineTune" or "FineTuneEvery" or "TrainingEpochs" or "DenoiserStart");
+        (!Draft.Denoise && property is "TrainCount" or "FineTune" or "FineTuneEvery" or "TrainingEpochs" or "DenoiserStart" or "EraseObjects");
     private RenderFragment B(string property, string label) => builder => {
         builder.OpenElement(0, "div"); builder.AddAttribute(1, "class", Row("setting-row boolean-setting", property)); builder.AddAttribute(2, "data-setting", property); builder.SetKey(property);
         builder.OpenElement(3, "label"); builder.AddAttribute(4, "for", _rootId + property); builder.AddContent(5, label); builder.CloseElement();

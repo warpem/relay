@@ -42,6 +42,27 @@ public class WorkerCommandContractTests
     }
 
     [Fact]
+    public void KeepingObjectsIsAnExtraArgumentOnlyWhenAsked()
+    {
+        var task = new TaskItem
+        {
+            Main =
+            [
+                WorkerCommands.MovieDenoise("movie.eer", "models/2.pt", 1.35f, .9f, .1f, eraseObjects: false),
+                WorkerCommands.TrainMovieDenoiser(["movie.eer"], "models/2.pt", "", 4, .9f, .1f, 1.35f, eraseObjects: false),
+                WorkerCommands.MovieDenoise("movie.eer", "models/2.pt", 1.35f, .9f, .1f),
+                WorkerCommands.TrainMovieDenoiser(["movie.eer"], "models/2.pt", "", 4, .9f, .1f, 1.35f)
+            ]
+        };
+        var decoded = TaskItem.FromJson(task.ToJson());
+        Assert.Equal(false, decoded.Main[0].Content[5]);
+        Assert.Equal(false, decoded.Main[1].Content[7]);
+        // Erasing (the default) sends the commands workers from before the option know.
+        Assert.Equal(5, decoded.Main[2].Content.Length);
+        Assert.Equal(7, decoded.Main[3].Content.Length);
+    }
+
+    [Fact]
     public void InitialTrainingDoesNotSerializeNullCommandArguments()
     {
         var task = new TaskItem { Main = [WorkerCommands.TrainMovieDenoiser(["a.eer"], "first.pt", null!, 8, .9f, .1f, 1)] };

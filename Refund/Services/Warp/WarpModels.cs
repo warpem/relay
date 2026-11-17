@@ -86,6 +86,12 @@ public sealed record WarpSettings
     public int TrainingEpochs { get; init; } = 4;
     /// <summary>A trained Noise2Mic model the session's first training fine-tunes, e.g. the BoxNet corpus model; "" trains from scratch.</summary>
     public string DenoiserStart { get; init; } = "";
+    /// <summary>
+    /// Whether high-contrast objects (carbon, ice crystals, gold) found on each average are replaced with matched noise
+    /// before training and denoising, so the denoiser learns only the ice around them. Changing it redoes denoising and
+    /// trains a new model: a model trained one way does not fit inputs prepared the other.
+    /// </summary>
+    public bool EraseObjects { get; init; } = true;
 
 }
 public sealed record WarpMovie

@@ -195,7 +195,10 @@ public sealed partial class WarpSession : IDisposable
             bool processingChanged=StageOrder.Any(stage=>_stageKeys[stage]!=nextKeys[stage]);
             // The histogram shows every pick's scores, so only new picks make it start over (not new score bounds).
             bool picksChanged=_stageKeys["pick"]!=nextKeys["pick"];
+            bool modelChanged=Model>0&&ModelKeyFor(next)!=ModelKey;
             Settings=next;RecomputeStageKeys();
+            // The model learned from inputs prepared the old way; the next one trains from the starting model (or scratch).
+            if(modelChanged)ForgetModel();
             if (processingChanged)
             {
                 foreach (var movie in _movies.Where(m => m.Failed))
@@ -213,7 +216,8 @@ public sealed partial class WarpSession : IDisposable
         if(next==Settings)return "";
         var before=BuildStageKeys(Settings);var after=BuildStageKeys(NormalizeSettings(next));
         string[] changed=StageOrder.Where(k=>before[k]!=after[k]).ToArray();
-        if(changed.Length>0)return "Redo "+string.Join(", ",changed.Select(StageLabel))+".";
+        string retrain=Model>0&&ModelKeyFor(NormalizeSettings(next))!=ModelKey?" Train a new denoiser.":"";
+        if(changed.Length>0)return "Redo "+string.Join(", ",changed.Select(StageLabel))+"."+retrain;
         // Optics groups are made when exporting: they change exports run from now on, never processing.
         return ChangedSettings(next,Settings).All(EpuSettings.Contains)?"Retain current results; exports from now on use the new optics groups.":"Update discovery and training schedule; retain current results.";
     }
@@ -245,11 +249,15 @@ public sealed partial class WarpSession : IDisposable
     /// </summary>
     public const decimal DeconvolutionStrength=.9m,DeconvolutionFalloff=.1m;
     /// <summary>
-    /// What a trained denoiser depends on: the deconvolution its inputs went through. Motion, averaging and CTF changes
-    /// redo deconvolution and denoising with the same model; a new model can still be trained on demand. Sessions whose
-    /// model was trained with the deconvolution formerly set otherwise forget it on load.
+    /// What a trained denoiser depends on: the deconvolution its inputs went through, and whether objects were erased from
+    /// them. Motion, averaging and CTF changes redo deconvolution and denoising with the same model; a new model can still
+    /// be trained on demand. Sessions whose model was trained with the deconvolution formerly set otherwise forget it on
+    /// load; changing <see cref="WarpSettings.EraseObjects"/> forgets it on <see cref="Apply"/>.
     /// </summary>
-    private static ulong ModelKey=>Fingerprint(new{DeconvolutionStrength,DeconvolutionFalloff});
+    private ulong ModelKey=>ModelKeyFor(Settings);
+    private static ulong ModelKeyFor(WarpSettings s)=>s.EraseObjects
+        ?Fingerprint(new{DeconvolutionStrength,DeconvolutionFalloff})
+        :Fingerprint(new{DeconvolutionStrength,DeconvolutionFalloff,s.EraseObjects});
     /// <summary>Denoised movies whose model is older than the current one.</summary>
     public int OlderModelMovies=>Settings.Denoise&&HasModel?_view.Count(m=>!m.Failed&&Current(m,"denoise")&&m.DenoiseModel<Model):0;
     /// <summary>Outdates denoising, picking and extraction for every movie denoised with an older model.</summary>

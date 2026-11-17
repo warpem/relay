@@ -51,7 +51,10 @@ public sealed partial class WarpSession
         ulong ctf=Fingerprint(new{fit,global::Warp.Tools.CtfSignal.Revision});
         legacyPrepare=Fingerprint(new{average,ctf=fit,DeconvolutionStrength,DeconvolutionFalloff,PreparationRevision=2});
         // The denoiser deconvolves each average on the fly with the movie's current CTF; without denoising, picking uses the average.
-        ulong denoise=s.Denoise?Fingerprint(new{average,ctf=fit,s.Denoise,DeconvolutionStrength,DeconvolutionFalloff,global::Warp.MovieDenoising.PreparationRevision}):Fingerprint(new{average,s.Denoise});
+        // Erasing objects is the default and stays out of the key, so sessions from before the option keep their results.
+        ulong denoise=!s.Denoise?Fingerprint(new{average,s.Denoise}):s.EraseObjects
+            ?Fingerprint(new{average,ctf=fit,s.Denoise,DeconvolutionStrength,DeconvolutionFalloff,global::Warp.MovieDenoising.PreparationRevision})
+            :Fingerprint(new{average,ctf=fit,s.Denoise,DeconvolutionStrength,DeconvolutionFalloff,global::Warp.MovieDenoising.PreparationRevision,s.EraseObjects});
         ulong pick=Fingerprint(new{denoise,s.Diameter,s.MinSeparation,global::Warp.Tools.BlobPicker.Revision});
         // Extraction keeps only the picks within the score bounds, so new bounds redo extraction but not picking.
         ulong extract=Fingerprint(new{raw,motion,ctf=fit,pick,s.Box,s.TotalDose,s.SkipFirst,s.SkipLast,s.ParticleBounds,global::Warp.Tools.PickSelection.Revision});
@@ -64,6 +67,8 @@ public sealed partial class WarpSession
     /// <summary>Denoising, and the picks and particles that follow from it, made with a model older than the redo floor.</summary>
     private bool RedoneByModel(WarpMovie movie,string stage)=>Settings.Denoise&&_minDenoiseModel>0&&stage is "denoise" or "pick" or "extract"&&movie.DenoiseModel<_minDenoiseModel;
 
+    /// <summary>How long the task queue may stay unreadable before processing stops; workers give up on a silent coordinator after 2 minutes.</summary>
+    internal static readonly TimeSpan QueueFailureTolerance=TimeSpan.FromMinutes(5);
     internal async Task RunAsync(WarpSettings settings,CancellationToken cancellationToken)
     {
         lock(_sync)
@@ -84,18 +89,33 @@ public sealed partial class WarpSession
         try
         {
             using var scheduler=new Scheduler(layout,queue,new ExternalProvisioner(),1,logDir:Path.Combine(Identity.SessionDirectory,"logs"));
+            DateTime? queueFailingSince=null,lastQueueWarning=null;
             while(true)
             {
                 token.ThrowIfCancellationRequested();
-                scheduler.Tick();
-                DiscoverBatch(token);
-                CollectCompletions(layout,token);
-                lock(_sync)
+                try
                 {
-                    token.ThrowIfCancellationRequested();
-                    Dispatch(queue,token);
-                    UpdateTrainingProgress();
-                    if(_changedRows.Count>0||_processingChanged){RefreshStates();Save();_processingChanged=false;}
+                    scheduler.Tick();
+                    DiscoverBatch(token);
+                    CollectCompletions(layout,token);
+                    lock(_sync)
+                    {
+                        token.ThrowIfCancellationRequested();
+                        Dispatch(queue,token);
+                        UpdateTrainingProgress();
+                        if(_changedRows.Count>0||_processingChanged){RefreshStates();Save();_processingChanged=false;}
+                    }
+                    if(queueFailingSince is {} since)_logger.Information("Warp session {Session}: the task queue is readable again after {Seconds:N0} s",Identity.Key,(DateTime.UtcNow-since).TotalSeconds);
+                    queueFailingSince=lastQueueWarning=null;
+                }
+                // The queue lives on a shared filesystem that workers on other hosts change all the time; over NFS, reading a
+                // folder while it changes can fail ("Stale file handle"). Every step above can be repeated, so the next tick
+                // tries again; only a queue that stays unreadable stops processing.
+                catch(IOException ex) when(!token.IsCancellationRequested)
+                {
+                    var now=DateTime.UtcNow;queueFailingSince??=now;
+                    if(now-queueFailingSince>QueueFailureTolerance)throw;
+                    if(lastQueueWarning==null||now-lastQueueWarning>TimeSpan.FromSeconds(30)){_logger.Warning(ex,"Warp session {Session}: task queue access failed, trying again: {Message}",Identity.Key,ex.Message);lastQueueWarning=now;}
                 }
                 UpdateHistogramBatch();
                 Publish();
@@ -182,7 +202,7 @@ public sealed partial class WarpSession
             {
                 var sample=_movies.Where(TrainingReady).TakeLast(Settings.TrainCount).Select(m=>m.ProcessingPath).ToArray();
                 _trainingOutput=Path.Combine(Identity.SessionDirectory,"models",$"model-{Guid.NewGuid():N}.pt");Directory.CreateDirectory(Path.GetDirectoryName(_trainingOutput));
-                var task=MakeTask("train",-1,[WorkerCommands.TrainMovieDenoiser(sample,_trainingOutput,HasModel?_modelPath:string.IsNullOrWhiteSpace(Settings.DenoiserStart)?null:Settings.DenoiserStart,Settings.TrainingEpochs,Noise2MicTorch.DeconvolutionStrength,Noise2MicTorch.DeconvolutionFalloff,(float)Settings.TargetPixelSize)]);
+                var task=MakeTask("train",-1,[WorkerCommands.TrainMovieDenoiser(sample,_trainingOutput,HasModel?_modelPath:string.IsNullOrWhiteSpace(Settings.DenoiserStart)?null:Settings.DenoiserStart,Settings.TrainingEpochs,Noise2MicTorch.DeconvolutionStrength,Noise2MicTorch.DeconvolutionFalloff,(float)Settings.TargetPixelSize,Settings.EraseObjects)]);
                 // Training shares a GPU badly (about 3x slower beside three processing workers), so it takes its GPU alone.
                 task.Priority=true;task.Exclusive=true;queue.Enqueue(task);
                 _inflight[task.TaskId]=new(-1,"train",ModelKey,_trainingOutput);Training=true;TrainingPercent=0;TrainingProgress=null;_trainRequested=false;_lastTrainingCount=prepared;
@@ -301,7 +321,7 @@ public sealed partial class WarpSession
                 // Without denoising, picking reads the average, whose preview the average stage made.
                 if(!Settings.Denoise)break;
                 string output=new Movie(m.ProcessingPath).AverageDenoisedPath;
-                commands.Add(WorkerCommands.MovieDenoise(m.ProcessingPath,_modelPath,(float)Settings.TargetPixelSize,Noise2MicTorch.DeconvolutionStrength,Noise2MicTorch.DeconvolutionFalloff));
+                commands.Add(WorkerCommands.MovieDenoise(m.ProcessingPath,_modelPath,(float)Settings.TargetPixelSize,Noise2MicTorch.DeconvolutionStrength,Noise2MicTorch.DeconvolutionFalloff,Settings.EraseObjects));
                 commands.Add(WorkerCommands.MicrographCreatePreview(output,PreviewPath(output),PreviewSize));break;
             }
             case "pick":string enhanced=EnhancedPath(new Movie(m.ProcessingPath));commands.Add(WorkerCommands.MicrographPickBlobs(enhanced,(float)(Settings.Diameter/(decimal)m.EnhancedPixelSize/2),0,(float)(Settings.Diameter*Settings.MinSeparation/(decimal)m.EnhancedPixelSize)));break;
