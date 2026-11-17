@@ -55,6 +55,10 @@ public class BeamInit3D : BeamParticleJob
         helpText: "Positive and negative random Gaussians per starting model.")]
     [RelayProperty] public int BlobCount { get; set; } = 40;
 
+    [UiDecimal("class-similarity", "Class similarity", min: 0, max: 1, stepSize: 0.05, isAdvanced: true,
+        helpText: "Early class-assignment sharing between initial models. 0 disables sharing; 1 maximizes sharing.")]
+    [RelayProperty] public decimal ClassSimilarity { get; set; } = 0.5m;
+
     [RelayProperty, Clearable] public bool FinalAssignmentAvailable { get; set; }
     public override Refund.Services.Storage.IntermediateRule IntermediateRule => Refund.Services.Storage.IntermediateRules.BeamInit3D;
     public override string IterationMetadataDirectory(int iteration) => Path.Combine(BeamDirectory, "warp_metadata");
@@ -87,6 +91,7 @@ public class BeamInit3D : BeamParticleJob
         var errors = base.ValidateInputs();
         if (NClasses < 1) errors[nameof(NClasses)] = "At least one class is required.";
         if (Updates < 1) errors[nameof(Updates)] = "Updates must be positive.";
+        if (ClassSimilarity is < 0 or > 1) errors[nameof(ClassSimilarity)] = "Class similarity must be between 0 and 1.";
         if (WorkingBox < 16 || WorkingBox % 2 != 0) errors[nameof(WorkingBox)] = "Box size must be even and at least 16 pixels.";
         if (FinalResolution <= 0 || FinalResolution > InitialResolution)
             errors[nameof(FinalResolution)] = "Final resolution must be positive and no coarser than the initial resolution.";

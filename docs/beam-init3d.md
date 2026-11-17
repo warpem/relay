@@ -13,8 +13,9 @@ sampling. Classification now exposes the same box-size control, defaulting to
 128. Refinement keeps its existing grid policy.
 
 Advanced controls include maximum particles for short trials, starting blob
-count, pose marginalization temperature, hardware batch size and additional
-arguments. The optional first-CTF-peak override applies only to ordinary images.
+count, class similarity, hardware batch size and additional arguments. Class
+similarity passes `--class-similarity` (default 0.5, range 0–1) to control early
+class-assignment sharing; 0 disables sharing. The optional first-CTF-peak override applies only to ordinary images.
 The job defaults to one GPU and eight CPU workers, with node-local particle
 scratch available as in refinement/classification.
 
