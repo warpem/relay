@@ -188,3 +188,32 @@ window.relayPadNumberMask = function (id) {
     // Re-resolving commits, which pads the loaded value now. A field being typed in pads when it blurs.
     if (!host.matches(':focus-within')) mask.value = mask.value;
 };
+
+// Copies text to the clipboard and resolves to whether it worked. navigator.clipboard only exists in secure contexts
+// (HTTPS or localhost), and Relay is often reached over plain HTTP on a cluster host, so fall back to execCommand.
+window.relayCopyText = async function (text) {
+    try {
+        if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(text);
+            return true;
+        }
+    } catch (e) {
+        // Fall through to the legacy path, e.g. when clipboard permission is denied.
+    }
+
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.top = '-1000px';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    try {
+        area.select();
+        return document.execCommand('copy');
+    } catch (e) {
+        return false;
+    } finally {
+        document.body.removeChild(area);
+    }
+};

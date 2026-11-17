@@ -1,0 +1,29 @@
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Microsoft.JSInterop
+@inject IJSRuntime JS
+
+@* Rendered under the message of every error toast (see RelayNotificationService). *@
+<div class="relay-error-toast-actions">
+    <FluentButton Appearance="ButtonAppearance.Subtle" Size="ButtonSize.Small" OnClick="CopyAsync">
+        @(_copied ? "Copied" : "Copy details")
+    </FluentButton>
+</div>
+
+@code {
+    /// <summary>The full text to copy: title and message.</summary>
+    [Parameter] public string Text { get; set; } = "";
+
+    private bool _copied;
+
+    private async Task CopyAsync()
+    {
+        try
+        {
+            _copied = await JS.InvokeAsync<bool>("relayCopyText", Text);
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
+        {
+            _copied = false;
+        }
+    }
+}

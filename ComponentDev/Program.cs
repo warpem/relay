@@ -20,6 +20,10 @@ builder.Services.AddFluentUIComponents(options =>
     options.DefaultValues.For<FluentBadge>().Set(p => p.Shape, BadgeShape.Rounded);
 });
 
+// Error toasts stay until dismissed and can be copied. Registered after AddFluentUIComponents so it replaces
+// Fluent's INotificationService.
+builder.Services.AddScoped<Microsoft.FluentUI.AspNetCore.Components.INotificationService, Refund.Services.RelayNotificationService>();
+
 builder.Services.AddRazorComponents()
                 .AddInteractiveServerComponents();
 

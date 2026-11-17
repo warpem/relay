@@ -1,5 +1,6 @@
 @page "/ErrorBoundary"
 @using Refund.Components
+@inject INotificationService ToastService
 
 <PageTitle>RelayErrorBoundary</PageTitle>
 
@@ -10,6 +11,13 @@
         Outside every boundary: <span id="outside-counter">@_outsideClicks</span>
         <FluentButton Id="outside-button" OnClick="() => _outsideClicks++">Still alive?</FluentButton>
     </div>
+
+    <section>
+        <h3>Toasts</h3>
+        <FluentButton Id="toast-error-short" OnClick="@(() => ToastService.ShowErrorToastAsync("Couldn't create job: input port is not connected"))">Short error</FluentButton>
+        <FluentButton Id="toast-error-long" OnClick="ShowLongError">Long error with details</FluentButton>
+        <FluentButton Id="toast-success" OnClick="@(() => ToastService.ShowSuccessToastAsync("Saved"))">Success (still times out)</FluentButton>
+    </section>
 
     <section>
         <h3>Default</h3>
@@ -51,4 +59,8 @@
     private int _outsideClicks;
     private int _version;
     private bool _closed;
+
+    private Task ShowLongError() => ToastService.ShowErrorToastAsync(
+        "Couldn't queue job J42: the managed queue rejected the reservation because the requested 4 GPUs exceed the 2 GPUs configured on this host",
+        "System.InvalidOperationException at Refund.JobQueues.ManagedQueueRules.ValidateReservation(ClusterQueue queue, ResourceRequest request) in /src/Refund/JobQueues/ManagedQueueRules.cs:line 118");
 }
