@@ -51,6 +51,21 @@ public partial class TopBar : ComponentBase, IDisposable
         await Session.SetRightPanelCollapsed(Session.IsRightPanelExpanded());
     }
 
+    /// <summary>
+    /// Fallback action of the breadcrumbs' error boundary. TopBar is outside that boundary, so this must not throw.
+    /// </summary>
+    private async Task GoHomeAsync()
+    {
+        try
+        {
+            await Session.NavigateToAsync(new());
+        }
+        catch (Exception exc)
+        {
+            Serilog.Log.ForContext<TopBar>().Error(exc, "Couldn't navigate home from the navigation fallback");
+        }
+    }
+
     private async Task HandleRightPanelCollapsedChanged()
     {
         await InvokeAsync(StateHasChanged);

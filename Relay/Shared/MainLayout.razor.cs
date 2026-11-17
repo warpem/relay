@@ -1,4 +1,6 @@
 using Microsoft.AspNetCore.Components;
+using Microsoft.FluentUI.AspNetCore.Components;
+using Refund.Services;
 using Refund.Services.Core.DataManager;
 using Refund.Services.Core.Session;
 
@@ -139,6 +141,63 @@ public partial class MainLayout
     {
         await InvokeAsync(StateHasChanged);
     }
+
+    #region Error recovery actions
+
+    [Inject] private JobEditorService JobEditor { get; set; } = default!;
+    [Inject] private INotificationService ToastService { get; set; } = default!;
+
+    // These run from the region error boundaries' fallback buttons. Their handlers belong to the layout, which no
+    // region boundary covers, so they must not throw.
+
+    private Task GoHomeAsync() => RecoverAsync(() => Session.NavigateToAsync(new()));
+
+    /// <summary>Navigates to the parent of the current location: folder or factory instance → view → space → project → home.</summary>
+    private Task GoUpAsync() => RecoverAsync(() =>
+    {
+        var request = new NavigationRequest { ProjectId = Session.ProjectId };
+        if (Session.FolderId != null || Session.FactoryInstanceId != null)
+        {
+            request.SpaceId = Session.SpaceId;
+            request.ViewId = Session.ViewId;
+        }
+        else if (Session.ViewId != null || Session.FactoryDefinitionId != null)
+            request.SpaceId = Session.SpaceId;
+        else if (Session.SpaceId == null)
+            request.ProjectId = null;
+
+        return Session.NavigateToAsync(request);
+    });
+
+    private Task CloseJobAsync() => RecoverAsync(() => Session.NavigateToAsync(new()
+    {
+        ProjectId = Session.ProjectId,
+        SpaceId = Session.SpaceId,
+        ViewId = Session.ViewId,
+        FolderId = Session.FolderId,
+        FactoryInstanceId = Session.FactoryInstanceId,
+        JobId = null,
+        Overlay = Session.CurrentOverlay
+    }));
+
+    private Task CloseOverlayAsync() => RecoverAsync(() => Session.CloseOverlayAsync());
+
+    private Task CloseEditorAsync() => RecoverAsync(() => JobEditor.SetJob(null));
+
+    private async Task RecoverAsync(Func<Task> action)
+    {
+        try
+        {
+            await action();
+        }
+        catch (Exception exc)
+        {
+            Serilog.Log.ForContext<MainLayout>().Error(exc, "Error recovery action failed");
+            _ = ToastService.ShowErrorToastAsync("That didn't work either: " + exc.Message);
+        }
+    }
+
+    #endregion
 
     /// <summary>
     /// Performs cleanup by unsubscribing from session events.

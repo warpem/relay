@@ -45,3 +45,18 @@
     font-size: var(--fontSizeBase200, 12px);
     white-space: pre-wrap;
 }
+
+.relay-error-boundary.inline {
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.2rem 0.5rem;
+    overflow: hidden;
+    white-space: nowrap;
+    font-size: var(--fontSizeBase200, 12px);
+}
+
+.relay-error-boundary.inline .relay-error-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}

@@ -8,6 +8,7 @@
 @using Relay.Screens.Overlay.Job
 @using Relay.Screens.Overlay.Queues
 @using Relay.Screens.Overlay.Settings
+@using Refund.Components
 @inherits LayoutComponentBase
 @inject RelaySession Session
 @inject DataManager DataManager
@@ -30,17 +31,39 @@
             @if (Session.IsAuthenticated)
             {
                 <div class="top-panel" style="@_topPanelStyle">
+                    @* TopBar wraps only its breadcrumbs in a boundary, so the user name, theme and panel buttons survive. *@
                     <TopBar @key="@("TopBar")" />
                 </div>
 
                 <div style="display: flex; flex-wrap: nowrap; width: 100%; height: 100%;">
                     <div class="left-panel" style="@_leftPanelStyle">
-                        <LeftBar @key="@("LeftBar")" />
+                        <RelayErrorBoundary Region="Sidebar" Compact="true">
+                            <ChildContent>
+                                <LeftBar @key="@("LeftBar")" />
+                            </ChildContent>
+                            <ErrorActions>
+                                <FluentButton Size="ButtonSize.Small" OnClick="@(() => NavigationManager.NavigateTo("/process-logout", forceLoad: true))">Sign out</FluentButton>
+                            </ErrorActions>
+                        </RelayErrorBoundary>
                     </div>
 
                     <div class="center-panel" style="@_centerPanelStyle">
                         <div class="main-content">
-                            @Body
+                            @* Each region below fails on its own: the bars stay usable to navigate away. Region
+                               boundaries reset on navigation (jobs and overlays don't count, so opening one
+                               doesn't make a broken screen throw again). *@
+                            <RelayErrorBoundary Region="This page" ResetOnNavigation="true" Style="margin: 1rem;">
+                                <ChildContent>
+                                    @Body
+                                </ChildContent>
+                                <ErrorActions>
+                                    @if (Session.ProjectId != null)
+                                    {
+                                        <FluentButton OnClick="GoUpAsync">Up one level</FluentButton>
+                                    }
+                                    <FluentButton OnClick="GoHomeAsync">Home</FluentButton>
+                                </ErrorActions>
+                            </RelayErrorBoundary>
                         </div>
 
                         @if (Session.Job != null)
@@ -50,13 +73,23 @@
                             </PageTitle>
 
                             <div class="overlay-content" style="z-index: 10;">
-                                <OverlayJob @key="@("OverlayJob")" />
+                                <RelayErrorBoundary Region="The job viewer" ResetKey="@Session.JobId" Style="margin: 1rem;">
+                                    <ChildContent>
+                                        <OverlayJob @key="@("OverlayJob")" />
+                                    </ChildContent>
+                                    <ErrorActions>
+                                        <FluentButton OnClick="CloseJobAsync">Close job</FluentButton>
+                                    </ErrorActions>
+                                </RelayErrorBoundary>
                             </div>
                         }
 
                         @if (Session.CurrentOverlay != OverlayScreenType.None)
                         {
                             <div class="overlay-content" style="z-index: 10;">
+                                @* The fallback needs its own Close: the overlay's close button goes down with it. *@
+                                <RelayErrorBoundary Region="This screen" ResetKey="@Session.CurrentOverlay" Style="margin: 1rem;">
+                                    <ChildContent>
                                 @switch (Session.CurrentOverlay)
                                 {
                                     case OverlayScreenType.Queues:
@@ -87,6 +120,11 @@
 
                                         break;
                                 }
+                                    </ChildContent>
+                                    <ErrorActions>
+                                        <FluentButton OnClick="CloseOverlayAsync">Close</FluentButton>
+                                    </ErrorActions>
+                                </RelayErrorBoundary>
                             </div>
                         }
                         else if (Session.Job == null && Session.Folder != null)
@@ -98,7 +136,18 @@
                     @if (Session.IsRightPanelExpanded())
                     {
                         <div class="right-panel" style="@_rightPanelStyle">
-                            <RightDrawer @key="@("RightDrawer")" />
+                            <RelayErrorBoundary Region="This panel" Compact="true" ResetOnNavigation="true" Style="margin: 0.5rem;">
+                                <ChildContent>
+                                    <RightDrawer @key="@("RightDrawer")" />
+                                </ChildContent>
+                                <ErrorActions>
+                                    @if (JobEditor.IsActive)
+                                    {
+                                        @* Without this an editor that fails on its job fails again right after Retry. *@
+                                        <FluentButton Size="ButtonSize.Small" OnClick="CloseEditorAsync">Close editor</FluentButton>
+                                    }
+                                </ErrorActions>
+                            </RelayErrorBoundary>
                         </div>
                     }
                 </div>

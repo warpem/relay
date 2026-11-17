@@ -414,6 +414,9 @@ public partial class Breadcrumbs : IDisposable
     /// </summary>
     public void Dispose()
     {
+        // The navigation error boundary recreates this component on every reset; leaked data subscriptions would
+        // keep calling into the dead instance.
+        _subscriptions.UnsubscribeAndClear();
         Session.OnMainChanged -= HandleMainChanged;
         Session.OnFolderChanged -= HandleFolderChanged;
         Session.OnFactoryDefinitionChanged -= HandleFactoryContextChanged;

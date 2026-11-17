@@ -108,3 +108,33 @@ html, body {
     top: 0.75rem;
     cursor: pointer;
 }
+
+/* Fallback of the outermost error boundary (Routes.razor), shown when the layout itself failed. */
+.relay-fatal-error {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    padding: 2rem;
+    text-align: center;
+    background-color: var(--colorNeutralBackground2, #f5f5f5);
+    color: var(--colorNeutralForeground1, #242424);
+}
+
+.relay-fatal-error p {
+    max-width: 40rem;
+    overflow-wrap: anywhere;
+    color: var(--colorNeutralForeground2, #424242);
+}
+
+.relay-fatal-error button {
+    padding: 0.4rem 1.25rem;
+    border: 1px solid var(--colorNeutralStroke1, #d1d1d1);
+    border-radius: 4px;
+    background-color: var(--colorNeutralBackground1, #fff);
+    color: inherit;
+    cursor: pointer;
+}

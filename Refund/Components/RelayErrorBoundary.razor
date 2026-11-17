@@ -9,6 +9,14 @@ else if (ErrorContent is not null)
 {
     @ErrorContent(CurrentException)
 }
+else if (Inline)
+{
+    <div class="relay-error-boundary inline" role="alert" style="@Style" title="@CurrentException.Message">
+        <span class="relay-error-title">@(Region ?? "This part of the page") couldn't be displayed</span>
+        <FluentButton Size="ButtonSize.Small" OnClick="Recover">Retry</FluentButton>
+        @ErrorActions
+    </div>
+}
 else
 {
     <div class="relay-error-boundary @(Compact ? "compact" : "")" role="alert" style="@Style">

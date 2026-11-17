@@ -36,6 +36,12 @@ public partial class RelayErrorBoundary : ErrorBoundaryBase, IDisposable
     /// <summary>Renders a one-line message with a small Retry button and no stack trace, for cards and fields.</summary>
     [Parameter] public bool Compact { get; set; }
 
+    /// <summary>
+    /// Renders a single row (title, Retry and actions; the message goes in the tooltip) for tight spots such as
+    /// the top bar. Takes precedence over <see cref="Compact"/>.
+    /// </summary>
+    [Parameter] public bool Inline { get; set; }
+
     /// <summary>Additional buttons shown next to Retry in the default error UI, e.g. "Close".</summary>
     [Parameter] public RenderFragment? ErrorActions { get; set; }
 

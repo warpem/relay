@@ -1,10 +1,20 @@
 @using Refund.Services.Core.Session
+@using Refund.Components
 @using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
 
 <div class="top-bar">
     
     <div class="breadcrumb-scroll">
-        <Breadcrumbs/>
+        @* The breadcrumbs are the main way out of a broken screen, so they must not die with it. TopBar itself
+           never re-renders on navigation, hence ResetOnNavigation. *@
+        <RelayErrorBoundary Region="Navigation" Inline="true" ResetOnNavigation="true">
+            <ChildContent>
+                <Breadcrumbs/>
+            </ChildContent>
+            <ErrorActions>
+                <FluentButton Size="ButtonSize.Small" OnClick="GoHomeAsync">Home</FluentButton>
+            </ErrorActions>
+        </RelayErrorBoundary>
     </div>
 
     <div class="top-bar-actions">

@@ -1,7 +1,24 @@
+@using Refund.Components
+@inject NavigationManager NavigationManager
+
 <Router AppAssembly="typeof(Program).Assembly">
     <Found Context="routeData">
-        <RouteView RouteData="routeData" DefaultLayout="typeof(Shared.MainLayout)" />
-        <FocusOnNavigate RouteData="routeData" Selector="h1" />
+        @* Last line of defence: the only boundary that catches failures in MainLayout itself (e.g. session
+           initialization). Region boundaries inside the layout handle everything else. Recovery is a full reload,
+           because the layout's own state can't be trusted after it failed. *@
+        <RelayErrorBoundary Region="Relay">
+            <ChildContent>
+                <RouteView RouteData="routeData" DefaultLayout="typeof(Shared.MainLayout)" />
+                <FocusOnNavigate RouteData="routeData" Selector="h1" />
+            </ChildContent>
+            <ErrorContent Context="exception">
+                <div class="relay-fatal-error" role="alert">
+                    <h2>Relay ran into a problem</h2>
+                    <p>@exception.Message</p>
+                    <button type="button" @onclick="Reload">Reload</button>
+                </div>
+            </ErrorContent>
+        </RelayErrorBoundary>
     </Found>
     <NotFound>
         <LayoutView Layout="typeof(Shared.MainLayout)">
@@ -9,3 +26,7 @@
         </LayoutView>
     </NotFound>
 </Router>
+
+@code {
+    private void Reload() => NavigationManager.NavigateTo(NavigationManager.Uri, forceLoad: true);
+}
