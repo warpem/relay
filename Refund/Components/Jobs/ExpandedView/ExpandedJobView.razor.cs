@@ -26,6 +26,8 @@ public partial class ExpandedJobView : IDisposable
         base.OnInitialized();
         
         Service.OnJobChanged += HandleJobChanged;
+        Service.OnIterationChanged += HandleIterationChanged;
+        Service.OnJobUpdated += HandleJobUpdated;
     }
 
     /// <summary>
@@ -33,9 +35,30 @@ public partial class ExpandedJobView : IDisposable
     /// Forces the component to re-render with the new job information.
     /// </summary>
     /// <param name="job">The newly selected job</param>
-    private async Task HandleJobChanged(ReadOnlyJob job)
+    private Task HandleJobChanged(ReadOnlyJob job) => RefreshAsync();
+
+    /// <summary>
+    /// Re-renders so the job view's error boundary sees the new iteration and can give the view another try.
+    /// </summary>
+    private Task HandleIterationChanged(int iteration) => RefreshAsync();
+
+    /// <summary>
+    /// Re-renders so the job view's error boundary sees status changes (e.g. outputs finished being written).
+    /// </summary>
+    private Task HandleJobUpdated() => RefreshAsync();
+
+    /// <summary>
+    /// The service awaits its handlers one after another and stops at the first throw, so this never throws.
+    /// </summary>
+    private async Task RefreshAsync()
     {
-        await InvokeAsync(StateHasChanged);
+        try
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (ObjectDisposedException)
+        {
+        }
     }
     
     /// <summary>
@@ -44,5 +67,7 @@ public partial class ExpandedJobView : IDisposable
     public void Dispose()
     {
         Service.OnJobChanged -= HandleJobChanged;
+        Service.OnIterationChanged -= HandleIterationChanged;
+        Service.OnJobUpdated -= HandleJobUpdated;
     }
 }

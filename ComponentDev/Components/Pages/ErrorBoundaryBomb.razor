@@ -1,0 +1,28 @@
+@* Test fixture for PageErrorBoundary: fails on demand in render, in a lifecycle method or in an event handler. *@
+<div class="bomb">
+    <span>@Label is fine (version @Version).</span>
+    <FluentButton Id="@($"{Label}-click-throw")" OnClick="ThrowFromClick">Throw from click</FluentButton>
+    <FluentButton Id="@($"{Label}-render-throw")" OnClick="() => _throwOnRender = true">Throw on next render</FluentButton>
+</div>
+
+@{
+    if (_throwOnRender)
+        throw new InvalidOperationException($"{Label} failed while rendering.");
+}
+
+@code {
+    [Parameter] public string Label { get; set; } = "Bomb";
+    [Parameter] public int Version { get; set; }
+    /// <summary>Versions below zero fail in OnParametersSet, like a view reading a missing file.</summary>
+    [Parameter] public bool FailOnNegativeVersion { get; set; }
+
+    private bool _throwOnRender;
+
+    protected override void OnParametersSet()
+    {
+        if (FailOnNegativeVersion && Version < 0)
+            throw new IOException($"{Label} couldn't read version {Version} (simulated missing file).");
+    }
+
+    private void ThrowFromClick() => throw new NullReferenceException($"{Label} failed in a click handler.");
+}

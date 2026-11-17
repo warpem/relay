@@ -1,0 +1,54 @@
+@page "/ErrorBoundary"
+@using Refund.Components
+
+<PageTitle>RelayErrorBoundary</PageTitle>
+
+<div style="display: flex; flex-direction: column; gap: 1.5rem; padding: 1rem; max-width: 900px;">
+    <h1>RelayErrorBoundary</h1>
+
+    <div>
+        Outside every boundary: <span id="outside-counter">@_outsideClicks</span>
+        <FluentButton Id="outside-button" OnClick="() => _outsideClicks++">Still alive?</FluentButton>
+    </div>
+
+    <section>
+        <h3>Default</h3>
+        <RelayErrorBoundary Region="Default demo">
+            <ErrorBoundaryBomb Label="default" />
+        </RelayErrorBoundary>
+    </section>
+
+    <section>
+        <h3>Compact, with an extra action</h3>
+        <RelayErrorBoundary Region="Compact demo" Compact="true">
+            <ChildContent>
+                <ErrorBoundaryBomb Label="compact" />
+            </ChildContent>
+            <ErrorActions>
+                <FluentButton Size="ButtonSize.Small" OnClick="() => _closed = true">Close</FluentButton>
+            </ErrorActions>
+        </RelayErrorBoundary>
+        @if (_closed)
+        {
+            <div id="compact-closed">Close clicked.</div>
+        }
+    </section>
+
+    <section>
+        <h3>ResetKey (lifecycle failure for negative versions)</h3>
+        <div>
+            Version <span id="reset-version">@_version</span>
+            <FluentButton Id="version-down" OnClick="() => _version--">−1</FluentButton>
+            <FluentButton Id="version-up" OnClick="() => _version++">+1</FluentButton>
+        </div>
+        <RelayErrorBoundary Region="Reset demo" ResetKey="@_version">
+            <ErrorBoundaryBomb Label="reset" Version="@_version" FailOnNegativeVersion="true" />
+        </RelayErrorBoundary>
+    </section>
+</div>
+
+@code {
+    private int _outsideClicks;
+    private int _version;
+    private bool _closed;
+}

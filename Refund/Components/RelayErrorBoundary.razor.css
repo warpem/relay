@@ -1,0 +1,47 @@
+.relay-error-boundary {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    border-left: 3px solid var(--colorPaletteRedBorder2, #c50f1f);
+    border-radius: 4px;
+    background-color: var(--colorPaletteRedBackground1, #fdf3f4);
+    color: var(--colorNeutralForeground1);
+    box-sizing: border-box;
+    min-width: 0;
+    overflow: auto;
+}
+
+.relay-error-boundary.compact {
+    gap: 0.25rem;
+    padding: 0.4rem 0.6rem;
+    font-size: var(--fontSizeBase200, 12px);
+}
+
+.relay-error-title {
+    font-weight: 600;
+}
+
+.relay-error-message {
+    overflow-wrap: anywhere;
+    color: var(--colorNeutralForeground2);
+}
+
+.relay-error-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.relay-error-details summary {
+    cursor: pointer;
+    color: var(--colorNeutralForeground3);
+}
+
+.relay-error-details pre {
+    margin: 0.5rem 0 0 0;
+    max-height: 20rem;
+    overflow: auto;
+    font-size: var(--fontSizeBase200, 12px);
+    white-space: pre-wrap;
+}

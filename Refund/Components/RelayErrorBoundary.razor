@@ -1,0 +1,30 @@
+@inherits ErrorBoundaryBase
+@using Microsoft.FluentUI.AspNetCore.Components
+
+@if (CurrentException is null)
+{
+    @ChildContent
+}
+else if (ErrorContent is not null)
+{
+    @ErrorContent(CurrentException)
+}
+else
+{
+    <div class="relay-error-boundary @(Compact ? "compact" : "")" role="alert" style="@Style">
+        <div class="relay-error-title">@(Region ?? "This part of the page") couldn't be displayed</div>
+        <div class="relay-error-message">@CurrentException.Message</div>
+        <div class="relay-error-actions">
+            <FluentButton Size="@(Compact ? ButtonSize.Small : ButtonSize.Medium)" OnClick="Recover">Retry</FluentButton>
+            @ErrorActions
+        </div>
+        @if (!Compact)
+        {
+            <details class="relay-error-details">
+                <summary>Details</summary>
+                <pre>@CurrentException.GetType().FullName: @CurrentException.Message
+@CurrentException.StackTrace</pre>
+            </details>
+        }
+    </div>
+}

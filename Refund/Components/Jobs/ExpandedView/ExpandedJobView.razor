@@ -1,34 +1,33 @@
+@{
+    // The service swaps CurrentJob from thread-pool callbacks; read it once per render.
+    var job = Service?.CurrentJob;
+}
 <div class="expanded-job-view">
-    @if (Service.CurrentJob.IsIterative)
+    @if (job?.IsIterative == true)
     {
         <div style="padding-left: 40px;">
-            <IterationPagination/>
+            <RelayErrorBoundary Region="Iteration selector" Compact="true" ResetKey="@job">
+                <IterationPagination/>
+            </RelayErrorBoundary>
         </div>
     }
 
     <div class="content-container">
-        @if (Service?.CurrentJob != null)
+        @if (job != null)
         {
-            var key = Service.CurrentJob.Space.Project.Id + "-" + Service.CurrentJob.Space.Id + "-" + Service.CurrentJob.Id;
-            <LogPanel/>
+            var key = job.Space.Project.Id + "-" + job.Space.Id + "-" + job.Id;
+            <RelayErrorBoundary Region="Log panel" Compact="true" ResetKey="@key">
+                <LogPanel/>
+            </RelayErrorBoundary>
 
             <div class="visualization-container">
-                @if (Service.CurrentJob.ExpandedViewType != null)
+                @if (job.ExpandedViewType != null)
                 {
-                    <ErrorBoundary>
-                        <ChildContent>
-                            <DynamicComponent @key="@key" Type="@Service.CurrentJob.ExpandedViewType"/>
-                        </ChildContent>
-                        <ErrorContent>
-                            <div class="error-message">
-                                <h5>An error occurred while rendering this job's expanded view:</h5>
-                                <div>
-                                    <p><strong>Message:</strong> @context.Message</p>
-                                    <pre>@context.StackTrace</pre>
-                                </div>
-                            </div>
-                        </ErrorContent>
-                    </ErrorBoundary>
+                    @* Keyed by job, iteration and status: a failure stays with the job that caused it, and
+                       picking another iteration or new results landing gives the view another try. *@
+                    <RelayErrorBoundary @key="@key" Region="This job's view" ResetKey="@((Service.CurrentIteration, job.Status))">
+                        <DynamicComponent Type="@job.ExpandedViewType"/>
+                    </RelayErrorBoundary>
                 }
             </div>
         }
