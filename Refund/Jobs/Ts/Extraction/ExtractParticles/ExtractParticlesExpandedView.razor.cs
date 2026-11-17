@@ -109,8 +109,9 @@ public partial class ExtractParticlesExpandedView : IAsyncDisposable
             // Get the position set resource from the output port
             _particleSet = _job.PortsIn[ExtractParticles.PortInParticleSet].GetSingleResource<ParticleSet>();
 
-            // Get the tomogram set resource from the output port
-            _tomogramSet = _particleSet.PickedInTomograms;
+            // Get the tomogram set resource from the output port. The particle input is unset while the job is
+            // still being built or after its upstream connection was removed.
+            _tomogramSet = _particleSet?.PickedInTomograms;
 
             await LoadData();
         }
@@ -134,7 +135,8 @@ public partial class ExtractParticlesExpandedView : IAsyncDisposable
 
     private async Task LoadData()
     {
-        if (_job == null)
+        // Nothing to show until both inputs resolve (e.g. Building jobs, disconnected upstream).
+        if (_job == null || _particleSet == null || _tomogramSet == null)
             return;
 
         var thumbnails = new List<ThumbnailData>();

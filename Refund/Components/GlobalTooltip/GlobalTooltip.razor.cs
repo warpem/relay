@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 
 namespace Refund.Components.GlobalTooltip
 {
-    public partial class GlobalTooltip : IDisposable
+    public partial class GlobalTooltip : IAsyncDisposable
     {
         [Inject]
         private GlobalTooltipService TooltipService { get; set; } = null!;
@@ -105,9 +105,21 @@ namespace Refund.Components.GlobalTooltip
             await OnHidden.InvokeAsync();
         }
 
-        public async void Dispose()
+        /// <summary>
+        /// Removing the tooltip calls into JS, which fails once the circuit is disconnecting. This used to be an
+        /// async void Dispose, where that failure terminated the circuit; the renderer awaits DisposeAsync.
+        /// </summary>
+        public async ValueTask DisposeAsync()
         {
-            await TooltipService.RemoveTooltip(TooltipId);
+            try
+            {
+                await TooltipService.RemoveTooltip(TooltipId);
+            }
+            catch (Exception)
+            {
+                // Disposal must not throw: an exception here is fatal to the circuit, and a tooltip that wasn't
+                // removed only lingers until its container goes away.
+            }
         }
     }
 }

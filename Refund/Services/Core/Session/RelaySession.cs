@@ -600,7 +600,24 @@ public class RelaySession : IAsyncDisposable
     /// </remarks>
     private async void HandleLocationChanged(object sender, LocationChangedEventArgs e)
     {
-        await ApplyLocationAsync(e.Location);
+        // async void: nothing awaits this, so an escaping exception would terminate the circuit. Applying the
+        // location runs every session subscriber, so contain whatever they throw.
+        try
+        {
+            await ApplyLocationAsync(e.Location);
+        }
+        catch (Exception exc)
+        {
+            Serilog.Log.ForContext<RelaySession>().Error(exc, "Failed to apply browser location {Location}", e.Location);
+            try
+            {
+                _ = _toastService.ShowErrorToastAsync("Couldn't open this page: " + exc.Message);
+            }
+            catch (Exception toastExc)
+            {
+                Serilog.Log.ForContext<RelaySession>().Warning(toastExc, "Couldn't show navigation error toast");
+            }
+        }
     }
 
     private async Task ApplyLocationAsync(string uri)

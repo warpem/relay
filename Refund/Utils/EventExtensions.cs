@@ -1,3 +1,5 @@
+using Serilog;
+
 namespace Refund.Utils;
 
 /// <summary>
@@ -7,6 +9,8 @@ namespace Refund.Utils;
 /// <remarks>
 /// Commonly used in the RelaySession to handle application-wide events like theme changes,
 /// window resizing, and authentication state changes in a predictable sequential manner.
+/// A subscriber that throws is logged and skipped; the remaining subscribers still run and the caller never sees
+/// the exception.
 /// </remarks>
 public static class EventExtensions
 {
@@ -28,7 +32,7 @@ public static class EventExtensions
     {
         if (handler != null)
             foreach (var invocation in handler.GetInvocationList())
-                await ((Func<Task>)invocation).Invoke();
+                await InvokeIsolated(invocation, () => ((Func<Task>)invocation).Invoke());
     }
     
     /// <summary>
@@ -43,7 +47,7 @@ public static class EventExtensions
     {
         if (handler != null)
             foreach (var invocation in handler.GetInvocationList())
-                await ((Func<T, Task>)invocation).Invoke(arg);
+                await InvokeIsolated(invocation, () => ((Func<T, Task>)invocation).Invoke(arg));
     }
     
     /// <summary>
@@ -60,7 +64,7 @@ public static class EventExtensions
     {
         if (handler != null)
             foreach (var invocation in handler.GetInvocationList())
-                await ((Func<T1, T2, Task>)invocation).Invoke(arg1, arg2);
+                await InvokeIsolated(invocation, () => ((Func<T1, T2, Task>)invocation).Invoke(arg1, arg2));
     }
     
     /// <summary>
@@ -79,9 +83,30 @@ public static class EventExtensions
     {
         if (handler != null)
             foreach (var invocation in handler.GetInvocationList())
-                await ((Func<T1, T2, T3, Task>)invocation).Invoke(arg1, arg2, arg3);
+                await InvokeIsolated(invocation, () => ((Func<T1, T2, T3, Task>)invocation).Invoke(arg1, arg2, arg3));
     }
     
+    /// <summary>
+    /// Runs one subscriber and logs instead of rethrowing what it throws.
+    /// </summary>
+    /// <remarks>
+    /// Subscribers are mostly UI components. Letting one subscriber's exception escape would skip every later
+    /// subscriber (leaving them stale) and surface the error in whichever component raised the event, e.g. the
+    /// button that started a navigation, which then shows the wrong failure or loses its circuit.
+    /// </remarks>
+    private static async Task InvokeIsolated(Delegate invocation, Func<Task> invoke)
+    {
+        try
+        {
+            await invoke();
+        }
+        catch (Exception exc)
+        {
+            Log.ForContext(typeof(EventExtensions)).Error(exc, "Event subscriber {Subscriber} failed",
+                                                          $"{invocation.Method.DeclaringType?.FullName}.{invocation.Method.Name}");
+        }
+    }
+
     /// <summary>
     /// Subscribes a callback to an event handler and returns an IDisposable that can be used to unsubscribe.
     /// </summary>

@@ -121,13 +121,41 @@ public partial class QueueJobCard : ComponentBase, IAsyncDisposable
         return Job.GetMostRecentEvent(EventType.Created).Timestamp.ToString(fullPattern, culture);
     }
 
-    private NavigationRequest GetNavRequest() => new()
+    /// <summary>
+    /// Where the job lives, or null if its space or every view of it is gone (the job can outlive both while it
+    /// still sits in a queue).
+    /// </summary>
+    private NavigationRequest? TryGetNavRequest()
     {
-        ProjectId = Job.Space.Project.Id,
-        SpaceId = Job.Space.Id,
-        ViewId = Job.Space.Views.First().Id,
-        JobId = Job.Id
-    };
+        var space = Job?.Space;
+        var view = space?.Views.FirstOrDefault();
+        if (space?.Project == null || view == null)
+            return null;
+
+        return new NavigationRequest
+        {
+            ProjectId = space.Project.Id,
+            SpaceId = space.Id,
+            ViewId = view.Id,
+            JobId = Job.Id,
+            Overlay = OverlayScreenType.None
+        };
+    }
+
+    private async Task OpenJobAsync(bool newTab)
+    {
+        var request = TryGetNavRequest();
+        if (request == null)
+        {
+            _ = ToastService.ShowErrorToastAsync($"Can't open {Job?.QualifiedName}: its space or view no longer exists.");
+            return;
+        }
+
+        if (newTab)
+            await Session.OpenInNewTabAsync(request);
+        else
+            await Session.NavigateToAsync(request);
+    }
 
     private async Task HandleContextMenu(bool value)
     {
@@ -161,14 +189,14 @@ public partial class QueueJobCard : ComponentBase, IAsyncDisposable
     private async Task HandleMouseUp(MouseEventArgs args)
     {
         if (args.Button == 1)
-            await Session.OpenInNewTabAsync(GetNavRequest());
+            await OpenJobAsync(newTab: true);
     }
 
-    private async void HandleClick(MouseEventArgs args)
+    private async Task HandleClick(MouseEventArgs args)
     {
         if (MouseUtils.IsNewTabClick(args))
         {
-            await Session.OpenInNewTabAsync(GetNavRequest());
+            await OpenJobAsync(newTab: true);
             return;
         }
 
@@ -180,14 +208,7 @@ public partial class QueueJobCard : ComponentBase, IAsyncDisposable
 
                 break;
             case true:
-                await Session.NavigateToAsync(new()
-                {
-                    ProjectId = Job.Space.Project.Id,
-                    SpaceId = Job.Space.Id,
-                    ViewId = Job.Space.Views.First().Id,
-                    JobId = Job.Id,
-                    Overlay = OverlayScreenType.None
-                });
+                await OpenJobAsync(newTab: false);
 
                 break;
         }
@@ -203,23 +224,7 @@ public partial class QueueJobCard : ComponentBase, IAsyncDisposable
         }
     }
 
-    private async void HandleDoubleClick(MouseEventArgs args)
-    {
-        if (MouseUtils.IsNewTabClick(args))
-        {
-            await Session.OpenInNewTabAsync(GetNavRequest());
-            return;
-        }
-
-        await Session.NavigateToAsync(new()
-        {
-            ProjectId = Job.Space.Project.Id,
-            SpaceId = Job.Space.Id,
-            ViewId = Job.Space.Views.First().Id,
-            JobId = Job.Id,
-            Overlay = OverlayScreenType.None
-        });
-    }
+    private Task HandleDoubleClick(MouseEventArgs args) => OpenJobAsync(newTab: MouseUtils.IsNewTabClick(args));
 
     public async ValueTask DisposeAsync()
     {

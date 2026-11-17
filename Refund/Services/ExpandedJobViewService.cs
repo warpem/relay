@@ -544,7 +544,7 @@ public class ExpandedJobViewService : IDisposable
         foreach (Func<T, Task> handler in handlers.GetInvocationList())
         {
             if (!IsCurrent(job, version)) return;
-            await handler(value);
+            await NotifyIsolated(job, handler, () => handler(value));
         }
     }
 
@@ -554,21 +554,33 @@ public class ExpandedJobViewService : IDisposable
         foreach (Func<Task> handler in handlers.GetInvocationList())
         {
             if (!IsCurrent(job, version)) return;
-            await handler();
+            await NotifyIsolated(job, handler, handler);
         }
     }
 
-    private async Task NotifyLogObservers<T>(ReadOnlyJob job, long version, Func<T, Task> handlers, T value)
+    /// <summary>
+    /// Runs one subscriber and logs what it throws. Subscribers are job views: one failing view must not stop
+    /// the others from hearing about the change, nor surface in the caller, e.g. the iteration selector's click
+    /// handler, which sits outside the job view's error boundary and would lose the circuit.
+    /// </summary>
+    private async Task NotifyIsolated(ReadOnlyJob job, Delegate subscriber, Func<Task> invoke)
     {
-        try { await NotifyCurrent(job, version, handlers, value); }
-        catch (Exception ex) { _logger.LogError(ex, "Error notifying log subscribers for job {JobId}", job.Id); }
+        try
+        {
+            await invoke();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Expanded view subscriber {Subscriber} failed for job {JobId}",
+                             $"{subscriber.Method.DeclaringType?.FullName}.{subscriber.Method.Name}", job?.Id);
+        }
     }
 
-    private async Task NotifyLogObservers(ReadOnlyJob job, long version, Func<Task> handlers)
-    {
-        try { await NotifyCurrent(job, version, handlers); }
-        catch (Exception ex) { _logger.LogError(ex, "Error notifying log subscribers for job {JobId}", job.Id); }
-    }
+    private Task NotifyLogObservers<T>(ReadOnlyJob job, long version, Func<T, Task> handlers, T value) =>
+        NotifyCurrent(job, version, handlers, value);
+
+    private Task NotifyLogObservers(ReadOnlyJob job, long version, Func<Task> handlers) =>
+        NotifyCurrent(job, version, handlers);
 
     /// <summary>
     /// Processes staging content to handle carriage return (\r) symbols.

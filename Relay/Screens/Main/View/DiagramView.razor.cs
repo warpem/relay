@@ -56,7 +56,7 @@ public partial class DiagramView : ComponentBase, IAsyncDisposable
                 _needsZoomToFit = false;
                 DiagramService.OnZoomChanged += HandleZoomToFit;
             }
-            catch (JSException) { /* Component may have been disposed */ }
+            catch (Exception e) when (IsExpectedJsFailure(e)) { /* Component may have been disposed */ }
         }
         else if (_jsInitialized && _needsZoomToFit && Layout is { Nodes.Count: > 0 })
         {
@@ -66,20 +66,31 @@ public partial class DiagramView : ComponentBase, IAsyncDisposable
                 await JSRuntime.InvokeVoidAsync("diagramInterop.zoomToFit",
                     Layout.GraphWidth, Layout.GraphHeight);
             }
-            catch (JSException) { }
+            catch (Exception e) when (IsExpectedJsFailure(e)) { }
         }
     }
 
+    /// <summary>
+    /// async void (OnZoomChanged is a plain event), so nothing observes its exceptions and any that escaped would
+    /// terminate the circuit. Zooming is best-effort; swallow everything.
+    /// </summary>
     private async void HandleZoomToFit()
     {
-        if (Layout == null) return;
         try
         {
-            await JSRuntime.InvokeVoidAsync("diagramInterop.zoomToFit",
-                Layout.GraphWidth, Layout.GraphHeight);
+            var layout = Layout;
+            if (layout == null) return;
+            await JSRuntime.InvokeVoidAsync("diagramInterop.zoomToFit", layout.GraphWidth, layout.GraphHeight);
         }
-        catch (JSException) { }
+        catch (Exception) { }
     }
+
+    /// <summary>
+    /// JS interop failures to expect while the diagram or the circuit is going away: script errors, a dropped
+    /// connection, the JS call timeout, or a disposed runtime.
+    /// </summary>
+    private static bool IsExpectedJsFailure(Exception e) =>
+        e is JSException or JSDisconnectedException or OperationCanceledException or ObjectDisposedException;
 
     // Find the layout node for a given view item
     private DiagramLayoutNode? GetNode(IViewItem item)
@@ -132,6 +143,6 @@ public partial class DiagramView : ComponentBase, IAsyncDisposable
         {
             await JSRuntime.InvokeVoidAsync("diagramInterop.dispose");
         }
-        catch (JSException) { }
+        catch (Exception e) when (IsExpectedJsFailure(e)) { }
     }
 }

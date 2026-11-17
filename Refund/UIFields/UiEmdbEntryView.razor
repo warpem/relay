@@ -2,6 +2,8 @@
 @using Microsoft.AspNetCore.Components.Web
 @using Microsoft.FluentUI.AspNetCore.Components
 @using System.Net.Http
+@using Microsoft.Extensions.Logging
+@inject ILogger<UiEmdbEntryView> Logger
 @implements  IDisposable
 @inherits UiFieldViewBase
 
@@ -27,8 +29,9 @@
 @code {
     private string _previewUrl;
     private bool _isValid;
-    private System.Timers.Timer _debounceTimer;
-    private static readonly HttpClient HttpClient = new HttpClient();
+    /// <summary>Cancels the pending or running lookup when the value changes again or the field goes away.</summary>
+    private CancellationTokenSource _debounce;
+    private static readonly HttpClient HttpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
     
     private UiEmdbEntry FieldDescriptionT => (UiEmdbEntry)FieldDescription ?? null;
 
@@ -40,16 +43,9 @@
     {
         base.OnInitialized();
 
-        _debounceTimer = new System.Timers.Timer(500);
-        _debounceTimer.AutoReset = false;
-        _debounceTimer.Elapsed += async (sender, args) =>
-        {
-            await InvokeAsync(CheckEmdbEntry);
-        };
-
         if (ValueT != null && ValueT.Value > 0)
             // Check initial value on component init
-            _debounceTimer.Start();
+            ScheduleCheck();
     }
 
     private async Task OnInputChanged(int? value)
@@ -60,11 +56,39 @@
         _previewUrl = null;
         _isValid = false;
 
-        _debounceTimer.Stop();
-        _debounceTimer.Start();
+        ScheduleCheck();
     }
 
-    private async Task CheckEmdbEntry()
+    /// <summary>
+    /// Debounces the EMDB lookup. This used to be a System.Timers.Timer whose async void Elapsed handler ran on
+    /// the thread pool, where any exception would take down the whole server process. The task runs on the
+    /// renderer's synchronization context and observes all of its own exceptions.
+    /// </summary>
+    private void ScheduleCheck()
+    {
+        _debounce?.Cancel();
+        _debounce?.Dispose();
+        _debounce = new CancellationTokenSource();
+        _ = DebouncedCheckAsync(_debounce.Token);
+    }
+
+    private async Task DebouncedCheckAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(500, cancellationToken);
+            await CheckEmdbEntry(cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception exc)
+        {
+            Logger.LogWarning(exc, "EMDB entry lookup failed");
+        }
+    }
+
+    private async Task CheckEmdbEntry(CancellationToken cancellationToken)
     {
         if (ValueT is not > 0)
         {
@@ -79,28 +103,34 @@
         StateHasChanged();
 
         string paddedId = ValueT.Value.ToString("D4");
-        _previewUrl = $"https://www.ebi.ac.uk/emdb/images/entry/EMD-{paddedId}/400_{paddedId}.gif";
+        string previewUrl = $"https://www.ebi.ac.uk/emdb/images/entry/EMD-{paddedId}/400_{paddedId}.gif";
+        _previewUrl = previewUrl;
 
+        bool isValid;
         try
         {
             // Check if entry exists by trying to fetch the preview image
-            var request = new HttpRequestMessage(HttpMethod.Head, _previewUrl);
-            var response = await HttpClient.SendAsync(request);
-            _isValid = response.IsSuccessStatusCode;
+            using var request = new HttpRequestMessage(HttpMethod.Head, previewUrl);
+            using var response = await HttpClient.SendAsync(request, cancellationToken);
+            isValid = response.IsSuccessStatusCode;
         }
-        catch
+        catch (Exception) when (!cancellationToken.IsCancellationRequested)
         {
-            _isValid = false;
+            isValid = false;
         }
-        finally
-        {
-            StateHasChanged();
-        }
+
+        // A newer value has superseded this lookup; its own check will update the preview.
+        cancellationToken.ThrowIfCancellationRequested();
+
+        _isValid = isValid;
+        StateHasChanged();
     }
 
     public override void Dispose()
     {
-        _debounceTimer?.Dispose();
+        _debounce?.Cancel();
+        _debounce?.Dispose();
+        _debounce = null;
         base.Dispose();
     }
 }
