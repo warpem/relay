@@ -80,11 +80,16 @@ public sealed record WarpSettings
     public int FineTuneEvery { get; init; } = 1000;
     public int TrainCount { get; init; } = 100;
     /// <summary>
-    /// Epochs of 4 patches per training movie. Fine-tuning (the usual case, from a starting model or the session's
-    /// last one) needs 4; Noise2Mic trained from scratch for 8.
+    /// Epochs of 4 patches per training movie. Fine-tuning (the usual case, from the pretrained model or the session's
+    /// last one) needs 4. Training from scratch needs far more steps than a session's sample gives at this budget.
     /// </summary>
     public int TrainingEpochs { get; init; } = 4;
-    /// <summary>A trained Noise2Mic model the session's first training fine-tunes, e.g. the BoxNet corpus model; "" trains from scratch.</summary>
+    /// <summary>
+    /// Whether the session's first training fine-tunes the pretrained model that comes with WarpTools (Noise2Mic trained
+    /// on the BoxNet corpus); workers find it in their installation. Off, <see cref="DenoiserStart"/> applies.
+    /// </summary>
+    public bool PretrainedDenoiser { get; init; } = true;
+    /// <summary>With <see cref="PretrainedDenoiser"/> off: a trained Noise2Mic model the first training fine-tunes; "" trains from scratch.</summary>
     public string DenoiserStart { get; init; } = "";
     /// <summary>
     /// Whether high-contrast objects (carbon, ice crystals, gold) found on each average are replaced with matched noise

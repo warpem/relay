@@ -715,13 +715,15 @@ public sealed class SessionServiceTests
         Assert.Equal("train",train.Stage);Assert.True(train.Priority);Assert.StartsWith(TaskQueue.PriorityPrefix,train.TaskId);Assert.True(train.Exclusive);
     }
     [Theory]
-    [InlineData(false,false,"")]
-    [InlineData(true,false,"start")]
-    [InlineData(true,true,"current")]
-    public void TrainingFineTunesTheStartingModelUntilTheSessionHasItsOwn(bool startingModel,bool sessionModel,string expected)
+    [InlineData("pretrained",false,"pretrained")]
+    [InlineData("scratch",false,"")]
+    [InlineData("file",false,"start")]
+    [InlineData("pretrained",true,"current")]
+    [InlineData("file",true,"current")]
+    public void TrainingFineTunesTheStartingModelUntilTheSessionHasItsOwn(string startingModel,bool sessionModel,string expected)
     {
         using var f=new Fixture();string start=Path.Combine(f.Root,"corpus.pt");File.WriteAllText(start,"weights");
-        f.Session.Apply(f.Session.Settings with{TrainCount=1,DenoiserStart=startingModel?start:""});
+        f.Session.Apply(f.Session.Settings with{TrainCount=1,PretrainedDenoiser=startingModel=="pretrained",DenoiserStart=startingModel=="file"?start:""});
         if(sessionModel)InstallModel(f.Session,f.Root,1);
         var movie=f.AddMovie();movie.TrainingPairReady=true;movie.DenoiseModel=sessionModel?1:0;
         SetField(f.Session,"<Running>k__BackingField",true);f.Session.Train();
@@ -729,7 +731,7 @@ public sealed class SessionServiceTests
         Invoke(f.Session,"Dispatch",new TaskQueue(layout),CancellationToken.None);
         var train=Assert.Single(PendingTasks(layout),t=>t.Stage=="train");
         string previous=(string)train.Main.Single(c=>c.Name==WorkerCommandNames.TrainMovieDenoiser).Content[2];
-        Assert.Equal(expected switch{"start"=>start,"current"=>Field<string>(f.Session,"_modelPath"),_=>""},previous);
+        Assert.Equal(expected switch{"start"=>start,"current"=>Field<string>(f.Session,"_modelPath"),"pretrained"=>Noise2MicTorch.PretrainedModel,_=>""},previous);
     }
     [Fact]
     public void TurningObjectErasureOffRedoesDenoisingAndTrainsANewModel()
@@ -738,12 +740,43 @@ public sealed class SessionServiceTests
         var next=f.Session.Settings with{EraseObjects=false};
         Assert.Equal("Redo denoising, picking, extraction. Train a new denoiser.",f.Session.GetSettingsImpact(next));
         f.Session.Apply(next);
-        // The model learned from erased inputs; the next one is trained without erasure.
-        Assert.Equal(0,f.Session.Model);Assert.False(f.Session.HasModel);
+        // The model learned from erased inputs; the next one is trained without erasure, as version 3.
+        Assert.Equal(2,f.Session.Model);Assert.False(f.Session.HasModel);
         Assert.Equal(WarpStage.Enhance|WarpStage.Pick|WarpStage.Extract,movie.Stale);
         f.Manager.Remove(f.Identity);var restored=f.Manager.GetOrCreate(f.Identity);
-        Assert.False(restored.Settings.EraseObjects);Assert.Equal(0,restored.Model);
+        Assert.False(restored.Settings.EraseObjects);Assert.False(restored.HasModel);
         Assert.Equal(WarpStage.Enhance|WarpStage.Pick|WarpStage.Extract,restored.Movies[0].Stale);
+    }
+    [Fact]
+    public void ChangingTheStartingModelTrainsFromItAndRedoesWhatTheOldModelDenoised()
+    {
+        using var f=new Fixture();f.Session.Apply(f.Session.Settings with{PretrainedDenoiser=false,TrainCount=1});InstallModel(f.Session,f.Root,2);
+        var movie=f.AddMovie();movie.DenoiseModel=2;
+        var next=f.Session.Settings with{PretrainedDenoiser=true};
+        Assert.Equal("Train a new denoiser from the new starting model, then redo denoising, picking and extraction with it.",f.Session.GetSettingsImpact(next));
+        f.Session.Apply(next);
+        Assert.False(f.Session.HasModel);Assert.Equal(2,f.Session.Model);
+        Assert.Equal(WarpStage.Enhance|WarpStage.Pick|WarpStage.Extract,movie.Stale);
+        // The next model is version 3, so movie 0's denoising by version 2 stays outdated until it is redone.
+        var layout=new QueueLayout(f.Identity.QueueDirectory);layout.EnsureDirectories();var queue=new TaskQueue(layout);
+        var trainer=f.AddMovie();trainer.TrainingPairReady=true;
+        SetField(f.Session,"<Running>k__BackingField",true);f.Session.Train();
+        Invoke(f.Session,"Dispatch",queue,CancellationToken.None);
+        var train=Assert.Single(PendingTasks(layout),t=>t.Stage=="train");
+        Assert.Equal(Noise2MicTorch.PretrainedModel,train.Main.Single(c=>c.Name==WorkerCommandNames.TrainMovieDenoiser).Content[2]);
+        string model=Path.Combine(f.Root,"trained.pt");File.WriteAllText(model,"model");
+        var inflight=Field<System.Collections.IDictionary>(f.Session,"_inflight");
+        object pendingTrain=Activator.CreateInstance(inflight.GetType().GetGenericArguments()[1],-1,"train",ModelKeyOf(f.Session),model,0L,0L,null,0,false)!;
+        inflight.Clear();inflight["train-task"]=pendingTrain;File.WriteAllText(Path.Combine(layout.Done,"train-task.json"),"{}");
+        Invoke(f.Session,"CollectCompletions",layout,CancellationToken.None);Invoke(f.Session,"RefreshStates");
+        Assert.Equal(3,f.Session.Model);Assert.True(f.Session.HasModel);
+        Assert.Equal(WarpStage.Enhance|WarpStage.Pick|WarpStage.Extract,movie.Stale);
+    }
+    [Fact]
+    public void ThePretrainedModelIsTheDefaultStart()
+    {
+        Assert.True(new WarpSettings().PretrainedDenoiser);
+        Assert.True(System.Text.Json.JsonSerializer.Deserialize<WarpSettings>("{\"Box\":128,\"DenoiserStart\":\"\"}")!.PretrainedDenoiser);
     }
     [Fact]
     public void ObjectErasureStaysOnForSessionsSavedBeforeTheOption()
@@ -793,7 +826,9 @@ public sealed class SessionServiceTests
     public void MissingStartingModelIsRejected()
     {
         using var f=new Fixture();
-        var error=Assert.Throws<ArgumentException>(()=>f.Session.Apply(f.Session.Settings with{DenoiserStart=Path.Combine(f.Root,"missing.pt")}));
+        var error=Assert.Throws<ArgumentException>(()=>f.Session.Apply(f.Session.Settings with{PretrainedDenoiser=false,DenoiserStart=Path.Combine(f.Root,"missing.pt")}));
+        // With the pretrained model on, the file is not used, so it is not checked either.
+        f.Session.Apply(f.Session.Settings with{DenoiserStart=Path.Combine(f.Root,"missing.pt")});
         Assert.Contains("starting model",error.Message,StringComparison.OrdinalIgnoreCase);
     }
     [Fact]

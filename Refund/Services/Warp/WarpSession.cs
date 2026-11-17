@@ -195,9 +195,10 @@ public sealed partial class WarpSession : IDisposable
             bool processingChanged=StageOrder.Any(stage=>_stageKeys[stage]!=nextKeys[stage]);
             // The histogram shows every pick's scores, so only new picks make it start over (not new score bounds).
             bool picksChanged=_stageKeys["pick"]!=nextKeys["pick"];
-            bool modelChanged=Model>0&&ModelKeyFor(next)!=ModelKey;
+            bool modelChanged=Model>0&&RetrainsModel(Settings,next);
             Settings=next;RecomputeStageKeys();
-            // The model learned from inputs prepared the old way; the next one trains from the starting model (or scratch).
+            // The model learned from inputs prepared the old way, or descends from another starting model; the next one
+            // trains from the starting model now chosen (or from scratch).
             if(modelChanged)ForgetModel();
             if (processingChanged)
             {
@@ -216,8 +217,10 @@ public sealed partial class WarpSession : IDisposable
         if(next==Settings)return "";
         var before=BuildStageKeys(Settings);var after=BuildStageKeys(NormalizeSettings(next));
         string[] changed=StageOrder.Where(k=>before[k]!=after[k]).ToArray();
-        string retrain=Model>0&&ModelKeyFor(NormalizeSettings(next))!=ModelKey?" Train a new denoiser.":"";
+        string retrain=HasModel&&RetrainsModel(Settings,NormalizeSettings(next))?" Train a new denoiser.":"";
         if(changed.Length>0)return "Redo "+string.Join(", ",changed.Select(StageLabel))+"."+retrain;
+        // A new starting model redoes nothing yet: the new denoiser does, once it is trained.
+        if(retrain.Length>0)return "Train a new denoiser from the new starting model, then redo denoising, picking and extraction with it.";
         // Optics groups are made when exporting: they change exports run from now on, never processing.
         return ChangedSettings(next,Settings).All(EpuSettings.Contains)?"Retain current results; exports from now on use the new optics groups.":"Update discovery and training schedule; retain current results.";
     }
@@ -241,8 +244,14 @@ public sealed partial class WarpSession : IDisposable
     public static string StatusColorFor(string status)=>StatusColorMapping.GetColor(status switch{"Failed"=>ProcessingStatus.Failed,"Kept"=>ProcessingStatus.Kept,"Excluded"=>ProcessingStatus.Deselected,"Outdated"=>ProcessingStatus.Outdated,"Filtered"=>ProcessingStatus.FilteredOut,"Ready"=>ProcessingStatus.Processed,"Partial"=>ProcessingStatus.Partial,_=>ProcessingStatus.Unprocessed});
     public void SetDisposition(IEnumerable<int> indices,WarpDisposition value)=>Mutate(()=>{foreach(int i in indices.Distinct())if(i>=0&&i<_movies.Count){_movies[i].Disposition=value;_movies[i].Excluded=value==WarpDisposition.Exclude;_changedRows.Add(i);}});
     public void Retry(IEnumerable<int> indices)=>Mutate(()=>{foreach(int i in indices.Distinct())if(i>=0&&i<_movies.Count){_movies[i].Failed=false;_movies[i].Error="";_changedRows.Add(i);}});
-    /// <summary>A model trained on other deconvolution settings no longer fits the data, so training starts over.</summary>
-    private void ForgetModel(){_modelPath="";Model=0;_lastTrainingCount=0;_minDenoiseModel=0;}
+    /// <summary>
+    /// A model trained on other inputs, or from another starting model, is dropped, so training starts over from the
+    /// starting model. The version count goes on: whatever was denoised with a dropped model is redone once the next one
+    /// exists, rather than passing as that model's work.
+    /// </summary>
+    private void ForgetModel(){if(Model==0)return;_modelPath="";_lastTrainingCount=0;_minDenoiseModel=Model+1;}
+    /// <summary>Whether going from one set of settings to the other makes the session's model unfit: other inputs, or another starting model.</summary>
+    private static bool RetrainsModel(WarpSettings before,WarpSettings after)=>ModelKeyFor(after)!=ModelKeyFor(before)||StartingModel(after)!=StartingModel(before);
     /// <summary>
     /// The deconvolution the denoiser's inputs go through: Noise2MicTorch's fixed values, as decimals written the way the
     /// former settings were, so the keys of sessions from then stay the same.

@@ -113,7 +113,7 @@ public sealed partial class WarpSession
         if(!s.MotionGridAuto&&(s.MotionGrid<1||s.MotionGridY<1||s.MotionGridZ<1))return "Motion grid dimensions must be positive.";
         if(!s.CtfGridAuto&&(s.CtfGridX<1||s.CtfGridY<1))return "CTF grid dimensions must be positive.";
         if(s.TrainCount<1||s.TrainingEpochs<1||s.FineTuneEvery<1)return "Training sample, epochs and interval are invalid.";
-        if(s.Denoise&&!string.IsNullOrWhiteSpace(s.DenoiserStart)&&!File.Exists(s.DenoiserStart))return "The starting model for denoiser training does not exist.";
+        if(s.Denoise&&!s.PretrainedDenoiser&&!string.IsNullOrWhiteSpace(s.DenoiserStart)&&!File.Exists(s.DenoiserStart))return "The starting model for denoiser training does not exist.";
         if(s.Diameter<=0||s.MinSeparation<=0||s.Box<2||s.Box%2!=0)return "Particle diameter/separation must be positive and box size positive/even.";
         if(s.RescaleParticles&&(s.RescaledBox<2||s.RescaledBox%2!=0||s.RescaledBox>=s.Box))return "The rescaled box must be even and smaller than the extraction box.";
         if(s.ParticleBounds is not {Valid:true})return "Particle score bounds need correlation within 0–1, nonnegative power, and each minimum at most its maximum.";

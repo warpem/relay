@@ -67,6 +67,11 @@ public sealed partial class WarpSession
     /// <summary>Denoising, and the picks and particles that follow from it, made with a model older than the redo floor.</summary>
     private bool RedoneByModel(WarpMovie movie,string stage)=>Settings.Denoise&&_minDenoiseModel>0&&stage is "denoise" or "pick" or "extract"&&movie.DenoiseModel<_minDenoiseModel;
 
+    /// <summary>
+    /// What a session's first denoiser training starts from: the pretrained model (a token workers resolve in their own
+    /// installation), the chosen file, or null to train from scratch.
+    /// </summary>
+    internal static string StartingModel(WarpSettings s)=>s.PretrainedDenoiser?Noise2MicTorch.PretrainedModel:string.IsNullOrWhiteSpace(s.DenoiserStart)?null:s.DenoiserStart;
     /// <summary>How long the task queue may stay unreadable before processing stops; workers give up on a silent coordinator after 2 minutes.</summary>
     internal static readonly TimeSpan QueueFailureTolerance=TimeSpan.FromMinutes(5);
     internal async Task RunAsync(WarpSettings settings,CancellationToken cancellationToken)
@@ -202,7 +207,7 @@ public sealed partial class WarpSession
             {
                 var sample=_movies.Where(TrainingReady).TakeLast(Settings.TrainCount).Select(m=>m.ProcessingPath).ToArray();
                 _trainingOutput=Path.Combine(Identity.SessionDirectory,"models",$"model-{Guid.NewGuid():N}.pt");Directory.CreateDirectory(Path.GetDirectoryName(_trainingOutput));
-                var task=MakeTask("train",-1,[WorkerCommands.TrainMovieDenoiser(sample,_trainingOutput,HasModel?_modelPath:string.IsNullOrWhiteSpace(Settings.DenoiserStart)?null:Settings.DenoiserStart,Settings.TrainingEpochs,Noise2MicTorch.DeconvolutionStrength,Noise2MicTorch.DeconvolutionFalloff,(float)Settings.TargetPixelSize,Settings.EraseObjects)]);
+                var task=MakeTask("train",-1,[WorkerCommands.TrainMovieDenoiser(sample,_trainingOutput,HasModel?_modelPath:StartingModel(Settings),Settings.TrainingEpochs,Noise2MicTorch.DeconvolutionStrength,Noise2MicTorch.DeconvolutionFalloff,(float)Settings.TargetPixelSize,Settings.EraseObjects)]);
                 // Training shares a GPU badly (about 3x slower beside three processing workers), so it takes its GPU alone.
                 task.Priority=true;task.Exclusive=true;queue.Enqueue(task);
                 _inflight[task.TaskId]=new(-1,"train",ModelKey,_trainingOutput);Training=true;TrainingPercent=0;TrainingProgress=null;_trainRequested=false;_lastTrainingCount=prepared;

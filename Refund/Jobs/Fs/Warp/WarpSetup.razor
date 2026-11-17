@@ -126,7 +126,8 @@
             <div class="field-grid">
                 @B("Denoise", "Denoise micrographs")
                 @N("TrainCount", "Training sample", 1, 10000, 1, "movies")
-                @if (Draft.Denoise) { @P("DenoiserStart", "Starting model (optional)", SelectionMode.SingleFile) }
+                @B("PretrainedDenoiser", "Start from pretrained model")
+                @if (Draft.Denoise && !Draft.PretrainedDenoiser) { @P("DenoiserStart", "Starting model (optional)", SelectionMode.SingleFile) }
             </div>
             <div class="training-state @(Session.Training ? "active" : Session.HasModel && Session.Settings.Denoise ? "ready" : "")">
                 <div><b>@TrainingTitle</b><span>@TrainingDetail</span></div>
@@ -212,7 +213,9 @@
     private string TrainingTitle => !Session.Settings.Denoise ? "Denoising is off" : Session.Training ? (Session.TrainingProgress is { } progress ? $"Training a new model: {progress.Percent}%, epoch {progress.Epoch} of {progress.Epochs}" : "Training a new model") : Session.HasModel ? $"Model v{Session.Model} ready" : $"Collecting training data: {Math.Min(Session.StageCounts[1], Session.Settings.TrainCount):N0} of {Session.Settings.TrainCount:N0} movies";
     private string TrainBlockedReason => !Session.Settings.Denoise ? "Denoising is off" : !Session.Running ? "Start processing to train" : Session.Training ? "Training is in progress" : Session.StageCounts[1] < Session.Settings.TrainCount ? $"Needs {Session.Settings.TrainCount:N0} movies with CTF results" : null;
     private string TrainingDetail => !Session.Settings.Denoise ? "Picking uses the aligned averages." : Session.Training ? (Session.HasModel ? $"Model v{Session.Model} denoises new movies until training finishes." : "Movie processing pauses so the first model has the GPU; it resumes with denoising.") : Session.HasModel ? $"Trained on {Session.Settings.TrainCount:N0} micrographs; it denoises new movies." : (Locked ? "Training starts automatically when enough CTF results are available." : "Training begins after processing starts and enough movies are ready.") + StartingModelNote;
-    private string StartingModelNote => string.IsNullOrWhiteSpace(Session.Settings.DenoiserStart) ? " The first model is trained from scratch." : $" The first model is fine-tuned from {System.IO.Path.GetFileName(Session.Settings.DenoiserStart)}.";
+    private string StartingModelNote => Session.Settings.PretrainedDenoiser ? " The first model is fine-tuned from the pretrained model." :
+        string.IsNullOrWhiteSpace(Session.Settings.DenoiserStart) ? " The first model is trained from scratch, which needs far more training than one sample gives: expect poor denoising." :
+        $" The first model is fine-tuned from {System.IO.Path.GetFileName(Session.Settings.DenoiserStart)}.";
 
     protected override void OnParametersSet()
     {
@@ -256,7 +259,7 @@
     private bool IsDisabled(string property) => Locked ||
         (!Draft.PickingEnabled && property is "Diameter" or "MinSeparation" or "Box" or "RescaleParticles" or "RescaledBox") ||
         (!Draft.CorrectGain && property is "GainPath" or "GainFlipX" or "GainFlipY" or "GainTranspose") ||
-        (!Draft.Denoise && property is "TrainCount" or "FineTune" or "FineTuneEvery" or "TrainingEpochs" or "DenoiserStart" or "EraseObjects");
+        (!Draft.Denoise && property is "TrainCount" or "FineTune" or "FineTuneEvery" or "TrainingEpochs" or "PretrainedDenoiser" or "DenoiserStart" or "EraseObjects");
     private RenderFragment B(string property, string label) => builder => {
         builder.OpenElement(0, "div"); builder.AddAttribute(1, "class", Row("setting-row boolean-setting", property)); builder.AddAttribute(2, "data-setting", property); builder.SetKey(property);
         builder.OpenElement(3, "label"); builder.AddAttribute(4, "for", _rootId + property); builder.AddContent(5, label); builder.CloseElement();
