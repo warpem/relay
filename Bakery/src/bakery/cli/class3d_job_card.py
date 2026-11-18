@@ -2,14 +2,13 @@ from pathlib import Path
 from typing import Annotated, List
 
 import matplotlib.axes
-import mrcfile
 import numpy as np
 import typer
 import starfile
 from matplotlib import pyplot as plt
 
 from bakery.cli._cli import cli
-from bakery.orthoslices.slice import take_slice
+from bakery.map_preview import read_z_projection, draw_map_preview
 
 
 def class_grid(n_classes: int) -> tuple[int, int]:
@@ -59,20 +58,10 @@ def class3d_job_card(
 
     aspect_ratio = n_cols / n_rows
 
-    # take volume z slices
-    volume_slices = []
+    # take volume z projections
+    volume_projections = []
     for file in volume_file:
-        with mrcfile.mmap(file) as volume:
-            volume_slices.append(take_slice(volume.data, axis='z', thickness=1).copy())
-
-    # Shared contrast supports mixed box sizes and empty maps.
-    sum_squares, n_nonzero = 0.0, 0
-    for image in volume_slices:
-        values = image[np.abs(image) > 1e-8].astype(np.float64)
-        sum_squares += np.dot(values, values)
-        n_nonzero += values.size
-    scale = np.sqrt(sum_squares / n_nonzero) if n_nonzero else 1.0
-    volume_slices = [image / scale for image in volume_slices]
+        volume_projections.append(read_z_projection(file))
 
     # setup plot
     fig, axs = plt.subplots(nrows=n_rows, ncols=n_cols, figsize=(aspect_ratio, 1))
@@ -82,14 +71,14 @@ def class3d_job_card(
         axs = np.array([axs])
     axs = axs.reshape(-1)
 
-    # draw each slice
+    # draw each projection
     for i in range(n_rows):
         for j in range(n_cols):
             idx = (i * n_cols) + j
             if idx <= n_volumes - 1:
                 draw_z_slice_panel(
                     ax=axs[idx],
-                    image=volume_slices[idx],
+                    image=volume_projections[idx],
                     label=class_number[idx],
                     n_rows=n_rows,
                     resolution=resolutions[idx]
@@ -108,17 +97,7 @@ def draw_z_slice_panel(
     n_rows: int,
     resolution: float | None = None,
 ):
-    # draw image, image==0 at 25% gray
-    std_scale = 5
-    ax.imshow(
-        image,
-        cmap="gray",
-        origin="lower",
-        interpolation='sinc',
-        interpolation_stage='data',
-        vmin=-0.25 * std_scale,
-        vmax=0.75 * std_scale,
-    )
+    draw_map_preview(ax, image)
 
     # add label
     if n_rows == 1:

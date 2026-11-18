@@ -5,7 +5,7 @@ import mrcfile
 import numpy as np
 from matplotlib import pyplot as plt
 
-from ..orthoslices.slice import take_slice
+from ..map_preview import read_z_projection, draw_map_preview
 from ..image_utils import process_image_for_visualization
 
 
@@ -17,7 +17,7 @@ def plot_ts_export_particles_job_card(
     output_file: Path,
 ):
     """
-    Create a job card visualization showing central slices of two MRC files
+    Create a job card visualization showing a tomogram slab and a particle-map z projection
     with particle circles overlaid.
     
     Args:
@@ -35,19 +35,18 @@ def plot_ts_export_particles_job_card(
         z_end = int(z_size * 0.75)
         slice1 = np.mean(mrc1.data[z_start:z_end], axis=0)
     
-    with mrcfile.mmap(mrc_file_2) as mrc2:
-        slice2 = take_slice(mrc2.data, axis='z', thickness=1)
+    projection = read_z_projection(mrc_file_2)
     
     # Process images for visualization
     image1 = process_image_for_visualization(slice1)
-    image2 = process_image_for_visualization(slice2)
+    image2 = projection
     
     # Create figure with two panels
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(2, 1))
     
     # Draw both slices with particle circles
     _draw_slice_with_particle_circle(ax1, image1, pixel_size, particle_diameter, mrc_file_1.name)
-    _draw_slice_with_particle_circle(ax2, image2, pixel_size, particle_diameter, mrc_file_2.name)
+    _draw_slice_with_particle_circle(ax2, image2, pixel_size, particle_diameter, mrc_file_2.name, map_preview=True)
     
     # Save figure
     fig.tight_layout(pad=0.1)
@@ -62,6 +61,7 @@ def _draw_slice_with_particle_circle(
     pixel_size: float,
     particle_diameter: float,
     filename: str,
+    map_preview: bool = False,
 ):
     """
     Draw a slice with a particle circle overlay.
@@ -74,7 +74,10 @@ def _draw_slice_with_particle_circle(
         filename: Filename to display in top left corner
     """
     # Display the image
-    ax.imshow(image, cmap='gray', origin='lower', interpolation='sinc')
+    if map_preview:
+        draw_map_preview(ax, image)
+    else:
+        ax.imshow(image, cmap='gray', origin='lower', interpolation='sinc')
     
     # Calculate particle radius in pixels
     particle_radius_pixels = (particle_diameter / 2) / pixel_size
@@ -95,8 +98,9 @@ def _draw_slice_with_particle_circle(
     ax.add_patch(circle)
     
     # Set axis limits to image bounds
-    ax.set_xlim(0, w)
-    ax.set_ylim(0, h)
+    if not map_preview:
+        ax.set_xlim(0, w)
+        ax.set_ylim(0, h)
     
     # Add filename label in top left corner
     ax.text(

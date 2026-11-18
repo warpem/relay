@@ -18,3 +18,9 @@ pip install ./Bakery
 ```bash
 bakery --help
 ```
+Single-view 3D map previews (class, refinement, species, import, postprocessing,
+particle-map and template panels) integrate the full map along z. They show the
+central two thirds in x and y with per-map min/max grayscale contrast, matching
+Beam 3D refinement. The legacy `xy-slice` command also uses this preview;
+`--slice-thickness-angstroms` remains accepted but does not limit projection depth.
+Three-plane orthoslice atlases and tomogram slabs retain their slice views.

@@ -1,40 +1,21 @@
 from pathlib import Path
-from enum import Enum
 
 import matplotlib.pyplot as plt
-import mrcfile
 import typer
 
 from ._cli import cli
-from ..orthoslices import draw_central_orthoslice
+from ..map_preview import read_z_projection, draw_map_preview
 
 
-@cli.command(no_args_is_help=True, help="central XY slice through a volume")
+@cli.command(no_args_is_help=True, help="z projection of a volume, zoomed to its central two thirds")
 def xy_slice(
     volume_file: Path = typer.Option(...),
-    slice_thickness_angstroms: float = typer.Option(default=10, help="angstroms"),
+    slice_thickness_angstroms: float = typer.Option(default=10, help="Legacy option; projections use the full z depth"),
     output_file: Path = typer.Option(...)
 ):
-    # read volume into (d, h, w) numpy array
-    volume = mrcfile.read(volume_file)
-
-    # setup axes in which to plot
+    projection = read_z_projection(volume_file)
     fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(1, 1))
-    ax.axis('off')
-
-    # plot...
-    # first calculate thickness in pixels
-    with mrcfile.open(volume_file, header_only=True) as mrc:
-        angstroms_per_pixel = mrc.voxel_size.x
-    thickness_px = slice_thickness_angstroms / angstroms_per_pixel
-
-    # then draw
-    draw_central_orthoslice(
-        ax=ax,
-        volume=volume,
-        axis_name='z',
-        thickness=thickness_px
-    )
+    draw_map_preview(ax, projection)
 
     # constrain figure layout to tightly wrap subplots
     plt.tight_layout(pad=0)
@@ -44,3 +25,5 @@ def xy_slice(
         output_file,
         dpi=1200,
     )
+
+    plt.close(fig)

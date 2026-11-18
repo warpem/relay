@@ -4,6 +4,7 @@ from pathlib import Path
 import mrcfile
 import matplotlib.pyplot as plt
 from ..image_utils import process_image_for_visualization
+from ..map_preview import project_z, draw_map_preview
 
 
 def parse_star_file_coordinates(star_file: Path) -> np.ndarray:
@@ -152,27 +153,17 @@ def plot_ts_template_match_job_card(
             template = mrc.data.astype(np.float32)
             template_voxel_size = float(mrc.voxel_size.x)  # Angstroms per voxel
         
-        # Get central XY slice
-        z_center = template.shape[0] // 2
-        template_slice = template[z_center]
-        
-        # Process template image for visualization
-        template_processed = process_image_for_visualization(template_slice, target_long_side=256)
-        
-        # Display template with interpolation
-        ax.imshow(template_processed, cmap="gray", origin="lower", vmin=0, vmax=1, aspect='equal', interpolation='sinc')
-        
-        # Calculate scale factor and particle radius for the circle
-        h, w = template_slice.shape
-        scale_factor = min(256 / h, 256 / w) if max(h, w) > 256 else 1.0
-        
+        # Project the full template depth with the same contrast as map cards.
+        template_projection = project_z(template)
+        draw_map_preview(ax, template_projection)
+
         # Draw yellow circle showing particle diameter
         particle_radius_voxels = (particle_diameter_angstroms / template_voxel_size) / 2
-        radius_pixels = particle_radius_voxels * scale_factor
+        radius_pixels = particle_radius_voxels
         
         # Center the circle on the template
-        center_x = template_processed.shape[1] / 2
-        center_y = template_processed.shape[0] / 2
+        center_x = (template_projection.shape[1] - 1) / 2
+        center_y = (template_projection.shape[0] - 1) / 2
         
         circle = plt.Circle((center_x, center_y), radius_pixels, 
                           color='yellow', fill=False, linewidth=0.42)

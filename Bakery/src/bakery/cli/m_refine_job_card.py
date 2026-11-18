@@ -4,7 +4,6 @@ from typing import Optional
 import xml.etree.ElementTree as ET
 
 import matplotlib
-import mrcfile
 import numpy as np
 import pandas as pd
 import starfile
@@ -13,7 +12,7 @@ from matplotlib import pyplot as plt
 
 from ._cli import cli
 from .class3d_job_card import class_grid
-from ..orthoslices.slice import take_slice
+from ..map_preview import read_z_projection, draw_map_preview
 
 
 @cli.command(no_args_is_help=True, help="visualize M-refine results with variable number of species")
@@ -44,15 +43,15 @@ def m_refine_job_card(
             n_species = 20
         
         if n_species == 1:
-            # single species: plot like m-species-job-card (map slice + FSC curves)
+            # single species: plot like m-species-job-card (map projection + FSC curves)
             _plot_single_species(species_folders[0], output_file)
         else:
-            # multiple species: plot only xy slices with resolution labels
+            # multiple species: plot only z projections with resolution labels
             _plot_multiple_species(species_folders, output_file)
 
 
 def _plot_single_species(species_folder: Path, output_file: Path):
-    """Plot single species like m-species-job-card with map slice and FSC curves."""
+    """Plot single species like m-species-job-card with map projection and FSC curves."""
     species_name = species_folder.name
     
     # find required files
@@ -74,13 +73,12 @@ def _plot_single_species(species_folder: Path, output_file: Path):
     # parse XML file for GlobalResolution
     global_resolution = _read_global_resolution(species_xml_file)
     
-    # grab volume slice
-    with mrcfile.mmap(volume_file) as volume:
-        slice = take_slice(volume.data, axis='z', thickness=1)
+    # grab volume projection
+    projection = read_z_projection(volume_file)
     
     # plot...
     fig, axs = plt.subplots(ncols=2, figsize=(2, 1))
-    draw_z_slice_panel(ax=axs[0], image=slice)
+    draw_z_slice_panel(ax=axs[0], image=projection)
     draw_fsc_panel(ax=axs[1], df=star, global_resolution=global_resolution)
     
     # write output file
@@ -91,7 +89,7 @@ def _plot_single_species(species_folder: Path, output_file: Path):
 
     # write PDF with vector FSC curves
     pdf_fig, pdf_axs = plt.subplots(ncols=2, figsize=(8, 4))
-    draw_z_slice_panel(ax=pdf_axs[0], image=slice)
+    draw_z_slice_panel(ax=pdf_axs[0], image=projection)
     _draw_fsc_on_axes(pdf_axs[1], star, global_resolution=global_resolution)
     pdf_fig.tight_layout(pad=0.5)
     pdf_fig.savefig(str(output_file.with_suffix('.pdf')))
@@ -99,15 +97,15 @@ def _plot_single_species(species_folder: Path, output_file: Path):
 
 
 def _plot_multiple_species(species_folders: list, output_file: Path):
-    """Plot multiple species as xy slices only with resolution labels."""
+    """Plot multiple species as z projections only with resolution labels."""
     n_species = len(species_folders)
     
     n_rows, n_cols = class_grid(n_species)
 
     aspect_ratio = n_cols / n_rows
     
-    # collect volume slices and resolution values
-    volume_slices = []
+    # collect volume projections and resolution values
+    volume_projections = []
     resolution_values = []
     species_names = []
     
@@ -125,24 +123,12 @@ def _plot_multiple_species(species_folders: list, output_file: Path):
         if not species_xml_file.exists():
             raise FileNotFoundError(f"Species XML file not found: {species_xml_file}")
         
-        # grab volume slice
-        with mrcfile.mmap(volume_file) as volume:
-            slice = take_slice(volume.data, axis='z', thickness=1)
-        volume_slices.append(slice)
+        # grab volume projection
+        projection = read_z_projection(volume_file)
+        volume_projections.append(projection)
         
         # parse XML file for GlobalResolution
         resolution_values.append(_read_global_resolution(species_xml_file))
-    
-    # Keep native slice dimensions: species can have different box sizes.
-    # Compute the shared contrast scale without stacking differently shaped arrays.
-    sum_squares = 0.0
-    n_nonzero = 0
-    for image in volume_slices:
-        values = image[np.abs(image) > 1e-8].astype(np.float64)
-        sum_squares += np.dot(values, values)
-        n_nonzero += values.size
-    normalized_l2_norm = np.sqrt(sum_squares / n_nonzero) if n_nonzero else 1.0
-    volume_slices = [image / normalized_l2_norm for image in volume_slices]
     
     # setup plot
     fig, axs = plt.subplots(nrows=n_rows, ncols=n_cols, figsize=(aspect_ratio, 1))
@@ -152,14 +138,14 @@ def _plot_multiple_species(species_folders: list, output_file: Path):
         axs = np.array([axs])
     axs = axs.reshape(-1)
     
-    # draw each slice
+    # draw each projection
     for i in range(n_rows):
         for j in range(n_cols):
             idx = (i * n_cols) + j
             if idx <= n_species - 1:
                 draw_z_slice_panel_with_resolution(
                     ax=axs[idx],
-                    image=volume_slices[idx],
+                    image=volume_projections[idx],
                     species_name=species_names[idx],
                     resolution=resolution_values[idx],
                     n_rows=n_rows
@@ -184,14 +170,7 @@ def draw_z_slice_panel(
     ax: matplotlib.axes.Axes,
     image: np.ndarray
 ):
-    # draw image
-    ax.imshow(
-        image,
-        cmap="gray",
-        origin="lower",
-        interpolation='sinc',
-        interpolation_stage='data'
-    )
+    draw_map_preview(ax, image)
     
     # remove axes
     ax.axis('off')
@@ -204,19 +183,7 @@ def draw_z_slice_panel_with_resolution(
     resolution: float,
     n_rows: int,
 ):
-    # draw image, image==0 at 25% gray (following class3d-job-card)
-    std_scale = 5
-    ax.imshow(
-        image,
-        cmap="gray",
-        origin="lower",
-        interpolation='sinc',
-        interpolation_stage='data',
-        # Fill an equal-sized square for every species, regardless of box size.
-        extent=(0, 1, 0, 1),
-        vmin=-0.25 * std_scale,
-        vmax=0.75 * std_scale,
-    )
+    draw_map_preview(ax, image)
     
     # add species name label (bottom left)
     if n_rows == 1:

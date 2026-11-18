@@ -3,7 +3,6 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 
 import matplotlib
-import mrcfile
 import numpy as np
 import pandas as pd
 import starfile
@@ -11,10 +10,10 @@ import typer
 from matplotlib import pyplot as plt
 
 from ._cli import cli
-from ..orthoslices.slice import take_slice
+from ..map_preview import read_z_projection, draw_map_preview
 
 
-@cli.command(no_args_is_help=True, help="map slice and FSC curves from M-species refinement")
+@cli.command(no_args_is_help=True, help="map projection and FSC curves from M-species refinement")
 def m_species_job_card(
     volume_file: Path = typer.Option(...),
     model_star_file: Path = typer.Option(...),
@@ -33,12 +32,12 @@ def m_species_job_card(
             global_resolution = float(param.get('Value'))
             break
 
-    # grab volume slice
-    slice = take_slice(mrcfile.mmap(volume_file).data, axis='z', thickness=1)
+    # grab volume projection
+    projection = read_z_projection(volume_file)
 
     # plot...
     fig, axs = plt.subplots(ncols=2, figsize=(2, 1))
-    draw_z_slice_panel(ax=axs[0], image=slice)
+    draw_z_slice_panel(ax=axs[0], image=projection)
     draw_fsc_panel(ax=axs[1], df=star, global_resolution=global_resolution)
 
     # write output file
@@ -49,7 +48,7 @@ def m_species_job_card(
 
     # write PDF with vector FSC curves
     pdf_fig, pdf_axs = plt.subplots(ncols=2, figsize=(8, 4))
-    draw_z_slice_panel(ax=pdf_axs[0], image=slice)
+    draw_z_slice_panel(ax=pdf_axs[0], image=projection)
     _draw_fsc_on_axes(pdf_axs[1], star, global_resolution=global_resolution)
     pdf_fig.tight_layout(pad=0.5)
     pdf_fig.savefig(str(output_file.with_suffix('.pdf')))
@@ -60,14 +59,7 @@ def draw_z_slice_panel(
     ax: matplotlib.axes.Axes,
     image: np.ndarray
 ):
-    # draw image
-    ax.imshow(
-        image,
-        cmap="gray",
-        origin="lower",
-        interpolation='sinc',
-        interpolation_stage='data'
-    )
+    draw_map_preview(ax, image)
 
     # remove axes
     ax.axis('off')
