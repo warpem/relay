@@ -1319,6 +1319,7 @@ public class Class3D : RelionJob, IClusterJob, IPooledJob, IPoolStatus
         // Check each iteration to see if results exist and need visualization
         for (int ires = ContinuingFromIteration; ires < LogsAvailableIteration + (HasFinished ? 1 : 0); ires++)
         {
+            using var figureBatch = BakeryWrapper.BeginBatch();
             // Skip if the result file for the first class doesn't exist
             if (!File.Exists(ResMapFile(ires, 1)))
                 break;

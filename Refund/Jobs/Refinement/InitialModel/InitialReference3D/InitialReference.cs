@@ -511,6 +511,7 @@ public class InitialReference : RelionJob, IClusterJob
 
         for (int ires = 0; ires < LogsAvailableIteration + (hasFinished ? 1 : 0); ires++)
         {
+            using var figureBatch = BakeryWrapper.BeginBatch();
             if (!File.Exists(ResMapFile(ires, 1)))
                 break;
 

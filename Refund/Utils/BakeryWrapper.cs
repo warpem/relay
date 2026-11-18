@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Text.Json;
 using System.Diagnostics;
 using Serilog;
 
@@ -23,6 +25,39 @@ namespace Refund.Utils;
 /// </remarks>
 public static class BakeryWrapper
 {
+    private sealed record BatchCommand(string Arguments, string[] ArgumentList, string WorkingDirectory);
+    private static readonly AsyncLocal<ConcurrentQueue<BatchCommand>> PendingBatch = new();
+
+    /// <summary>Share one Python interpreter and plotting caches across an iteration's figures.</summary>
+    public static IDisposable BeginBatch() => BeginBatch(manifest => RunArguments(["batch", "--manifest", manifest]));
+
+    internal static IDisposable BeginBatch(Action<string> render)
+    {
+        if (PendingBatch.Value != null) return new BatchScope(null, render);
+        var commands = new ConcurrentQueue<BatchCommand>();
+        PendingBatch.Value = commands;
+        return new BatchScope(commands, render);
+    }
+
+    private sealed class BatchScope(ConcurrentQueue<BatchCommand> commands, Action<string> render) : IDisposable
+    {
+        private bool _disposed;
+        public void Dispose()
+        {
+            if (_disposed || commands == null) return;
+            _disposed = true;
+            PendingBatch.Value = null;
+            if (commands.IsEmpty) return;
+            string manifest = Path.GetTempFileName();
+            try
+            {
+                File.WriteAllText(manifest, JsonSerializer.Serialize(commands.ToArray()));
+                render(manifest);
+            }
+            finally { File.Delete(manifest); }
+        }
+    }
+
     /// <summary>
     /// Maximum number of concurrent bakery processes that can run simultaneously.
     /// </summary>
@@ -54,6 +89,11 @@ public static class BakeryWrapper
 
     internal static void RunCommand(ProcessStartInfo startInfo)
     {
+        if (PendingBatch.Value is { } batch)
+        {
+            batch.Enqueue(new(startInfo.Arguments, startInfo.ArgumentList.ToArray(), startInfo.WorkingDirectory));
+            return;
+        }
         ProcessSemaphore.Wait(); // Block if maximum concurrent processes reached
         
         try
@@ -63,11 +103,14 @@ public static class BakeryWrapper
             startInfo.RedirectStandardError = true;
             using var process = new Process { StartInfo = startInfo };
             var logger = Log.ForContext("SourceContext", "Refund.Utils.BakeryWrapper");
-            logger.Information("Running bakery with: {Output}", startInfo.Arguments);
+            logger.Information("Running bakery with: {Output}", startInfo.ArgumentList.Count > 0
+                ? string.Join(" ", startInfo.ArgumentList.Select(JobTools.QuoteArgumentValue)) : startInfo.Arguments);
+            var elapsed = Stopwatch.StartNew();
 
             process.Start();
             string error = process.StandardError.ReadToEnd();
             process.WaitForExit();
+            logger.Information("Bakery finished in {ElapsedSeconds:F2}s", elapsed.Elapsed.TotalSeconds);
 
             if (process.ExitCode != 0)
                 throw new InvalidOperationException(

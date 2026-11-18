@@ -1059,6 +1059,7 @@ public class Refine3D : RelionJob, IClusterJob, IPooledJob, IPoolStatus
 
         for (int ires = 0; ires < LogsAvailableIteration + (hasFinished ? 1 : 0); ires++)
         {
+            using var figureBatch = BakeryWrapper.BeginBatch();
             // If HasFinished == true, visualize all remaining results,
             // otherwise only the first iterations that doesn't have vis yet
             if (!File.Exists(VisFilteredSlices(ires)))

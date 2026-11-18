@@ -214,6 +214,7 @@ public class BeamInit3D : BeamParticleJob
         int latest = VisAvailableIteration;
         foreach (int i in CommittedIterations())
         {
+            using var figureBatch = BakeryWrapper.BeginBatch();
             bool finalUpdate = final && i == FinalIteration;
             for (int c = 1; c <= NClasses; c++)
             {

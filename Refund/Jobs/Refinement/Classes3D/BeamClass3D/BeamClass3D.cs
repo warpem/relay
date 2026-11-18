@@ -237,6 +237,7 @@ public class BeamClass3D : BeamParticleJob
         int latest = VisAvailableIteration;
         foreach (int i in CommittedIterations())
         {
+            using var figureBatch = BakeryWrapper.BeginBatch();
             if (IsTiltSeries && !File.Exists(TiltProcessedItems(i))) CollectTiltSeriesItems(i);
             for (int c = 1; c <= NClasses; c++)
             {

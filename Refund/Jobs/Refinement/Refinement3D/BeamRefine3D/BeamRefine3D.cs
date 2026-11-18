@@ -189,6 +189,7 @@ public class BeamRefine3D : BeamParticleJob
         int committed = CommittedIterations().DefaultIfEmpty(-1).Max();
         foreach (int i in CommittedIterations())
         {
+            using var figureBatch = BakeryWrapper.BeginBatch();
             if (IsTiltSeries && !File.Exists(TiltProcessedItems(i))) CollectTiltSeriesItems(i);
             bool currentFigures = DiagnosticsAreCurrent(VisDiagnostics(i));
             if (currentFigures && File.Exists(VisCard(i)) && FigureFilesReady(VisFilteredSlices(i)) && FigureFilesReady(VisFsc(i)) &&

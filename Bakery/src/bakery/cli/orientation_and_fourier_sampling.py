@@ -1,4 +1,5 @@
 from enum import Enum
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
@@ -9,6 +10,7 @@ import starfile
 import typer
 from cmap import Colormap
 from scipy.spatial.transform import Rotation
+from scipy.sparse import csr_matrix
 
 from ._cli import cli
 from ..figure_export import save_figure
@@ -57,26 +59,21 @@ def orientation_and_fourier_sampling(
     - Must be one of ‘I’, ‘O’, ‘T’, ‘Dn’, ‘Cn’, where n is a positive integer
     c.f. https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.transform.Rotation.create_group.html
     """
-    # find h3 indices for particle z vectors (and their symmetry mates)
-    if class_number is None:
-        rot, tilt = parse_input_file(particles_file, input_type)
-    else:
-        particles = starfile.read(particles_file, always_dict=True)['particles']
-        selected = particles.loc[particles['rlnClassNumber'] == class_number]
-        rot = selected['rlnAngleRot'].to_numpy(copy=True)
-        tilt = selected['rlnAngleTilt'].to_numpy(copy=True)
+    symmetry = class_symmetry(symmetry, class_number)
+    particles = particle_angles(particles_file)
+    selected = particles if class_number is None else particles.loc[particles['rlnClassNumber'] == class_number]
+    rot = selected['rlnAngleRot'].to_numpy(copy=True)
+    tilt = selected['rlnAngleTilt'].to_numpy(copy=True)
     rot, tilt = normalize_orientations(rot, tilt)
-    rotation_matrices = rottilt_to_rotation_matrix(rot, tilt)
+    rotation_matrices = rottilt_to_rotation_matrix(rot, tilt) if len(rot) else np.empty((0, 3, 3))
     if symmetry is not None:
         rotation_matrices = symmetrize(rotation_matrices, symmetry=symmetry)
     z_vectors = rotation_matrices[..., :, 2]
-    h = xyz_to_cell(z_vectors, res=grid_resolution)
-    h_to_count = count_particles_per_h3_cell(h)
+    h_to_count = count_particles_per_h3_cell(xyz_to_cell(z_vectors, res=grid_resolution))
 
-    # find mapping between h3 indices and pixels in our output image
-    rot_grid, tilt_grid = generate_rot_grid(1024), generate_tilt_grid(1024)
-    h_grid = rottilt_to_cell(rot_grid, tilt_grid, res=grid_resolution)
-    h_cells, h_cell_counts, idx_inv = find_cell_count_to_image_mapping(h_grid, h_to_count)
+    # Grid geometry is independent of particles, classes and iterations.
+    h_cells, idx_inv, tilt_grid = projection_grid(grid_resolution)
+    h_cell_counts = np.array([h_to_count.get(h, 0) for h in h_cells])
 
     # write outputs
     if output_orientation_file is not None:
@@ -104,7 +101,7 @@ def orientation_and_fourier_sampling(
                                        directions).reshape(-1, 3)
             directions = np.where(directions[:, 2:3] < 0, -directions, directions)
             h_to_count = count_particles_per_h3_cell(xyz_to_cell(directions, res=grid_resolution))
-            h_cells, h_cell_counts, idx_inv = find_cell_count_to_image_mapping(h_grid, h_to_count)
+            h_cell_counts = np.array([h_to_count.get(h, 0) for h in h_cells])
         image = generate_fourier_sampling_distribution_image(
             h_cells=h_cells,
             h_cell_counts=h_cell_counts,
@@ -118,6 +115,39 @@ def orientation_and_fourier_sampling(
             output_file=output_fourier_sampling_file,
             svg=svg,
         )
+
+
+def class_symmetry(symmetry, class_number=None):
+    if not symmetry:
+        return None
+    groups = [group.strip().upper() for group in symmetry.split(',')]
+    if len(groups) > 1:
+        if class_number is None or not 1 <= class_number <= len(groups):
+            raise ValueError('Per-class symmetry requires a matching class number')
+        symmetry = groups[class_number - 1]
+    else:
+        symmetry = groups[0]
+    return None if symmetry == 'C1' else symmetry
+
+
+@lru_cache(maxsize=2)
+def _particle_angles(path, mtime, size):
+    # Keep only plotting columns after one STAR parse, shared by every class.
+    table = starfile.read(path, always_dict=True)['particles']
+    return table[[c for c in ('rlnAngleRot', 'rlnAngleTilt', 'rlnClassNumber') if c in table]]
+
+
+def particle_angles(path):
+    path = Path(path).resolve()
+    stat = path.stat()
+    return _particle_angles(str(path), stat.st_mtime_ns, stat.st_size)
+
+
+@lru_cache(maxsize=4)
+def projection_grid(resolution):
+    rot, tilt = generate_rot_grid(1024), generate_tilt_grid(1024)
+    cells, inverse = np.unique(rottilt_to_cell(rot, tilt, res=resolution), return_inverse=True)
+    return cells, inverse, tilt
 
 
 def parse_input_file(particles_file: Path, input_type: InputType):
@@ -170,7 +200,7 @@ def plot_orientation_distribution(
     fig, ax = plt.subplots(figsize=(3, 3))
     cmap = Colormap(colormap).to_mpl()
     cmap.set_bad(color=(0, 0, 0, 0))
-    ax.imshow(image, cmap=cmap, interpolation='sinc', origin='lower', vmin=0)
+    ax.imshow(image, cmap=cmap, interpolation='nearest', origin='lower', vmin=0)
     ax.set(xticks=[], xticklabels=[], yticks=[], yticklabels=[])
     for spine in ax.spines.values():
         spine.set_visible(False)
@@ -197,37 +227,37 @@ def generate_fourier_sampling_distribution_image(
     tilt_grid: np.ndarray,
     grid_resolution: int,
 ) -> np.ndarray:
-    idx = np.nonzero(h_cell_counts)
-    nonzero_h_cells = h_cells[idx]
-    nonzero_h_cell_counts = h_cell_counts[idx]
+    transfer = fourier_transfer(tuple(h_cells), grid_resolution)
+    counts = transfer @ h_cell_counts
+    return np.ma.masked_where(tilt_grid > 90, counts[idx_inv])
 
-    theta = np.linspace(start=0, stop=2 * np.pi, num=500, endpoint=False)
-    x = np.cos(theta)
-    y = np.sin(theta)
-    z = np.zeros_like(theta)
-    xyz = einops.rearrange([x, y, z], 'xyz b -> b xyz')
 
-    h_cell_counts_fourier_sampling = np.zeros_like(h_cell_counts)
+@lru_cache(maxsize=4)
+def fourier_transfer(cells, resolution):
+    """Exact old 500-point great-circle binning, computed once as a sparse operator.
 
-    for h, count in zip(nonzero_h_cells, nonzero_h_cell_counts):
-        rotation_matrix = cell_to_rotation_matrix(h)
-        rotated_xyz = rotation_matrix @ einops.rearrange(xyz, 'b xyz -> b xyz 1')
-        rotated_xyz = einops.rearrange(rotated_xyz, 'b xyz 1 -> b xyz')
-        h_rotated = xyz_to_cell(rotated_xyz, res=grid_resolution)
-        unique_h_rotated = np.unique(h_rotated)
-        idx_in_hemisphere = np.where(np.isin(h_cells, unique_h_rotated))
-        h_cell_counts_fourier_sampling[idx_in_hemisphere] += count
-
-    image = h_cell_counts_fourier_sampling[idx_inv]
-    image = np.ma.masked_where(condition=tilt_grid > 90, a=image)
-    return image
+    Each circle contributes once per visited cell, not once per sampled point.
+    Dictionary lookups replace repeatedly scanning the entire image-cell array.
+    """
+    cells = np.asarray(cells)
+    lookup = {cell: i for i, cell in enumerate(cells)}
+    rotations = cell_to_rotation_matrix(cells)
+    theta = np.linspace(0, 2 * np.pi, 500, endpoint=False)
+    circle = np.stack([np.cos(theta), np.sin(theta), np.zeros_like(theta)], axis=-1)
+    rows, columns = [], []
+    for source, rotation in enumerate(rotations):
+        visited = np.unique(xyz_to_cell(circle @ rotation.T, res=resolution))
+        targets = [lookup[cell] for cell in visited if cell in lookup]
+        rows.extend(targets)
+        columns.extend([source] * len(targets))
+    return csr_matrix((np.ones(len(rows), dtype=np.int8), (rows, columns)), shape=(len(cells), len(cells)))
 
 
 def plot_fourier_sampling_distribution(image: np.ndarray, colormap, output_file, svg: bool = False):
     fig, ax = plt.subplots(figsize=(3, 3))
     cmap = Colormap(colormap).to_mpl()
     cmap.set_bad(color=(0, 0, 0, 0))
-    ax.imshow(image, cmap=cmap, interpolation='sinc', origin='lower', vmin=0)
+    ax.imshow(image, cmap=cmap, interpolation='nearest', origin='lower', vmin=0)
     ax.set(xticks=[], xticklabels=[], yticks=[], yticklabels=[])
     for spine in ax.spines.values():
         spine.set_visible(False)

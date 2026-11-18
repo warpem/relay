@@ -40,3 +40,4 @@ import matplotlib
 matplotlib.use('Agg')
 from .beam_class2d_figures import beam_class2d_figures
 from .beam_class2d_subclasses import beam_class2d_subclasses
+from .batch import batch
