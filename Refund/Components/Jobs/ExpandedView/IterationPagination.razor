@@ -1,3 +1,4 @@
+@using Refund.DataModel
 
 @if (Service?.CurrentJob?.IsIterative == true && Service.AvailableIterations.Any())
 {
@@ -41,11 +42,14 @@
                         <div class="iteration-number" style="opacity: 0.7;">
                             @iteration
                         </div>
-                        <div style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;">
-                            <FluentSpinner Size="SpinnerSize.Medium"
-                                           Style="@(iteration < Service.CurrentJob.LogsAvailableIteration ?
-                                               "--colorBrandStroke1: var(--success-normal);" : null)" />
-                        </div>
+                        @if (iteration < Service.CurrentJob.LogsAvailableIteration || Service.CurrentJob.Status == JobStatus.Running)
+                        {
+                            <div style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;">
+                                <FluentSpinner Size="SpinnerSize.Medium"
+                                               Style="@(iteration < Service.CurrentJob.LogsAvailableIteration ?
+                                                   "--colorBrandStroke1: var(--success-normal);" : null)" />
+                            </div>
+                        }
                         <div class="iteration-dots">
                             @if (metadata.hasResults)
                             {

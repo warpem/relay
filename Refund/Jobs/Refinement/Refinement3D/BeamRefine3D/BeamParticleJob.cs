@@ -31,6 +31,7 @@ public abstract class BeamParticleJob : Job, IClusterJob
     public override string CommandSuffix => $" && touch {JobTools.QuoteArgumentValue(PathSuccess)}";
 
     public virtual bool SupportsAlignment => true;
+    public virtual bool SupportsPoseMarginalization => SupportsAlignment;
     public bool UsesGlobalSearch => SupportsAlignment && Alignment == BeamAlignment.Global;
     public bool UsesLocalSearch => SupportsAlignment && Alignment == BeamAlignment.Local;
     public bool ShowParticleDiameter => !SupportsAlignment || UsesGlobalSearch;
@@ -59,7 +60,7 @@ public abstract class BeamParticleJob : Job, IClusterJob
     [UiFieldGroup("Alignment", 1)]
     [UiDecimal("pose-marginalization-temperature", "Pose marginalization temperature", min: 0, max: 100,
         stepSize: 0.1, isAdvanced: true, helpText: "Scales the pose posterior covariance; 0 uses only the best pose.",
-        ConditionalOnField = nameof(SupportsAlignment), ConditionalOnValue = true)]
+        ConditionalOnField = nameof(SupportsPoseMarginalization), ConditionalOnValue = true)]
     [RelayProperty] public decimal PoseMarginalizationTemperature { get; set; } = 1;
 
     [UiFieldGroup("Alignment", 1)]
@@ -335,7 +336,8 @@ public abstract class BeamParticleJob : Job, IClusterJob
         for (int index = 0; index < lines.Length; index++)
         {
             int? iteration = LogIteration(lines[index].Trim());
-            if (iteration.HasValue) starts[iteration.Value] = index;
+            // Some commands report multiple updates within one displayed iteration.
+            if (iteration.HasValue) starts.TryAdd(iteration.Value, index);
         }
         var sections = starts.ToArray();
         for (int section = 0; section < sections.Length; section++)

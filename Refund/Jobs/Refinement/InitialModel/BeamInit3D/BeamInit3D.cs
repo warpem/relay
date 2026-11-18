@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Refund.DataModel;
 using Refund.DataModel.ReadOnly;
@@ -24,6 +25,7 @@ public class BeamInit3D : BeamParticleJob
     public override string TypeDescription => "Generate one or more initial 3D models from particle images or raw particle tilt series";
     public override string CommandName => "beam init3d";
     public override bool SupportsAlignment => false;
+    public override bool SupportsPoseMarginalization => true;
     public override Type ExpandedViewType => typeof(BeamClass3DExpandedView);
     public override int2 CardSquareCount { get => Class3DCardLayout.SquareCount(NClasses); set { } }
 
@@ -32,8 +34,32 @@ public class BeamInit3D : BeamParticleJob
     [RelayProperty] public int NClasses { get; set; } = 1;
 
     [UiInt("updates", "Updates", min: 1, max: 10000,
-        helpText: "Number of stochastic gradient updates. Beam saves intermediate models every 10 updates.")]
-    [RelayProperty] public int Updates { get; set; } = 200;
+        helpText: "Number of stochastic gradient updates. Preview frequency is controlled by the snapshot interval.")]
+    [RelayProperty] public int Updates { get; set; } = 1000;
+
+    [UiBool("no-positivity", "Enforce positivity", reverse: true,
+        helpText: "Constrain initial models to nonnegative density. Disable to allow signed density.")]
+    [RelayProperty] public bool EnforcePositivity { get; set; } = true;
+
+    [UiInt("initial-minibatch", "Initial particles per update", min: 1, max: int.MaxValue,
+        helpText: "Starting scientific minibatch, total across halves and classes. Separate from the hardware batch size.")]
+    [RelayProperty] public int InitialMinibatch { get; set; } = 100;
+
+    [UiInt("final-minibatch", "Final particles per update", min: 1, max: int.MaxValue,
+        helpText: "Final scientific minibatch, total across halves and classes. Must be at least the initial minibatch.")]
+    [RelayProperty] public int FinalMinibatch { get; set; } = 500;
+
+    [UiDecimal("initial-learning-rate", "Initial learning rate", min: 0.000001, max: 1, stepSize: 0.05, isAdvanced: true,
+        helpText: "Starting VDAM step size; decays exponentially over all updates to the final learning rate.")]
+    [RelayProperty] public decimal InitialLearningRate { get; set; } = 0.5m;
+
+    [UiDecimal("final-learning-rate", "Final learning rate", min: 0.000001, max: 1, stepSize: 0.05, isAdvanced: true,
+        helpText: "VDAM step size reached on the final update.")]
+    [RelayProperty] public decimal FinalLearningRate { get; set; } = 0.1m;
+
+    [UiInt("snapshot-interval", "Snapshot interval", min: 1, max: 10000, unit: "updates", isAdvanced: true,
+        helpText: "Publish intermediate models every this many updates. Relay groups iteration logs and previews using this interval.")]
+    [RelayProperty] public int SnapshotInterval { get; set; } = 50;
 
     [UiInt("working-box", "Box size", min: 16, max: 4096, stepSize: 2, unit: "px",
         helpText: "Even working box size, capped at the input box. Fourier cropping preserves the field of view and coarsens the pixel size.")]
@@ -64,18 +90,20 @@ public class BeamInit3D : BeamParticleJob
     public override string IterationMetadataDirectory(int iteration) => Path.Combine(BeamDirectory, "warp_metadata");
     public string ParticleStar => Path.Combine(BeamDirectory, "initial_model_data.star");
     public string SummaryFile => Path.Combine(BeamDirectory, "summary.json");
-    private int FinalIteration => (Updates + 9) / 10;
+    private int PreviewInterval => Math.Max(1, SnapshotInterval);
+    private int FinalIteration => IterationForUpdate(Updates);
     private int OutputIndex(int i) => i < 0 ? Math.Max(LastCommittedIteration, VisAvailableIteration) : i;
-    private int OutputUpdate(int i) => Math.Min(OutputIndex(i) * 10, Updates);
+    public int UpdateForIteration(int i) => Math.Min(OutputIndex(i) * PreviewInterval, Updates);
+    public int IterationForUpdate(int update) => (update + PreviewInterval - 1) / PreviewInterval;
     public bool IsFinalUpdate(int i) => FinalAssignmentAvailable && OutputIndex(i) == FinalIteration;
-    public string VisMap3d(int i, int c) => MapFile(OutputUpdate(i), c, IsFinalUpdate(i));
+    public string VisMap3d(int i, int c) => MapFile(UpdateForIteration(i), c, IsFinalUpdate(i));
     private string MapFile(int i, int c, bool final) => Path.Combine(BeamDirectory,
         $"{(final ? "" : $"it{i:D3}_")}initial_model_class{c:D3}.mrc");
     public string VisFilteredSlices(int i, int c) => Figure(i, c, "slices");
     public string VisAngularDistribution(int i, int c) => Figure(i, c, "angles");
     public string VisFourierSampling(int i, int c) => Figure(i, c, "sampling");
-    public string VisClassStats(int i) => Path.Combine(RelayResultsDirectoryPath, $"classes_it{OutputUpdate(i):D4}.json");
-    private string Figure(int i, int c, string name) => Path.Combine(RelayResultsDirectoryPath, $"{name}_it{OutputUpdate(i):D4}_class{c:D3}.png");
+    public string VisClassStats(int i) => Path.Combine(RelayResultsDirectoryPath, $"classes_it{UpdateForIteration(i):D4}.json");
+    private string Figure(int i, int c, string name) => Path.Combine(RelayResultsDirectoryPath, $"{name}_it{UpdateForIteration(i):D4}_class{c:D3}.png");
 
     public BeamInit3D()
     {
@@ -91,6 +119,12 @@ public class BeamInit3D : BeamParticleJob
         var errors = base.ValidateInputs();
         if (NClasses < 1) errors[nameof(NClasses)] = "At least one class is required.";
         if (Updates < 1) errors[nameof(Updates)] = "Updates must be positive.";
+        if (SnapshotInterval < 1) errors[nameof(SnapshotInterval)] = "Snapshot interval must be positive.";
+        if (InitialMinibatch < 1) errors[nameof(InitialMinibatch)] = "Initial particles per update must be positive.";
+        if (FinalMinibatch < 1 || FinalMinibatch < InitialMinibatch)
+            errors[nameof(FinalMinibatch)] = "Final particles per update must be positive and at least the initial count.";
+        if (InitialLearningRate is <= 0 or > 1) errors[nameof(InitialLearningRate)] = "Initial learning rate must be in (0, 1].";
+        if (FinalLearningRate is <= 0 or > 1) errors[nameof(FinalLearningRate)] = "Final learning rate must be in (0, 1].";
         if (ClassSimilarity is < 0 or > 1) errors[nameof(ClassSimilarity)] = "Class similarity must be between 0 and 1.";
         if (WorkingBox < 16 || WorkingBox % 2 != 0) errors[nameof(WorkingBox)] = "Box size must be even and at least 16 pixels.";
         if (FinalResolution <= 0 || FinalResolution > InitialResolution)
@@ -100,16 +134,23 @@ public class BeamInit3D : BeamParticleJob
         if (!errors.ContainsKey(nameof(AdditionalArguments)))
         {
             var custom = BeamWrapper.ParseArguments(AdditionalArguments);
-            if (custom.ContainsKey("classes") || custom.ContainsKey("updates"))
-                errors[nameof(AdditionalArguments)] = "Set classes and updates using the job fields.";
+            if (custom.ContainsKey("classes") || custom.ContainsKey("updates") || custom.ContainsKey("snapshot-interval"))
+                errors[nameof(AdditionalArguments)] = "Set classes, updates and snapshot interval using the job fields.";
         }
         return errors;
+    }
+
+    public override void ReadFromJson(JsonNode reader)
+    {
+        base.ReadFromJson(reader);
+        // Existing saved jobs use ten-update preview numbering and filenames.
+        if (reader[nameof(SnapshotInterval)] == null) SnapshotInterval = 10;
     }
 
     protected override void AddReferenceArguments(Dictionary<string, string> args) { }
     protected override void AddRunArguments(Dictionary<string, string> args) { }
     protected override IEnumerable<string> RequiredIterationFiles(int i) =>
-        Enumerable.Range(1, NClasses).Select(c => MapFile(OutputUpdate(i), c, false));
+        Enumerable.Range(1, NClasses).Select(c => MapFile(UpdateForIteration(i), c, false));
 
     private bool HasFinalOutputs() => File.Exists(SummaryFile) && File.Exists(ParticleStar) &&
         Enumerable.Range(1, NClasses).All(c => File.Exists(MapFile(Updates, c, true))) &&
@@ -122,7 +163,7 @@ public class BeamInit3D : BeamParticleJob
             .Select(Path.GetFileName).Select(name => Regex.Match(name!, @"^it(\d+)_initial_model_class001\.mrc$"))
             .Where(m => m.Success).Select(m => int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture))
             .Where(update => Enumerable.Range(1, NClasses).All(c => File.Exists(MapFile(update, c, false))))
-            .Select(update => (update + 9) / 10);
+            .Select(IterationForUpdate);
         return snapshots.Concat(HasFinalOutputs() ? [FinalIteration] : Array.Empty<int>()).Distinct().Order().ToArray();
     }
 
@@ -130,10 +171,13 @@ public class BeamInit3D : BeamParticleJob
 
     protected override int? LogIteration(string line)
     {
+        // The progress bar appears before the first completed update. Mark the
+        // first preview block active immediately, just like a refinement header.
+        if (line.StartsWith("Ab initio updates:", StringComparison.Ordinal)) return 1;
         var match = Regex.Match(line, @"^update\s+(\d+)\b");
         if (!match.Success) return null;
         int update = int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
-        return update % 10 == 0 || update == Updates ? (update + 9) / 10 : null;
+        return update > 0 ? IterationForUpdate(update) : null;
     }
 
     protected override ParticleSet GetParticles(int iteration)
@@ -174,7 +218,7 @@ public class BeamInit3D : BeamParticleJob
             for (int c = 1; c <= NClasses; c++)
             {
                 if (!BeamRefine3D.FigureFilesReady(VisFilteredSlices(i, c)))
-                    BakeryWrapper.MapOrthosliceAtlas(MapFile(OutputUpdate(i), c, finalUpdate), 1, VisFilteredSlices(i, c), svg: true);
+                    BakeryWrapper.MapOrthosliceAtlas(MapFile(UpdateForIteration(i), c, finalUpdate), 1, VisFilteredSlices(i, c), svg: true);
                 if (finalUpdate && (!BeamRefine3D.FigureFilesReady(VisAngularDistribution(i, c)) || !BeamRefine3D.FigureFilesReady(VisFourierSampling(i, c))))
                     BakeryWrapper.OrientationAndFourierSamplingHexBin(ParticleStar, VisAngularDistribution(i, c), VisFourierSampling(i, c),
                         Symmetry == "C1" ? null : Symmetry, svg: true, classNumber: c,
@@ -195,7 +239,7 @@ public class BeamInit3D : BeamParticleJob
                 File.WriteAllText(VisClassStats(i), JsonSerializer.Serialize(stats));
             }
             if (!File.Exists(VisCard(i))) BakeryWrapper.Class3DJobCard(
-                Enumerable.Range(1, NClasses).Take(20).Select(c => MapFile(OutputUpdate(i), c, finalUpdate)).ToArray(),
+                Enumerable.Range(1, NClasses).Take(20).Select(c => MapFile(UpdateForIteration(i), c, finalUpdate)).ToArray(),
                 Enumerable.Range(1, NClasses).Take(20).ToArray(), VisCard(i));
             if (finalUpdate && IsTiltSeries && !File.Exists(TiltProcessedItems(i))) CollectTiltSeriesItems(i);
             latest = i;

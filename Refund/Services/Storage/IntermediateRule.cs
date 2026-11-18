@@ -190,8 +190,8 @@ public static class IntermediateRules
             return [ToDisk(job, Math.Max(init.LastCommittedIteration, init.VisAvailableIteration))];
         }
 
-        public override int ToDisk(Job job, int logical) => Math.Min(logical * 10, ((BeamInit3D)job).Updates);
-        public override int ToLogical(Job job, int onDisk) => (onDisk + 9) / 10;
+        public override int ToDisk(Job job, int logical) => ((BeamInit3D)job).UpdateForIteration(logical);
+        public override int ToLogical(Job job, int onDisk) => ((BeamInit3D)job).IterationForUpdate(onDisk);
     }
 
     /// <summary>beam/snapshots/itNNN/ holds the class images and model of iteration NNN.</summary>
