@@ -55,6 +55,12 @@ public partial class ViewToolbar : ComponentBase, IDisposable
         DiagramService.OnViewModeChanged += HandleViewModeChanged;
     }
 
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+            await SortingService.InitializeAsync();
+    }
+
     private async Task HandleSortChanged()
     {
         await InvokeAsync(StateHasChanged);
