@@ -156,7 +156,8 @@ public partial class Class2DExpandedView : IDisposable
             if (view == null)
                 throw new Exception("Current view not found");
 
-            var createdJob = await _dataManager.CreateJob(_session.User, view, class2DSelection.TypeGuid, class2DSelection);
+            var createdJob = await _dataManager.CreateJob(_session.User, view, class2DSelection.TypeGuid, class2DSelection,
+                targetFolder: view.FindFolderContainingJob(_job.Id));
             if (createdJob == null)
                 throw new Exception("Failed to create selection job");
 
@@ -187,7 +188,8 @@ public partial class Class2DExpandedView : IDisposable
                 UnselectedClasses = all.Except(selected).Order().ToArray()
             };
             var view = _session.View ?? throw new Exception("Current view not found");
-            var created = await _dataManager.CreateJob(_session.User, view, selection.TypeGuid, selection)
+            var created = await _dataManager.CreateJob(_session.User, view, selection.TypeGuid, selection,
+                targetFolder: view.FindFolderContainingJob(_job.Id))
                 ?? throw new Exception("Failed to create selection job");
             await _dataManager.CreateEdge(_job.Space, _job.PortsOut["SubclassParticles"], created.PortsIn["Particles"]);
             await _dataManager.CreateEdge(_job.Space, _job.PortsOut["SubclassTemplates"], created.PortsIn["Templates"]);

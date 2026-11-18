@@ -211,7 +211,8 @@ public partial class Class3DExpandedView
                 throw new Exception("Current view not found");
 
             // Create the selection job
-            var createdJob = await _dataManager.CreateJob(_session.User, view, select3d.TypeGuid, select3d);
+            var createdJob = await _dataManager.CreateJob(_session.User, view, select3d.TypeGuid, select3d,
+                targetFolder: view.FindFolderContainingJob(_job.Id));
             if (createdJob == null)
                 throw new Exception("Failed to create selection job");
 
