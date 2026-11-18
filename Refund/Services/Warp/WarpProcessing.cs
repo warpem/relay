@@ -11,7 +11,7 @@ using Warp.Workers.Scheduling;
 namespace Refund.Services.Warp;
 public sealed partial class WarpSession
 {
-    private static readonly string[] StageOrder=["motion","average","ctf","denoise","pick","extract"];
+    private static readonly string[] StageOrder=["motion","average","junk","ctf","denoise","pick","extract"];
     private Dictionary<string,ulong> _stageKeys=[];
     private readonly Dictionary<string,PendingTask> _inflight=[];
     private readonly Dictionary<string,(long Length,long WriteTicks,DateTime Observed)> _candidates=new(StringComparer.Ordinal);
@@ -31,36 +31,38 @@ public sealed partial class WarpSession
     public static string PreviewPath(string micrograph)=>Path.Combine(Path.GetDirectoryName(micrograph)??"","previews",Path.GetFileNameWithoutExtension(micrograph)+".png");
     /// <summary>The preview when the worker wrote one; movies processed before previews existed have none.</summary>
     public static string ExistingPreview(string micrograph)=>string.IsNullOrEmpty(micrograph)?null:PreviewPath(micrograph) is var path&&File.Exists(path)?path:null;
-    private static string StageLabel(string s)=>s switch{"average"=>"averages","ctf"=>"CTF","denoise"=>"denoising","pick"=>"picking","extract"=>"extraction",_=>s};
+    private static string StageLabel(string s)=>s switch{"average"=>"averages","junk"=>"junk detection","ctf"=>"CTF","denoise"=>"denoising","pick"=>"picking","extract"=>"extraction",_=>s};
+    // Junk detection has no result flag of its own: a mask alone must not mark the micrograph enhanced (before the first
+    // denoiser it is found long before denoising). An outdated mask does outdate the enhanced micrograph (StaleFlag).
     private static WarpStage StageFlag(string stage)=>stage switch{"motion" or "average"=>WarpStage.Motion,"ctf"=>WarpStage.Ctf,"denoise"=>WarpStage.Enhance,"pick"=>WarpStage.Pick,"extract"=>WarpStage.Extract,_=>0};
+    private static WarpStage StaleFlag(string stage)=>stage=="junk"?WarpStage.Enhance:StageFlag(stage);
+    /// <summary>Whether the denoiser's inputs have their junk erased: it needs the junk found first.</summary>
+    internal static bool ErasesJunk(WarpSettings s)=>s.EraseObjects&&s.DetectJunk;
     private static string FileRevision(string path){if(string.IsNullOrEmpty(path))return "";var f=new FileInfo(path);return f.Exists?$"{path}|{f.Length}|{f.LastWriteTimeUtc.Ticks}":path+"|missing";}
     // The denoiser model is not part of any key: a newer model applies to movies not yet denoised,
     // and RedoDenoising is the explicit way to bring older results up to date.
-    private static Dictionary<string,ulong> BuildStageKeys(WarpSettings s)=>BuildStageKeys(s,out _);
-    /// <param name="legacyPrepare">The key of the deconvolution stage that preceded denoising until it moved into the
-    /// denoiser; checkpoints from then recorded it as their model's key.</param>
-    private static Dictionary<string,ulong> BuildStageKeys(WarpSettings s,out ulong legacyPrepare)
+    private static Dictionary<string,ulong> BuildStageKeys(WarpSettings s)
     {
         ulong raw=Fingerprint(new{s.Pixel,s.TargetPixelSize,s.EerGrouping,Gain=s.CorrectGain?FileRevision(s.GainPath):"",Defects=s.CorrectDefects?FileRevision(s.DefectsPath):"",s.GainFlipX,s.GainFlipY,s.GainTranspose});
         ulong motion=Fingerprint(new{raw,AutoDose=s.MotionGridAuto?s.TotalDose:0,s.MotionMin,s.MotionMax,s.MotionBfactor,s.MotionGridAuto,X=s.MotionGridAuto?0:s.MotionGrid,Y=s.MotionGridAuto?0:s.MotionGridY,Z=s.MotionGridAuto?0:s.MotionGridZ});
-        // Aligned stacks are no longer saved; the key keeps their old setting so earlier averages stay current.
-        ulong average=Fingerprint(new{motion,s.TotalDose,s.SkipFirst,s.SkipLast,ExportStack=false,StackGroup=1});
+        ulong average=Fingerprint(new{motion,s.TotalDose,s.SkipFirst,s.SkipLast});
         // Spectra come from aligned exposure groups, so CTF follows the motion fit and the dose that sizes the groups.
         ulong fit=Fingerprint(new{raw,motion,s.TotalDose,global::Warp.Tools.CtfExposureGroups.DefaultExposure,s.CtfMin,s.CtfMax,s.CtfWindow,s.Voltage,s.Cs,s.Cc,s.Amplitude,s.DefocusMin,s.DefocusMax,s.FitPhase,s.FitThickness,s.CtfGridAuto,X=s.CtfGridAuto?0:s.CtfGridX,Y=s.CtfGridAuto?0:s.CtfGridY});
         // The CTF stage also scores its signal; a new score revision redoes CTF alone, since later stages use only the fit.
         ulong ctf=Fingerprint(new{fit,global::Warp.Tools.CtfSignal.Revision});
-        legacyPrepare=Fingerprint(new{average,ctf=fit,DeconvolutionStrength,DeconvolutionFalloff,PreparationRevision=2});
+        // JunkNet reads only the average.
+        ulong junk=Fingerprint(new{average,s.DetectJunk,Revision=s.DetectJunk?global::Warp.JunkNetTorch.Revision:0});
         // The denoiser deconvolves each average on the fly with the movie's current CTF; without denoising, picking uses the average.
-        // Erasing objects is the default and stays out of the key, so sessions from before the option keep their results.
-        ulong denoise=!s.Denoise?Fingerprint(new{average,s.Denoise}):s.EraseObjects
-            ?Fingerprint(new{average,ctf=fit,s.Denoise,DeconvolutionStrength,DeconvolutionFalloff,global::Warp.MovieDenoising.PreparationRevision})
-            :Fingerprint(new{average,ctf=fit,s.Denoise,DeconvolutionStrength,DeconvolutionFalloff,global::Warp.MovieDenoising.PreparationRevision,s.EraseObjects});
-        ulong pick=Fingerprint(new{denoise,s.Diameter,s.MinSeparation,global::Warp.Tools.BlobPicker.Revision});
+        // Erasing junk follows its mask and how junk is erased and restored.
+        ulong denoise=!s.Denoise?Fingerprint(new{average,s.Denoise})
+            :Fingerprint(new{average,ctf=fit,s.Denoise,DeconvolutionStrength,DeconvolutionFalloff,global::Warp.MovieDenoising.PreparationRevision,
+                Erasure=ErasesJunk(s)?Fingerprint(new{junk,global::Warp.MovieDenoising.JunkRevision}):0UL});
+        // Picks near junk are dropped.
+        ulong pick=Fingerprint(new{denoise,s.Diameter,s.MinSeparation,global::Warp.Tools.BlobPicker.Revision,junk,JunkDistance=s.DetectJunk?s.JunkDistance:0});
         // Extraction keeps only the picks within the score bounds, so new bounds redo extraction but not picking.
-        ulong extract=Fingerprint(new{raw,motion,ctf=fit,pick,s.Box,s.TotalDose,s.SkipFirst,s.SkipLast,s.ParticleBounds,global::Warp.Tools.PickSelection.Revision});
-        // Rescaling joins the key only when on, so extractions made before the option existed stay current.
-        if(s.RescaleParticles)extract=Fingerprint(new{extract,s.RescaledBox});
-        return new(){["motion"]=motion,["average"]=average,["ctf"]=ctf,["denoise"]=denoise,["pick"]=pick,["extract"]=extract};
+        ulong extract=Fingerprint(new{raw,motion,ctf=fit,pick,s.Box,s.TotalDose,s.SkipFirst,s.SkipLast,s.ParticleBounds,global::Warp.Tools.PickSelection.Revision,
+            s.RescaleParticles,RescaledBox=s.RescaleParticles?s.RescaledBox:0});
+        return new(){["motion"]=motion,["average"]=average,["junk"]=junk,["ctf"]=ctf,["denoise"]=denoise,["pick"]=pick,["extract"]=extract};
     }
     private void RecomputeStageKeys()=>_stageKeys=BuildStageKeys(Settings);
     private bool Current(WarpMovie movie,string stage)=>movie.Completed.TryGetValue(stage,out ulong value)&&value==_stageKeys[stage]&&!RedoneByModel(movie,stage);
@@ -207,7 +209,7 @@ public sealed partial class WarpSession
             {
                 var sample=_movies.Where(TrainingReady).TakeLast(Settings.TrainCount).Select(m=>m.ProcessingPath).ToArray();
                 _trainingOutput=Path.Combine(Identity.SessionDirectory,"models",$"model-{Guid.NewGuid():N}.pt");Directory.CreateDirectory(Path.GetDirectoryName(_trainingOutput));
-                var task=MakeTask("train",-1,[WorkerCommands.TrainMovieDenoiser(sample,_trainingOutput,HasModel?_modelPath:StartingModel(Settings),Settings.TrainingEpochs,Noise2MicTorch.DeconvolutionStrength,Noise2MicTorch.DeconvolutionFalloff,(float)Settings.TargetPixelSize,Settings.EraseObjects)]);
+                var task=MakeTask("train",-1,[WorkerCommands.TrainMovieDenoiser(sample,_trainingOutput,HasModel?_modelPath:StartingModel(Settings),Settings.TrainingEpochs,Noise2MicTorch.DeconvolutionStrength,Noise2MicTorch.DeconvolutionFalloff,(float)Settings.TargetPixelSize,ErasesJunk(Settings))]);
                 // Training shares a GPU badly (about 3x slower beside three processing workers), so it takes its GPU alone.
                 task.Priority=true;task.Exclusive=true;queue.Enqueue(task);
                 _inflight[task.TaskId]=new(-1,"train",ModelKey,_trainingOutput);Training=true;TrainingPercent=0;TrainingProgress=null;_trainRequested=false;_lastTrainingCount=prepared;
@@ -258,17 +260,17 @@ public sealed partial class WarpSession
     }
     /// <summary>
     /// A movie trains the denoiser once its half-averages and its CTF are current: training deconvolves the halves on
-    /// the fly with that CTF.
+    /// the fly with that CTF. When junk is erased, its mask must be current too.
     /// </summary>
-    private bool TrainingReady(WarpMovie m)=>!m.Failed&&m.TrainingPairReady&&Current(m,"average")&&Current(m,"ctf");
+    private bool TrainingReady(WarpMovie m)=>!m.Failed&&m.TrainingPairReady&&Current(m,"average")&&Current(m,"ctf")&&(!ErasesJunk(Settings)||Current(m,"junk"));
     /// <summary>What picking reads: the denoised micrograph, or the average without denoising.</summary>
     private string EnhancedPath(Movie metadata)=>Settings.Denoise?metadata.AverageDenoisedPath:metadata.AveragePath;
     private double EnhancedPixelSize=>Settings.Denoise?MovieDenoising.Sampling((float)Settings.TargetPixelSize):(double)Settings.TargetPixelSize;
-    /// <summary>Halves left from an earlier export would otherwise train the denoiser again; deconvolved halves are from before denoising deconvolved on the fly.</summary>
+    /// <summary>Halves left from an earlier export would otherwise train the denoiser again.</summary>
     private static void DeleteTrainingHalves(WarpMovie m)
     {
         var metadata=new Movie(m.ProcessingPath);
-        foreach(string path in new[]{metadata.AverageOddPath,metadata.AverageEvenPath,metadata.DenoiseTrainingOddPath,metadata.DenoiseTrainingEvenPath})
+        foreach(string path in new[]{metadata.AverageOddPath,metadata.AverageEvenPath})
             if(!string.IsNullOrEmpty(path))try{File.Delete(path);}catch(Exception ex) when(ex is IOException or UnauthorizedAccessException){}
     }
     /// <summary>Whether any pick lies within the score bounds; an unreadable pick list counts, so the worker reports it.</summary>
@@ -320,16 +322,24 @@ public sealed partial class WarpSession
         {
             case "motion":commands.Add(load);commands.Add(WorkerCommands.MovieProcessMovement(m.ProcessingPath,options.GetProcessingMovieMovement()));break;
             case "average":commands.Add(load);var export=options.GetProcessingMovieExport();export.DoAverage=true;export.DoDenoise=trainingPair;export.DoDenoiseDeconv=false;export.DoDeconv=false;commands.Add(WorkerCommands.MovieExportMovie(m.ProcessingPath,export));commands.Add(WorkerCommands.WaitAsyncTasks());commands.Add(WorkerCommands.MovieCreateThumbnail(m.ProcessingPath,384,3));commands.Add(WorkerCommands.MicrographCreatePreview(m.AveragePath,PreviewPath(m.AveragePath),PreviewSize));break;
+            // JunkNet reads the exported average; the raw movie is not needed.
+            // The average's preview is drawn again with the junk left out of its contrast, as the viewer stretches it.
+            case "junk":if(Settings.DetectJunk){commands.Add(WorkerCommands.MovieSegmentJunk(m.ProcessingPath,(float)Settings.TargetPixelSize));commands.Add(WorkerCommands.MicrographCreatePreview(m.AveragePath,PreviewPath(m.AveragePath),PreviewSize,new Movie(m.ProcessingPath).MaskPath));}break;
             case "ctf":commands.Add(load);commands.Add(WorkerCommands.MovieProcessCTF(m.ProcessingPath,options.GetProcessingMovieCTF()));break;
             case "denoise":
             {
                 // Without denoising, picking reads the average, whose preview the average stage made.
                 if(!Settings.Denoise)break;
                 string output=new Movie(m.ProcessingPath).AverageDenoisedPath;
-                commands.Add(WorkerCommands.MovieDenoise(m.ProcessingPath,_modelPath,(float)Settings.TargetPixelSize,Noise2MicTorch.DeconvolutionStrength,Noise2MicTorch.DeconvolutionFalloff,Settings.EraseObjects));
-                commands.Add(WorkerCommands.MicrographCreatePreview(output,PreviewPath(output),PreviewSize));break;
+                commands.Add(WorkerCommands.MovieDenoise(m.ProcessingPath,_modelPath,(float)Settings.TargetPixelSize,Noise2MicTorch.DeconvolutionStrength,Noise2MicTorch.DeconvolutionFalloff,ErasesJunk(Settings)));
+                commands.Add(WorkerCommands.MicrographCreatePreview(output,PreviewPath(output),PreviewSize,Settings.DetectJunk?new Movie(m.ProcessingPath).MaskPath:null));break;
             }
-            case "pick":string enhanced=EnhancedPath(new Movie(m.ProcessingPath));commands.Add(WorkerCommands.MicrographPickBlobs(enhanced,(float)(Settings.Diameter/(decimal)m.EnhancedPixelSize/2),0,(float)(Settings.Diameter*Settings.MinSeparation/(decimal)m.EnhancedPixelSize)));break;
+            case "pick":
+            {
+                var metadata=new Movie(m.ProcessingPath);string enhanced=EnhancedPath(metadata);decimal pixel=(decimal)m.EnhancedPixelSize;
+                commands.Add(WorkerCommands.MicrographPickBlobs(enhanced,(float)(Settings.Diameter/pixel/2),0,(float)(Settings.Diameter*Settings.MinSeparation/pixel),
+                    Settings.DetectJunk?metadata.MaskPath:null,Settings.DetectJunk?(float)(Settings.JunkDistance/pixel):0));break;
+            }
             case "extract":commands.Add(load);var particle=options.GetProcessingParticleExport();particle.Suffix="_warp";particle.BoxSize=Settings.Box;particle.BoxSizeResample=Settings.RescaleParticles?Settings.RescaledBox:-1;particle.BinTimes=Settings.BinTimes;var bounds=Settings.ParticleBounds;
                 commands.Add(WorkerCommands.MovieExportParticlesFromStar(m.ProcessingPath,particle,m.ParticleStarPath,(float)m.EnhancedPixelSize,
                     bounds.MinCorrelation,bounds.MaxCorrelation,bounds.MinPower,bounds.MaxPower??double.MaxValue,m.ExtractedStarPath));break;
@@ -442,6 +452,10 @@ public sealed partial class WarpSession
         {
             case "motion":if(metadata.OptionsMovement==null)throw new InvalidDataException("Motion metadata is missing.");m.Motion=(double)metadata.MeanFrameMovement;break;
             case "average":if(!File.Exists(m.AveragePath))throw new IOException("Aligned average is missing.");m.PixelSize=(double)Settings.TargetPixelSize;m.TrainingPairReady=File.Exists(metadata.AverageOddPath)&&File.Exists(metadata.AverageEvenPath);break;
+            case "junk":
+                if(!Settings.DetectJunk){m.Junk=double.NaN;m.MaskPath="";break;}
+                if(!File.Exists(metadata.MaskPath))throw new IOException("Junk mask is missing.");
+                m.MaskPath=metadata.MaskPath;m.Junk=metadata.MaskPercentage<0?double.NaN:(double)metadata.MaskPercentage;break;
             case "ctf":if(metadata.OptionsCTF==null)throw new InvalidDataException("CTF metadata is missing.");m.Ctf=(double)metadata.CTFResolutionEstimate;m.CtfSignal=metadata.CTFSignal;m.Defocus=(double)metadata.CTF.Defocus;m.Astigmatism=(double)metadata.CTF.DefocusDelta;m.AstigmatismAngle=(double)metadata.CTF.DefocusAngle;m.Ice=Settings.FitThickness&&metadata.CTFSpecimenThicknessAngstrom>0?(double)metadata.CTFSpecimenThicknessAngstrom:double.NaN;break;
             case "denoise":m.EnhancedPath=EnhancedPath(metadata);if(!File.Exists(m.EnhancedPath))throw new IOException("Enhanced micrograph is missing.");m.EnhancedPixelSize=EnhancedPixelSize;m.ParticleStarPath=Path.Combine(Path.GetDirectoryName(m.EnhancedPath),"matching",metadata.RootName+"_blob.star");break;
             case "pick":if(!File.Exists(m.ParticleStarPath))throw new IOException("Particle STAR is missing.");_particleCache.Remove(m.Index);m.Picks=ReadParticles(m.ParticleStarPath).Length;break;

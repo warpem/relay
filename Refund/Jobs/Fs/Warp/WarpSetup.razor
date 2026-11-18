@@ -125,6 +125,7 @@
             <header><h3 id="@(_rootId + "-denoise")">Denoising</h3></header>
             <div class="field-grid">
                 @B("Denoise", "Denoise micrographs")
+                @B("DetectJunk", "Detect junk")
                 @N("TrainCount", "Training sample", 1, 10000, 1, "movies")
                 @B("PretrainedDenoiser", "Start from pretrained model")
                 @if (Draft.Denoise && !Draft.PretrainedDenoiser) { @P("DenoiserStart", "Starting model (optional)", SelectionMode.SingleFile) }
@@ -155,7 +156,7 @@
                 <div class="field-grid">
                     <div class="advanced-label">Advanced</div>
                     @N("TrainingEpochs", "Training epochs", 1, 1000, 1)
-                    @B("EraseObjects", "Erase carbon, ice and gold")
+                    @B("EraseObjects", "Erase junk before deconvolution")
                     @B("FineTune", "Periodic fine-tuning")
                     @if (Draft.FineTune) { @N("FineTuneEvery", "Fine-tune every", 1, 100000, 100, "movies") }
                 </div>
@@ -167,6 +168,7 @@
                 @B("PickingEnabled", "Blob picking")
                 @D("Diameter", "Particle diameter", 1, 10000, 1, "Å")
                 @D("MinSeparation", "Minimum separation", .1, 5, .05, "× diam.", $"{Draft.Diameter * Draft.MinSeparation:0} Å between particle centers")
+                @if (Draft.DetectJunk) { @D("JunkDistance", "Distance from junk", 0, 10000, 10, "Å", "Between particle edges and junk") }
                 @N("Box", "Extraction box", 16, 4096, 8, "px", $"{Draft.Box * Draft.TargetPixelSize:0} Å at {Draft.TargetPixelSize:0.###} Å/px")
                 @B("RescaleParticles", "Rescale particles")
                 @if (Draft.RescaleParticles) { @N("RescaledBox", "Rescaled box", 16, 4096, 2, "px", $"{Draft.ParticlePixelSize:0.###} Å/px") }
@@ -257,9 +259,10 @@
     // A field whose value differs from the applied settings tints until Apply.
     private string Row(string classes, params string[] properties) => properties.Any(_changed.Contains) ? classes + " changed" : classes;
     private bool IsDisabled(string property) => Locked ||
-        (!Draft.PickingEnabled && property is "Diameter" or "MinSeparation" or "Box" or "RescaleParticles" or "RescaledBox") ||
+        (!Draft.PickingEnabled && property is "Diameter" or "MinSeparation" or "Box" or "RescaleParticles" or "RescaledBox" or "JunkDistance") ||
         (!Draft.CorrectGain && property is "GainPath" or "GainFlipX" or "GainFlipY" or "GainTranspose") ||
-        (!Draft.Denoise && property is "TrainCount" or "FineTune" or "FineTuneEvery" or "TrainingEpochs" or "PretrainedDenoiser" or "DenoiserStart" or "EraseObjects");
+        (!Draft.Denoise && property is "TrainCount" or "FineTune" or "FineTuneEvery" or "TrainingEpochs" or "PretrainedDenoiser" or "DenoiserStart" or "EraseObjects") ||
+        (!Draft.DetectJunk && property is "EraseObjects" or "JunkDistance");
     private RenderFragment B(string property, string label) => builder => {
         builder.OpenElement(0, "div"); builder.AddAttribute(1, "class", Row("setting-row boolean-setting", property)); builder.AddAttribute(2, "data-setting", property); builder.SetKey(property);
         builder.OpenElement(3, "label"); builder.AddAttribute(4, "for", _rootId + property); builder.AddContent(5, label); builder.CloseElement();

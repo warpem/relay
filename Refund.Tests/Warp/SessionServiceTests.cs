@@ -173,10 +173,7 @@ public sealed class SessionServiceTests
             Assert.Equal("processing",(string)saved["Settings"]!["OutputPath"]!);
             Assert.Equal(Path.Combine("models","model-1.pt"),(string)saved["ModelPath"]!);
 
-            // An older checkpoint saved them absolute: once the space moves they move with it, and so do relative ones.
-            row["AveragePath"]=Path.Combine(session,"processing","average","x_a.mrc");
-            saved["Settings"]!["OutputPath"]=Path.Combine(session,"processing");
-            File.WriteAllText(Path.Combine(session,"warp-mini.json"),saved.ToJsonString());
+            // Once the space moves, they move with it.
             Directory.Move(space,moved);
             string movedSession=Path.Combine(moved,"J3");
             using(var manager=new WarpSessionManager())
@@ -388,11 +385,12 @@ public sealed class SessionServiceTests
         var metadata=new Movie(movie.ProcessingPath,f.Root,[]){OptionsMovement=new(),OptionsCTF=new(),MeanFrameMovement=1.2m,CTFResolutionEstimate=3.1m};metadata.SaveMeta();
         movie.MetadataPath=metadata.XMLPath;movie.AveragePath=metadata.AveragePath;
         Directory.CreateDirectory(Path.GetDirectoryName(movie.AveragePath)!);File.WriteAllText(movie.AveragePath,"image");
+        MovieJunk.WriteMask(metadata.MaskPath,new bool[16*16],16,16);
         var layout=new QueueLayout(f.Identity.QueueDirectory);layout.EnsureDirectories();Invoke(f.Session,"Dispatch",new TaskQueue(layout),CancellationToken.None);
         var task=TaskItem.FromJson(File.ReadAllText(Assert.Single(Directory.GetFiles(layout.Pending,"*.json"))));
         if(failsInCtf)
         {
-            // The worker got through motion and averaging before CTF estimation failed.
+            // The worker got through motion, averaging and junk detection before CTF estimation failed.
             task.CompletedCommands=Array.FindIndex(task.Main,c=>c.Name==WorkerCommandNames.MovieProcessCTF);task.Error="CTF failed";
             File.WriteAllText(Path.Combine(layout.Poisoned,task.TaskId+".json"),task.ToJson());
         }
@@ -400,7 +398,8 @@ public sealed class SessionServiceTests
         Invoke(f.Session,"CollectCompletions",layout,CancellationToken.None);
         var keys=Field<Dictionary<string,ulong>>(f.Session,"_stageKeys");
         // Without a model, a movie's task ends after CTF estimation: denoising waits for the first model.
-        string[] finished=failsInCtf?["motion","average"]:["motion","average","ctf"];
+        // Junk detection sets no result flag of its own: the micrograph is not enhanced yet.
+        string[] finished=failsInCtf?["motion","average","junk"]:["motion","average","junk","ctf"];
         foreach(string stage in finished)Assert.Equal(keys[stage],movie.Completed[stage]);
         Assert.Equal(finished.Length,movie.Completed.Count);Assert.Equal(failsInCtf?WarpStage.Motion:WarpStage.Motion|WarpStage.Ctf,movie.Done);
         Assert.Equal(1,movie.MotionRevision);Assert.Equal(failsInCtf?0:1,movie.CtfRevision);
@@ -618,10 +617,23 @@ public sealed class SessionServiceTests
         movie.ProcessingPath=Path.Combine(f.Root,"movie.eer");movie.AveragePath=Path.Combine(f.Root,"average","movie.mrc");
         var layout=new QueueLayout(f.Identity.QueueDirectory);layout.EnsureDirectories();
         Invoke(f.Session,"Dispatch",new TaskQueue(layout),CancellationToken.None);
-        var previews=Assert.Single(PendingTasks(layout)).Main.Where(c=>c.Name==WorkerCommandNames.MicrographCreatePreview).Select(c=>((string)c.Content[0],(string)c.Content[1])).ToArray();
-        string denoised=new Movie(movie.ProcessingPath).AverageDenoisedPath;
-        Assert.Equal([(movie.AveragePath,WarpSession.PreviewPath(movie.AveragePath)),(denoised,WarpSession.PreviewPath(denoised))],previews);
-        Assert.EndsWith(".png",WarpSession.PreviewPath(movie.AveragePath));
+        var previews=Assert.Single(PendingTasks(layout)).Main.Where(c=>c.Name==WorkerCommandNames.MicrographCreatePreview)
+            .Select(c=>((string)c.Content[0],(string)c.Content[1],(string)c.Content[3])).ToArray();
+        var metadata=new Movie(movie.ProcessingPath);string denoised=metadata.AverageDenoisedPath,average=WarpSession.PreviewPath(movie.AveragePath);
+        // Once junk is found, the average's preview is drawn again and the denoised one is drawn with the junk left out of their contrast.
+        Assert.Equal([(movie.AveragePath,average,""),(movie.AveragePath,average,metadata.MaskPath),(denoised,WarpSession.PreviewPath(denoised),metadata.MaskPath)],previews);
+        Assert.EndsWith(".png",average);
+    }
+    [Fact]
+    public void WithoutJunkDetectionPreviewsStretchTheWholeCentre()
+    {
+        using var f=new Fixture();f.Session.Apply(f.Session.Settings with{DetectJunk=false});InstallModel(f.Session,f.Root,1);
+        var movie=f.AddMovie();movie.Completed.Clear();movie.Done=0;movie.EnhancedPixelSize=5;movie.ProcessingPath=Path.Combine(f.Root,"movie.eer");
+        var layout=new QueueLayout(f.Identity.QueueDirectory);layout.EnsureDirectories();
+        Invoke(f.Session,"Dispatch",new TaskQueue(layout),CancellationToken.None);
+        var previews=Assert.Single(PendingTasks(layout)).Main.Where(c=>c.Name==WorkerCommandNames.MicrographCreatePreview).ToArray();
+        Assert.Equal(2,previews.Length);
+        Assert.All(previews,c=>Assert.Equal("",c.Content[3]));
     }
     [Fact]
     public void WithoutModelTheMovieStopsAfterCtf()
@@ -782,14 +794,69 @@ public sealed class SessionServiceTests
     public void ObjectErasureStaysOnForSessionsSavedBeforeTheOption()
     {
         Assert.True(System.Text.Json.JsonSerializer.Deserialize<WarpSettings>("{\"Box\":128}")!.EraseObjects);
-        // A model trained before the option (erasing, as it does by default) is kept after loading.
+        // A model trained on inputs prepared as they are now is kept after loading.
         using var f=new Fixture();InstallModel(f.Session,f.Root,2);f.Session.Apply(f.Session.Settings with{CtfMax=f.Session.Settings.CtfMax+1});
         f.Manager.Remove(f.Identity);Assert.Equal(2,f.Manager.GetOrCreate(f.Identity).Model);
+    }
+    [Fact]
+    public void ModelsTrainedOnTheOldObjectErasureAreRetrainedAfterLoading()
+    {
+        using var f=new Fixture();InstallModel(f.Session,f.Root,2);var movie=f.AddMovie();movie.DenoiseModel=2;
+        // The key a model trained with the earlier detector's erasure recorded.
+        SetField(f.Session,"_modelPreparationKey",WarpSession.Fingerprint(new{WarpSession.DeconvolutionStrength,WarpSession.DeconvolutionFalloff}));
+        f.Session.Apply(f.Session.Settings with{CtfMax=f.Session.Settings.CtfMax+1});
+        f.Manager.Remove(f.Identity);var restored=f.Manager.GetOrCreate(f.Identity);
+        Assert.False(restored.HasModel);
+    }
+    [Fact]
+    public void JunkIsSegmentedAfterAveragingThenErasedAndKeptAwayFromPicks()
+    {
+        using var f=new Fixture();f.Session.Apply(f.Session.Settings with{JunkDistance=50});InstallModel(f.Session,f.Root,1);
+        var movie=f.AddMovie();movie.Completed.Clear();movie.Done=0;movie.EnhancedPixelSize=5;
+        var layout=new QueueLayout(f.Identity.QueueDirectory);layout.EnsureDirectories();
+        Invoke(f.Session,"Dispatch",new TaskQueue(layout),CancellationToken.None);
+        var commands=Assert.Single(PendingTasks(layout)).Main;
+        int Index(string name)=>Array.FindIndex(commands,c=>c.Name==name);
+        // After the average is written, before CTF estimation (whose worker erases junk ahead of denoising).
+        Assert.True(Index(WorkerCommandNames.MovieExportMovie)<Index(WorkerCommandNames.MovieSegmentJunk));
+        Assert.True(Index(WorkerCommandNames.MovieSegmentJunk)<Index(WorkerCommandNames.MovieProcessCTF));
+        Assert.Equal(movie.ProcessingPath,commands[Index(WorkerCommandNames.MovieSegmentJunk)].Content[0]);
+        // The denoiser erases junk; picks keep 50 Å (10 pixels) from junk.
+        Assert.Equal(true,commands[Index(WorkerCommandNames.MovieDenoise)].Content[5]);
+        var pick=commands[Index(WorkerCommandNames.MicrographPickBlobs)];
+        Assert.Equal(new Movie(movie.ProcessingPath).MaskPath,pick.Content[4]);Assert.Equal(10f,pick.Content[5]);
+    }
+    [Fact]
+    public void WithoutJunkDetectionNothingIsSegmentedErasedOrKeptAway()
+    {
+        using var f=new Fixture();f.Session.Apply(f.Session.Settings with{DetectJunk=false});InstallModel(f.Session,f.Root,1);
+        var movie=f.AddMovie();movie.Completed.Clear();movie.Done=0;movie.EnhancedPixelSize=5;
+        var layout=new QueueLayout(f.Identity.QueueDirectory);layout.EnsureDirectories();
+        Invoke(f.Session,"Dispatch",new TaskQueue(layout),CancellationToken.None);
+        var commands=Assert.Single(PendingTasks(layout)).Main;
+        Assert.DoesNotContain(commands,c=>c.Name==WorkerCommandNames.MovieSegmentJunk);
+        Assert.Equal(false,commands.Single(c=>c.Name==WorkerCommandNames.MovieDenoise).Content[5]);
+        Assert.Equal("",commands.Single(c=>c.Name==WorkerCommandNames.MicrographPickBlobs).Content[4]);
+    }
+    [Fact]
+    public void JunkSettingsRedoOnlyWhatDependsOnThem()
+    {
+        using var f=new Fixture();InstallModel(f.Session,f.Root,1);
+        Assert.Equal("Redo picking, extraction.",f.Session.GetSettingsImpact(f.Session.Settings with{JunkDistance=20}));
+        // Turning detection off has nothing to redo in junk detection itself.
+        Assert.Equal("Redo denoising, picking, extraction. Train a new denoiser.",f.Session.GetSettingsImpact(f.Session.Settings with{DetectJunk=false}));
+        // Applying it dropped the model trained on erased junk, so turning detection back on has no model to replace.
+        f.Session.Apply(f.Session.Settings with{DetectJunk=false});Assert.False(f.Session.HasModel);
+        Assert.Equal("Redo junk detection, denoising, picking, extraction.",f.Session.GetSettingsImpact(f.Session.Settings with{DetectJunk=true}));
+        Assert.True(new WarpSettings().DetectJunk);Assert.Equal(0,new WarpSettings().JunkDistance);
+        Assert.True(System.Text.Json.JsonSerializer.Deserialize<WarpSettings>("{\"Box\":128}")!.DetectJunk);
+        Assert.Contains("junk",WarpSession.ValidateSettings(new WarpSettings{InputPath="/data",JunkDistance=-1}));
+        Assert.Null(WarpSession.ValidateSettings(new WarpSettings{InputPath="/data",DetectJunk=false,JunkDistance=-1}));
     }
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public void WorkersAreToldToKeepObjectsOnlyWhenErasureIsOff(bool erase)
+    public void WorkersAreToldWhetherToEraseJunk(bool erase)
     {
         using var f=new Fixture();string start=Path.Combine(f.Root,"corpus.pt");File.WriteAllText(start,"weights");
         f.Session.Apply(f.Session.Settings with{EraseObjects=erase,TrainCount=1,DenoiserStart=start});InstallModel(f.Session,f.Root,1);
@@ -801,9 +868,7 @@ public sealed class SessionServiceTests
         SetField(f.Session,"<Running>k__BackingField",true);f.Session.Train();
         Invoke(f.Session,"Dispatch",queue,CancellationToken.None);
         var train=Assert.Single(PendingTasks(layout),t=>t.Stage=="train").Main.Single(c=>c.Name==WorkerCommandNames.TrainMovieDenoiser);
-        // Erasing is what workers from before the option do, so then the commands are the ones they know.
-        if(erase){Assert.Equal(5,denoise.Content.Length);Assert.Equal(7,train.Content.Length);}
-        else{Assert.Equal(false,denoise.Content[5]);Assert.Equal(false,train.Content[7]);}
+        Assert.Equal(erase,denoise.Content[5]);Assert.Equal(erase,train.Content[7]);
     }
     [Fact]
     public async Task ProcessingRidesOutAQueueFolderThatCannotBeWritten()

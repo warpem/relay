@@ -311,7 +311,9 @@ public sealed class WarpLifecycleTests
             Assert.Throws<InvalidOperationException>(() => job.RunLocal(CancellationToken.None));
             File.WriteAllText(job.StarPath, "data_particles\n\nloop_\n_rlnImageName #1\n000001@/data/particles.mrcs\n");
             File.WriteAllText(job.ProcessedItemsJson, "[{\"Path\":\"movie.eer\",\"Resolution\":3.1}]");
-            var manifest = new WarpExportManifest(job.StarPath, true, 1, 1, new(), root, DateTime.UtcNow, job.ProcessedItemsJson, true, root, Path.Combine(root, "input"));
+            string list = Path.Combine(root, "movies.txt");
+            var manifest = new WarpExportManifest(job.StarPath, true, 1, 1, new(), root, DateTime.UtcNow, job.ProcessedItemsJson, true, root, Path.Combine(root, "input"),
+                new(), list, new(false, 1, 0));
             job.Summarize(manifest);
             job.Manifest = manifest.RelativeTo(root);
             Assert.Equal(Path.GetRelativePath(root, job.ProcessedItemsJson), job.Manifest.ProcessedItemsJson);

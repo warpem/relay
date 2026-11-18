@@ -88,20 +88,18 @@ public abstract class WarpExportJob : Job, ILocalJob
         yield return m.Particles
             ? $"Exported from Warp session J{sourceJobId} on {when}: {m.ParticleCount:N0} particles from {m.MovieCount:N0} accepted micrographs with current picking and extraction."
             : $"Exported from Warp session J{sourceJobId} on {when}: {m.MovieCount:N0} accepted micrographs with current motion and CTF results.";
-        if (m.Filters is { } f)
+        var f = m.Filters;
+        var limits = new List<string>
         {
-            var limits = new List<string>
-            {
-                $"CTF fit {f.MinCtf:0.##}–{f.MaxCtf:0.##} Å",
-                f.MaxCtfSignal is { } maxSignal ? $"CTF signal {f.MinCtfSignal:0.#}–{maxSignal:0.#} σ" : $"CTF signal ≥ {f.MinCtfSignal:0.#} σ",
-                $"motion {f.MinMotion:0.##}–{f.MaxMotion:0.##} Å/frame"
-            };
-            if (s.FitThickness) limits.Add($"ice {f.MinIce:0}–{f.MaxIce:0} Å");
-            limits.Add($"astigmatism within {f.MaxAstigmatismSigma:0.#} σ of its neighbours");
-            if (s.PickingEnabled && (f.MinParticles > 0 || f.MaxParticles < int.MaxValue))
-                limits.Add(f.MaxParticles < int.MaxValue ? $"{f.MinParticles:N0}–{f.MaxParticles:N0} particles" : $"at least {f.MinParticles:N0} particles");
-            yield return "Accepted: movies marked Keep, or passing the filters (" + string.Join(", ", limits) + ").";
-        }
+            $"CTF fit {f.MinCtf:0.##}–{f.MaxCtf:0.##} Å",
+            f.MaxCtfSignal is { } maxSignal ? $"CTF signal {f.MinCtfSignal:0.#}–{maxSignal:0.#} σ" : $"CTF signal ≥ {f.MinCtfSignal:0.#} σ",
+            $"motion {f.MinMotion:0.##}–{f.MaxMotion:0.##} Å/frame"
+        };
+        if (s.FitThickness) limits.Add($"ice {f.MinIce:0}–{f.MaxIce:0} Å");
+        limits.Add($"astigmatism within {f.MaxAstigmatismSigma:0.#} σ of its neighbours");
+        if (s.PickingEnabled && (f.MinParticles > 0 || f.MaxParticles < int.MaxValue))
+            limits.Add(f.MaxParticles < int.MaxValue ? $"{f.MinParticles:N0}–{f.MaxParticles:N0} particles" : $"at least {f.MinParticles:N0} particles");
+        yield return "Accepted: movies marked Keep, or passing the filters (" + string.Join(", ", limits) + ").";
         if (m.Particles)
         {
             var b = s.ParticleBounds;
@@ -109,18 +107,18 @@ public abstract class WarpExportJob : Job, ILocalJob
             yield return $"Particles: picks with correlation {b.MinCorrelation:0.##}–{b.MaxCorrelation:0.##} and local power {power}, extracted in {s.Box} px boxes at {s.TargetPixelSize:0.###} Å/px" +
                 (s.RescaleParticles ? $" and rescaled to {s.RescaledBox} px at {s.ParticlePixelSize:0.###} Å/px" : "") + $"; particle diameter {s.Diameter:0} Å.";
         }
-        if (m.OpticsGroups is { } o)
-            yield return !s.EpuOpticsGroups ? "Optics groups: one for all micrographs (EPU optics groups are off)."
-                : !o.FromEpu ? "Optics groups: one for all micrographs; none had EPU metadata with a beam shift."
-                : $"Optics groups: {o.Groups:N0} by EPU beam shift, each within {s.EpuGroupRadius:0.###} of its group's mean" +
-                  (o.WithoutMetadata > 0 ? $"; {NoEpuGroup} holds the {o.WithoutMetadata:N0} micrographs without EPU metadata." : ".");
+        var o = m.OpticsGroups;
+        yield return !s.EpuOpticsGroups ? "Optics groups: one for all micrographs (EPU optics groups are off)."
+            : !o.FromEpu ? "Optics groups: one for all micrographs; none had EPU metadata with a beam shift."
+            : $"Optics groups: {o.Groups:N0} by EPU beam shift, each within {s.EpuGroupRadius:0.###} of its group's mean" +
+              (o.WithoutMetadata > 0 ? $"; {NoEpuGroup} holds the {o.WithoutMetadata:N0} micrographs without EPU metadata." : ".");
         yield return $"Data: {s.Pixel:0.####} Å/px movies at {s.TargetPixelSize:0.###} Å/px, {s.TotalDose:0.#} e⁻/Å², {s.Voltage} kV, Cs {s.Cs:0.##} mm.";
         var stats = new List<string>();
         if (card.MedianResolution is { } resolution) stats.Add($"median CTF fit {resolution:0.0} Å");
         if (card.MedianMotion is { } motion) stats.Add($"median motion {motion:0.00} Å/frame");
         if (card.DefocusMin is { } low && card.DefocusMax is { } high) stats.Add($"defocus {low:0.00}–{high:0.00} µm");
         if (stats.Count > 0) yield return "Micrographs: " + string.Join(", ", stats) + ".";
-        string list = m.InputListPath != null ? $", processed_items.json and {Path.GetFileName(m.InputListPath)}" : " and processed_items.json";
+        string list = $", processed_items.json and {Path.GetFileName(m.InputListPath)}";
         yield return m.Particles
             ? $"Wrote particles.star ({m.ParticleCount:N0} particles){list}."
             : $"Wrote micrographs.star ({m.MovieCount:N0} micrographs){list}.";
@@ -147,7 +145,7 @@ public abstract class WarpExportJob : Job, ILocalJob
             HasMovies = true, HasMotion = true, HasCtf = true, HasMetadata = true,
             ItemCount = manifest.MovieCount, ProcessedItemsJson = manifest.ProcessedItemsJson,
             // The data directory is the session's, holding every movie it received; the list holds the exported ones.
-            InputListPath = manifest.InputListPath ?? "",
+            InputListPath = manifest.InputListPath,
             AverageDirectory = Path.Combine(root, Movie.AverageDirName),
             ToAveragePath = name => Path.Combine(root, Movie.ToAveragePath(name)),
             AverageOddDirectory = Directory.Exists(Path.Combine(root, Movie.AverageOddDirName)) ? Path.Combine(root, Movie.AverageOddDirName) : "",
@@ -225,7 +223,7 @@ public sealed record WarpExportCard(int Micrographs, long Particles, double? Med
         var defoci = items.Select(i => i.Defocus).Where(d => d.HasValue && double.IsFinite(d.Value)).Select(d => d.Value).ToArray();
 
         // Particle positions per micrograph, in the average's pixels, in the order the STAR lists them. Micrographs are
-        // matched by name: particles name their movie (older exports its average), whose name the average shares.
+        // matched by name: particles name their movie, whose name the average shares.
         var positions = new Dictionary<string, (List<float> X, List<float> Y)>();
         if (manifest.Particles && File.Exists(starPath))
         {

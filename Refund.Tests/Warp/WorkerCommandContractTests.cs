@@ -42,12 +42,16 @@ public class WorkerCommandContractTests
     }
 
     [Fact]
-    public void KeepingObjectsIsAnExtraArgumentOnlyWhenAsked()
+    public void JunkArgumentsAreAlwaysSentAndEmptyWhenThereIsNoJunk()
     {
         var task = new TaskItem
         {
             Main =
             [
+                WorkerCommands.MicrographCreatePreview("average/movie.mrc", "average/previews/movie.png", 1024),
+                WorkerCommands.MicrographCreatePreview("average/movie.mrc", "average/previews/movie.png", 1024, "mask/movie.tif"),
+                WorkerCommands.MicrographPickBlobs("average/denoised/movie.mrc", 12),
+                WorkerCommands.MovieSegmentJunk("movie.eer", 1.2f),
                 WorkerCommands.MovieDenoise("movie.eer", "models/2.pt", 1.35f, .9f, .1f, eraseObjects: false),
                 WorkerCommands.TrainMovieDenoiser(["movie.eer"], "models/2.pt", "", 4, .9f, .1f, 1.35f, eraseObjects: false),
                 WorkerCommands.MovieDenoise("movie.eer", "models/2.pt", 1.35f, .9f, .1f),
@@ -55,11 +59,14 @@ public class WorkerCommandContractTests
             ]
         };
         var decoded = TaskItem.FromJson(task.ToJson());
-        Assert.Equal(false, decoded.Main[0].Content[5]);
-        Assert.Equal(false, decoded.Main[1].Content[7]);
-        // Erasing (the default) sends the commands workers from before the option know.
-        Assert.Equal(5, decoded.Main[2].Content.Length);
-        Assert.Equal(7, decoded.Main[3].Content.Length);
+        Assert.Equal(new object[] { "average/movie.mrc", "average/previews/movie.png", 1024, "" }, decoded.Main[0].Content);
+        Assert.Equal("mask/movie.tif", decoded.Main[1].Content[3]);
+        Assert.Equal(new object[] { "", 0f }, decoded.Main[2].Content[4..]);
+        Assert.Equal("", decoded.Main[3].Content[2]);
+        Assert.Equal(false, decoded.Main[4].Content[5]);
+        Assert.Equal(false, decoded.Main[5].Content[7]);
+        Assert.Equal(true, decoded.Main[6].Content[5]);
+        Assert.Equal(true, decoded.Main[7].Content[7]);
     }
 
     [Fact]

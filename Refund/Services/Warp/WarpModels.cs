@@ -92,11 +92,18 @@ public sealed record WarpSettings
     /// <summary>With <see cref="PretrainedDenoiser"/> off: a trained Noise2Mic model the first training fine-tunes; "" trains from scratch.</summary>
     public string DenoiserStart { get; init; } = "";
     /// <summary>
-    /// Whether high-contrast objects (carbon, ice crystals, gold) found on each average are replaced with matched noise
-    /// before training and denoising, so the denoiser learns only the ice around them. Changing it redoes denoising and
+    /// Whether the junk <see cref="DetectJunk"/> finds is replaced with matched noise before deconvolution and restored
+    /// after it, for training and denoising alike, so its edges do not ring into the ice. Changing it redoes denoising and
     /// trains a new model: a model trained one way does not fit inputs prepared the other.
     /// </summary>
     public bool EraseObjects { get; init; } = true;
+    /// <summary>
+    /// Whether JunkNet segments junk (carbon, gold, ice) in each average. Its mask is saved with the movie, erased before
+    /// deconvolution (<see cref="EraseObjects"/>) and keeps picks away from junk (<see cref="JunkDistance"/>).
+    /// </summary>
+    public bool DetectJunk { get; init; } = true;
+    /// <summary>How far particle edges must stay from junk, Å; picks closer are dropped. 0 keeps particles off junk.</summary>
+    public decimal JunkDistance { get; init; }
 
 }
 public sealed record WarpMovie
@@ -108,6 +115,8 @@ public sealed record WarpMovie
     public string ProcessingPath {get;set;}="";
     public string MetadataPath {get;set;}="";
     public string AveragePath {get;set;}="";
+    /// <summary>The junk mask JunkNet saved for this movie; empty without junk detection.</summary>
+    public string MaskPath {get;set;}="";
     public string EnhancedPath {get;set;}="";
     public string ThumbnailPath {get;set;}="";
     public string ParticleStarPath {get;set;}="";
@@ -120,6 +129,8 @@ public sealed record WarpMovie
     public double CtfSignal {get;set;}=double.NaN;
     public double Motion {get;set;}=double.NaN;
     public double Ice {get;set;}=double.NaN;
+    /// <summary>Percentage of the micrograph JunkNet marked as junk; NaN until segmented.</summary>
+    public double Junk {get;set;}=double.NaN;
     public double Astigmatism {get;set;}=double.NaN;
     public double AstigmatismAngle {get;set;}=double.NaN;
     /// <summary>Blob picks detected on the micrograph, before the particle score bounds.</summary>
@@ -179,15 +190,14 @@ public sealed record WarpParticleHistogram(int[] Bins,int Columns,int Rows,doubl
         return count;
     }
 }
-/// <param name="Filters">The filter thresholds that decided which movies were accepted; null in exports made before they were recorded.</param>
-/// <param name="InputListPath">The exported movies, one path per line in <paramref name="DataDirectory"/>, for WarpTools'
-/// --input_data; null for exports from before they were listed, whose data directory held only their movies.</param>
-/// <param name="OpticsGroups">How the export's rows were put in optics groups; null for exports from before groups.</param>
-public sealed record WarpExportManifest(string StarPath,bool Particles,int MovieCount,long ParticleCount,WarpSettings Settings,string SessionDirectory,DateTime Created,string ProcessedItemsJson,bool HasParticleData,string ProcessingDirectory,string DataDirectory,WarpFilters Filters=null,string InputListPath=null,WarpOpticsGroups OpticsGroups=null)
+/// <param name="Filters">The filter thresholds that decided which movies were accepted.</param>
+/// <param name="InputListPath">The exported movies, one path per line in <paramref name="DataDirectory"/>, for WarpTools' --input_data.</param>
+/// <param name="OpticsGroups">How the export's rows were put in optics groups.</param>
+public sealed record WarpExportManifest(string StarPath,bool Particles,int MovieCount,long ParticleCount,WarpSettings Settings,string SessionDirectory,DateTime Created,string ProcessedItemsJson,bool HasParticleData,string ProcessingDirectory,string DataDirectory,WarpFilters Filters,string InputListPath,WarpOpticsGroups OpticsGroups)
 {
     /// <summary>The manifest with its files relative to <paramref name="root"/> (the space's), as export jobs save it.</summary>
     public WarpExportManifest RelativeTo(string root)=>MapPaths(path=>WarpPaths.Relative(root,path));
-    /// <summary>A saved manifest with its files as absolute paths under <paramref name="root"/>; older manifests saved them absolute.</summary>
+    /// <summary>A saved manifest with its files as absolute paths under <paramref name="root"/>.</summary>
     public WarpExportManifest ResolvedIn(string root)=>MapPaths(path=>WarpPaths.Resolve(root,path));
     internal WarpExportManifest MapPaths(Func<string,string> map)=>this with
     {

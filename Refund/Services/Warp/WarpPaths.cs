@@ -23,17 +23,4 @@ internal static class WarpPaths
     /// <summary>A path saved by <see cref="Relative"/>, as an absolute path under <paramref name="root"/>; absolute paths stay as they are.</summary>
     public static string Resolve(string root, string path) =>
         string.IsNullOrEmpty(root) || string.IsNullOrEmpty(path) || Path.IsPathRooted(path) ? path : Path.GetFullPath(Path.Combine(root, path));
-
-    /// <summary>
-    /// A saved path as an absolute path under <paramref name="root"/>: relative ones resolve against it, and absolute ones
-    /// saved from <paramref name="savedRoot"/> (before the folder moved) move with it.
-    /// </summary>
-    public static string Restore(string root, string savedRoot, string path)
-    {
-        if (string.IsNullOrEmpty(path)) return path;
-        if (!Path.IsPathRooted(path)) return Resolve(root, path);
-        if (string.IsNullOrEmpty(savedRoot)) return path;
-        string relative = Relative(savedRoot, path);
-        return Path.IsPathRooted(relative) ? path : Resolve(root, relative);
-    }
 }

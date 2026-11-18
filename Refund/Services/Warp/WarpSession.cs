@@ -9,7 +9,7 @@ namespace Refund.Services.Warp;
 
 internal sealed record WarpCheckpoint(int Schema,WarpSettings Settings,IReadOnlyList<WarpMovie> Movies,
     List<WarpExportManifest> Exports,string ModelPath,int Model,int LastTrainingCount,DateTime? LastInputAt,DateTime? LastResultAt,
-    WarpFilters Filters,WarpHistogramCheckpoint Histogram,ulong ModelPreparationKey=0,int MinDenoiseModel=0);
+    WarpFilters Filters,WarpHistogramCheckpoint Histogram,ulong ModelPreparationKey,int MinDenoiseModel);
 internal sealed record WarpHistogramCheckpoint(int Schema,WarpParticleHistogram Histogram,string CohortSignature);
 public sealed record WarpFilters(double MinCtf=0,double MaxCtf=5,double MinMotion=0,double MaxMotion=2.5,
     double MinIce=0,double MaxIce=2000,int MinParticles=0,int MaxParticles=int.MaxValue,double MaxAstigmatismSigma=3,
@@ -148,23 +148,21 @@ public sealed partial class WarpSession : IDisposable
             {
                 var saved=JsonSerializer.Deserialize<WarpCheckpoint>(File.ReadAllText(CheckpointPath),JsonOptions);
                 if(saved?.Schema!=1)throw new InvalidDataException("Unsupported Warp session checkpoint schema.");
-                // Paths are saved relative to the session's folder; older checkpoints saved them absolute, under the folder
-                // their output path names, and move with the session if it has moved since.
-                string root=identity.SessionDirectory,savedRoot=Path.IsPathRooted(saved.Settings.OutputPath)?Path.GetDirectoryName(saved.Settings.OutputPath):null;
-                string Restore(string path)=>WarpPaths.Restore(root,savedRoot,path);
+                // Paths are saved relative to the session's folder, so they move with it.
+                string root=identity.SessionDirectory;
+                string Restore(string path)=>WarpPaths.Resolve(root,path);
                 Settings=NormalizeSettings(saved.Settings) with{OutputPath=Path.Combine(root,"processing")};
                 _movies.AddRange(saved.Movies.Select(m=>MapPaths(m,Restore)));
                 _exports.AddRange(saved.Exports.Select(e=>e.MapPaths(Restore)));
-                _modelPreparationKey=saved.ModelPreparationKey;Model=saved.Model;_modelPath=Restore(saved.ModelPath??"");_lastTrainingCount=saved.LastTrainingCount;_minDenoiseModel=saved.MinDenoiseModel;
-                LastInputAt=saved.LastInputAt;LastResultAt=saved.LastResultAt;_filters=saved.Filters??new();
+                _modelPreparationKey=saved.ModelPreparationKey;Model=saved.Model;_modelPath=Restore(saved.ModelPath);_lastTrainingCount=saved.LastTrainingCount;_minDenoiseModel=saved.MinDenoiseModel;
+                LastInputAt=saved.LastInputAt;LastResultAt=saved.LastResultAt;_filters=saved.Filters;
                 foreach(var m in _movies){m.ActiveStage="";_byInput[m.InputPath]=m;}
                 foreach(var m in _movies)_changedRows.Add(m.Index);PublishRows();
                 // A missing model file only stops new denoising until the next model; existing results stay valid.
                 if(_modelPath.Length>0&&!File.Exists(_modelPath))_modelPath="";
-                // Checkpoints from before ModelKey recorded the deconvolution key the model was trained under.
-                RecomputeStageKeys();BuildStageKeys(Settings,out ulong legacyPrepare);
-                if(Model>0&&_modelPreparationKey!=ModelKey&&_modelPreparationKey!=legacyPrepare)ForgetModel();
-                else if(Model>0)_modelPreparationKey=ModelKey;
+                // A model trained on differently prepared input is not used.
+                RecomputeStageKeys();
+                if(Model>0&&_modelPreparationKey!=ModelKey)ForgetModel();
                 RefreshStates();
                 if(saved.Histogram is {Schema:1} h && h.CohortSignature==ParticleCohortSignature() &&
                     h.Histogram.Bins?.Length==64*48 && h.Histogram.Bins.All(v=>v>=0) && h.Histogram.Bins.Sum(v=>(long)v)==h.Histogram.Total)
@@ -216,7 +214,8 @@ public sealed partial class WarpSession : IDisposable
     {
         if(next==Settings)return "";
         var before=BuildStageKeys(Settings);var after=BuildStageKeys(NormalizeSettings(next));
-        string[] changed=StageOrder.Where(k=>before[k]!=after[k]).ToArray();
+        // With junk detection turned off there is no junk to detect again.
+        string[] changed=StageOrder.Where(k=>before[k]!=after[k]&&(k!="junk"||next.DetectJunk)).ToArray();
         string retrain=HasModel&&RetrainsModel(Settings,NormalizeSettings(next))?" Train a new denoiser.":"";
         if(changed.Length>0)return "Redo "+string.Join(", ",changed.Select(StageLabel))+"."+retrain;
         // A new starting model redoes nothing yet: the new denoiser does, once it is trained.
@@ -264,9 +263,9 @@ public sealed partial class WarpSession : IDisposable
     /// load; changing <see cref="WarpSettings.EraseObjects"/> forgets it on <see cref="Apply"/>.
     /// </summary>
     private ulong ModelKey=>ModelKeyFor(Settings);
-    private static ulong ModelKeyFor(WarpSettings s)=>s.EraseObjects
-        ?Fingerprint(new{DeconvolutionStrength,DeconvolutionFalloff})
-        :Fingerprint(new{DeconvolutionStrength,DeconvolutionFalloff,s.EraseObjects});
+    // Models trained before junk came from JunkNet erased objects found another way; they are retrained.
+    private static ulong ModelKeyFor(WarpSettings s)=>Fingerprint(new{DeconvolutionStrength,DeconvolutionFalloff,global::Warp.MovieDenoising.PreparationRevision,
+        Erasure=ErasesJunk(s)?Fingerprint(new{global::Warp.JunkNetTorch.Revision,global::Warp.MovieDenoising.JunkRevision}):0UL});
     /// <summary>Denoised movies whose model is older than the current one.</summary>
     public int OlderModelMovies=>Settings.Denoise&&HasModel?_view.Count(m=>!m.Failed&&Current(m,"denoise")&&m.DenoiseModel<Model):0;
     /// <summary>Outdates denoising, picking and extraction for every movie denoised with an older model.</summary>
@@ -295,7 +294,7 @@ public sealed partial class WarpSession : IDisposable
         foreach(var m in _movies)
         {
             var priorStale=m.Stale;m.Stale=0;
-            foreach(string stage in StageOrder)if(m.Completed.TryGetValue(stage,out ulong completed)&&(completed!=_stageKeys[stage]||RedoneByModel(m,stage)))m.Stale|=StageFlag(stage);
+            foreach(string stage in StageOrder)if(m.Completed.TryGetValue(stage,out ulong completed)&&(completed!=_stageKeys[stage]||RedoneByModel(m,stage)))m.Stale|=StaleFlag(stage);
             if(priorStale!=m.Stale)_changedRows.Add(m.Index);
             if(m.Failed)Failed++;
             // Processed, and so accepted, means current results from every stage the settings require.
@@ -325,7 +324,7 @@ public sealed partial class WarpSession : IDisposable
     private static WarpMovie MapPaths(WarpMovie m,Func<string,string> map)=>m with
     {
         ProcessingPath=map(m.ProcessingPath),MetadataPath=map(m.MetadataPath),AveragePath=map(m.AveragePath),EnhancedPath=map(m.EnhancedPath),
-        ThumbnailPath=map(m.ThumbnailPath),ParticleStarPath=map(m.ParticleStarPath),ParticleStackPath=map(m.ParticleStackPath)
+        ThumbnailPath=map(m.ThumbnailPath),ParticleStarPath=map(m.ParticleStarPath),ParticleStackPath=map(m.ParticleStackPath),MaskPath=map(m.MaskPath)
     };
     private async Task SaveAsync()
     {
