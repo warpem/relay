@@ -61,16 +61,40 @@ function releaseImages(state) {
     state.particleWorker?.terminate();
     state.particleWorker = null;
     state.particleGeneration = (state.particleGeneration ?? 0) + 1;
+    releaseMask(state);
     for (const level of state.levels) level.close();
     state.levels = [];
-    state.mask?.close();
-    state.mask = null;
     state.particles = [];
     state.width = state.height = 0;
     state.thumbnail.onload = state.thumbnail.onerror = null;
     state.thumbnail.removeAttribute('src');
     state.preview = false;
     showProgress(state, null);
+}
+
+function releaseMask(state) {
+    state.maskWorker?.terminate();
+    state.maskWorker = null;
+    state.maskGeneration = (state.maskGeneration ?? 0) + 1;
+    state.mask?.close();
+    state.mask = null;
+    notifyMask(state, false);
+}
+
+// Tells .NET whether a mask is showing, so its toolbar section appears only then.
+function notifyMask(state, available) {
+    if (state.maskShown === available) return;
+    state.maskShown = available;
+    if (state.disposed || !state.root.isConnected) return;
+    state.callback.invokeMethodAsync('OnMaskAvailability', available)
+        .catch(error => { if (!state.disposed && state.root.isConnected) console.error(error); });
+}
+
+// Loading text with a spinner; null clears both, a message without loading shows only the message.
+function setStatus(state, message, loading = false) {
+    state.status.textContent = message ?? '';
+    if (loading) state.status.setAttribute('data-loading', '');
+    else state.status.removeAttribute('data-loading');
 }
 
 // A bar along the top edge while the full-resolution plane streams in; null hides it.
@@ -217,7 +241,7 @@ function create(root, callback) {
     progress.append(progressBar);
     surface.append(canvas, mini, status, progress);
     const state = { root, surface, canvas, mini, status, progress, progressBar, callback, thumbnail: new Image(), levels: [], particles: [],
-        width: 0, height: 0, viewWidth: 1, viewHeight: 1, zoom: 1, tx: 0, ty: 0, fitted: true,
+        width: 0, height: 0, viewWidth: 1, viewHeight: 1, zoom: 1, tx: 0, ty: 0, fitted: true, maskShown: false,
         listeners: new AbortController(), generation: 0 };
     const signal = state.listeners.signal;
     canvas.addEventListener('wheel', event => {
@@ -271,15 +295,34 @@ function updateParticles(state) {
     const worker = state.particleWorker = new Worker(new URL('../../js/micrograph-worker.js', import.meta.url), { type: 'module' });
     worker.onmessage = ({ data }) => {
         if (state.disposed || generation !== state.particleGeneration) return;
-        if (data.type === 'particles') { state.particles = data.particles; state.status.textContent = ''; }
-        else state.status.textContent = data.message;
+        // Optional overlays fail quietly, leaving the micrograph in view.
+        if (data.type === 'particles') state.particles = data.particles;
+        else console.warn(data.message);
         schedule(state);
     };
     worker.onerror = event => {
-        if (!state.disposed && generation === state.particleGeneration)
-            state.status.textContent = `Unable to load particles: ${event.message}`;
+        if (!state.disposed && generation === state.particleGeneration) console.warn(`Unable to load particles: ${event.message}`);
     };
     worker.postMessage({ type: 'particles', particlesUrl: state.options.particlesUrl, width: state.width, height: state.height });
+}
+
+// The mask is drawn stretched over the micrograph, so it loads on its own, alongside the preview or the plane.
+function updateMask(state) {
+    releaseMask(state);
+    schedule(state);
+    if (!state.options.maskUrl || state.disposed) return;
+    const generation = state.maskGeneration;
+    const worker = state.maskWorker = new Worker(new URL('../../js/micrograph-worker.js', import.meta.url), { type: 'module' });
+    worker.onmessage = ({ data }) => {
+        if (state.disposed || generation !== state.maskGeneration) { data.mask?.close(); return; }
+        if (data.type === 'mask') { state.mask = data.mask; notifyMask(state, true); }
+        else console.warn(data.message);
+        schedule(state);
+    };
+    worker.onerror = event => {
+        if (!state.disposed && generation === state.maskGeneration) console.warn(`Unable to load mask: ${event.message}`);
+    };
+    worker.postMessage({ type: 'mask', maskUrl: state.options.maskUrl });
 }
 
 function showImage(state, levels, width, height, pixelSize) {
@@ -287,7 +330,7 @@ function showImage(state, levels, width, height, pixelSize) {
     for (const level of state.levels) level.close();
     state.levels = levels;
     state.width = width; state.height = height; state.pixelSize = pixelSize;
-    state.status.textContent = '';
+    setStatus(state, null);
     state.root.setAttribute('aria-busy', 'false');
     resize(state);
     // Replacing a preview keeps the particles: they are in the same pixel frame.
@@ -321,11 +364,11 @@ function startPlane(state, options, generation, upgrade) {
             showImage(state, data.levels, data.width, data.height, data.pixelSize);
             state.preview = false;
             showProgress(state, null);
-        } else if (data.type === 'mask') state.mask = data.mask;
-        else if (data.type === 'particles') state.particles = data.particles;
+        } else if (data.type === 'particles') state.particles = data.particles;
+        else if (data.type === 'warning') console.warn(data.message);
         else {
             // A failed upgrade leaves the preview in place.
-            if (!upgrade) state.status.textContent = data.message;
+            if (!upgrade) setStatus(state, data.message);
             state.root.setAttribute('aria-busy', 'false');
             showProgress(state, null);
         }
@@ -333,12 +376,13 @@ function startPlane(state, options, generation, upgrade) {
     };
     worker.onerror = event => {
         if (state.disposed || generation !== state.generation) return;
-        if (!upgrade) state.status.textContent = `Unable to load micrograph: ${event.message}`;
+        if (!upgrade) setStatus(state, `Unable to load micrograph: ${event.message}`);
         state.root.setAttribute('aria-busy', 'false');
         showProgress(state, null);
     };
-    // Masks load with the first image; an upgrade only needs the plane.
-    worker.postMessage({ ...options, maskUrl: upgrade ? null : options.maskUrl, particlesUrl: null });
+    // The mask and particles load on their own (updateMask, updateParticles); the plane worker reads only the plane, and
+    // the mask once more when particle contrast leaves junk out.
+    worker.postMessage({ ...options, maskUrl: null, particlesUrl: null, contrastMaskUrl: options.particleContrast ? options.maskUrl : null });
 }
 
 export function update(root, options, callback) {
@@ -346,14 +390,16 @@ export function update(root, options, callback) {
     state.callback = callback;
     const previous = state.options;
     state.options = options;
-    const key = JSON.stringify([options.url, options.layer, options.maskUrl, options.thumbnailUrl, options.previewUrl]);
+    // A new mask alone keeps the micrograph and the view.
+    const key = JSON.stringify([options.url, options.layer, options.thumbnailUrl, options.previewUrl]);
     if (key !== state.sourceKey) {
         state.sourceKey = key;
         releaseImages(state);
         state.generation++;
         state.root.setAttribute('aria-busy', String(!!options.url));
-        state.status.textContent = options.url ? 'Loading micrograph…' : '';
+        setStatus(state, options.url ? 'Loading micrograph…' : null, !!options.url);
         state.fitted = true;
+        if (options.url) updateMask(state);
         if (options.url) {
             const generation = state.generation;
             // Browsing quickly cancels both pending work and any in-progress fetch/processing.
@@ -368,7 +414,17 @@ export function update(root, options, callback) {
             }, 50);
         }
     }
-    else if (previous?.particlesUrl !== options.particlesUrl) updateParticles(state);
+    else {
+        if (previous?.particlesUrl !== options.particlesUrl) updateParticles(state);
+        if (previous?.maskUrl !== options.maskUrl) {
+            updateMask(state);
+            // Particle contrast leaves the junk out, so a plane on screen is measured again; a preview waits for zooming.
+            if (options.particleContrast && options.url && state.width && !state.preview) {
+                state.worker?.terminate();
+                startPlane(state, options, state.generation, true);
+            }
+        }
+    }
     if (!previous) state.observer.observe(root);
     if (!previous || previous.minWidth !== options.minWidth || previous.minHeight !== options.minHeight) resize(state);
     schedule(state);

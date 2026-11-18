@@ -14,6 +14,8 @@ public partial class MicrographViewer : ComponentBase, IAsyncDisposable
     /// <summary>Changes when a live result overwrites the same file; omitted for immutable results.</summary>
     [Parameter] public long? ResultRevision { get; set; }
     [Parameter] public string MaskPath { get; set; }
+    /// <summary>Changes when the mask is rewritten; without it the mask follows <see cref="ResultRevision"/>.</summary>
+    [Parameter] public long? MaskRevision { get; set; }
     [Parameter] public string ThumbnailPath { get; set; }
     /// <summary>Optional display-ready PNG of the micrograph: shown first, until zooming or panning loads the MRC.</summary>
     [Parameter] public string PreviewPath { get; set; }
@@ -27,6 +29,11 @@ public partial class MicrographViewer : ComponentBase, IAsyncDisposable
     /// <summary>Physical extraction-box width in Å.</summary>
     [Parameter] public double DefaultParticleBoxSize { get; set; } = 200;
     [Parameter] public bool CanControlParticleDisplay { get; set; } = true;
+    /// <summary>
+    /// Stretch the contrast for particles in ice: statistics from the central half of the micrograph in each dimension,
+    /// leaving out the mask (junk) and a margin around it, as Warp's previews do. Otherwise the whole micrograph counts.
+    /// </summary>
+    [Parameter] public bool ParticleContrast { get; set; }
     public int Width { get; private set; } = 800;
     public int Height { get; private set; } = 600;
 
@@ -40,6 +47,8 @@ public partial class MicrographViewer : ComponentBase, IAsyncDisposable
     private string previousPath;
     private double zoomLevel = 1;
     private bool showScaleBar = true, showMask = true, isPaintingMask, isPickingParticles;
+    /// <summary>Whether the browser is showing a mask: the toolbar offers mask controls only then (or when masks can be edited).</summary>
+    private bool hasMask;
     private decimal particleDiameter = 100, particleBoxSize = 200, maskBrushDiameter = 300;
     private string particleColor = "#FFF700";
     private ParticleShapes particleShape = ParticleShapes.Circle;
@@ -52,7 +61,12 @@ public partial class MicrographViewer : ComponentBase, IAsyncDisposable
         particleBoxSize = (decimal)DefaultParticleBoxSize;
     }
 
-    private string Url(string path) => string.IsNullOrWhiteSpace(path) ? null : FileService.GetUrl(path) + (ResultRevision.HasValue ? "?revision=" + ResultRevision.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) : "");
+    private string Url(string path, long? revision = null)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return null;
+        revision ??= ResultRevision;
+        return FileService.GetUrl(path) + (revision.HasValue ? "?revision=" + revision.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) : "");
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -71,11 +85,14 @@ public partial class MicrographViewer : ComponentBase, IAsyncDisposable
         }
         var options = new
         {
-            url = Url(path), layer, maskUrl = Url(MaskPath), thumbnailUrl = Url(ThumbnailPath), previewUrl = Url(PreviewPath),
+            // As before the viewer moved to the browser, a mask that does not exist (yet) is no mask.
+            url = Url(path), layer, maskUrl = !string.IsNullOrWhiteSpace(MaskPath) && File.Exists(MaskPath) ? Url(MaskPath, MaskRevision) : null,
+            thumbnailUrl = Url(ThumbnailPath), previewUrl = Url(PreviewPath),
             particlesUrl = Url(ParticleStarPath), minWidth = MinWidth, minHeight = MinHeight,
             showScaleBar, showMask, isPaintingMask = CanEditMask && isPaintingMask,
             isPickingParticles = CanEditParticles && isPickingParticles,
-            particleDiameter, particleBoxSize, particleColor, particleShape, maskBrushDiameter
+            particleDiameter, particleBoxSize, particleColor, particleShape, maskBrushDiameter,
+            particleContrast = ParticleContrast
         };
         var serialized = JsonSerializer.Serialize(options);
         if (serialized == lastOptions) return;
@@ -95,6 +112,14 @@ public partial class MicrographViewer : ComponentBase, IAsyncDisposable
         zoomLevel = zoom;
         Width = width;
         Height = height;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public Task OnMaskAvailability(bool available)
+    {
+        if (disposed || hasMask == available) return Task.CompletedTask;
+        hasMask = available;
         return InvokeAsync(StateHasChanged);
     }
 

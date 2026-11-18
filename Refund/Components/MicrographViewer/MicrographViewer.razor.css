@@ -39,6 +39,23 @@
     left: 50%;
     transform: translate(-50%, -50%);
     pointer-events: none;
+    text-align: center;
+}
+/* While the micrograph loads: a spinner above the status text. */
+.micrograph-viewer-container ::deep .micrograph-status[data-loading]::before {
+    content: '';
+    display: block;
+    width: 56px;
+    height: 56px;
+    margin: 0 auto 10px;
+    border: 5px solid color-mix(in srgb, var(--colorNeutralForeground3, #888) 30%, transparent);
+    border-top-color: var(--colorBrandBackground, #0f6cbd);
+    border-radius: 50%;
+    animation: micrograph-spin 1s linear infinite;
+}
+@keyframes micrograph-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+    .micrograph-viewer-container ::deep .micrograph-status[data-loading]::before { animation-duration: 3s; }
 }
 /* Full-resolution load after a preview: a thin bar along the top edge. */
 .micrograph-viewer-container ::deep .micrograph-progress {

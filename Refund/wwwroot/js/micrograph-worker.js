@@ -1,7 +1,26 @@
 import { loadPlane } from './mrc-parser.js';
+import { isTiff, parseTiff } from './tiff-parser.js';
 
 // Shared with main-thread viewers (the amplitude spectrum); kept exported here for existing callers.
 export { loadPlane };
+
+/**
+ * One image plane from an MRC or TIFF file (told apart by their first bytes, since file URLs carry no extension).
+ * MRC planes stream with range requests; a TIFF is read whole.
+ */
+export async function loadImage(url, layer = 0, { onProgress } = {}) {
+    const head = await fetch(url, { headers: { Range: 'bytes=0-3' } });
+    if (!head.ok) throw new Error(`File request failed (${head.status})`);
+    const bytes = new Uint8Array(await head.arrayBuffer());
+    if (!isTiff(bytes)) return loadPlane(url, layer, { onProgress });
+    // A server that ignores Range already sent the whole file.
+    const buffer = head.status === 206 ? await (async () => {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`File request failed (${response.status})`);
+        return response.arrayBuffer();
+    })() : bytes.buffer;
+    return parseTiff(buffer, layer);
+}
 
 export function bin2(data, width, height) {
     const w = Math.max(1, Math.floor(width / 2)), h = Math.max(1, Math.floor(height / 2));
@@ -15,17 +34,68 @@ export function bin2(data, width, height) {
     return { data: next, width: w, height: h };
 }
 
-export function pixels(data, width, height, mask = false) {
+/** Mean and standard deviation of the finite values whose index passes `include` (all when omitted). */
+function statistics(data, include) {
     let mean = 0, variance = 0, count = 0;
-    if (!mask) for (const value of data) {
-        if (!Number.isFinite(value)) continue;
+    for (let i = 0; i < data.length; i++) {
+        const value = data[i];
+        if (!Number.isFinite(value) || (include && !include(i))) continue;
         count++;
         const delta = value - mean;
         mean += delta / count;
         variance += delta * (value - mean);
     }
-    const std = count ? Math.sqrt(variance / count) : 0;
-    const low = mean - 2.5 * std, scale = std > 0 ? 255 / (5 * std) : 0;
+    return { mean, std: count ? Math.sqrt(variance / count) : 0, count };
+}
+
+/** Masked pixels this far around junk are left out too: Warp blends restored junk into the ice over 12 Å (masks are 8 Å/pixel). */
+export const ContrastMaskMargin = 2;
+
+/** The mask grown by `margin` pixels (a disc), as a byte per pixel. */
+function grownMask(mask, margin) {
+    const { data, width, height } = mask, grown = new Uint8Array(width * height);
+    for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+        if (!(data[y * width + x] >= 0.5)) continue;
+        for (let dy = -margin; dy <= margin; dy++) for (let dx = -margin; dx <= margin; dx++) {
+            const xx = x + dx, yy = y + dy;
+            if (dx * dx + dy * dy <= margin * margin && xx >= 0 && yy >= 0 && xx < width && yy < height) grown[yy * width + xx] = 1;
+        }
+    }
+    return grown;
+}
+
+/**
+ * The display window for particles in ice, as Warp's micrograph previews compute it: mean ± 2.5 sd over the central half
+ * of the plane in each dimension, leaving out the junk `mask` (any grid covering the same field, rows in plane order)
+ * and its margin. Too few such pixels (under 1% of that region) fall back to all unmasked pixels, then to the central
+ * half, then to the whole plane.
+ */
+export function particleContrast(data, width, height, mask = null) {
+    const grown = mask ? grownMask(mask, ContrastMaskMargin) : null;
+    const column = new Int32Array(width), row = new Int32Array(height);
+    if (grown) {
+        for (let x = 0; x < width; x++) column[x] = Math.min(mask.width - 1, Math.floor((x + 0.5) * mask.width / width));
+        for (let y = 0; y < height; y++) row[y] = Math.min(mask.height - 1, Math.floor((y + 0.5) * mask.height / height)) * mask.width;
+    }
+    const x0 = Math.floor(width / 4), x1 = width - x0, y0 = Math.floor(height / 4), y1 = height - y0;
+    const central = i => { const x = i % width, y = (i - x) / width; return x >= x0 && x < x1 && y >= y0 && y < y1; };
+    const clear = i => !grown || !grown[row[(i - i % width) / width] + column[i % width]];
+    const minimum = Math.max(16, Math.ceil((x1 - x0) * (y1 - y0) / 100));
+    let stats = null;
+    for (const include of grown ? [i => central(i) && clear(i), clear, central, null] : [central, null]) {
+        stats = statistics(data, include);
+        if (stats.count >= minimum) break;
+    }
+    return displayWindow(stats);
+}
+
+function displayWindow({ mean, std }) {
+    return { low: mean - 2.5 * std, scale: std > 0 ? 255 / (5 * std) : 0 };
+}
+
+/** Gray (or, for a mask, translucent red) RGBA pixels; `contrast` defaults to mean ± 2.5 sd of the whole plane. */
+export function pixels(data, width, height, mask = false, contrast = null) {
+    const { low, scale } = contrast ?? (mask ? { low: 0, scale: 0 } : displayWindow(statistics(data)));
     const rgba = new Uint8ClampedArray(width * height * 4);
     for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
         const value = data[(height - 1 - y) * width + x];
@@ -38,9 +108,9 @@ export function pixels(data, width, height, mask = false) {
     return rgba;
 }
 
-async function bitmap(plane, mask = false) {
+async function bitmap(plane, mask = false, contrast = null) {
     const canvas = new OffscreenCanvas(plane.width, plane.height);
-    canvas.getContext('2d').putImageData(new ImageData(pixels(plane.data, plane.width, plane.height, mask), plane.width, plane.height), 0, 0);
+    canvas.getContext('2d').putImageData(new ImageData(pixels(plane.data, plane.width, plane.height, mask, contrast), plane.width, plane.height), 0, 0);
     return canvas.transferToImageBitmap();
 }
 
@@ -83,34 +153,43 @@ export async function loadParticles(options) {
     } catch (error) { postMessage({ type: 'warning', message: `Particles: ${error.message}` }); }
 }
 
+// Masks are drawn stretched over the micrograph, so they need no plane and no image dimensions.
+export async function loadMask(options) {
+    try {
+        const mask = await bitmap(await loadImage(options.maskUrl), true);
+        postMessage({ type: 'mask', mask }, [mask]);
+    } catch (error) { postMessage({ type: 'warning', message: `Mask: ${error.message}` }); }
+}
+
 async function load(options) {
     try {
         let reported = -1;
-        let plane = await loadPlane(options.url, options.layer, { onProgress: (loaded, total) => {
+        let plane = await loadImage(options.url, options.layer, { onProgress: (loaded, total) => {
             const percent = Math.floor(loaded / total * 100);
             if (percent !== reported) { reported = percent; postMessage({ type: 'progress', loaded, total }); }
         } });
         const { width, height, pixelSize } = plane;
+        // Each zoom level is stretched by its own statistics, as Warp's binned previews are; particle contrast leaves out
+        // the junk mask, or only the border if the mask cannot be read.
+        const mask = options.particleContrast && options.contrastMaskUrl ? await loadImage(options.contrastMaskUrl).catch(error => {
+            postMessage({ type: 'warning', message: `Mask for contrast: ${error.message}` });
+            return null;
+        }) : null;
         const levels = [];
         while (true) {
-            levels.push(await bitmap(plane));
+            const contrast = options.particleContrast ? particleContrast(plane.data, plane.width, plane.height, mask) : null;
+            levels.push(await bitmap(plane, false, contrast));
             if (Math.max(plane.width, plane.height) <= 512) break;
             plane = bin2(plane.data, plane.width, plane.height);
         }
         postMessage({ type: 'image', width, height, pixelSize, levels }, levels);
         // Optional overlays fail independently, leaving the image usable.
-        await Promise.all([
-            options.maskUrl && (async () => {
-                const mask = await bitmap(await loadPlane(options.maskUrl), true);
-                postMessage({ type: 'mask', mask }, [mask]);
-            })().catch(error => postMessage({ type: 'warning', message: `Mask: ${error.message}` })),
-            options.particlesUrl && (async () => {
-                const response = await fetch(options.particlesUrl);
-                if (!response.ok) throw new Error(`File request failed (${response.status})`);
-                postMessage({ type: 'particles', particles: parseParticles(await response.text(), width, height) });
-            })().catch(error => postMessage({ type: 'warning', message: `Particles: ${error.message}` }))
-        ]);
+        if (options.particlesUrl) await (async () => {
+            const response = await fetch(options.particlesUrl);
+            if (!response.ok) throw new Error(`File request failed (${response.status})`);
+            postMessage({ type: 'particles', particles: parseParticles(await response.text(), width, height) });
+        })().catch(error => postMessage({ type: 'warning', message: `Particles: ${error.message}` }));
     } catch (error) { postMessage({ type: 'error', message: error.message }); }
 }
 if (typeof self !== 'undefined') self.onmessage = ({ data }) =>
-    (data.type === 'particles' ? loadParticles(data) : load(data)).finally(() => self.close());
+    (data.type === 'particles' ? loadParticles(data) : data.type === 'mask' ? loadMask(data) : load(data)).finally(() => self.close());
