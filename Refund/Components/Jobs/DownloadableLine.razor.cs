@@ -27,8 +27,12 @@ public partial class DownloadableLine : ComponentBase
     public Downloadable Downloadable { get; set; }
     
     /// <summary>
-    /// Font size for the line item text
+    /// Optional filename to use when saving the download. Defaults to the server basename.
     /// </summary>
+    [Parameter]
+    public string FileName { get; set; }
+
+    /// <summary>Font size for the line item text.</summary>
     [Parameter]
     public string FontSize { get; set; } = "0.75rem";
     
@@ -59,8 +63,9 @@ public partial class DownloadableLine : ComponentBase
 
         try
         {
-            string fileUrl = FileService.GetUrl(Downloadable.ServerPath);
-            await JSRuntime.InvokeVoidAsync("downloadFile", fileUrl, Path.GetFileName(Downloadable.ServerPath));
+            string fileName = FileName ?? Path.GetFileName(Downloadable.ServerPath);
+            string fileUrl = FileService.GetDownloadUrl(Downloadable.ServerPath, fileName);
+            await JSRuntime.InvokeVoidAsync("downloadFile", fileUrl, fileName);
         }
         finally
         {

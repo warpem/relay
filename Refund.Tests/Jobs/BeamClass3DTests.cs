@@ -211,6 +211,10 @@ public class BeamClass3DTests : IDisposable
         Assert.Null(output.OptimisationSetStarPath);
         var maps = Assert.IsType<MapList>(job.PortsOut["Reference"].GetResource());
         Assert.Equal(4, maps.Maps.Count);
+        var downloads = maps.GetDownloadables().ToList();
+        Assert.Equal("Class 1: Half-map 1", downloads[0].Name);
+        Assert.Equal("Class 4: Half-map 2", downloads[10].Name);
+        Assert.Equal(job.IterationFile(3, "half2_class004_unfiltered.mrc"), downloads[10].ServerPath);
         Assert.Equal(job.IterationFile(3, "half2_class004_unfiltered.mrc"), maps.Maps[3].Half2VolumePath);
         Assert.Equal(job.IterationMetadataDirectory(3), Assert.IsType<TiltSeriesSet>(job.PortsOut["TiltSeries"].GetResource()).LatestMetadataDirectory);
     }
@@ -288,6 +292,9 @@ public class BeamClass3DTests : IDisposable
         Assert.Equal(parent.IterationFile(2, "data.star"), Assert.IsType<ParticleSet>(parent.PortsOut["Particles"].GetResource()).ParticlesSingleStarPath);
         var maps = Assert.IsType<MapList>(select.PortsOut["Maps"].GetResource());
         Assert.Equal(parent.IterationFile(2, "half1_class002_unfiltered.mrc"), maps.Maps.Single().Half1VolumePath);
+        Assert.Equal(2, maps.Maps.Single().ClassId);
+        Assert.Equal(new[] { "Class 2: Half-map 1", "Class 2: Half-map 2", "Class 2: Average map" },
+            maps.GetDownloadables().Select(d => d.Name));
         Assert.Equal(parent.IterationMetadataDirectory(2), Assert.IsType<TiltSeriesSet>(select.PortsOut["TiltSeries"].GetResource()).LatestMetadataDirectory);
     }
 

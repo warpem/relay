@@ -35,7 +35,7 @@ public class FileServer : ControllerBase
     /// <param name="guid">The GUID that maps to a file path</param>
     /// <returns>File content with appropriate content type, or NotFound if the GUID is invalid or the file doesn't exist</returns>
     [HttpGet("{guid}")]
-    public IActionResult GetFile(string guid)
+    public IActionResult GetFile(string guid, [FromQuery] string downloadName = null)
     {
         if(!_guidMappingService.TryGetPath(guid, out var filePath))
         {
@@ -59,8 +59,8 @@ public class FileServer : ControllerBase
 
         var contentDisposition = new ContentDisposition
         {
-            FileName = Path.GetFileName(filePath),
-            Inline = contentType.StartsWith("image/") // Display images inline in browser
+            FileName = Path.GetFileName(downloadName ?? filePath),
+            Inline = downloadName == null && contentType.StartsWith("image/") // Display images inline in browser
         };
 
         Response.Headers.Append("Content-Disposition", contentDisposition.ToString());

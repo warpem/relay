@@ -39,7 +39,13 @@ namespace Refund.JobResources
         /// <returns>Flattened collection of downloadable resources from all contained maps</returns>
         public override IEnumerable<Downloadable> GetDownloadables()
         {
-            var result = Maps.SelectMany(m => m.GetDownloadables()).ToList();
+            var result = Maps.SelectMany((map, index) => map.GetDownloadables().Select(d =>
+            {
+                int? classId = map.ClassId ?? (Maps.Count > 1 ? index + 1 : null);
+                return classId.HasValue
+                    ? new Downloadable($"Class {classId}: {d.Name}", d.Description, d.ServerPath, d.VisualizationPath)
+                    : d;
+            })).ToList();
             if (!string.IsNullOrEmpty(Model))
                 result.Add(new Downloadable("Model Metadata", "STAR file containing metadata about the maps", Model));
             

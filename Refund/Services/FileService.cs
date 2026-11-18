@@ -52,6 +52,10 @@ public class FileService
         _logger = logger;
     }
 
+    /// <summary>Gets a secure file URL with an explicit attachment filename.</summary>
+    public string GetDownloadUrl(string filePath, string fileName) =>
+        $"{GetUrl(filePath)}?downloadName={Uri.EscapeDataString(fileName)}";
+
     /// <summary>
     /// Gets a secure URL for accessing the specified file.
     /// </summary>

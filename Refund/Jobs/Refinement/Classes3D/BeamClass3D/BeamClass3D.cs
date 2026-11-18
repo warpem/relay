@@ -198,7 +198,7 @@ public class BeamClass3D : BeamParticleJob
         return new MapList(Enumerable.Range(1, NClasses).Select(c => new Map(
             half1VolumePath: IterationFile(i, $"half1_class{c:D3}_unfiltered.mrc"),
             half2VolumePath: IterationFile(i, $"half2_class{c:D3}_unfiltered.mrc"),
-            averageVolumePath: VisMap3d(i, c), isAbsoluteScale: true,
+            averageVolumePath: VisMap3d(i, c), isAbsoluteScale: true, classId: c,
             visualizationPaths: new()
             {
                 [Map.VisTypes.OrthoSlices] = VisFilteredSlices(i, c), [Map.VisTypes.Fsc] = VisFsc(i, c),

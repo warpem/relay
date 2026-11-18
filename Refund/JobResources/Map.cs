@@ -10,6 +10,9 @@ namespace Refund.JobResources;
 /// </summary>
 public class Map : Resource
 {
+    /// <summary>Original one-based class ID, retained when selecting a subset of classes.</summary>
+    public readonly int? ClassId;
+
     /// <summary>
     /// Path to the first half-map volume file, used for resolution estimation via FSC.
     /// </summary>
@@ -91,6 +94,7 @@ public class Map : Resource
     /// <param name="maskVolumePath">Path to a mask volume</param>
     /// <param name="fscStarPath">Path to FSC data in STAR format</param>
     /// <param name="isAbsoluteScale">Whether the map is on an absolute scale</param>
+    /// <param name="classId">Original one-based class ID, when this map represents a class</param>
     /// <param name="visualizationPaths">Dictionary of paths to visualization resources</param>
     public Map(string half1VolumePath = null, 
                string half2VolumePath = null, 
@@ -99,8 +103,10 @@ public class Map : Resource
                string maskVolumePath = null,
                string fscStarPath = null, 
                bool isAbsoluteScale = false,
-               Dictionary<VisTypes, string> visualizationPaths = null)
+               Dictionary<VisTypes, string> visualizationPaths = null,
+               int? classId = null)
     {
+        ClassId = classId;
         Half1VolumePath = half1VolumePath;
         Half2VolumePath = half2VolumePath;
         AverageVolumePath = averageVolumePath;

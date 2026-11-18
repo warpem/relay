@@ -280,6 +280,7 @@ public class Class3DSelect : Job, ILocalJob
             maps.Add(new Map(half1VolumePath: sourceMaps?.Maps[c - 1].Half1VolumePath,
                              half2VolumePath: sourceMaps?.Maps[c - 1].Half2VolumePath,
                              averageVolumePath: ResSelectedClassFile(c),
+                             classId: sourceMaps?.Maps[c - 1].ClassId ?? c,
                              visualizationPaths: new()
                              {
                                  { Map.VisTypes.OrthoSlices, VisFilteredSlices(c) },

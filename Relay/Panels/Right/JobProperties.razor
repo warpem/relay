@@ -245,7 +245,8 @@
                                         
                                         @foreach (var downloadable in downloadables)
                                         {
-                                            <DownloadableLine Downloadable="@downloadable"/>
+                                            <DownloadableLine Downloadable="@downloadable"
+                                                              FileName="@downloadable.GetFileName(job.Space.Project.Id, job.Space.Id)"/>
                                         }
                                     </div>
                                 }

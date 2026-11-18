@@ -237,10 +237,11 @@ public class RelayMcpTools(IHttpContextAccessor contextAccessor, DataManager dat
         var match = RelayMcpProjections.MatchDownloadable(EnumerateDownloadables(job, iter), port, name);
         if (match == null) throw new McpException($"No result named '{name}' on port '{port}' for iteration {iter}.");
 
-        string relative = fileService.GetUrl(match.ServerPath); // "/api/file/{hash}"
+        string fileName = match.GetFileName(projectId, spaceId);
+        string relative = fileService.GetDownloadUrl(match.ServerPath, fileName);
         var request = contextAccessor.HttpContext?.Request;
         string url = request != null ? $"{request.Scheme}://{request.Host}{relative}" : relative;
-        return new ResultLinkDto(match.Name, Path.GetFileName(match.ServerPath), url);
+        return new ResultLinkDto(match.Name, fileName, url);
     }
 
     [McpServerTool(Name = "list_job_types"), Description("List all job types (guid, name, and full context-menu category path). Call get_job_type for a type's parameters and ports.")]

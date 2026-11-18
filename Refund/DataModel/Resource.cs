@@ -69,6 +69,10 @@ public class Downloadable(string name, string description, string serverPath, st
     /// Display name of the downloadable, shown in the UI.
     /// </summary>
     public string Name { get; set; } = name;
+
+    /// <summary>Download filename with the producing project's and space's identifiers.</summary>
+    public string GetFileName(int projectId, int spaceId) =>
+        $"P{projectId}_S{spaceId}_{Path.GetFileName(ServerPath)}";
     
     /// <summary>
     /// Description of the downloadable's contents, shown as a tooltip in the UI.

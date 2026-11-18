@@ -199,7 +199,7 @@ public class BeamInit3D : BeamParticleJob
     }
 
     protected override MapList GetMaps(int iteration) => new(Enumerable.Range(1, NClasses).Select(c => new Map(
-        averageVolumePath: VisMap3d(iteration, c), visualizationPaths: new()
+        averageVolumePath: VisMap3d(iteration, c), classId: c, visualizationPaths: new()
         {
             [Map.VisTypes.OrthoSlices] = VisFilteredSlices(iteration, c),
             [Map.VisTypes.Statistics] = VisClassStats(iteration),

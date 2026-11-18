@@ -888,7 +888,7 @@ public class Class3D : RelionJob, IClusterJob, IPooledJob, IPoolStatus
         for (int c = 1; c <= NClasses; c++)
             Maps.Add(new Map(
                              // Path to the actual 3D volume for this class
-                             averageVolumePath: ResMapFile(iter, c),
+                             averageVolumePath: ResMapFile(iter, c), classId: c,
                              isAbsoluteScale: true,
                              // Dictionary of paths to various visualizations for this class
                              visualizationPaths: new()

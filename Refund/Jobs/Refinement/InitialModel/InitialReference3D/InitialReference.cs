@@ -315,7 +315,7 @@ public class InitialReference : RelionJob, IClusterJob
         List<Map> maps = new();
 
         for (int c = 1; c <= NClasses; c++)
-            maps.Add(new Map(averageVolumePath: ResMapFile(iter, c),
+            maps.Add(new Map(averageVolumePath: ResMapFile(iter, c), classId: c,
                              visualizationPaths: new()
                              {
                                  { Map.VisTypes.OrthoSlices, VisFilteredSlices(iter, c) },
