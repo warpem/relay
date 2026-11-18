@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Optional
 
 import einops
+import h3
 import matplotlib.pyplot as plt
 import numpy as np
 import starfile
@@ -69,6 +70,8 @@ def orientation_and_fourier_sampling(
     if symmetry is not None:
         rotation_matrices = symmetrize(rotation_matrices, symmetry=symmetry)
     z_vectors = rotation_matrices[..., :, 2]
+    # Symmetry can move directions across the hemisphere used by the plot.
+    z_vectors = np.where(z_vectors[..., 2:3] < 0, -z_vectors, z_vectors)
     h_to_count = count_particles_per_h3_cell(xyz_to_cell(z_vectors, res=grid_resolution))
 
     # Grid geometry is independent of particles, classes and iterations.
@@ -80,7 +83,8 @@ def orientation_and_fourier_sampling(
         image = generate_orientation_distribution_image(
             h_counts=h_cell_counts,
             idx_inv=idx_inv,
-            tilt_grid=tilt_grid
+            tilt_grid=tilt_grid,
+            h_cells=h_cells,
         )
         plot_orientation_distribution(
             image=image,
@@ -185,8 +189,44 @@ def find_cell_count_to_image_mapping(
     return h, h_counts, idx_inv
 
 
-def generate_orientation_distribution_image(h_counts, idx_inv, tilt_grid):
-    image = h_counts[idx_inv]
+@lru_cache(maxsize=4)
+def hemisphere_cell_areas(cells):
+    """Solid angle of each H3 cell inside the displayed northern hemisphere.
+
+    Counts are folded before binning. Equator-crossing cells therefore need
+    their clipped area, rather than their full spherical area. Clipping great
+    circle edges at z=0 also handles pentagons and face-boundary vertices.
+    """
+    areas = []
+    for cell in cells:
+        boundary = np.deg2rad(np.asarray(h3.cell_to_boundary(str(cell))))
+        lat, lng = boundary.T
+        vertices = np.stack((np.cos(lat)*np.cos(lng), np.cos(lat)*np.sin(lng), np.sin(lat)), axis=1)
+        clipped = []
+        for a, b in zip(vertices, np.roll(vertices, -1, axis=0)):
+            if a[2] >= 0:
+                clipped.append(a)
+            if (a[2] >= 0) != (b[2] >= 0):
+                point = a + (b-a) * (-a[2] / (b[2]-a[2]))
+                clipped.append(point / np.linalg.norm(point))
+        area = 0.
+        if len(clipped) >= 3:
+            a = clipped[0]
+            for b, c in zip(clipped[1:-1], clipped[2:]):
+                area += 2*np.arctan2(np.dot(a, np.cross(b, c)),
+                                    1 + np.dot(a, b) + np.dot(b, c) + np.dot(c, a))
+        areas.append(abs(area))
+    result = np.asarray(areas)
+    result.setflags(write=False)
+    return result
+
+
+def generate_orientation_distribution_image(h_counts, idx_inv, tilt_grid, h_cells):
+    # H3 cells are not equal area. Display particles per steradian, preserving
+    # zeros and count-based Fourier sampling as separate scientific quantities.
+    areas = hemisphere_cell_areas(tuple(h_cells))
+    density = np.divide(h_counts, areas, out=np.zeros(len(areas), dtype=float), where=areas > 1e-15)
+    image = density[idx_inv]
     image = np.ma.masked_where(condition=tilt_grid > 90, a=image)
     return image
 
