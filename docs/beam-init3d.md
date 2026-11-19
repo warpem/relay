@@ -13,8 +13,7 @@ Beam caps it at the input box, preserving the field of view and adjusting map
 sampling. Classification now exposes the same box-size control, defaulting to
 128. Refinement keeps its existing grid policy.
 
-Advanced controls include maximum particles for short trials, starting blob
-count, class similarity, initial/final learning rates (0.5→0.1, exponentially
+Advanced controls include maximum particles for short trials, class similarity, initial/final learning rates (0.5→0.1, exponentially
 annealed), snapshot interval (50 updates), pose marginalization temperature,
 hardware batch size and additional arguments. Class
 similarity passes `--class-similarity` (default 0.5, range 0–1) to control early

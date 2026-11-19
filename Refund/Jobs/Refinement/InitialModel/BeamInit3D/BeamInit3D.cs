@@ -77,10 +77,6 @@ public class BeamInit3D : BeamParticleJob
         helpText: "Optional deterministic subset for quick trials. The final particle output contains this subset.")]
     [RelayProperty] public int? MaximumParticles { get; set; }
 
-    [UiInt("blob-count", "Starting blobs", min: 1, max: 1000, isAdvanced: true,
-        helpText: "Positive and negative random Gaussians per starting model.")]
-    [RelayProperty] public int BlobCount { get; set; } = 40;
-
     [UiDecimal("class-similarity", "Class similarity", min: 0, max: 1, stepSize: 0.05, isAdvanced: true,
         helpText: "Early class-assignment sharing between initial models. 0 disables sharing; 1 maximizes sharing.")]
     [RelayProperty] public decimal ClassSimilarity { get; set; } = 0.5m;
