@@ -125,7 +125,7 @@ public class InputBindingTests
     [Fact]
     public void NullTextIsNormalizedWithoutDroppingOtherParameters()
     {
-        var parameters = TextInputParameters.Normalize(ParameterView.FromDictionary(new Dictionary<string, object?>
+        var parameters = TextInputParameters.Normalize(new object(), ParameterView.FromDictionary(new Dictionary<string, object?>
         {
             ["Value"] = null,
             ["Immediate"] = true
