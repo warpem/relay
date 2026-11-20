@@ -56,8 +56,9 @@ public class ExtractParticles2D : WarpToolsJobGpu, IClusterJob
 
     [UiInt("diameter", "Particle diameter",
            helpText: "Particle diameter in Angstrom; the background outside it is normalized",
-           min: 1,
+           min: 10,
            max: 10000,
+           stepSize: 10,
            unit: "Å")]
     [RelayProperty]
     public int Diameter { get; set; } = 100;
@@ -69,12 +70,13 @@ public class ExtractParticles2D : WarpToolsJobGpu, IClusterJob
     public bool DontInvert { get; set; } = false;
 
     [UiBool("dont_normalize", "Don't normalize",
-            "Don't normalize background (RELION will complain!)")]
+            "Don't normalize the background around each particle to zero mean and unit variance, which refinement programs expect")]
     [RelayProperty]
     public bool DontNormalize { get; set; } = false;
 
     [UiBool("dont_center", "Don't recenter",
-            "Don't re-center particles based on refined shifts")]
+            "Don't re-center particles based on their refined shifts, and keep the shifts",
+            ConditionalOnField = nameof(HasRefinedShifts), ConditionalOnValue = true)]
     [RelayProperty]
     public bool DontCenter { get; set; } = false;
 
@@ -101,6 +103,11 @@ public class ExtractParticles2D : WarpToolsJobGpu, IClusterJob
     public int SkipLast { get; set; } = 0;
 
     #endregion
+
+    /// <summary>The connected particles have refined shifts, which extraction re-centers them on unless told not to.</summary>
+    public bool HasRefinedShifts => ParticleInputs.Sources(PortsIn[PortInParticles])
+        .Concat(ParticleInputs.Sources(PortsIn[PortInPositions]))
+        .Any(s => s.Resource?.HasShifts == true);
 
     public string ResParticlesStar => Path.Combine(DirectoryPath, "particles.star");
     public string ResSettings => Path.Combine(DirectoryPath, "processing.settings");

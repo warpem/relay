@@ -92,6 +92,27 @@ public class ExtractParticles2DTests
     }
 
     [Fact]
+    public void Recentering_IsOfferedOnlyForParticlesWithShifts()
+    {
+        var job = Make();
+        job.DontCenter = true;
+        Connect(job.PortsIn[ExtractParticles2D.PortInMicrographs], Micrographs);
+        Connect(job.PortsIn[ExtractParticles2D.PortInPositions], () => new ParticleSet
+        {
+            ParticlesSingleStarPath = Root + "/picks.star", HasPositions = true, CoordPixelSize = 0.928M
+        });
+
+        Assert.False(job.HasRefinedShifts);
+        Assert.False(job.ComposeCommandArguments().ContainsKey("dont_center"));
+
+        job.PortsIn[ExtractParticles2D.PortInPositions].Edges.Clear();
+        Connect(job.PortsIn[ExtractParticles2D.PortInParticles], Refined);
+
+        Assert.True(job.HasRefinedShifts);
+        Assert.Equal("", job.ComposeCommandArguments()["dont_center"]);
+    }
+
+    [Fact]
     public void Validation_NeedsExactlyOneParticleInputAndMovieMetadata()
     {
         var job = Make();
