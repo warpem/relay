@@ -417,6 +417,8 @@ public class MotionAndCTF2D : WarpToolsJobGpu, IClusterJob
 
         result.HasMotion = true;
         result.HasCtf = true;
+        result.HasMetadata = true;
+        result.MetadataDirectory = DirectoryPath;
 
         result.PowerspectrumDirectory = WarpHelper.PathCombine(DirectoryPath, Movie.PowerSpectrumDirName);
         result.ToPowerspectrumPath = (name) => WarpHelper.PathCombine(DirectoryPath, Movie.ToPowerSpectrumPath(name));

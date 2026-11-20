@@ -1,8 +1,7 @@
-using System.Text.Json;
+using System.Globalization;
 using Refund.DataModel;
 using Refund.DataModel.ReadOnly;
 using Refund.JobResources;
-using Refund.Jobs.Fs.MotionCtf.MotionAndCTF2D;
 using Refund.UIFields;
 using Refund.Utils;
 using Warp;
@@ -10,43 +9,58 @@ using Warp.Tools;
 
 namespace Refund.Jobs.Fs.Extraction.ExtractParticles2D;
 
+/// <summary>
+/// Extracts particles from the movies of a micrograph set with WarpTools fs_export_particles: each particle is
+/// averaged from its motion-corrected frames, with the CTF from the movie's Warp metadata. The particles are either
+/// positions (e.g. picks) or refined particles, which are re-centered on their refined shifts.
+/// </summary>
 [GenerateReadOnly]
 public class ExtractParticles2D : WarpToolsJobGpu, IClusterJob
 {
-    public override int2 CardSquareCount { get; set; } = new int2(2, 1);
+    public override int2 CardSquareCount { get; set; } = new int2(3, 1);
     public override string TypeGuid => "21f9daa1-3e5a-4f04-94b4-63204b1c74b5";
     public override string TypeCategory => "Frame-series.Extraction.Extract particles";
     public override string TypeName => "Extract particles";
     public override string TypeNameShort => "Extract particles";
     public override string TypeDescription => "Extract and export particles from 2D micrographs";
     public override bool IsIterative => false;
-    public override Type ExpandedViewType => typeof(ExtractParticles2DExpandedView);
+    public override Type ExpandedViewType => null;
+
+    // Extraction is as fast as the movies' frames can be decoded on the CPU; the GPU work hides behind it.
+    protected override int CoresPerWorker => 4;
+
+    public const string PortInMicrographs = "Micrographs";
+    public const string PortInPositions = "Positions";
+    public const string PortInParticles = "Particles";
+    public const string PortOutParticles = "Particles";
 
     #region Parameters
 
     [UiFieldGroup("Extraction Settings", 0)]
     [UiDecimalNullable("angpix_out", "Output pixel size",
-                       helpText: "Pixel size the extracted particles will be scaled to; leave empty to use binned pixel size from input settings",
+                       helpText: "Pixel size the extracted particles will be scaled to; leave empty to use the micrographs' pixel size",
                        min: 0,
                        stepSize: 0.001,
                        unit: "Å")]
     [RelayProperty]
     public decimal? AngpixOut { get; set; } = null;
 
-    [UiDecimal("box", "Box size",
-               helpText: "Particle box size in pixels",
-               min: 2,
-               stepSize: 2,
-               unit: "px")]
+    [UiInt("box", "Box size",
+           helpText: "Particle box size in pixels",
+           min: 4,
+           max: 4096,
+           stepSize: 2,
+           unit: "px")]
     [RelayProperty]
-    public decimal BoxSize { get; set; } = 128;
+    public int BoxSize { get; set; } = 128;
 
-    [UiDecimal("diameter", "Particle diameter",
-               helpText: "Particle diameter in Angstrom",
-               min: 1,
-               unit: "Å")]
+    [UiInt("diameter", "Particle diameter",
+           helpText: "Particle diameter in Angstrom; the background outside it is normalized",
+           min: 1,
+           max: 10000,
+           unit: "Å")]
     [RelayProperty]
-    public decimal Diameter { get; set; } = 100;
+    public int Diameter { get; set; } = 100;
 
     [UiFieldGroup("Advanced Options", 1)]
     [UiBool("dont_invert", "Don't invert contrast",
@@ -69,173 +83,180 @@ public class ExtractParticles2D : WarpToolsJobGpu, IClusterJob
     [RelayProperty]
     public bool PreflipPhases { get; set; } = false;
 
-    [UiDecimal("skip_first_frames", "Skip first frames",
-               helpText: "Skip first N frames",
-               min: 0,
-               stepSize: 1)]
+    [UiBool("keep_ctf", "Keep input CTF",
+            "Keep the particles' CTF parameters (e.g. refined per particle) instead of taking them from the movies' Warp metadata")]
     [RelayProperty]
-    public decimal SkipFirst { get; set; } = 0;
+    public bool KeepCtf { get; set; } = false;
 
-    [UiDecimal("skip_last_frames", "Skip last frames",
-               helpText: "Skip last N frames",
-               min: 0,
-               stepSize: 1)]
+    [UiInt("skip_first_frames", "Skip first frames",
+           helpText: "Skip first N frames",
+           min: 0)]
     [RelayProperty]
-    public decimal SkipLast { get; set; } = 0;
-    
+    public int SkipFirst { get; set; } = 0;
+
+    [UiInt("skip_last_frames", "Skip last frames",
+           helpText: "Skip last N frames",
+           min: 0)]
+    [RelayProperty]
+    public int SkipLast { get; set; } = 0;
+
     #endregion
-    
-    #region Results paths
-    
-    public string ResParticlesStar(string name) => Path.Combine(DirectoryPath, "matching", $"{Path.GetFileNameWithoutExtension(name)}_mm_1e-4to1e-5.star");
-    public string ResAverageFile(string name) => Path.Combine(DirectoryPath, "average", $"{Path.GetFileNameWithoutExtension(name)}.mrc");
-    #endregion
-    
-    #region Visualizations
-    
-    public string VisThumbnail(string name) => Path.Combine(DirectoryPath, 
-                                                            "thumbnails", 
-                                                            $"{name.Substring(0, name.LastIndexOf("."))}.png");
-    
-    #endregion
+
+    public string ResParticlesStar => Path.Combine(DirectoryPath, "particles.star");
+    public string ResSettings => Path.Combine(DirectoryPath, "processing.settings");
 
     public ExtractParticles2D()
     {
-        var portInMicrographs = new PortIn(
-            job: this,
-            resourceType: typeof(MicrographSet),
-            name: "Micrographs",
-            alias: "Micrographs",
-            minItems: 1,
-            maxItems: 1
-        );
-        
-        var portInPositionSet = new PortIn(
-            job: this,
-            resourceType: typeof(ParticleSet),
-            name: "Positions",
-            alias: "Positions",
-            minItems: 0,
-            maxItems: 1
-        );
-        
-        var portInParticleSet = new PortIn(
-            job: this,
-            resourceType: typeof(ParticleSet),
-            name: "Particles",
-            alias: "Particles",
-            minItems: 0,
-            maxItems: 1
-        );
+        var portInMicrographs = new PortIn(this, typeof(MicrographSet), PortInMicrographs, "Micrographs", 1, 1);
+        var portInPositions = new PortIn(this, typeof(ParticleSet), PortInPositions, "Positions", 0, 1);
+        var portInParticles = new PortIn(this, typeof(ParticleSet), PortInParticles, "Particles", 0, 1);
 
         PortsIn = new(new Dictionary<string, PortIn>
         {
             [portInMicrographs.Name] = portInMicrographs,
-            [portInPositionSet.Name] = portInPositionSet,
-            [portInParticleSet.Name] = portInParticleSet,
+            [portInPositions.Name] = portInPositions,
+            [portInParticles.Name] = portInParticles,
         });
 
-        var portOutParticleSet = new PortOut(
-            job: this,
-            resourceType: typeof(ParticleSet),
-            name: "Particles",
-            alias: "Particles",
-            resourceDelegate: GetParticlesResource
-        );
+        var portOutParticles = new PortOut(this, typeof(ParticleSet), PortOutParticles, "Particles", GetParticlesResource);
 
         PortsOut = new(new Dictionary<string, PortOut>
         {
-            [portOutParticleSet.Name] = portOutParticleSet,
+            [portOutParticles.Name] = portOutParticles,
         });
     }
 
-    private Resource GetParticlesResource(int iter)
+    /// <summary>The particles to extract: refined particles if connected, otherwise positions.</summary>
+    private ParticleSet InputParticles() =>
+        PortsIn[PortInParticles].GetSingleResource<ParticleSet>() ?? PortsIn[PortInPositions].GetSingleResource<ParticleSet>();
+
+    private ParticleSet GetParticlesResource(int iter)
     {
-        ParticleSet result = new();
-        
-        if (PortsIn["Particles"].Edges.Any())
-            result = PortsIn["Particles"].Edges.First().Source.GetResource() as ParticleSet;
+        var result = InputParticles()?.Copy();
+        if (result == null)
+            return null;
 
         result.HasData = true;
-        result.ParticlesSingleStarPath = ResParticlesStar("");
+        result.ParticlesSingleStarPath = ResParticlesStar;
+        result.ParticlesMultiStarDirectory = "";
+        result.ToMultiStarPath = null;
+        result.TomogramsStarPath = null;
+        result.OptimisationSetStarPath = null;
         result.ItemCount = null;
+        result.DataDimensionality = ParticleType.Image;
+        result.HasPositions = true;
+        result.HasCtf = true;
+        // Re-centering moves each position by its refined shift, which is then zero; coordinates keep their units.
+        result.HasShifts = DontCenter && result.HasShifts;
+        result.Diameter = Diameter;
+        result.PickedInMicrographs = PortsIn[PortInMicrographs].GetSingleResource<MicrographSet>() ?? result.PickedInMicrographs;
 
         return result;
     }
 
-    public override Action TrackProgressLogs()
+    public override Dictionary<string, string> ValidateInputs()
     {
-        Directory.CreateDirectory(RelayResultsDirectoryPath);
-        
-        if (!File.Exists(PathStdOut))
-            return null;
-        
-        var LogLines = File.ReadAllText(PathStdOut).Split('\n');
-        if (LogLines.Length == 0)
-            return null;
-        
-        // Find progress line if it exists
-        int ProgressLine = -1;
-        for (int i = 0; i < LogLines.Length; i++)
-            if (LogLines[i].Contains("Connected to") && i < LogLines.Length - 1)
-            {
-                ProgressLine = i + 1;
-                break;
-            }
-        
-        // Take care of progress bars
-        for (int i = 0; i < LogLines.Length; i++)
-            if (LogLines[i].Contains('\r'))
-                LogLines[i] = LogLines[i].Substring(LogLines[i].LastIndexOf('\r') + 1);
-        
-        // Parse line looking like "2/4, 00:10 remaining"
-        int ItemsProcessed = 0;
-        int ItemsTotal = 0;
-        if (ProgressLine != -1)
-        {
-            var ProgressParts = LogLines[ProgressLine].Split(['/', ',']);
-            if (ProgressParts.Length >= 2)
-            {
-                ItemsProcessed = int.Parse(ProgressParts[0]);
-                ItemsTotal = int.Parse(ProgressParts[1]);
-            }
-        }
-        
-        JobTools.WriteLogFile(string.Join('\n', LogLines), LogFilePath(0));
-        
-        if (LogsAvailableIteration < 0 ||
-            NItemsProcessed != ItemsProcessed ||
-            NItemsTotal != ItemsTotal)
-            return () => 
-            {
-                NItemsProcessed = ItemsProcessed;
-                NItemsTotal = ItemsTotal;
-                LogsAvailableIteration = 0;
-            };
+        var errors = base.ValidateInputs();
 
-        return null;
+        bool hasPositions = PortsIn[PortInPositions].Edges.Any(), hasParticles = PortsIn[PortInParticles].Edges.Any();
+        if (hasPositions == hasParticles)
+            errors[PortInParticles] = "Connect either positions or particles to extract.";
+
+        if (BoxSize % 2 != 0)
+            errors[nameof(BoxSize)] = "The box size must be even.";
+
+        if (PortsIn[PortInMicrographs].GetSingleResource<MicrographSet>() is { } micrographs)
+        {
+            if (!micrographs.HasMovies || micrographs.DataSetFs == null)
+                errors[PortInMicrographs] = "Particles are extracted from the movies, which these micrographs don't have.";
+            else if (!micrographs.HasMotion || !micrographs.HasMetadataDirectory)
+                errors[PortInMicrographs] = "The micrographs need Warp motion correction metadata.";
+            else if (!micrographs.HasCtf && !KeepCtf)
+                errors[PortInMicrographs] = "The micrographs need Warp CTF metadata, or keep the particles' input CTF.";
+            else if (AngpixOut is { } angpix && angpix < micrographs.DataSetFs.PixelSize * micrographs.DataSetFs.BinFactor)
+                errors[nameof(AngpixOut)] = "The output pixel size can't be smaller than the micrographs' pixel size.";
+        }
+
+        if (InputParticles() is { } particles && particles.HasNormalizedCoords)
+            errors[hasParticles ? PortInParticles : PortInPositions] = "Normalized coordinates aren't supported; the coordinates need a pixel size.";
+
+        return errors;
+    }
+
+    public override string CommandName => "WarpTools fs_export_particles";
+
+    public override Dictionary<string, string> ComposeCommandArguments()
+    {
+        var result = base.ComposeCommandArguments();
+
+        var micrographs = PortsIn[PortInMicrographs].GetSingleResource<MicrographSet>()
+            ?? throw new InvalidOperationException("No micrographs connected.");
+        var particles = InputParticles() ?? throw new InvalidOperationException("No particles connected.");
+
+        result["settings"] = Space.GetRelativePath(ResSettings);
+        // A selection of its folder's movies (e.g. a Warp export) lists them; WarpTools would otherwise take them all.
+        if (!string.IsNullOrEmpty(micrographs.InputListPath))
+            result["input_data"] = Space.GetRelativePath(micrographs.InputListPath);
+        // Motion and CTF come from the micrographs' metadata; this job writes its own copy beside the particles.
+        result["input_processing"] = Space.GetRelativePath(micrographs.MetadataDirectory);
+        result["output_processing"] = Space.GetRelativePath(DirectoryPath);
+
+        if (particles.HasSingleStar)
+            result["input"] = Space.GetRelativePath(particles.ParticlesSingleStarPath);
+        else if (particles.HasMultiStar)
+            result["input"] = Space.GetRelativePath(particles.ParticlesMultiStarDirectory);
+        else
+            throw new InvalidOperationException("The particles have neither a STAR file nor a folder of them.");
+
+        result["angpix_coords"] = particles.CoordPixelSize.ToString(CultureInfo.InvariantCulture);
+        result["output"] = Space.GetRelativePath(ResParticlesStar);
+        result["averages"] = "";
+
+        return result;
+    }
+
+    public override void Stage()
+    {
+        base.Stage();
+
+        var micrographs = PortsIn[PortInMicrographs].GetSingleResource<MicrographSet>()
+            ?? throw new InvalidOperationException("No micrographs connected.");
+        if (micrographs.DataSetFs == null)
+            throw new InvalidOperationException("The micrographs don't come with their movies' import settings.");
+
+        Directory.CreateDirectory(DirectoryPath);
+
+        OptionsWarp optionsWarp = micrographs.DataSetFs.ToOptionsWarp();
+        optionsWarp.Import.ProcessingFolder = DirectoryPath;
+        optionsWarp.Save(ResSettings);
     }
 
     public override Action TrackProgressResults()
     {
-        if (VisAvailableIteration < 0 && !File.Exists(VisCard(0)) && NItemsProcessed > 1)
+        var baseUpdate = base.TrackProgressResults();
+
+        // WarpTools writes the STAR file last, once every movie is done, and the success marker after it.
+        if (VisAvailableIteration < 0 && File.Exists(PathSuccess) && File.Exists(ResParticlesStar))
         {
-            var processedItems = JsonSerializer.Deserialize<List<WarpTools.MiniJsonFsItem>>(File.ReadAllText(ResProcessedItemsJson));
-            if (processedItems.Count < 2)
-                return null;
+            Directory.CreateDirectory(RelayResultsDirectoryPath);
+            try
+            {
+                if (!File.Exists(VisCard(0)))
+                    BakeryWrapper.ImportParticlesJobCard([ResParticlesStar], VisCard(0), Space.RootDirectory);
+            }
+            // The particles are there without their preview.
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                WriteToLifecycleLog($"The job card could not be made: {ex.Message}").GetAwaiter().GetResult();
+            }
 
-            Movie m1 = new Movie(Path.Combine(DirectoryPath, processedItems[0].Path));
-            Movie m2 = new Movie(Path.Combine(DirectoryPath, processedItems[1].Path));
-            
-            BakeryWrapper.BoxNetInference2DJobCard(m1.AveragePath, ResParticlesStar(m1.RootName),
-                                                   m2.AveragePath, ResParticlesStar(m2.RootName),
-                                                   VisCard(0));
-            
-            return () => VisAvailableIteration = 0;
+            return () =>
+            {
+                baseUpdate?.Invoke();
+                VisAvailableIteration = 0;
+            };
         }
-        
-        return null;
-    }
 
-    public string ComposeCommand() => throw new NotImplementedException();
+        return baseUpdate;
+    }
 }

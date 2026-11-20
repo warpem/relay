@@ -143,7 +143,7 @@ public abstract class WarpExportJob : Job, ILocalJob
                 GainFlipX = s.GainFlipX, GainFlipY = s.GainFlipY, GainTranspose = s.GainTranspose
             },
             HasMovies = true, HasMotion = true, HasCtf = true, HasMetadata = true,
-            ItemCount = manifest.MovieCount, ProcessedItemsJson = manifest.ProcessedItemsJson,
+            ItemCount = manifest.MovieCount, ProcessedItemsJson = manifest.ProcessedItemsJson, MetadataDirectory = root,
             // The data directory is the session's, holding every movie it received; the list holds the exported ones.
             InputListPath = manifest.InputListPath,
             AverageDirectory = Path.Combine(root, Movie.AverageDirName),

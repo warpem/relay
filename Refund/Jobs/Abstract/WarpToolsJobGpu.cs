@@ -22,7 +22,13 @@ public abstract class WarpToolsJobGpu : WarpToolsJob, IPooledJob, IPoolStatus
 
     public override JobQueueType QueueType => JobQueueType.GPU;
 
-    public override int CoreCount => IsPooled ? ManagerCoreCount : (NGpus * PerDevice) * 2;
+    public override int CoreCount => IsPooled ? ManagerCoreCount : (NGpus * PerDevice) * CoresPerWorker;
+
+    /// <summary>
+    /// CPU cores requested for each worker process, in a job's own allocation and in each pool worker's. Jobs that
+    /// decode movies on the CPU while the GPU waits ask for more.
+    /// </summary>
+    protected virtual int CoresPerWorker => 2;
 
     public override int MemoryGb => IsPooled ? ManagerMemoryGb : (NGpus * PerDevice) * MemoryPerWorker;
 
@@ -132,7 +138,7 @@ public abstract class WarpToolsJobGpu : WarpToolsJob, IPooledJob, IPoolStatus
         var values = GetResourceValues();
         values["job_id"]        = $"{Id}-worker";
         values["n_processes"]   = "1";                              // one SLURM task; PerDevice procs run within it
-        values["n_cores"]       = (PerDevice * 2).ToString();       // PerDevice worker processes, ~2 cores each
+        values["n_cores"]       = (PerDevice * CoresPerWorker).ToString(); // PerDevice worker processes
         values["memory_gb"]     = (PerDevice * MemoryPerWorker).ToString();
         values["n_gpus"]        = "1";                              // one cluster job == one GPU
         values["gpu_memory_gb"] = base.GpuMemoryGb.ToString();     // un-pooled per-GPU default (shared by PerDevice procs)

@@ -638,7 +638,7 @@ public partial class ThumbnailPanel : ComponentBase, IAsyncDisposable
 /// in the ThumbnailPanel's status bar and individual thumbnails. It provides a
 /// color-coded representation of processing progress and outcomes.
 /// 
-/// Used in job expanded views like ExtractParticles2DExpandedView and MotionAndCTF2DExpandedView
+/// Used in job expanded views like MotionAndCTF2DExpandedView
 /// where thumbnails are typically assigned the Processed status for successfully processed items:
 /// <code>
 /// Status = ProcessingStatus.Processed
@@ -743,7 +743,7 @@ public static class StatusLabelMapping
 /// 
 /// This class encapsulates all necessary information for displaying a thumbnail image
 /// within the panel, including its content path, processing status, and selection state.
-/// It's used extensively in job expanded views like ExtractParticles2DExpandedView and
+/// It's used extensively in job expanded views like
 /// MotionAndCTF2DExpandedView to display lists of processed micrographs or particles.
 /// </summary>
 public class ThumbnailData

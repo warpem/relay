@@ -22,6 +22,12 @@ public class MicrographSet : Resource
     /// </summary>
     public string InputListPath { get; set; } = "";
     
+    /// <summary>
+    /// The Warp processing folder holding each movie's XML metadata (motion and CTF), which later Warp steps read.
+    /// </summary>
+    public string MetadataDirectory { get; set; } = "";
+    public bool HasMetadataDirectory => !string.IsNullOrEmpty(MetadataDirectory);
+
     public string ProcessedItemsJson { get; set; }
     public string FailedItemsJson { get; set; }
 
