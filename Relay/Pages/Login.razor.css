@@ -10,89 +10,32 @@
     isolation: isolate;
 }
 
-/* Hidden SVG filter container */
-.metaball-svg {
+/* Animated background layer (filled by Login.razor.js); fades in once the sketch is running. */
+.login-bg {
     position: absolute;
-    width: 0;
-    height: 0;
-}
-
-/* Metaballs background layer */
-.metaballs-bg {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
+    inset: 0;
     z-index: -1;
-    filter: url(#metaball-filter) blur(16px);
+    overflow: hidden;
+    isolation: isolate;
+    opacity: 0;
+    transition: opacity 0.9s ease;
 }
 
-/* Base blob style */
-.metaball {
-    position: absolute;
-    border-radius: 50%;
-    will-change: transform;
-    top: 0;
-    left: 0;
+.login-bg.ready {
+    opacity: 1;
 }
 
-.metaball-1 {
-    width: 60vw;
-    height: 60vw;
-}
-
-.metaball-2 {
-    width: 50vw;
-    height: 50vw;
-}
-
-.metaball-3 {
-    width: 45vw;
-    height: 45vw;
-}
-
-.metaball-4 {
-    width: 55vw;
-    height: 55vw;
-}
-
-.metaball-5 {
-    width: 40vw;
-    height: 40vw;
-}
-
-.metaball-6 {
-    width: 50vw;
-    height: 50vw;
-}
-
-/* Light mode */
+/* Plain paper colour behind the background, and the fallback if it can't start. */
 @media (prefers-color-scheme: light) {
     .login-container {
-        background: #f5f8ff;
+        background: #f6efe4;
     }
-
-    .metaball-1 { background: rgba(192, 204, 255, 0.8); }
-    .metaball-2 { background: rgba(212, 199, 255, 0.7); }
-    .metaball-3 { background: rgba(182, 214, 255, 0.75); }
-    .metaball-4 { background: rgba(202, 194, 255, 0.7); }
-    .metaball-5 { background: rgba(197, 219, 255, 0.8); }
-    .metaball-6 { background: rgba(217, 204, 255, 0.65); }
 }
 
-/* Dark mode */
 @media (prefers-color-scheme: dark) {
     .login-container {
-        background: #0a1628;
+        background: #201a17;
     }
-
-    .metaball-1 { background: rgba(20, 41, 110, 0.85); }
-    .metaball-2 { background: rgba(45, 31, 100, 0.8); }
-    .metaball-3 { background: rgba(15, 51, 120, 0.75); }
-    .metaball-4 { background: rgba(35, 26, 95, 0.8); }
-    .metaball-5 { background: rgba(25, 61, 130, 0.85); }
-    .metaball-6 { background: rgba(50, 36, 110, 0.7); }
 }
 
 .sso-card {

@@ -73,7 +73,7 @@ public partial class Login : IAsyncDisposable
     private bool _isFirstUser;
     private string? _errorMessage;
     private bool _isLoading;
-    private IJSObjectReference? _metaballModule;
+    private IJSObjectReference? _backgroundModule;
 
     /// <summary>
     /// Initializes the login page. If the user is already authenticated, redirects to the home page.
@@ -98,25 +98,25 @@ public partial class Login : IAsyncDisposable
         {
             try
             {
-                _metaballModule = await JsRuntime.InvokeAsync<IJSObjectReference>(
+                _backgroundModule = await JsRuntime.InvokeAsync<IJSObjectReference>(
                     "import", "./Pages/Login.razor.js");
-                await _metaballModule.InvokeVoidAsync("start");
+                await _backgroundModule.InvokeVoidAsync("start");
             }
             catch (JSException ex)
             {
-                Logger.LogWarning(ex, "Login page JS module failed to load; metaball animation will be skipped");
+                Logger.LogWarning(ex, "Login page JS module failed to load; the animated background will be skipped");
             }
         }
     }
 
     public async ValueTask DisposeAsync()
     {
-        if (_metaballModule is not null)
+        if (_backgroundModule is not null)
         {
             try
             {
-                await _metaballModule.InvokeVoidAsync("stop");
-                await _metaballModule.DisposeAsync();
+                await _backgroundModule.InvokeVoidAsync("stop");
+                await _backgroundModule.DisposeAsync();
             }
             catch (JSDisconnectedException) { }
         }
