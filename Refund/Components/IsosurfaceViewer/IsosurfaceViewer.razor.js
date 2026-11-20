@@ -5,6 +5,10 @@
  * renders with Blinn-Phong shading. Quaternion-based orbit camera with free rotation
  * (no gimbal lock), camera and threshold sync across instances, Euler angle display
  * in cryo-EM convention.
+ *
+ * 2D mode (XY/XZ/YZ) shows raw orthogonal slices with a contrast range shared by all
+ * orientations. View mode and slice position sync with the camera lock; contrast syncs
+ * with the threshold lock. All of it persists per map in localStorage.
  */
 
 import { fetchMRC } from '../../js/mrc-parser.js';
@@ -27,6 +31,21 @@ const globalCamera = {
     distance: 300, panX: 0, panY: 0
 };
 let globalThreshold = null;
+let globalContrast = null; // [lo, hi] in map values, shared by all 2D orientations
+
+// View mode + slice positions travel with the camera lock. Slice positions are in
+// Angstroms relative to the box center so maps with different boxes stay aligned.
+const globalView = { mode: '3d', slice: { x: 0, y: 0, z: 0 } };
+
+const VIEW_MODES = ['3d', 'xy', 'xz', 'yz'];
+const MODE_LABELS = { '3d': '3D', xy: 'XY', xz: 'XZ', yz: 'YZ' };
+// n = axis normal to the slice, h/v = in-plane axes shown horizontally/vertically
+const SLICE_AXES = {
+    xy: { n: 'z', h: 'x', v: 'y' },
+    xz: { n: 'y', h: 'x', v: 'z' },
+    yz: { n: 'x', h: 'y', v: 'z' }
+};
+const WHEEL_STEP = 40; // accumulated pixel delta per slice for smooth (trackpad) scrolling
 
 const syncedCameraInstances = new Set();
 const syncedThresholdInstances = new Set();
@@ -47,6 +66,9 @@ function saveSettings(state) {
                 panY: state.camera.panY
             },
             threshold: state.threshold,
+            contrast: state.contrast ? [...state.contrast] : null,
+            viewMode: state.viewMode,
+            slicePos: { ...state.slicePos },
             cameraSynced: state.cameraSynced,
             isoSynced: state.isoSynced
         };
@@ -100,6 +122,33 @@ function broadcastThreshold(sourceId, threshold) {
     }
 }
 
+function broadcastContrast(sourceId, contrast) {
+    globalContrast = [...contrast];
+    for (const id of syncedThresholdInstances) {
+        if (id === sourceId) continue;
+        const s = instances.get(id);
+        if (s && s.header) {
+            s.contrast = [...contrast];
+            updateContrastUI(s);
+            if (s.viewMode !== '3d') requestRender(s);
+            scheduleSave(s);
+        }
+    }
+}
+
+function broadcastView(sourceId, state) {
+    globalView.mode = state.viewMode;
+    globalView.slice = { ...state.slicePos };
+    for (const id of syncedCameraInstances) {
+        if (id === sourceId) continue;
+        const s = instances.get(id);
+        if (s) {
+            applyView(s, globalView.mode, globalView.slice);
+            scheduleSave(s);
+        }
+    }
+}
+
 // ── Exported functions ──────────────────────────────────────────────────────
 
 export function initialize(container, dotNetRef, fileUrl, options) {
@@ -129,6 +178,8 @@ export function loadVolumeByUrl(elementId, url, storageKey) {
     state.header = null;
     state.volumeData = null;
     state.mesh = null;
+    state._sliceKey = null;
+    updateSliceUI(state);
     showLoading(state, 0, 'Loading volume...');
     loadVolume(state);
 }
@@ -156,6 +207,7 @@ export function dispose(elementId) {
     }
     document.removeEventListener('mousemove', state._boundMouseMove);
     document.removeEventListener('mouseup', state._boundMouseUp);
+    document.removeEventListener('pointerdown', state._boundDocPointerDown, true);
     if (state._tooltipRaf) cancelAnimationFrame(state._tooltipRaf);
 
     syncedCameraInstances.delete(elementId);
@@ -179,6 +231,17 @@ function createState(elementId, container, dotNetRef, fileUrl, options) {
         // Mesh
         threshold: 0,
         mesh: null,
+        _meshDirty: false, // threshold changed while in 2D; regenerate on return to 3D
+
+        // 2D slices
+        viewMode: globalView.mode,
+        slicePos: { ...globalView.slice },
+        contrast: null,
+        sliceProgram: null, sliceVAO: null, sliceTex: null, sliceUniforms: {},
+        _sliceKey: null,
+        _sliceRect: null, // CSS-pixel rect of the drawn slice, for hover readout
+        _wheelAccum: 0,
+        sliceNav: null,
 
         // WebGL
         gl: null, canvas: null, program: null,
@@ -274,12 +337,53 @@ function createUI(state) {
     canvasContainer.appendChild(tooltip);
     state._tooltip = tooltip;
 
+    state.sliceNav = createSliceNav(state);
+    canvasContainer.appendChild(state.sliceNav.root);
+
     initWebGL(state);
 
     state.loadingOverlay = createLoadingOverlay();
     c.appendChild(state.loadingOverlay.root);
 
     setupFullscreenListener(state);
+    applyModeUI(state);
+}
+
+// Top-left overlay in 2D mode: ‹ Z 64 / 127 ›
+function createSliceNav(state) {
+    const root = document.createElement('div');
+    root.style.cssText = `
+        position: absolute; top: 6px; left: 6px; display: none; align-items: center; gap: 2px;
+        padding: 1px; z-index: 5; border-radius: 4px;
+        background: rgb(from var(--colorNeutralBackground1) r g b / 80%);
+        border: 1px solid var(--colorNeutralStroke1);
+        font-size: 11px; font-family: monospace; color: var(--colorNeutralForeground1);
+    `;
+    for (const type of ['click', 'mousedown', 'mouseup', 'dblclick', 'contextmenu']) {
+        root.addEventListener(type, (e) => e.stopPropagation());
+    }
+    root.addEventListener('wheel', (e) => state._boundWheel?.(e), { passive: false });
+
+    const makeChevron = (dir) => {
+        const btn = document.createElement('button');
+        btn.title = dir < 0 ? 'Previous slice' : 'Next slice';
+        btn.style.cssText = `
+            width: 20px; height: 20px; padding: 0; border: none; border-radius: 3px; cursor: pointer;
+            background: transparent; color: inherit; display: flex; align-items: center; justify-content: center;
+        `;
+        btn.innerHTML = dir < 0
+            ? '<svg width="10" height="10" viewBox="0 0 10 10"><path d="M6.5 1.5 L3 5 L6.5 8.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+            : '<svg width="10" height="10" viewBox="0 0 10 10"><path d="M3.5 1.5 L7 5 L3.5 8.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        btn.addEventListener('click', () => stepSlice(state, dir));
+        return btn;
+    };
+
+    const prev = makeChevron(-1);
+    const next = makeChevron(1);
+    const label = document.createElement('span');
+    label.style.cssText = 'padding: 0 2px; white-space: pre; text-align: center;';
+    root.append(prev, label, next);
+    return { root, prev, next, label };
 }
 
 function createToolbar(state, miniOverride) {
@@ -351,7 +455,52 @@ function createToolbar(state, miniOverride) {
         });
     }
 
-    // ── Threshold lock ──
+    // ── Contrast range (2D mode) ──
+    const contrastFromFractions = (lo, hi) => {
+        const range = state.stats.max - state.stats.min;
+        return [state.stats.min + lo * range, state.stats.min + hi * range];
+    };
+    const contrastSlider = createRangeSlider(mini, {
+        onInput: (lo, hi) => {
+            if (!state.header) return;
+            setContrast(state, contrastFromFractions(lo, hi), false);
+        },
+        onCommit: (lo, hi) => {
+            if (!state.header) return;
+            setContrast(state, contrastFromFractions(lo, hi), true);
+        },
+        onReset: () => {
+            if (!state.header) return;
+            setContrast(state, defaultContrast(state.stats), true);
+        }
+    });
+
+    let contrastLoInput = null, contrastHiInput = null;
+    if (!mini) {
+        const makeInput = (title) => {
+            const input = document.createElement('input');
+            input.type = 'number';
+            input.step = '0.001';
+            input.title = title;
+            input.style.cssText = threshInput.style.cssText;
+            return input;
+        };
+        contrastLoInput = makeInput('Black level');
+        contrastHiInput = makeInput('White level');
+        const onInputChange = () => {
+            if (!state.header || !state.contrast) return;
+            let lo = parseFloat(contrastLoInput.value);
+            let hi = parseFloat(contrastHiInput.value);
+            if (isNaN(lo)) lo = state.contrast[0];
+            if (isNaN(hi)) hi = state.contrast[1];
+            if (lo > hi) [lo, hi] = [hi, lo];
+            setContrast(state, [lo, hi], true);
+        };
+        contrastLoInput.addEventListener('change', onInputChange);
+        contrastHiInput.addEventListener('change', onInputChange);
+    }
+
+    // ── Threshold / contrast lock ──
     const isoLockBtn = createLockToggle(state.isoSynced, (active) => {
         state.isoSynced = active;
         if (active) {
@@ -361,14 +510,19 @@ function createToolbar(state, miniOverride) {
                 updateThresholdUI(state);
                 regenerateMesh(state);
             }
+            if (globalContrast !== null && state.header) {
+                state.contrast = [...globalContrast];
+                updateContrastUI(state);
+                requestRender(state);
+            }
         } else {
             syncedThresholdInstances.delete(state.elementId);
         }
         scheduleSave(state);
     });
-    isoLockBtn.title = 'Sync threshold across viewers';
+    isoLockBtn.title = 'Sync threshold and contrast across viewers';
 
-    // ── Camera lock ──
+    // ── Camera / view lock ──
     const camLockBtn = createLockToggle(state.cameraSynced, (active) => {
         state.cameraSynced = active;
         if (active) {
@@ -377,13 +531,17 @@ function createToolbar(state, miniOverride) {
             state.camera.distance = globalCamera.distance;
             state.camera.panX = globalCamera.panX;
             state.camera.panY = globalCamera.panY;
+            applyView(state, globalView.mode, globalView.slice);
             requestRender(state);
         } else {
             syncedCameraInstances.delete(state.elementId);
         }
         scheduleSave(state);
     });
-    camLockBtn.title = 'Sync camera across viewers';
+    camLockBtn.title = 'Sync camera, view mode and slice across viewers';
+
+    // ── View mode (3D / XY / XZ / YZ) ──
+    const modeBtn = createModeButton(state);
 
     // ── Fullscreen button (shared by both modes) ──
     const fullscreenBtn = document.createElement('button');
@@ -398,21 +556,27 @@ function createToolbar(state, miniOverride) {
     `;
     fullscreenBtn.addEventListener('click', () => toggleFullscreen(state));
 
+    state.toolbar = {};
     state.toolbar.slider = slider;
     state.toolbar.threshInput = threshInput;
+    state.toolbar.contrastSlider = contrastSlider;
+    state.toolbar.contrastLoInput = contrastLoInput;
+    state.toolbar.contrastHiInput = contrastHiInput;
     state.toolbar.isoLockBtn = isoLockBtn;
     state.toolbar.camLockBtn = camLockBtn;
     state.toolbar.fullscreenBtn = fullscreenBtn;
+    state.toolbar.modeBtn = modeBtn;
 
     if (mini) {
-        // Mini mode: slider + iso lock + cam lock + fullscreen — flat, no groups/labels
-        toolbar.append(slider, isoLockBtn, camLockBtn, fullscreenBtn);
+        // Mini mode: mode + slider + iso lock + cam lock + fullscreen — flat, no groups/labels
+        toolbar.append(modeBtn.root, slider, contrastSlider.root, isoLockBtn, camLockBtn, fullscreenBtn);
     } else {
         // Full mode: grouped layout with all controls
         const threshGroup = createToolbarGroup('Threshold');
+        state.toolbar.threshLabel = threshGroup.firstChild;
         const threshRow = document.createElement('div');
         threshRow.style.cssText = 'display:flex; gap:6px; align-items:center;';
-        threshRow.append(slider, threshInput, isoLockBtn);
+        threshRow.append(slider, threshInput, contrastSlider.root, contrastLoInput, contrastHiInput, isoLockBtn);
         threshGroup.appendChild(threshRow);
         toolbar.appendChild(threshGroup);
 
@@ -440,18 +604,24 @@ function createToolbar(state, miniOverride) {
             padding: 0;
         `;
         resetBtn.addEventListener('click', () => {
+            if (state.viewMode !== '3d') {
+                setSlicePosition(state, SLICE_AXES[state.viewMode].n, 0);
+                return;
+            }
             resetCamera(state);
             if (state.cameraSynced) broadcastCamera(state.elementId, state.camera);
             scheduleSave(state);
             requestRender(state);
         });
 
+        viewRow.appendChild(modeBtn.root);
         if (eulerDisplay) viewRow.appendChild(eulerDisplay);
         viewRow.append(camLockBtn, resetBtn, fullscreenBtn);
         viewGroup.appendChild(viewRow);
         toolbar.appendChild(viewGroup);
 
         state.toolbar.eulerDisplay = eulerDisplay;
+        state.toolbar.resetBtn = resetBtn;
     }
 
     return toolbar;
@@ -494,6 +664,291 @@ function createLockToggle(initialActive, onToggle) {
     };
 
     return btn;
+}
+
+// Overloaded button: shows the current mode with a south-east corner marker; clicking
+// opens a flyout with the other modes.
+function createModeButton(state) {
+    const root = document.createElement('div');
+    root.style.cssText = 'position:relative; flex-shrink:0;';
+
+    const btnStyle = `
+        position: relative; min-width: 30px; height: 24px; padding: 0 7px; box-sizing: border-box;
+        font-size: 11px; font-weight: 600; line-height: 1; letter-spacing: 0.3px;
+        border: 1px solid var(--colorNeutralStroke1); border-radius: 4px; cursor: pointer;
+        background: var(--colorNeutralBackground1); color: var(--colorNeutralForeground1);
+        display: flex; align-items: center; justify-content: center;
+    `;
+
+    const btn = document.createElement('button');
+    btn.title = 'View mode: 3D isosurface or 2D slices';
+    btn.style.cssText = btnStyle;
+    const label = document.createElement('span');
+    const corner = document.createElement('span');
+    corner.style.cssText = `
+        position: absolute; right: 2px; bottom: 2px; width: 0; height: 0; pointer-events: none;
+        border-style: solid; border-width: 0 0 5px 5px;
+        border-color: transparent transparent currentColor transparent; opacity: 0.6;
+    `;
+    btn.append(label, corner);
+
+    const flyout = document.createElement('div');
+    flyout.style.cssText = `
+        position: absolute; top: calc(100% + 4px); left: 0; display: none; gap: 2px; padding: 2px;
+        background: var(--colorNeutralBackground1); border: 1px solid var(--colorNeutralStroke1);
+        border-radius: 5px; box-shadow: var(--shadow8); z-index: 200;
+    `;
+
+    let open = false;
+    const close = () => { open = false; flyout.style.display = 'none'; };
+    const show = () => {
+        flyout.innerHTML = '';
+        for (const mode of VIEW_MODES) {
+            if (mode === state.viewMode) continue;
+            const opt = document.createElement('button');
+            opt.textContent = MODE_LABELS[mode];
+            opt.title = mode === '3d' ? 'Isosurface' : `${MODE_LABELS[mode]} slices`;
+            opt.style.cssText = btnStyle;
+            opt.addEventListener('click', () => {
+                close();
+                setViewMode(state, mode);
+            });
+            flyout.appendChild(opt);
+        }
+        open = true;
+        flyout.style.display = 'flex';
+    };
+
+    btn.addEventListener('click', () => (open ? close() : show()));
+    root.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+    root.append(btn, flyout);
+
+    return {
+        root,
+        isOpen: () => open,
+        close,
+        setMode: (mode) => {
+            label.textContent = MODE_LABELS[mode];
+            const is2D = mode !== '3d';
+            btn.style.background = is2D ? 'var(--colorBrandBackground)' : 'var(--colorNeutralBackground1)';
+            btn.style.color = is2D ? 'var(--colorNeutralForegroundOnBrand)' : 'var(--colorNeutralForeground1)';
+            btn.style.borderColor = is2D ? 'var(--colorBrandBackground)' : 'var(--colorNeutralStroke1)';
+            if (open) show();
+        }
+    };
+}
+
+// Two-thumb range slider. Fractions in [0, 1]. Drag a thumb to move one end, drag the
+// filled span to move the window, double-click to reset.
+function createRangeSlider(mini, { onInput, onCommit, onReset }) {
+    const THUMB = 12, HALF = THUMB / 2;
+    const root = document.createElement('div');
+    root.style.cssText = (mini ? 'flex:1; min-width:24px;' : 'width:100px; flex-shrink:0;') +
+        ' position:relative; height:14px; cursor:pointer; touch-action:none;';
+    root.title = 'Contrast range (drag the span to shift, double-click to reset)';
+
+    const track = document.createElement('div');
+    track.style.cssText = `position:absolute; left:${HALF}px; right:${HALF}px; top:5px; height:4px; border-radius:2px; background:var(--colorNeutralStroke1);`;
+    const fill = document.createElement('div');
+    fill.style.cssText = 'position:absolute; top:5px; height:4px; background:var(--colorBrandBackground);';
+    const makeThumb = () => {
+        const t = document.createElement('div');
+        t.style.cssText = `
+            position:absolute; top:1px; width:${THUMB}px; height:${THUMB}px; margin-left:-${HALF}px;
+            box-sizing:border-box; border-radius:50%; background:var(--colorBrandBackground);
+            border:2px solid var(--colorNeutralBackground1); box-shadow:0 0 0 1px var(--colorBrandBackground);
+        `;
+        return t;
+    };
+    const thumbLo = makeThumb();
+    const thumbHi = makeThumb();
+    root.append(track, fill, thumbLo, thumbHi);
+
+    let lo = 0, hi = 1;
+    const pos = (f) => `calc(${HALF}px + ${f} * (100% - ${THUMB}px))`;
+    const layout = () => {
+        thumbLo.style.left = pos(lo);
+        thumbHi.style.left = pos(hi);
+        fill.style.left = pos(lo);
+        fill.style.width = `calc(${hi - lo} * (100% - ${THUMB}px))`;
+    };
+    layout();
+
+    const clamp01 = (v) => Math.min(1, Math.max(0, v));
+    let drag = null; // { kind: 'lo'|'hi'|'span', startF, startLo, startHi }
+
+    const fractionAt = (clientX) => {
+        const rect = root.getBoundingClientRect();
+        const usable = rect.width - THUMB;
+        return usable > 0 ? clamp01((clientX - rect.left - HALF) / usable) : 0;
+    };
+
+    root.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const f = fractionAt(e.clientX);
+        const rect = root.getBoundingClientRect();
+        const pxPerUnit = Math.max(1, rect.width - THUMB);
+        const dLo = Math.abs(f - lo) * pxPerUnit;
+        const dHi = Math.abs(f - hi) * pxPerUnit;
+
+        let kind;
+        if (dLo <= HALF + 2 || dHi <= HALF + 2) kind = dLo < dHi || (dLo === dHi && f < lo) ? 'lo' : 'hi';
+        else if (f > lo && f < hi) kind = 'span';
+        else kind = f < lo ? 'lo' : 'hi';
+
+        drag = { kind, startF: f, startLo: lo, startHi: hi };
+        root.setPointerCapture(e.pointerId);
+        if (kind !== 'span') move(f);
+    });
+
+    const move = (f) => {
+        if (drag.kind === 'lo') lo = Math.min(f, hi);
+        else if (drag.kind === 'hi') hi = Math.max(f, lo);
+        else {
+            const width = drag.startHi - drag.startLo;
+            const newLo = Math.min(1 - width, Math.max(0, drag.startLo + f - drag.startF));
+            lo = newLo;
+            hi = newLo + width;
+        }
+        layout();
+        onInput(lo, hi);
+    };
+
+    root.addEventListener('pointermove', (e) => {
+        if (!drag) return;
+        move(fractionAt(e.clientX));
+    });
+    const end = (e) => {
+        if (!drag) return;
+        drag = null;
+        if (root.hasPointerCapture(e.pointerId)) root.releasePointerCapture(e.pointerId);
+        onCommit(lo, hi);
+    };
+    root.addEventListener('pointerup', end);
+    root.addEventListener('pointercancel', end);
+    root.addEventListener('dblclick', (e) => { e.stopPropagation(); onReset(); });
+
+    return {
+        root,
+        set: (newLo, newHi) => {
+            lo = clamp01(newLo);
+            hi = Math.max(lo, clamp01(newHi));
+            layout();
+        }
+    };
+}
+
+// ── View mode / slice / contrast state ─────────────────────────────────────
+
+function applyModeUI(state) {
+    const t = state.toolbar;
+    const is2D = state.viewMode !== '3d';
+    if (t.slider) t.slider.style.display = is2D ? 'none' : '';
+    if (t.threshInput) t.threshInput.style.display = is2D ? 'none' : '';
+    if (t.contrastSlider) t.contrastSlider.root.style.display = is2D ? '' : 'none';
+    if (t.contrastLoInput) t.contrastLoInput.style.display = is2D ? '' : 'none';
+    if (t.contrastHiInput) t.contrastHiInput.style.display = is2D ? '' : 'none';
+    if (t.threshLabel) t.threshLabel.textContent = is2D ? 'Contrast' : 'Threshold';
+    if (t.eulerDisplay) t.eulerDisplay.style.display = is2D ? 'none' : '';
+    if (t.resetBtn) t.resetBtn.title = is2D ? 'Center slice' : 'Reset camera';
+    if (t.modeBtn) t.modeBtn.setMode(state.viewMode);
+    updateSliceUI(state);
+}
+
+function applyView(state, mode, slice) {
+    const prevMode = state.viewMode;
+    state.viewMode = mode;
+    state.slicePos = { ...slice };
+    if (prevMode !== mode) {
+        applyModeUI(state);
+        if (state._tooltip) state._tooltip.style.display = 'none';
+        if (mode === '3d' && state._meshDirty) regenerateMesh(state);
+    } else {
+        updateSliceUI(state);
+    }
+    requestRender(state);
+}
+
+function setViewMode(state, mode) {
+    if (mode === state.viewMode) return;
+    applyView(state, mode, state.slicePos);
+    if (state.cameraSynced) broadcastView(state.elementId, state);
+    scheduleSave(state);
+}
+
+function sliceIndex(state, axis) {
+    const n = state.dims[axis];
+    if (!n) return 0;
+    const i = Math.round(state.slicePos[axis] / state.pixelSize[axis] + n * 0.5);
+    return Math.min(n - 1, Math.max(0, i));
+}
+
+function setSlicePosition(state, axis, posA) {
+    state.slicePos = { ...state.slicePos, [axis]: posA };
+    updateSliceUI(state);
+    requestRender(state);
+    if (state.cameraSynced) broadcastView(state.elementId, state);
+    scheduleSave(state);
+}
+
+function stepSlice(state, delta) {
+    if (state.viewMode === '3d' || !state.header) return;
+    const axis = SLICE_AXES[state.viewMode].n;
+    const n = state.dims[axis];
+    const current = sliceIndex(state, axis);
+    const next = Math.min(n - 1, Math.max(0, current + delta));
+    if (next === current) return;
+    setSlicePosition(state, axis, (next - n * 0.5) * state.pixelSize[axis]);
+}
+
+function updateSliceUI(state) {
+    const nav = state.sliceNav;
+    if (!nav) return;
+    if (state.viewMode === '3d' || !state.header) {
+        nav.root.style.display = 'none';
+        return;
+    }
+    const axis = SLICE_AXES[state.viewMode].n;
+    const n = state.dims[axis];
+    const i = sliceIndex(state, axis);
+    nav.root.style.display = 'flex';
+    // Displayed coordinates are 1-based (1..n); internal indices stay 0-based. Figure-space padding keeps width stable.
+    nav.label.textContent = `${axis.toUpperCase()} ${String(i + 1).padStart(String(n).length, ' ')} / ${n}`;
+    nav.label.title = `${((i - n * 0.5) * state.pixelSize[axis]).toFixed(1)} Å from box center`;
+    nav.prev.disabled = i <= 0;
+    nav.next.disabled = i >= n - 1;
+    nav.prev.style.opacity = i <= 0 ? '0.35' : '1';
+    nav.next.style.opacity = i >= n - 1 ? '0.35' : '1';
+}
+
+function defaultContrast(stats) {
+    let lo = Math.max(stats.min, stats.mean - 3 * stats.std);
+    let hi = Math.min(stats.max, stats.mean + 3 * stats.std);
+    if (!(hi > lo)) { lo = stats.min; hi = stats.max; }
+    return [lo, hi];
+}
+
+function setContrast(state, contrast, commit) {
+    state.contrast = [...contrast];
+    updateContrastUI(state);
+    requestRender(state);
+    if (state.isoSynced) broadcastContrast(state.elementId, state.contrast);
+    if (commit) scheduleSave(state);
+}
+
+function updateContrastUI(state) {
+    const t = state.toolbar;
+    if (!state.contrast || !t.contrastSlider) return;
+    const range = state.stats.max - state.stats.min;
+    if (range > 0) {
+        t.contrastSlider.set(
+            (state.contrast[0] - state.stats.min) / range,
+            (state.contrast[1] - state.stats.min) / range);
+    }
+    if (t.contrastLoInput) t.contrastLoInput.value = formatThresholdValue(state.contrast[0]);
+    if (t.contrastHiInput) t.contrastHiInput.value = formatThresholdValue(state.contrast[1]);
 }
 
 function createToolbarGroup(label) {
@@ -695,6 +1150,7 @@ function initWebGL(state) {
     setupPickFBO(state);
 
     initBakeProgram(state);
+    initSliceProgram(state);
 }
 
 // compileShader, buildOccupancyTexture, BAKE shaders, initBakeResources,
@@ -709,6 +1165,215 @@ function initBakeProgram(state) {
     state.bakeUniforms = res.uniforms;
     state.bakeVAO = res.vao;
     state.transformFeedback = res.transformFeedback;
+}
+
+// ── 2D slice rendering ──────────────────────────────────────────────────────
+
+const SLICE_VERTEX_SHADER = `#version 300 es
+precision highp float;
+layout(location = 0) in vec2 aCorner; // unit quad, (0,0) = bottom-left
+uniform vec4 uRect;                   // x0, y0, x1, y1 in NDC
+out vec2 vUV;
+void main() {
+    vUV = aCorner;
+    gl_Position = vec4(mix(uRect.xy, uRect.zw, aCorner), 0.0, 1.0);
+}
+`;
+
+const SLICE_FRAGMENT_SHADER = `#version 300 es
+precision highp float;
+uniform highp sampler2D uSlice;
+uniform vec2 uContrast; // black, white
+in vec2 vUV;
+layout(location = 0) out vec4 fragColor;
+
+// Catmull-Rom weights for taps at -1, 0, +1, +2 relative to floor(p)
+vec4 cubicWeights(float f) {
+    return vec4(
+        f * (-0.5 + f * (1.0 - 0.5 * f)),
+        1.0 + f * f * (-2.5 + 1.5 * f),
+        f * (0.5 + f * (2.0 - 1.5 * f)),
+        f * f * (-0.5 + 0.5 * f));
+}
+
+// Manual bicubic: R32F is not hardware-filterable in WebGL2 without an extension
+float sampleBicubic(vec2 uv) {
+    ivec2 size = textureSize(uSlice, 0);
+    vec2 p = uv * vec2(size) - 0.5;
+    vec2 base = floor(p);
+    vec2 f = p - base;
+    vec4 wx = cubicWeights(f.x);
+    vec4 wy = cubicWeights(f.y);
+    ivec2 maxIdx = size - 1;
+    float sum = 0.0;
+    for (int j = 0; j < 4; j++) {
+        int y = clamp(int(base.y) + j - 1, 0, maxIdx.y);
+        float row = 0.0;
+        for (int i = 0; i < 4; i++) {
+            int x = clamp(int(base.x) + i - 1, 0, maxIdx.x);
+            row += wx[i] * texelFetch(uSlice, ivec2(x, y), 0).r;
+        }
+        sum += wy[j] * row;
+    }
+    return sum;
+}
+
+void main() {
+    float v = sampleBicubic(vUV);
+    float t = clamp((v - uContrast.x) / max(uContrast.y - uContrast.x, 1e-30), 0.0, 1.0);
+    fragColor = vec4(vec3(t), 1.0);
+}
+`;
+
+function initSliceProgram(state) {
+    const gl = state.gl;
+    const vs = compileShader(gl, gl.VERTEX_SHADER, SLICE_VERTEX_SHADER);
+    const fs = compileShader(gl, gl.FRAGMENT_SHADER, SLICE_FRAGMENT_SHADER);
+    const program = gl.createProgram();
+    gl.attachShader(program, vs);
+    gl.attachShader(program, fs);
+    gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        console.error('Slice shader link error:', gl.getProgramInfoLog(program));
+        return;
+    }
+    state.sliceProgram = program;
+    state.sliceUniforms = {
+        rect: gl.getUniformLocation(program, 'uRect'),
+        contrast: gl.getUniformLocation(program, 'uContrast'),
+        slice: gl.getUniformLocation(program, 'uSlice')
+    };
+
+    state.sliceVAO = gl.createVertexArray();
+    gl.bindVertexArray(state.sliceVAO);
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    gl.bindVertexArray(null);
+
+    state.sliceTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, state.sliceTex);
+    // Sampled with texelFetch only (bicubic in the shader); filter modes are irrelevant.
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+}
+
+// Voxel index of in-plane pixel (ih, iv) on slice k, for the current 2D mode.
+function sliceVoxel(mode, k, ih, iv) {
+    switch (mode) {
+        case 'xy': return { x: ih, y: iv, z: k };
+        case 'xz': return { x: ih, y: k, z: iv };
+        default: return { x: k, y: ih, z: iv }; // yz
+    }
+}
+
+function uploadSlice(state) {
+    const gl = state.gl;
+    const mode = state.viewMode;
+    const axes = SLICE_AXES[mode];
+    const k = sliceIndex(state, axes.n);
+    const key = `${mode}:${k}`;
+    if (state._sliceKey === key) return;
+
+    const { x: nx, y: ny } = state.dims;
+    const data = state.volumeData;
+    const w = state.dims[axes.h], h = state.dims[axes.v];
+    let pixels;
+    if (mode === 'xy') {
+        pixels = data.subarray(k * nx * ny, (k + 1) * nx * ny);
+    } else {
+        pixels = new Float32Array(w * h);
+        const sliceStride = nx * ny;
+        if (mode === 'xz') {
+            for (let z = 0; z < h; z++) {
+                const src = z * sliceStride + k * nx;
+                pixels.set(data.subarray(src, src + nx), z * w);
+            }
+        } else { // yz
+            let o = 0;
+            for (let z = 0; z < h; z++)
+                for (let y = 0; y < w; y++)
+                    pixels[o++] = data[z * sliceStride + y * nx + k];
+        }
+    }
+
+    gl.bindTexture(gl.TEXTURE_2D, state.sliceTex);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, w, h, 0, gl.RED, gl.FLOAT, pixels);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    state._sliceKey = key;
+}
+
+function renderSlice(state) {
+    const gl = state.gl;
+    state._sliceRect = null;
+    if (!state.sliceProgram || !state.volumeData || !state.header || !state.contrast) return;
+
+    uploadSlice(state);
+
+    const axes = SLICE_AXES[state.viewMode];
+    const physW = state.dims[axes.h] * state.pixelSize[axes.h];
+    const physH = state.dims[axes.v] * state.pixelSize[axes.v];
+    const cw = state.canvas.width, ch = state.canvas.height;
+    const scale = 0.96 * Math.min(cw / physW, ch / physH);
+    const halfW = physW * scale / cw, halfH = physH * scale / ch;
+
+    gl.disable(gl.DEPTH_TEST);
+    gl.useProgram(state.sliceProgram);
+    gl.uniform4f(state.sliceUniforms.rect, -halfW, -halfH, halfW, halfH);
+    gl.uniform2f(state.sliceUniforms.contrast, state.contrast[0], state.contrast[1]);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, state.sliceTex);
+    gl.uniform1i(state.sliceUniforms.slice, 0);
+    gl.bindVertexArray(state.sliceVAO);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.bindVertexArray(null);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.enable(gl.DEPTH_TEST);
+
+    const cssW = state.canvas.clientWidth, cssH = state.canvas.clientHeight;
+    state._sliceRect = {
+        left: cssW * (1 - halfW) / 2, top: cssH * (1 - halfH) / 2,
+        width: cssW * halfW, height: cssH * halfH
+    };
+}
+
+function updateSliceTooltip(state, cssX, cssY) {
+    const tooltip = state._tooltip;
+    const r = state._sliceRect;
+    if (!tooltip) return;
+    if (!r || !state.volumeData) { tooltip.style.display = 'none'; return; }
+
+    const u = (cssX - r.left) / r.width;
+    const v = 1 - (cssY - r.top) / r.height;
+    if (u < 0 || u >= 1 || v < 0 || v >= 1) { tooltip.style.display = 'none'; return; }
+
+    const axes = SLICE_AXES[state.viewMode];
+    const ih = Math.floor(u * state.dims[axes.h]);
+    const iv = Math.floor(v * state.dims[axes.v]);
+    const vox = sliceVoxel(state.viewMode, sliceIndex(state, axes.n), ih, iv);
+    const { x: nx, y: ny } = state.dims;
+    const value = state.volumeData[vox.z * nx * ny + vox.y * nx + vox.x];
+    const toA = (axis) => ((vox[axis] - state.dims[axis] * 0.5) * state.pixelSize[axis]).toFixed(1);
+
+    tooltip.innerHTML =
+        `<span style="color:var(--colorNeutralForeground3)">Å</span> ${toA('x')}, ${toA('y')}, ${toA('z')}<br>` +
+        `<span style="color:var(--colorNeutralForeground3)">voxel</span> ${vox.x + 1}, ${vox.y + 1}, ${vox.z + 1}<br>` +
+        `<span style="color:var(--colorNeutralForeground3)">value</span> ${formatThresholdValue(value)}`;
+    tooltip.style.display = 'block';
+
+    const containerRect = state.canvas.parentElement.getBoundingClientRect();
+    let tipX = cssX + 16;
+    let tipY = cssY + 16;
+    if (tipX + 150 > containerRect.width) tipX = cssX - 160;
+    if (tipY + 56 > containerRect.height) tipY = cssY - 60;
+    tooltip.style.left = tipX + 'px';
+    tooltip.style.top = tipY + 'px';
 }
 
 function bakeSH(state) {
@@ -742,6 +1407,11 @@ function renderScene(state) {
 
     gl.viewport(0, 0, w, h);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    if (state.viewMode !== '3d') {
+        renderSlice(state);
+        return;
+    }
 
     updateEulerDisplay(state);
 
@@ -886,6 +1556,7 @@ function setupMouseHandlers(state) {
 
     state._boundMouseMove = (e) => {
         if (!state._isDragging) return;
+        if (state.viewMode !== '3d') return;
 
         const dx = e.clientX - state._lastMouse.x;
         const dy = e.clientY - state._lastMouse.y;
@@ -955,6 +1626,24 @@ function setupMouseHandlers(state) {
     state._boundWheel = (e) => {
         e.preventDefault();
         e.stopPropagation();
+        if (state.viewMode !== '3d') {
+            // One slice per wheel notch; accumulate small trackpad deltas.
+            // Shift+wheel arrives as deltaX on some platforms.
+            let d = e.deltaY !== 0 ? e.deltaY : e.deltaX;
+            if (e.deltaMode === 1) d *= WHEEL_STEP;
+            else if (e.deltaMode === 2) d *= WHEEL_STEP * 10;
+            let steps;
+            if (Math.abs(d) >= WHEEL_STEP) {
+                steps = Math.sign(d);
+                state._wheelAccum = 0;
+            } else {
+                state._wheelAccum += d;
+                steps = Math.trunc(state._wheelAccum / WHEEL_STEP);
+                state._wheelAccum -= steps * WHEEL_STEP;
+            }
+            if (steps !== 0) stepSlice(state, -steps * (e.shiftKey ? 10 : 1));
+            return;
+        }
         const factor = Math.pow(1.1, -e.deltaY / 100);
         state.camera.distance = Math.max(1, state.camera.distance * factor);
         if (state.cameraSynced) broadcastCamera(state.elementId, state.camera);
@@ -968,6 +1657,13 @@ function setupMouseHandlers(state) {
     state._boundTooltipMove = (e) => {
         const tooltip = state._tooltip;
         if (!tooltip) return;
+
+        if (state.viewMode !== '3d') {
+            if (state._isDragging) { tooltip.style.display = 'none'; return; }
+            const rect = state.canvas.getBoundingClientRect();
+            updateSliceTooltip(state, e.clientX - rect.left, e.clientY - rect.top);
+            return;
+        }
 
         if (state._isDragging || !state.pickFBO || !state.mesh) {
             tooltip.style.display = 'none';
@@ -1017,7 +1713,7 @@ function setupMouseHandlers(state) {
 
             tooltip.innerHTML =
                 `<span style="color:var(--colorNeutralForeground3)">\u00C5</span> ${posA[0].toFixed(1)}, ${posA[1].toFixed(1)}, ${posA[2].toFixed(1)}<br>` +
-                `<span style="color:var(--colorNeutralForeground3)">voxel</span> ${Math.round(vx)}, ${Math.round(vy)}, ${Math.round(vz)}`;
+                `<span style="color:var(--colorNeutralForeground3)">voxel</span> ${Math.round(vx) + 1}, ${Math.round(vy) + 1}, ${Math.round(vz) + 1}`;
             tooltip.style.display = 'block';
 
             // Position tooltip, flip if near right/bottom edge
@@ -1040,6 +1736,12 @@ function setupMouseHandlers(state) {
             state._tooltipRaf = null;
         }
     };
+
+    state._boundDocPointerDown = (e) => {
+        const m = state.toolbar.modeBtn;
+        if (m && m.isOpen() && !m.root.contains(e.target)) m.close();
+    };
+    document.addEventListener('pointerdown', state._boundDocPointerDown, true);
 
     canvas.addEventListener('mousedown', state._boundMouseDown);
     document.addEventListener('mousemove', state._boundMouseMove);
@@ -1152,6 +1854,8 @@ function rebuildToolbar(state, miniOverride) {
     state.container.insertBefore(newToolbar, state.container.firstChild);
 
     updateThresholdUI(state);
+    updateContrastUI(state);
+    applyModeUI(state);
 }
 
 function setupFullscreenListener(state) {
@@ -1232,6 +1936,15 @@ async function loadVolume(state) {
                 globalCamera.panX = saved.camera.panX;
                 globalCamera.panY = saved.camera.panY;
             }
+            if (saved.viewMode && VIEW_MODES.includes(saved.viewMode)) {
+                const slice = { ...state.slicePos, ...(saved.slicePos || {}) };
+                // Mirror the camera: update global first so the lock re-sync below keeps it
+                globalView.mode = saved.viewMode;
+                globalView.slice = { ...slice };
+                applyView(state, saved.viewMode, slice);
+            }
+            if (saved.contrast) state.contrast = [...saved.contrast];
+            else if (isFirstLoad || !state.contrast) state.contrast = defaultContrast(stats);
             if (saved.cameraSynced !== undefined)
                 state.toolbar.camLockBtn.setActive(saved.cameraSynced);
             if (saved.isoSynced !== undefined)
@@ -1239,12 +1952,19 @@ async function loadVolume(state) {
         } else if (isFirstLoad) {
             // First load with no stored settings — use defaults
             state.threshold = 0.3 * stats.max;
+            state.contrast = defaultContrast(stats);
             resetCamera(state);
+        } else if (!state.contrast) {
+            state.contrast = defaultContrast(stats);
         }
-        // else: re-load in same viewer — keep current camera & threshold
+        // else: re-load in same viewer — keep current camera, threshold & contrast
 
         updateThresholdUI(state);
-        if (state.cameraSynced) broadcastCamera(state.elementId, state.camera);
+        updateContrastUI(state);
+        if (state.cameraSynced) {
+            broadcastCamera(state.elementId, state.camera);
+            broadcastView(state.elementId, state);
+        }
 
         showLoading(state, 0.85, 'Preparing worker...');
         if (state.worker) state.worker.terminate();
@@ -1267,13 +1987,21 @@ async function loadVolume(state) {
             }
         };
 
-        state.volumeData = data; // Keep on main thread for GPU SH bake
+        state.volumeData = data; // Keep on main thread for GPU SH bake and 2D slices
+        state._sliceKey = null;
         state.worker.postMessage(
             { type: 'setVolume', volume: data, dims: state.dims, pixelSize: state.pixelSize }
         );
 
-        showLoading(state, 0.85, 'Generating surface...');
-        state.worker.postMessage({ type: 'generate', threshold: state.threshold });
+        updateSliceUI(state);
+        if (state.viewMode === '3d') {
+            regenerateMesh(state);
+        } else {
+            // Defer marching cubes until the user switches to 3D
+            state._meshDirty = true;
+            hideLoading(state);
+            requestRender(state);
+        }
 
     } catch (err) {
         if (err.name === 'AbortError') return;
@@ -1316,6 +2044,11 @@ function uploadMesh(state, positions, normals) {
 
 function regenerateMesh(state) {
     if (!state.worker) return;
+    if (state.viewMode !== '3d') {
+        state._meshDirty = true;
+        return;
+    }
+    state._meshDirty = false;
     showLoading(state, 0.85, 'Generating surface...');
     state.worker.postMessage({ type: 'generate', threshold: state.threshold });
 }
