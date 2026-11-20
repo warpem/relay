@@ -320,6 +320,10 @@ function createUI(state) {
     canvasContainer.style.cssText = 'flex:1; min-width:0; min-height:0; position:relative; overflow:hidden; background:var(--colorNeutralBackground1);';
     c.appendChild(canvasContainer);
 
+    // 2D readout strip below the canvas: a layout row, so it never covers the slice
+    state.sliceStatus = createSliceStatus();
+    c.appendChild(state.sliceStatus.root);
+
     const canvas = document.createElement('canvas');
     // Drawing-buffer dimensions must never contribute to the flex item's intrinsic size.
     canvas.style.cssText = 'position:absolute; inset:0; width:100%; height:100%; display:block;';
@@ -347,6 +351,38 @@ function createUI(state) {
 
     setupFullscreenListener(state);
     applyModeUI(state);
+}
+
+function createSliceStatus() {
+    const root = document.createElement('div');
+    root.style.cssText = `
+        display: none; flex-wrap: wrap; column-gap: 14px; row-gap: 0; flex-shrink: 0;
+        padding: 2px 8px; font-size: 10.5px; line-height: 1.5; font-family: monospace;
+        color: var(--colorNeutralForeground2); background: var(--colorNeutralBackground1);
+        border-top: 1px solid var(--colorNeutralStroke2);
+    `;
+    for (const type of ['click', 'mousedown', 'mouseup']) {
+        root.addEventListener(type, (e) => e.stopPropagation());
+    }
+    // Fixed minimum widths keep wrapping (and thus the strip height) stable as values change
+    const makeItem = (label, minCh) => {
+        const item = document.createElement('span');
+        item.style.cssText = `white-space: pre; min-width: ${minCh}ch;`;
+        const l = document.createElement('span');
+        l.textContent = label + ' ';
+        l.style.color = 'var(--colorNeutralForeground3)';
+        const v = document.createElement('span');
+        item.append(l, v);
+        root.appendChild(item);
+        return v;
+    };
+    // voxel + value fit on one line even in mini viewers (~240 px); Å wraps below there
+    const voxel = makeItem('voxel', 19);
+    const value = makeItem('value', 13);
+    const angstrom = makeItem('Å', 24);
+    const clear = () => { voxel.textContent = '–'; angstrom.textContent = '–'; value.textContent = '–'; };
+    clear();
+    return { root, voxel, angstrom, value, clear };
 }
 
 // Top-left overlay in 2D mode: ‹ Z 64 / 127 ›
@@ -854,6 +890,10 @@ function applyModeUI(state) {
     if (t.eulerDisplay) t.eulerDisplay.style.display = is2D ? 'none' : '';
     if (t.resetBtn) t.resetBtn.title = is2D ? 'Center slice' : 'Reset camera';
     if (t.modeBtn) t.modeBtn.setMode(state.viewMode);
+    if (state.sliceStatus) {
+        state.sliceStatus.root.style.display = is2D ? 'flex' : 'none';
+        state.sliceStatus.clear();
+    }
     updateSliceUI(state);
 }
 
@@ -888,6 +928,7 @@ function sliceIndex(state, axis) {
 function setSlicePosition(state, axis, posA) {
     state.slicePos = { ...state.slicePos, [axis]: posA };
     updateSliceUI(state);
+    if (state._hoverPos) updateSliceReadout(state, state._hoverPos.x, state._hoverPos.y);
     requestRender(state);
     if (state.cameraSynced) broadcastView(state.elementId, state);
     scheduleSave(state);
@@ -1343,15 +1384,16 @@ function renderSlice(state) {
     };
 }
 
-function updateSliceTooltip(state, cssX, cssY) {
-    const tooltip = state._tooltip;
+function updateSliceReadout(state, cssX, cssY) {
+    const status = state.sliceStatus;
+    if (!status) return;
+    state._hoverPos = cssX == null ? null : { x: cssX, y: cssY };
     const r = state._sliceRect;
-    if (!tooltip) return;
-    if (!r || !state.volumeData) { tooltip.style.display = 'none'; return; }
+    if (cssX == null || !r || !state.volumeData) { status.clear(); return; }
 
     const u = (cssX - r.left) / r.width;
     const v = 1 - (cssY - r.top) / r.height;
-    if (u < 0 || u >= 1 || v < 0 || v >= 1) { tooltip.style.display = 'none'; return; }
+    if (u < 0 || u >= 1 || v < 0 || v >= 1) { status.clear(); return; }
 
     const axes = SLICE_AXES[state.viewMode];
     const ih = Math.floor(u * state.dims[axes.h]);
@@ -1361,19 +1403,9 @@ function updateSliceTooltip(state, cssX, cssY) {
     const value = state.volumeData[vox.z * nx * ny + vox.y * nx + vox.x];
     const toA = (axis) => ((vox[axis] - state.dims[axis] * 0.5) * state.pixelSize[axis]).toFixed(1);
 
-    tooltip.innerHTML =
-        `<span style="color:var(--colorNeutralForeground3)">Å</span> ${toA('x')}, ${toA('y')}, ${toA('z')}<br>` +
-        `<span style="color:var(--colorNeutralForeground3)">voxel</span> ${vox.x + 1}, ${vox.y + 1}, ${vox.z + 1}<br>` +
-        `<span style="color:var(--colorNeutralForeground3)">value</span> ${formatThresholdValue(value)}`;
-    tooltip.style.display = 'block';
-
-    const containerRect = state.canvas.parentElement.getBoundingClientRect();
-    let tipX = cssX + 16;
-    let tipY = cssY + 16;
-    if (tipX + 150 > containerRect.width) tipX = cssX - 160;
-    if (tipY + 56 > containerRect.height) tipY = cssY - 60;
-    tooltip.style.left = tipX + 'px';
-    tooltip.style.top = tipY + 'px';
+    status.voxel.textContent = `${vox.x + 1}, ${vox.y + 1}, ${vox.z + 1}`;
+    status.angstrom.textContent = `${toA('x')}, ${toA('y')}, ${toA('z')}`;
+    status.value.textContent = formatThresholdValue(value);
 }
 
 function bakeSH(state) {
@@ -1659,9 +1691,9 @@ function setupMouseHandlers(state) {
         if (!tooltip) return;
 
         if (state.viewMode !== '3d') {
-            if (state._isDragging) { tooltip.style.display = 'none'; return; }
+            tooltip.style.display = 'none';
             const rect = state.canvas.getBoundingClientRect();
-            updateSliceTooltip(state, e.clientX - rect.left, e.clientY - rect.top);
+            updateSliceReadout(state, e.clientX - rect.left, e.clientY - rect.top);
             return;
         }
 
@@ -1731,6 +1763,7 @@ function setupMouseHandlers(state) {
 
     state._boundTooltipLeave = () => {
         if (state._tooltip) state._tooltip.style.display = 'none';
+        updateSliceReadout(state, null);
         if (state._tooltipRaf) {
             cancelAnimationFrame(state._tooltipRaf);
             state._tooltipRaf = null;
