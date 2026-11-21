@@ -73,6 +73,12 @@ public class ParticleSet : Resource, ICountableResource
     /// If not normalized and not in physical units, this value indicates the size of a single pixel in Angstroms.
     /// </summary>
     public decimal CoordPixelSize { get; set; } = 1M;
+
+    /// <summary>
+    /// Whether <see cref="CoordPixelSize"/> is known. Producers that can't tell (e.g. an import whose metadata doesn't
+    /// record it) clear this, so consumers don't take the default 1 Å for the coordinates' units.
+    /// </summary>
+    public bool HasCoordPixelSize { get; set; } = true;
     
     /// <summary>
     /// Indicates whether the particle coordinate origin is at the image/volume center, or in the corner.

@@ -88,7 +88,8 @@ public class DeduplicateParticles : Job, IClusterJob
     public bool LowerIsBetter { get; set; }
 
     [UiDecimalNullable("", "Coordinate pixel size", min: 0, stepSize: 0.001, unit: "Å", isAdvanced: true,
-        helpText: "Pixel size of the particles' rlnCoordinateX/Y/Z. Leave empty to use the particle set's own.")]
+        helpText: "Pixel size of the particles' rlnCoordinateX/Y/Z. Leave empty to use the particle set's own, or, if it " +
+                  "doesn't know it, Beam's reading of the STAR file.")]
     [RelayProperty]
     public decimal? CoordinatePixelSize { get; set; }
 
@@ -180,8 +181,12 @@ public class DeduplicateParticles : Job, IClusterJob
         return errors;
     }
 
-    /// <summary>The coordinate pixel size passed to Beam: the field if set, otherwise the particle set's.</summary>
-    public decimal EffectiveCoordinatePixelSize(ParticleSet particles) => CoordinatePixelSize ?? particles.CoordPixelSize;
+    /// <summary>
+    /// The coordinate pixel size passed to Beam: the field if set, otherwise the particle set's if it knows it. Null lets
+    /// Beam read it from the STAR file.
+    /// </summary>
+    public decimal? EffectiveCoordinatePixelSize(ParticleSet particles) =>
+        CoordinatePixelSize ?? (particles.HasCoordPixelSize ? particles.CoordPixelSize : null);
 
     public override Dictionary<string, string> ComposeCommandArguments()
     {
@@ -203,9 +208,10 @@ public class DeduplicateParticles : Job, IClusterJob
             ["output"] = folder ? ResParticlesDirectory : ResParticlesStar,
             ["project-root"] = Space.RootDirectory,
             ["distance"] = Distance.ToString(CultureInfo.InvariantCulture),
-            ["drop"] = Removal == DuplicateRemoval.Both ? "both" : "worse",
-            ["coordinate-pixel-size"] = EffectiveCoordinatePixelSize(particles).ToString(CultureInfo.InvariantCulture)
+            ["drop"] = Removal == DuplicateRemoval.Both ? "both" : "worse"
         };
+        if (EffectiveCoordinatePixelSize(particles) is { } pixelSize)
+            args["coordinate-pixel-size"] = pixelSize.ToString(CultureInfo.InvariantCulture);
         if (Removal == DuplicateRemoval.Worse)
         {
             args["score"] = Score switch

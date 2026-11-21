@@ -155,6 +155,19 @@ public class ExtractParticles2DTests
     }
 
     [Fact]
+    public void Validation_RejectsUnknownCoordinatePixelSize()
+    {
+        var job = Make();
+        Connect(job.PortsIn[ExtractParticles2D.PortInMicrographs], Micrographs);
+        Connect(job.PortsIn[ExtractParticles2D.PortInParticles], () => new ParticleSet
+        {
+            ParticlesSingleStarPath = Root + "/imported.star", HasPositions = true, HasCoordPixelSize = false
+        });
+
+        Assert.Contains(ExtractParticles2D.PortInParticles, job.ValidateInputs().Keys);
+    }
+
+    [Fact]
     public void Output_IsReCenteredParticlesFromTheMicrographs()
     {
         var job = Make();

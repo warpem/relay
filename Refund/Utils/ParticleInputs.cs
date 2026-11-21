@@ -98,6 +98,7 @@ public static class ParticleInputs
         result.HasShifts = resources.All(r => r.HasShifts);
         result.HasScale = resources.All(r => r.HasScale);
         result.HasCtf = resources.All(r => r.HasCtf);
+        result.HasCoordPixelSize = resources.All(r => r.HasCoordPixelSize);
         // These singular associations cannot describe independent input datasets. Do not
         // advertise the first source's maps/micrographs/tomograms as applying to every row.
         if (!resources.All(r => ReferenceEquals(r.PickedInMicrographs, result.PickedInMicrographs))) result.PickedInMicrographs = null;

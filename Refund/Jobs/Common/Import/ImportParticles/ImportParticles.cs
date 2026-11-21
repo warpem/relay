@@ -49,6 +49,9 @@ public class ImportParticles : Job, IClusterJob
     [RelayProperty] public bool HasClasses { get; set; }
     [RelayProperty] public bool HasScale { get; set; }
 
+    /// <summary>The coordinates' pixel size found in the imported optics table, or 0 if it isn't recorded.</summary>
+    [RelayProperty, Clearable] public decimal DetectedCoordPixelSize { get; set; }
+
     [UiFieldGroup("Parameters", 0)]
     [UiEnum("", "Metadata format", typeof(ParticleMetadataFormat))]
     [RelayProperty]
@@ -107,6 +110,13 @@ public class ImportParticles : Job, IClusterJob
     [RelayProperty]
     public string AdditionalMetadataFile5 { get; set; } = "";
 
+    [UiDecimalNullable("", "Coordinate pixel size", min: 0, stepSize: 0.001, unit: "Å", isAdvanced: true,
+        helpText: "Pixel size of the particles' coordinates (rlnCoordinateX/Y), i.e. of the micrographs they were picked in. " +
+                  "Leave empty to read it from the metadata: rlnMicrographPixelSize, or rlnMicrographOriginalPixelSize, " +
+                  "which is wrong if the micrographs were binned.")]
+    [RelayProperty]
+    public decimal? CoordinatePixelSize { get; set; }
+
     [UiFieldGroup("Compute", 1)]
     [UiInt("", "Workers", min: 1, max: 64,
         helpText: "Concurrent particle-stack header reads. More workers can hide shared-filesystem latency.")]
@@ -159,6 +169,7 @@ public class ImportParticles : Job, IClusterJob
                 if (!string.IsNullOrWhiteSpace(file.Path) && !file.Path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
                     errors[file.Name] = "Select a .cs metadata file or leave this field empty.";
         }
+        if (CoordinatePixelSize is <= 0) errors[nameof(CoordinatePixelSize)] = "The coordinate pixel size must be positive or empty.";
         if (Memory < 1) errors[nameof(Memory)] = "Host memory must be positive.";
         if (Workers < 1 || Workers > 64) errors[nameof(Workers)] = "Use between 1 and 64 workers.";
         return errors;
@@ -206,8 +217,39 @@ public class ImportParticles : Job, IClusterJob
         HasAngles = HasAngles,
         HasCtf = HasCtf,
         HasClasses = HasClasses,
-        HasScale = HasScale
+        HasScale = HasScale,
+        CoordPixelSize = CoordinatePixelSize ?? (DetectedCoordPixelSize > 0 ? DetectedCoordPixelSize : 1M),
+        HasCoordPixelSize = CoordinatePixelSize.HasValue || DetectedCoordPixelSize > 0
     };
+
+    /// <summary>
+    /// The coordinates' pixel size from the optics table: rlnMicrographPixelSize, else RELION's fallback
+    /// rlnMicrographOriginalPixelSize. 0 if neither is recorded or the optics groups disagree.
+    /// </summary>
+    internal static decimal ReadCoordPixelSize(Refund.Utils.Star.StreamingStar star)
+    {
+        var optics = star.FindBlock("optics");
+        if (optics == null || !optics.IsLoop)
+            return 0;
+        foreach (string label in new[] { "rlnMicrographPixelSize", "rlnMicrographOriginalPixelSize" })
+        {
+            int column = optics.Columns.IndexOf(label);
+            if (column < 0)
+                continue;
+            var values = new HashSet<decimal>();
+            bool valid = true;
+            star.ReadRows(optics, row =>
+            {
+                if (decimal.TryParse(Refund.Utils.Star.StreamingStar.Value(row[column]), System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out decimal value) && value > 0)
+                    values.Add(value);
+                else
+                    valid = false;
+            }, CancellationToken.None);
+            return valid && values.Count == 1 ? values.Single() : 0;
+        }
+        return 0;
+    }
 
     public override Action TrackProgressLogs()
     {
@@ -239,9 +281,10 @@ public class ImportParticles : Job, IClusterJob
                 if (particles.RowCount == 0 || !particles.Columns.Contains("rlnImageName"))
                     throw new InvalidDataException("Beam did not write a non-empty particle image table.");
                 string[] columns = particles.Columns.ToArray();
+                decimal coordPixelSize = ReadCoordPixelSize(imported);
                 // Persist capabilities before attempting preview generation. Downstream
                 // jobs must not lose CTF/pose information when a preview is unavailable.
-                return () => { DetectMetadata(columns); HasRunToCompletion = true; };
+                return () => { DetectMetadata(columns); DetectedCoordPixelSize = coordPixelSize; HasRunToCompletion = true; };
             }
             catch (FileNotFoundException) { return null; }
             catch (DirectoryNotFoundException) { return null; }

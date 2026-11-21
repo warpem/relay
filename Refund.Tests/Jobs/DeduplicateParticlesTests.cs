@@ -75,6 +75,17 @@ public class DeduplicateParticlesTests : IDisposable
     }
 
     [Fact]
+    public void UnknownCoordinatePixelSizeIsLeftToBeam()
+    {
+        var input = SingleStar();
+        input.HasCoordPixelSize = false;
+        var job = NewJob(input);
+        Assert.False(job.ComposeCommandArguments().ContainsKey("coordinate-pixel-size"));
+        job.CoordinatePixelSize = 0.9M;
+        Assert.Equal("0.9", job.ComposeCommandArguments()["coordinate-pixel-size"]);
+    }
+
+    [Fact]
     public void ScoreOptionsFollowTheRemovalPolicy()
     {
         var job = NewJob(SingleStar());

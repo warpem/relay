@@ -228,6 +228,48 @@ public class ImportParticlesTests : IDisposable
         Assert.False(job.HasCtf);
     }
 
+    [Theory]
+    [InlineData("_rlnMicrographPixelSize #3\n_rlnMicrographOriginalPixelSize #4\n1 opticsGroup1 0.83 0.415\n2 opticsGroup2 0.83 0.415\n", 0.83)]
+    [InlineData("_rlnMicrographOriginalPixelSize #3\n1 opticsGroup1 1.1\n", 1.1)]
+    [InlineData("_rlnMicrographOriginalPixelSize #3\n1 opticsGroup1 1.1\n2 opticsGroup2 0.9\n", 0)]
+    [InlineData("_rlnImagePixelSize #3\n1 opticsGroup1 2.2\n", 0)]
+    public void CoordinatePixelSizeIsReadFromTheOpticsTable(string optics, double expected)
+    {
+        string path = Path.Combine(_root, "particles.star");
+        Write(path, "data_optics\n\nloop_\n_rlnOpticsGroup #1\n_rlnOpticsGroupName #2\n" + optics +
+                    "\ndata_particles\n\nloop_\n_rlnImageName #1\n_rlnOpticsGroup #2\n1@s.mrcs 1\n");
+        var star = new Refund.Utils.Star.StreamingStar(path, CancellationToken.None);
+        Assert.Equal((decimal)expected, ImportParticles.ReadCoordPixelSize(star));
+    }
+
+    [Fact]
+    public void ParticleSetReportsWhetherItsCoordinatePixelSizeIsKnown()
+    {
+        var job = NewJob();
+        ParticleSet Output() => Assert.IsType<ParticleSet>(job.PortsOut["Particles"].GetResource());
+        Assert.False(Output().HasCoordPixelSize);
+
+        job.DetectedCoordPixelSize = 0.83M;
+        Assert.True(Output().HasCoordPixelSize);
+        Assert.Equal(0.83M, Output().CoordPixelSize);
+
+        job.CoordinatePixelSize = 1.66M;
+        Assert.Equal(1.66M, Output().CoordPixelSize);
+        job.CoordinatePixelSize = 0;
+        Assert.Contains(nameof(job.CoordinatePixelSize), job.ValidateInputs().Keys);
+    }
+
+    [Fact]
+    public void PublishedImportRecordsItsCoordinatePixelSize()
+    {
+        var job = NewJob();
+        Write(job.ImportedParticlesPath, "data_optics\n\nloop_\n_rlnOpticsGroup #1\n_rlnMicrographOriginalPixelSize #2\n1 0.95\n" +
+                                         "\ndata_particles\n\nloop_\n_rlnImageName #1\n_rlnCoordinateX #2\n1@s.mrcs 10\n");
+        job.TrackProgressResults()!.Invoke();
+        Assert.True(job.HasPositions);
+        Assert.Equal(0.95M, job.DetectedCoordPixelSize);
+    }
+
     private static void Write(string path, string value)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);

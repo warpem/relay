@@ -184,8 +184,12 @@ public class ExtractParticles2D : WarpToolsJobGpu, IClusterJob
                 errors[nameof(AngpixOut)] = "The output pixel size can't be smaller than the micrographs' pixel size.";
         }
 
-        if (InputParticles() is { } particles && particles.HasNormalizedCoords)
+        var particles = InputParticles();
+        if (particles is { HasNormalizedCoords: true })
             errors[hasParticles ? PortInParticles : PortInPositions] = "Normalized coordinates aren't supported; the coordinates need a pixel size.";
+        else if (particles is { HasCoordPixelSize: false })
+            errors[hasParticles ? PortInParticles : PortInPositions] =
+                "The coordinates' pixel size is unknown; set it in the job that imported the particles.";
 
         return errors;
     }
