@@ -7,5 +7,5 @@ namespace Refund.Components;
 public class RelayTextArea(LibraryConfiguration configuration) : FluentTextArea(configuration)
 {
     public override Task SetParametersAsync(ParameterView parameters) =>
-        base.SetParametersAsync(TextInputParameters.Normalize(parameters));
+        base.SetParametersAsync(TextInputParameters.Normalize(this, parameters));
 }
