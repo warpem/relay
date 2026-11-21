@@ -69,6 +69,7 @@ public class DeduplicateParticlesTests : IDisposable
         Assert.Equal("auto", args["score"]);
         Assert.Equal("1.35", args["coordinate-pixel-size"]);
         Assert.False(args.ContainsKey("lower-is-better"));
+        Assert.Equal(job.ResReport, args["report"]);
 
         job.CoordinatePixelSize = 0.83M;
         Assert.Equal("0.83", job.ComposeCommandArguments()["coordinate-pixel-size"]);
@@ -197,6 +198,30 @@ public class DeduplicateParticlesTests : IDisposable
         job.TrackProgressResults()!.Invoke();
         Assert.Equal(2, job.KeptParticleCount);
         Assert.Equal(2, port.GetResource().ItemCount);
+        Assert.Null(job.TrackProgressResults());
+    }
+
+    [Fact]
+    public void BeamReportBecomesTheJobCard()
+    {
+        var job = NewJob(SingleStar());
+        Directory.CreateDirectory(job.DirectoryPath);
+        File.WriteAllText(job.ResParticlesStar, "data_particles\n\nloop_\n_rlnCoordinateX #1\n_rlnCoordinateY #2\n1 2\n");
+        File.WriteAllText(job.ResReport, "{}");
+
+        string[]? arguments = null;
+        Action? update;
+        using (BakeryWrapper.BeginBatch(manifest =>
+               {
+                   using var json = System.Text.Json.JsonDocument.Parse(File.ReadAllText(manifest));
+                   arguments = json.RootElement[0].GetProperty("ArgumentList").EnumerateArray().Select(a => a.GetString()!).ToArray();
+               }))
+            update = job.TrackProgressResults();
+        update!.Invoke();
+
+        Assert.Equal(["deduplicate-particles-job-card", "--report-file", job.ResReport, "--output-file", job.VisCard(0)], arguments);
+        Assert.Equal(1, job.KeptParticleCount);
+        Assert.Equal(0, job.VisAvailableIteration);
         Assert.Null(job.TrackProgressResults());
     }
 

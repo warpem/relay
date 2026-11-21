@@ -106,6 +106,8 @@ public class DeduplicateParticles : Job, IClusterJob
     public string ResParticlesStar => Path.Combine(DirectoryPath, "particles.star");
     public string ResParticlesDirectory => Path.Combine(DirectoryPath, "particles");
     public string ResOptimisationSetStar => Path.Combine(DirectoryPath, "optimisation_set.star");
+    /// <summary>Beam's summary of the run, with the input's nearest-neighbour distance histogram, for the job card.</summary>
+    public string ResReport => Path.Combine(DirectoryPath, "deduplication.json");
 
     public DeduplicateParticles()
     {
@@ -207,6 +209,7 @@ public class DeduplicateParticles : Job, IClusterJob
             ["input"] = Path.GetFullPath(input, Space.RootDirectory),
             ["output"] = folder ? ResParticlesDirectory : ResParticlesStar,
             ["project-root"] = Space.RootDirectory,
+            ["report"] = ResReport,
             ["distance"] = Distance.ToString(CultureInfo.InvariantCulture),
             ["drop"] = Removal == DuplicateRemoval.Both ? "both" : "worse"
         };
@@ -253,33 +256,62 @@ public class DeduplicateParticles : Job, IClusterJob
 
     public override Action TrackProgressResults()
     {
-        if (KeptParticleCount >= 0)
-            return null;
         var particles = InputParticles();
         if (particles == null)
             return null;
-        // Beam publishes its output only when complete, so once it is there it can be counted.
-        string[] files;
-        if (IsFolder(particles))
+
+        int? kept = null;
+        if (KeptParticleCount < 0)
         {
-            if (!Directory.Exists(ResParticlesDirectory))
-                return null;
-            files = Directory.GetFiles(ResParticlesDirectory, "*.star");
+            // Beam publishes its output only when complete, so once it is there it can be counted.
+            string[] files;
+            if (IsFolder(particles))
+            {
+                if (!Directory.Exists(ResParticlesDirectory))
+                    return null;
+                files = Directory.GetFiles(ResParticlesDirectory, "*.star");
+            }
+            else
+            {
+                try
+                {
+                    // Open rather than gating on File.Exists: close-to-open consistency refreshes shared-filesystem attributes.
+                    using var published = File.OpenRead(ResParticlesStar);
+                }
+                catch (FileNotFoundException) { return null; }
+                catch (DirectoryNotFoundException) { return null; }
+                files = [ResParticlesStar];
+            }
+            kept = checked((int)files.Sum(CountParticles));
         }
-        else
+
+        // Beam writes its report before the particles, so it is complete by now.
+        bool baked = false;
+        if (VisAvailableIteration < 0 && File.Exists(ResReport))
         {
+            Directory.CreateDirectory(RelayResultsDirectoryPath);
             try
             {
-                // Open rather than gating on File.Exists: close-to-open consistency refreshes shared-filesystem attributes.
-                using var published = File.OpenRead(ResParticlesStar);
+                if (!File.Exists(VisCard(0)))
+                    BakeryWrapper.DeduplicateParticlesJobCard(ResReport, VisCard(0));
+                baked = true;
             }
-            catch (FileNotFoundException) { return null; }
-            catch (DirectoryNotFoundException) { return null; }
-            files = [ResParticlesStar];
+            // The particles are there without their card, which then shows the log.
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                WriteToLifecycleLog($"The job card could not be made: {ex.Message}").GetAwaiter().GetResult();
+            }
         }
-        long count = files.Sum(CountParticles);
-        int kept = checked((int)count);
-        return () => KeptParticleCount = kept;
+
+        if (kept == null && !baked)
+            return null;
+        return () =>
+        {
+            if (kept.HasValue)
+                KeptParticleCount = kept.Value;
+            if (baked)
+                VisAvailableIteration = 0;
+        };
     }
 
     /// <summary>Rows of a STAR file's particle loop: <c>data_particles</c>, or its one loop with coordinates.</summary>

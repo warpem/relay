@@ -22,6 +22,7 @@ from .postprocess3d_job_card import postprocess3d_job_card
 from .refine3d_job_card import refine3d_job_card
 from .import_map_3d_job_card import import_map_3d_job_card
 from .import_particles_job_card import import_particles_job_card
+from .deduplicate_particles_job_card import deduplicate_particles_job_card
 from .ts_etomo_job_card import ts_etomo_job_card
 from .ts_ctf_job_card import ts_ctf_job_card
 from .ts_reconstruct_job_card import ts_reconstruct_job_card

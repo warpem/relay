@@ -714,6 +714,14 @@ public static class BakeryWrapper
         RunArguments(arguments, workingDirectory);
     }
     
+    /// <summary>
+    /// Creates the Deduplicate particles job card from Beam's deduplication report: a histogram of the input particles'
+    /// nearest-neighbour distances up to their 95th percentile, with the threshold marked, beside the run's counts and
+    /// settings.
+    /// </summary>
+    public static void DeduplicateParticlesJobCard(string reportFile, string outputImageFile) =>
+        RunArguments(["deduplicate-particles-job-card", "--report-file", reportFile, "--output-file", outputImageFile]);
+
     public static void TsEtomoJobCard(
         string tiltImagePngFile,
         int tiltImageIndex,
