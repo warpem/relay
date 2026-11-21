@@ -14,7 +14,11 @@ public static class ParticleInputs
     public static bool NeedsMerge(PortIn port) => port.IsActive() && port.ResourceType == typeof(ParticleSet)
         && port.MaxItems > 1 && port.Edges.Count > 1;
 
-    internal static bool UsesWarpMetadata(PortIn port) => port.Job is Jobs.Refinement.Refinement3D.BeamRefine3D.BeamParticleJob;
+    // Beam jobs read Warp tilt-series XML instead of RELION tomogram metadata. Deduplication accepts either; Warp
+    // tilt-series particle sets carry no tomograms STAR, so merging them must not ask for one.
+    internal static bool UsesWarpMetadata(PortIn port) => port.Job is Jobs.Refinement.Refinement3D.BeamRefine3D.BeamParticleJob
+        || (port.Job is Jobs.Common.Tools.DeduplicateParticles.DeduplicateParticles
+            && Sources(port).All(s => string.IsNullOrEmpty(s.Resource?.TomogramsStarPath)));
 
     public static List<Issue> Validate(IReadOnlyList<(string Label, ParticleSet Resource)> inputs, bool warpMetadata = false)
     {

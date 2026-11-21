@@ -1,5 +1,6 @@
 using Refund.DataModel;
 using Refund.JobResources;
+using Refund.Jobs.Common.Tools.DeduplicateParticles;
 using Refund.Jobs.Common.Tools.ExpandSymmetry;
 using Refund.Jobs.Common.Tools.ThresholdStatistics;
 using Refund.Jobs.Fs.Extraction.ExtractParticles2D;
@@ -45,7 +46,7 @@ public class ResourceDescriptionCountTests
             new Class2D(), new Class2DSelect(), new Class3D(), new Class3DSelect(),
             new InitialReference(), new Refine3D(), new ExpandSymmetry(),
             new ThresholdStatistics(), new ExtractParticles2D(), new ExtractParticles(),
-            new SelectParticles()
+            new SelectParticles(), new DeduplicateParticles()
         ];
 
         foreach (var job in jobs)

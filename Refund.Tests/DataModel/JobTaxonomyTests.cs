@@ -87,6 +87,7 @@ public class JobTaxonomyTests
         ["ImportParticlePositions"]= "Common.Import.Particle positions",
         ["ThresholdStatistics"]    = "Common.Tools.Threshold statistics",
         ["ExpandSymmetry"]         = "Common.Tools.Expand symmetry",
+        ["DeduplicateParticles"]   = "Common.Tools.Deduplicate particles",
         ["Note"]                   = "Common.Notes.Note",
         ["Vibe"]                   = "Common.Notes.Vibe",
     };
