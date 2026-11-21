@@ -32,7 +32,7 @@ public enum DuplicateScore
 [GenerateReadOnly]
 public class DeduplicateParticles : Job, IClusterJob
 {
-    public override int2 CardSquareCount { get; set; } = new(1, 1);
+    public override int2 CardSquareCount { get; set; } = new(2, 1);
     public override string TypeGuid => "6c1f3b8e-2d47-4a95-b0e1-7f9d84c2a613";
     public override string TypeCategory => "Common.Tools.Deduplicate particles";
     public override string TypeName => "Deduplicate particles";
