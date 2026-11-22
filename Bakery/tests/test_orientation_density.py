@@ -67,3 +67,58 @@ def test_symmetrized_directions_stay_in_plotted_hemisphere(tmp_path, monkeypatch
     )
     assert len(captured) == 1
     assert (captured[0][..., 2] >= 0).all()
+
+
+@pytest.mark.parametrize('counts, expected', [
+    (None, [0., 45., 120.]),
+    ([1, 1, 1], [0., 45., 120.]),
+    ([1, 0, 2], [0., 120.]),
+    ([0, 0, 0], []),
+])
+def test_particle_angles_include_only_processed_rows_when_marker_present(tmp_path, counts, expected):
+    import pandas as pd
+    import starfile
+    table = pd.DataFrame({
+        'rlnAngleRot': [0., 45., 120.],
+        'rlnAngleTilt': [0., 30., 60.],
+        'rlnClassNumber': [1, 1, 2],
+    })
+    if counts is not None:
+        table['rlnNrOfSignificantSamples'] = counts
+    path = tmp_path / 'particles.star'
+    starfile.write({'particles': table}, path)
+    assert module.particle_angles(path)['rlnAngleRot'].tolist() == expected
+
+
+def test_class3d_both_plots_match_processed_only_star(tmp_path, monkeypatch):
+    import pandas as pd
+    import starfile
+    class3d = importlib.import_module('bakery.cli.orientation_and_fourier_sampling_class3d')
+    table = pd.DataFrame({
+        'rlnAngleRot': [0., 0., 80., 120.],
+        'rlnAngleTilt': [0., 0., 50., 70.],
+        'rlnClassNumber': [1, 1, 1, 2],
+        'rlnNrOfSignificantSamples': [0, 1, 1, 1],
+    })
+    captured = {}
+    def capture(image, colormap, output_file, svg=False):
+        captured[output_file.name] = image.copy()
+    monkeypatch.setattr(module, 'plot_orientation_distribution', capture)
+    monkeypatch.setattr(module, 'plot_fourier_sampling_distribution', capture)
+    results = []
+    for name, rows in [('full', table), ('processed', table.loc[table['rlnNrOfSignificantSamples'] > 0])]:
+        path = tmp_path / f'{name}.star'
+        starfile.write({'particles': rows}, path)
+        class3d.orientation_and_fourier_sampling_class3d(
+            particle_star_file=path, n_classes=3, grid_resolution=0,
+            symmetry='C1', colormap='viridis',
+            output_orientation_file=tmp_path / 'orientation.png',
+            output_fourier_sampling_file=tmp_path / 'fourier.png',
+        )
+        results.append(dict(captured))
+    assert len(results[0]) == 6
+    for name in results[0]:
+        np.testing.assert_array_equal(results[0][name].mask, results[1][name].mask)
+        np.testing.assert_allclose(results[0][name].compressed(), results[1][name].compressed())
+    assert not results[0]['orientation_class003.png'].compressed().any()
+    assert not results[0]['fourier_class003.png'].compressed().any()

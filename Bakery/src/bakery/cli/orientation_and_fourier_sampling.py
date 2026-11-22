@@ -138,6 +138,11 @@ def class_symmetry(symmetry, class_number=None):
 def _particle_angles(path, mtime, size):
     # Keep only plotting columns after one STAR parse, shared by every class.
     table = starfile.read(path, always_dict=True)['particles']
+    # Beam's subset iterations retain unprocessed rows with placeholder poses
+    # and class 1. Only positive counts represent poses fitted this iteration.
+    # Apply this before caching so orientation and Fourier plots share the filter.
+    if 'rlnNrOfSignificantSamples' in table:
+        table = table.loc[table['rlnNrOfSignificantSamples'] > 0]
     return table[[c for c in ('rlnAngleRot', 'rlnAngleTilt', 'rlnClassNumber') if c in table]]
 
 
