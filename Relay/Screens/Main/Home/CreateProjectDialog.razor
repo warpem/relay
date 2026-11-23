@@ -20,7 +20,6 @@
                                  Immediate="true"
                                  Autofocus="true"
                                  AutoComplete="off"/>
-                <FluentValidationMessage For="@(() => Model.Name)"/>
             </div>
 
             <div class="form-item">
@@ -28,7 +27,6 @@
                                  Label="Notes"
                                  Immediate="true"
                                  AutoComplete="off"/>
-                <FluentValidationMessage For="@(() => Model.Notes)"/>
             </div>
 
             @if (!string.IsNullOrEmpty(ErrorMessage))

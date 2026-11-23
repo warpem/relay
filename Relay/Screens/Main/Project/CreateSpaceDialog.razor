@@ -22,7 +22,6 @@
                                  Autofocus="true"
                                  AutoComplete="off"
                                  Disabled="@Model.IsReconnectMode"/>
-                <FluentValidationMessage For="@(() => Model.Name)"/>
 
                 @if (!string.IsNullOrEmpty(ErrorMessage))
                 {
@@ -35,7 +34,6 @@
                                  Immediate="true"
                                  AutoComplete="off"
                                  Disabled="@Model.IsReconnectMode"/>
-                <FluentValidationMessage For="@(() => Model.Notes)"/>
             </div>
 
             <div class="form-item">

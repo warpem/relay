@@ -44,13 +44,11 @@
                                          Immediate="true"
                                          Autofocus="true"
                                          AutoComplete="off" />
-                        <FluentValidationMessage For="@(() => _registrationModel.Username)"/>
 
                         <RelayTextInput @bind-Value="_registrationModel.Name"
                                          Label="Name"
                                          Required="true"
                                          Immediate="true"/>
-                        <FluentValidationMessage For="@(() => _registrationModel.Name)"/>
 
                         <RelayTextInput @bind-Value="_registrationModel.Email"
                                          Label="Email"
@@ -58,13 +56,11 @@
                                          Type="email"
                                          Immediate="true"
                                          TextInputType="TextInputType.Email"/>
-                        <FluentValidationMessage For="@(() => _registrationModel.Email)"/>
 
                         <RelayTextInput @bind-Value="_registrationModel.Password"
                                          Label="Password"
                                          Required="true"
                                          TextInputType="TextInputType.Password"/>
-                        <FluentValidationMessage For="@(() => _registrationModel.Password)"/>
 
                         @if (!_isFirstUser)
                         {
@@ -72,7 +68,6 @@
                                              Label="Security Token"
                                              Required="true"
                                              AutoComplete="off" />
-                            <FluentValidationMessage For="@(() => _registrationModel.SecurityToken)"/>
                         }
 
                         <div class="button-row">
@@ -109,7 +104,6 @@
                                          Immediate="true"
                                          Autofocus="true"
                                          AutoComplete="off"/>
-                        <FluentValidationMessage For="@(() => _loginModel.Username)"/>
 
                         <RelayTextInput @bind-Value="_loginModel.Password"
                                          Label="Password"
@@ -117,7 +111,6 @@
                                          Immediate="true"
                                          AutoComplete="off"
                                          Type="password"/>
-                        <FluentValidationMessage For="@(() => _loginModel.Password)"/>
 
                         <FluentCheckbox @bind-Value="_loginModel.RememberMe"
                                         Label="Remember me"/>
