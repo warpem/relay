@@ -266,26 +266,32 @@ public class SelectParticles : WarpToolsJob, ILocalJob
         float minScore = float.MaxValue;
         float maxScore = float.MinValue;
 
-        if (positionSet.IsSingleStar)
+        // Position sets from other sources (imports, deduplication, ...) may carry no score column
+        void AccumulateScores(string starPath)
         {
-            float[] scores = Star.LoadFloat(positionSet.ParticlesSingleStarPath, "rlnAutopickFigureOfMerit");
+            var table = new Star(starPath);
+            if (!table.HasColumn("rlnAutopickFigureOfMerit"))
+                return;
+            float[] scores = table.GetFloatRobust("rlnAutopickFigureOfMerit");
+            if (scores.Length == 0)
+                return;
             minScore = Math.Min(minScore, scores.Min());
             maxScore = Math.Max(maxScore, scores.Max());
         }
+
+        if (positionSet.IsSingleStar)
+            AccumulateScores(positionSet.ParticlesSingleStarPath);
         foreach (var item in processedItems)
         {
-            try
-            {
-                float[] scores = Star.LoadFloat(positionSet.ToMultiStarPath(item.Path), "rlnAutopickFigureOfMerit");
-                minScore = Math.Min(minScore, scores.Min());
-                maxScore = Math.Max(maxScore, scores.Max());
-            }
+            try { AccumulateScores(positionSet.ToMultiStarPath(item.Path)); }
             catch {}
         }
+
+        bool anyScores = minScore <= maxScore;
         GlobalFilterSettings.Filters[FilterKeyScore] = new FilterSetting
         {
-            Min = (decimal)Math.Floor(minScore), 
-            Max = (decimal)Math.Ceiling(maxScore)
+            Min = anyScores ? (decimal)Math.Floor(minScore) : 0,
+            Max = anyScores ? (decimal)Math.Ceiling(maxScore) : 0
         };
     }
 
