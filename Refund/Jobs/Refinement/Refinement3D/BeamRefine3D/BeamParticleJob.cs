@@ -35,6 +35,10 @@ public abstract class BeamParticleJob : Job, IClusterJob
     public bool UsesGlobalSearch => SupportsAlignment && Alignment == BeamAlignment.Global;
     public bool UsesLocalSearch => SupportsAlignment && Alignment == BeamAlignment.Local;
     public bool ShowParticleDiameter => !SupportsAlignment || UsesGlobalSearch;
+    /// <summary>Whether the command accepts --initial-resolution.</summary>
+    public virtual bool UsesInitialResolution => true;
+    /// <summary>Whether the command searches translations globally within --translation-range.</summary>
+    public virtual bool ShowGlobalTranslationRange => UsesGlobalSearch;
 
     [UiFieldGroup("Reference", 0)]
     [UiEnum("", "Alignment", typeof(BeamAlignment), helpText: "Global searches all orientations. Local searches around existing particle poses and requires a mask.",
@@ -45,7 +49,8 @@ public abstract class BeamParticleJob : Job, IClusterJob
     [RelayProperty] public string Symmetry { get; set; } = "C1";
 
     [UiDecimal("initial-resolution", "Initial low-pass", min: 1, max: 1000, stepSize: 0.1, unit: "Å",
-        helpText: "Initial low-pass resolution.")]
+        helpText: "Initial low-pass resolution.",
+        ConditionalOnField = nameof(UsesInitialResolution), ConditionalOnValue = true)]
     [RelayProperty] public decimal InitialResolution { get; set; } = 40;
 
     [UiInt("particle-diameter", "Particle diameter", min: 1, max: 10000, unit: "Å",
@@ -69,7 +74,7 @@ public abstract class BeamParticleJob : Job, IClusterJob
     [RelayProperty] public decimal LocalAngularRange { get; set; } = 5;
 
     [UiDecimal("translation-range", "Translation range", min: 0.1, max: 1000, stepSize: 0.1, unit: "Å",
-        ConditionalOnField = nameof(UsesGlobalSearch), ConditionalOnValue = true)]
+        ConditionalOnField = nameof(ShowGlobalTranslationRange), ConditionalOnValue = true)]
     [RelayProperty] public decimal TranslationRange { get; set; } = 40;
 
     [UiDecimal("translation-range", "Local translation range", min: 0.1, max: 1000, stepSize: 0.1, unit: "Å",

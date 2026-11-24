@@ -34,36 +34,32 @@ public class BeamInit3DTests : IDisposable
         Assert.Equal("beam init3d", job.CommandName);
         var args = job.ComposeCommandArguments();
         Assert.Equal("1", args["classes"]);
-        Assert.Equal("1000", args["updates"]);
+        Assert.Equal("200", args["updates"]);
         Assert.Equal("50", args["snapshot-interval"]);
-        Assert.Equal("100", args["initial-minibatch"]);
-        Assert.Equal("500", args["final-minibatch"]);
-        Assert.Equal("0.5", args["initial-learning-rate"]);
+        Assert.Equal("250", args["initial-minibatch"]);
+        Assert.Equal("1000", args["final-minibatch"]);
+        Assert.Equal("0.9", args["initial-learning-rate"]);
         Assert.Equal("0.1", args["final-learning-rate"]);
-        Assert.True(job.EnforcePositivity);
-        Assert.DoesNotContain("no-positivity", args.Keys);
-        Assert.Equal("1", args["pose-marginalization-temperature"]);
-        Assert.Equal("64", args["working-box"]);
-        Assert.Equal("35", args["initial-resolution"]);
-        Assert.Equal("12", args["final-resolution"]);
+        Assert.Equal("0.5", args["class-similarity"]);
+        Assert.Equal("12", args["resolution"]);
+        Assert.Equal("40", args["translation-range"]);
         Assert.Equal("200", args["particle-diameter"]);
         Assert.Equal("cuda:0", args["device"]);
         Assert.Equal("8", args["workers"]);
         Assert.Equal(8, job.CoreCount);
         Assert.Contains("beam", job.RequiredModules);
         Assert.Contains("show-progress", args.Keys);
-        foreach (string name in new[] { "reference", "mask", "local-angular-range", "translation-range", "beams", "dont-align-symmetry", "regularization", "iterations" })
+        // Options beam init3d no longer accepts, and refinement options it never had.
+        foreach (string name in new[] { "reference", "mask", "local-angular-range", "beams", "dont-align-symmetry", "regularization", "iterations",
+                     "working-box", "initial-resolution", "final-resolution", "no-positivity", "pose-marginalization-temperature", "tilt-damage-threshold" })
             Assert.DoesNotContain(name, args.Keys);
     }
 
     [Theory]
     [InlineData(15)]
     [InlineData(17)]
-    public void BothJobsRejectUnsupportedBoxSizes(int box)
+    public void ClassificationRejectsUnsupportedBoxSizes(int box)
     {
-        var init = NewJob();
-        init.WorkingBox = box;
-        Assert.Contains(nameof(init.WorkingBox), init.ValidateInputs().Keys);
         var classify = new BeamClass3D { WorkingBox = box };
         Assert.Contains(nameof(classify.WorkingBox), classify.ValidateInputs().Keys);
     }
@@ -216,25 +212,39 @@ public class BeamInit3DTests : IDisposable
     }
 
     [Fact]
-    public void OptimizationControlsRoundTripAndPositivityCanBeDisabled()
+    public void OptimizationControlsRoundTrip()
     {
         var job = NewJob();
-        job.EnforcePositivity = false;
         job.InitialMinibatch = 40; job.FinalMinibatch = 300;
         job.InitialLearningRate = .4m; job.FinalLearningRate = .05m;
         job.SnapshotInterval = 25;
+        job.Resolution = 15; job.TranslationRange = 30;
         var clone = NewJob(); clone.ReadFromJson(job.ToJson());
         var args = clone.ComposeCommandArguments();
-        Assert.Contains("no-positivity", args.Keys);
+        Assert.Equal("15", args["resolution"]);
+        Assert.Equal("30", args["translation-range"]);
         Assert.Equal("40", args["initial-minibatch"]);
         Assert.Equal("300", args["final-minibatch"]);
         Assert.Equal("0.4", args["initial-learning-rate"]);
         Assert.Equal("0.05", args["final-learning-rate"]);
         Assert.Equal("25", args["snapshot-interval"]);
         Assert.Equal(.4m, clone.InitialLearningRate);
-        Assert.False(clone.EnforcePositivity);
-        clone.EnforcePositivity = true;
-        Assert.DoesNotContain("no-positivity", clone.ComposeCommandArguments().Keys);
+    }
+
+    [Fact]
+    public void SavedJobsCarryTheirFinalResolutionIntoTheRunResolution()
+    {
+        var saved = NewJob().ToJson();
+        saved.AsObject().Remove(nameof(BeamInit3D.Resolution));
+        saved.AsObject()["FinalResolution"] = 18.5;
+        saved.AsObject()["WorkingBox"] = 96;
+        saved.AsObject()["EnforcePositivity"] = false;
+        var restored = NewJob(); restored.ReadFromJson(saved);
+        Assert.Equal(18.5m, restored.Resolution);
+        var args = restored.ComposeCommandArguments();
+        Assert.Equal("18.5", args["resolution"]);
+        Assert.DoesNotContain("working-box", args.Keys);
+        Assert.DoesNotContain("no-positivity", args.Keys);
     }
 
     [Fact]
@@ -254,7 +264,7 @@ public class BeamInit3DTests : IDisposable
     public void OptimizationSettingsRejectInvalidValuesAndConflictingSnapshotArguments()
     {
         var job = NewJob();
-        job.InitialMinibatch = 0; job.FinalMinibatch = -1;
+        job.InitialMinibatch = 1; job.FinalMinibatch = -1;
         job.InitialLearningRate = 0; job.FinalLearningRate = 1.1m;
         job.SnapshotInterval = 0;
         var errors = job.ValidateInputs();
@@ -267,12 +277,14 @@ public class BeamInit3DTests : IDisposable
     }
 
     [Fact]
-    public void TiltCtfOverrideAndInvalidAnnealingAreRejected()
+    public void TiltCtfOverrideAndInvalidResolutionAreRejected()
     {
         var job = NewJob();
-        job.FinalResolution = 40;
-        Assert.Contains(nameof(job.FinalResolution), job.ValidateInputs().Keys);
-        job.FinalResolution = 12;
+        job.Resolution = 0; job.TranslationRange = 0;
+        var errors = job.ValidateInputs();
+        Assert.Contains(nameof(job.Resolution), errors.Keys);
+        Assert.Contains(nameof(job.TranslationRange), errors.Keys);
+        job.Resolution = 12; job.TranslationRange = 40;
         job.CtfIntactFirstPeak = true;
         ParticleInputs.Sources(job.PortsIn["Particles"])[0].Resource.DataDimensionality = ParticleType.Tiltseries;
         Assert.Contains(nameof(job.CtfIntactFirstPeak), job.ValidateInputs().Keys);

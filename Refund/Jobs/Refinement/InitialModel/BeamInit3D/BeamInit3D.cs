@@ -25,7 +25,8 @@ public class BeamInit3D : BeamParticleJob
     public override string TypeDescription => "Generate one or more initial 3D models from particle images or raw particle tilt series";
     public override string CommandName => "beam init3d";
     public override bool SupportsAlignment => false;
-    public override bool SupportsPoseMarginalization => true;
+    public override bool UsesInitialResolution => false;
+    public override bool ShowGlobalTranslationRange => true;
     public override Type ExpandedViewType => typeof(BeamClass3DExpandedView);
     public override int2 CardSquareCount { get => Class3DCardLayout.SquareCount(NClasses); set { } }
 
@@ -35,23 +36,19 @@ public class BeamInit3D : BeamParticleJob
 
     [UiInt("updates", "Updates", min: 1, max: 10000,
         helpText: "Number of stochastic gradient updates. Preview frequency is controlled by the snapshot interval.")]
-    [RelayProperty] public int Updates { get; set; } = 1000;
+    [RelayProperty] public int Updates { get; set; } = 200;
 
-    [UiBool("no-positivity", "Enforce positivity", reverse: true,
-        helpText: "Constrain initial models to nonnegative density. Disable to allow signed density.")]
-    [RelayProperty] public bool EnforcePositivity { get; set; } = true;
-
-    [UiInt("initial-minibatch", "Initial particles per update", min: 1, max: int.MaxValue,
+    [UiInt("initial-minibatch", "Initial particles per update", min: 2, max: int.MaxValue,
         helpText: "Starting scientific minibatch, total across halves and classes. Separate from the hardware batch size.")]
-    [RelayProperty] public int InitialMinibatch { get; set; } = 100;
+    [RelayProperty] public int InitialMinibatch { get; set; } = 250;
 
-    [UiInt("final-minibatch", "Final particles per update", min: 1, max: int.MaxValue,
+    [UiInt("final-minibatch", "Final particles per update", min: 2, max: int.MaxValue,
         helpText: "Final scientific minibatch, total across halves and classes. Must be at least the initial minibatch.")]
-    [RelayProperty] public int FinalMinibatch { get; set; } = 500;
+    [RelayProperty] public int FinalMinibatch { get; set; } = 1000;
 
     [UiDecimal("initial-learning-rate", "Initial learning rate", min: 0.000001, max: 1, stepSize: 0.05, isAdvanced: true,
         helpText: "Starting VDAM step size; decays exponentially over all updates to the final learning rate.")]
-    [RelayProperty] public decimal InitialLearningRate { get; set; } = 0.5m;
+    [RelayProperty] public decimal InitialLearningRate { get; set; } = 0.9m;
 
     [UiDecimal("final-learning-rate", "Final learning rate", min: 0.000001, max: 1, stepSize: 0.05, isAdvanced: true,
         helpText: "VDAM step size reached on the final update.")]
@@ -61,24 +58,20 @@ public class BeamInit3D : BeamParticleJob
         helpText: "Publish intermediate models every this many updates. Relay groups iteration logs and previews using this interval.")]
     [RelayProperty] public int SnapshotInterval { get; set; } = 50;
 
-    [UiInt("working-box", "Box size", min: 16, max: 4096, stepSize: 2, unit: "px",
-        helpText: "Even working box size, capped at the input box. Fourier cropping preserves the field of view and coarsens the pixel size.")]
-    [RelayProperty] public int WorkingBox { get; set; } = 64;
-
-    [UiDecimal("final-resolution", "Final resolution", min: 1, max: 1000, unit: "Å",
-        stepSize: 0.1, helpText: "Target at the end of the resolution ramp, bounded by the working Nyquist resolution.")]
-    [RelayProperty] public decimal FinalResolution { get; set; } = 12;
+    [UiDecimal("resolution", "Resolution", min: 1, max: 1000, unit: "Å", stepSize: 0.1,
+        helpText: "The one resolution of the whole run. Particles are Fourier-cropped to a working pixel size of at most a third of it.")]
+    [RelayProperty] public decimal Resolution { get; set; } = 12;
 
     [UiBool("ctf-intact-first-peak", "Keep first CTF peak intact", isAdvanced: true,
         ConditionalOnField = nameof(IsTiltSeries), ConditionalOnValue = false)]
     [RelayProperty] public bool CtfIntactFirstPeak { get; set; }
 
     [UiIntNullable("maximum-particles", "Maximum particles", min: 2, max: int.MaxValue, isAdvanced: true,
-        helpText: "Optional deterministic subset for quick trials. The final particle output contains this subset.")]
+        helpText: "Optional random subset for quick trials. The final particle output contains this subset.")]
     [RelayProperty] public int? MaximumParticles { get; set; }
 
     [UiDecimal("class-similarity", "Class similarity", min: 0, max: 1, stepSize: 0.05, isAdvanced: true,
-        helpText: "Early class-assignment sharing between initial models. 0 disables sharing; 1 maximizes sharing.")]
+        helpText: "Early class-assignment sharing between initial models, faded out over the first 30% of updates. 0 disables sharing; 1 maximizes sharing.")]
     [RelayProperty] public decimal ClassSimilarity { get; set; } = 0.5m;
 
     [RelayProperty, Clearable] public bool FinalAssignmentAvailable { get; set; }
@@ -103,7 +96,6 @@ public class BeamInit3D : BeamParticleJob
 
     public BeamInit3D()
     {
-        InitialResolution = 35;
         PortsIn = new(PortsIn.Where(p => p.Key is not ("Reference" or "Mask")).ToDictionary(p => p.Key, p => p.Value));
         var outputs = PortsOut.ToDictionary(p => p.Key, p => p.Value);
         outputs["Reference"] = new(this, typeof(MapList), "Reference", "Initial models", GetMaps);
@@ -116,15 +108,14 @@ public class BeamInit3D : BeamParticleJob
         if (NClasses < 1) errors[nameof(NClasses)] = "At least one class is required.";
         if (Updates < 1) errors[nameof(Updates)] = "Updates must be positive.";
         if (SnapshotInterval < 1) errors[nameof(SnapshotInterval)] = "Snapshot interval must be positive.";
-        if (InitialMinibatch < 1) errors[nameof(InitialMinibatch)] = "Initial particles per update must be positive.";
-        if (FinalMinibatch < 1 || FinalMinibatch < InitialMinibatch)
-            errors[nameof(FinalMinibatch)] = "Final particles per update must be positive and at least the initial count.";
+        if (InitialMinibatch < 2) errors[nameof(InitialMinibatch)] = "Initial particles per update must be at least two.";
+        if (FinalMinibatch < 2 || FinalMinibatch < InitialMinibatch)
+            errors[nameof(FinalMinibatch)] = "Final particles per update must be at least two and at least the initial count.";
         if (InitialLearningRate is <= 0 or > 1) errors[nameof(InitialLearningRate)] = "Initial learning rate must be in (0, 1].";
         if (FinalLearningRate is <= 0 or > 1) errors[nameof(FinalLearningRate)] = "Final learning rate must be in (0, 1].";
         if (ClassSimilarity is < 0 or > 1) errors[nameof(ClassSimilarity)] = "Class similarity must be between 0 and 1.";
-        if (WorkingBox < 16 || WorkingBox % 2 != 0) errors[nameof(WorkingBox)] = "Box size must be even and at least 16 pixels.";
-        if (FinalResolution <= 0 || FinalResolution > InitialResolution)
-            errors[nameof(FinalResolution)] = "Final resolution must be positive and no coarser than the initial resolution.";
+        if (Resolution <= 0) errors[nameof(Resolution)] = "Resolution must be positive.";
+        if (TranslationRange <= 0) errors[nameof(TranslationRange)] = "Translation range must be positive.";
         if (IsTiltSeries && CtfIntactFirstPeak) errors[nameof(CtfIntactFirstPeak)] = "First-peak override is only supported for single-tilt images.";
         if (MaximumParticles is < 2) errors[nameof(MaximumParticles)] = "Maximum particles must be at least two or empty.";
         if (!errors.ContainsKey(nameof(AdditionalArguments)))
@@ -141,6 +132,9 @@ public class BeamInit3D : BeamParticleJob
         base.ReadFromJson(reader);
         // Existing saved jobs use ten-update preview numbering and filenames.
         if (reader[nameof(SnapshotInterval)] == null) SnapshotInterval = 10;
+        // Beam replaced the annealing target --final-resolution with one run resolution.
+        if (reader[nameof(Resolution)] == null && reader["FinalResolution"] is { } finalResolution)
+            Resolution = (decimal)finalResolution.GetValue<double>();
     }
 
     protected override void AddReferenceArguments(Dictionary<string, string> args) { }

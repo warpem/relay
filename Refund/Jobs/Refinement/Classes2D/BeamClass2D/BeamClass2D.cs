@@ -42,14 +42,12 @@ public class BeamClass2D : Job, IClusterJob
     [UiInt("final-classes", "Number of classes", min: 1, max: 10000,
         helpText: "Final total, including classes representing unusual particles. Beam grows the class bank during training.")]
     [RelayProperty] public int NClasses { get; set; } = 64;
-    [UiInt("iterations", "Training updates", min: 1, max: 10000)]
+    [UiInt("iterations", "Training iterations", min: 1, max: 10000,
+        helpText: "Number of training iterations, each a maximum-likelihood solve on a particle subset.")]
     [RelayProperty] public int Iterations { get; set; } = 60;
     [UiInt("particles-per-class", "Training particles per class", min: 1, max: 1000000,
-        helpText: "Training particles per current class per update. Higher values give steadier updates.")]
-    [RelayProperty] public int ParticlesPerClass { get; set; } = 100;
-    [UiDecimal("learning-rate", "Learning rate", min: 0.001, max: 1, stepSize: 0.05,
-        helpText: "Class reconstruction update rate in (0, 1].")]
-    [RelayProperty] public decimal LearningRate { get; set; } = 0.2m;
+        helpText: "Subset particles per current class in each training iteration's maximum-likelihood solve.")]
+    [RelayProperty] public int ParticlesPerClass { get; set; } = 300;
     [UiBool("subclassify", "Subclassify final classes",
         helpText: "After final assignment, split each regular class into four fixed-pose subclasses. Completed subclasses appear grouped by parent, with separate subclass particle and template outputs.")]
     [RelayProperty] public bool Subclassify { get; set; }
@@ -92,7 +90,7 @@ public class BeamClass2D : Job, IClusterJob
     [RelayProperty] public int PcaRank { get; set; } = 16;
     [UiInt("maximum-pca-particles", "Maximum PCA particles", min: 2, max: 10000000, isAdvanced: true)]
     [RelayProperty] public int MaximumPcaParticles { get; set; } = 50000;
-    [UiInt("discovery-interval", "Updates between PCA rebuilds", min: 1, max: 10000, isAdvanced: true)]
+    [UiInt("discovery-interval", "Iterations between PCA rebuilds", min: 1, max: 10000, isAdvanced: true)]
     [RelayProperty] public int DiscoveryInterval { get; set; } = 10;
 
     [UiFieldGroup("Compute", 3)]
@@ -253,7 +251,6 @@ public class BeamClass2D : Job, IClusterJob
             [nameof(PcaRank)] = PcaRank, [nameof(DiscoveryInterval)] = DiscoveryInterval
         })
             if (value < 1) errors[name] = "Must be positive.";
-        if (LearningRate <= 0 || LearningRate > 1) errors[nameof(LearningRate)] = "Learning rate must be in (0, 1].";
         if (TranslationRange < 0) errors[nameof(TranslationRange)] = "Translation range must be nonnegative.";
         if (AngularSampling <= 0 || AngularSampling > 180) errors[nameof(AngularSampling)] = "Angular sampling must be in (0, 180].";
         if (PeripheralClassRatio < 0 || PeripheralClassRatio > 2) errors[nameof(PeripheralClassRatio)] = "Peripheral class ratio must be in [0, 2].";
