@@ -415,6 +415,9 @@ public class ImportParticlePositions : LocalJob, ILocalJob
                     if (InputType == InputTypes.SingleFile)
                     {
                         File.Copy(SingleFilePath, ImportedSinglePath, true);
+
+                        if (AddTomoNameColumn(ImportedSinglePath))
+                            logger.WriteLine("Added rlnTomoName (copied from rlnMicrographName) so that tomogram-based jobs can match particles to tomograms");
                     }
                     else
                     {
@@ -464,6 +467,36 @@ public class ImportParticlePositions : LocalJob, ILocalJob
 
     private static bool TryParsePositive(string text, out decimal value) =>
         decimal.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value) && value > 0;
+
+    /// <summary>
+    /// Tomography jobs match particles to tomograms through rlnTomoName, but RELION 3.0-style exports (e.g. pytom's)
+    /// name the tomogram in rlnMicrographName. For a table with 3D coordinates that has only the latter, adds
+    /// rlnTomoName as a copy of it, rewriting the (already copied) file in place. Returns whether it changed anything.
+    /// </summary>
+    internal static bool AddTomoNameColumn(string path)
+    {
+        bool multiTable = Star.IsMultiTable(path);
+        Star particles = multiTable ? new Star(path, "particles") : new Star(path);
+
+        if (particles.HasColumn("rlnTomoName") || !particles.HasColumn("rlnMicrographName") ||
+            !(particles.HasColumn("rlnCoordinateZ") || particles.HasColumn("rlnCoordinateZAngst")))
+            return false;
+
+        particles.AddColumn("rlnTomoName", particles.GetColumn("rlnMicrographName"));
+
+        if (multiTable)
+        {
+            Dictionary<string, Star> tables = new();
+            if (Star.ContainsTable(path, "optics"))
+                tables["optics"] = new Star(path, "optics");
+            tables["particles"] = particles;
+            Star.SaveMultitable(path, tables);
+        }
+        else
+            particles.Save(path);
+
+        return true;
+    }
 
     #region Per-series file name suffix
 

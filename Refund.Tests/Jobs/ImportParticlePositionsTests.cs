@@ -267,6 +267,54 @@ public class ImportParticlePositionsTests
     }
 
     [Fact]
+    public void AddTomoNameColumn_ExistingTomoNameOrNo3dCoords_LeavesFileAlone()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "relay-tomoname-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+
+        try
+        {
+            string flat = Path.Combine(root, "flat.star");
+            Particles(("rlnCoordinateX", ["1"]), ("rlnCoordinateY", ["1"]), ("rlnMicrographName", ["mic.mrc"])).Save(flat);
+            Assert.False(ImportParticlePositions.AddTomoNameColumn(flat));
+
+            string named = Path.Combine(root, "named.star");
+            Particles(("rlnCoordinateZ", ["1"]), ("rlnMicrographName", ["a"]), ("rlnTomoName", ["b"])).Save(named);
+            Assert.False(ImportParticlePositions.AddTomoNameColumn(named));
+            Assert.Equal(["b"], new Star(named).GetColumn("rlnTomoName"));
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public void AddTomoNameColumn_MultiTableFile_KeepsOpticsTable()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "relay-tomoname-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+
+        try
+        {
+            string path = Path.Combine(root, "multi.star");
+            Star.SaveMultitable(path, new Dictionary<string, Star>
+            {
+                ["optics"] = Particles(("rlnOpticsGroup", ["1"]), ("rlnImagePixelSize", ["2.5"])),
+                ["particles"] = Particles(("rlnCoordinateZ", ["1"]), ("rlnMicrographName", ["ts.tomostar"]))
+            });
+
+            Assert.True(ImportParticlePositions.AddTomoNameColumn(path));
+            Assert.Equal(["ts.tomostar"], new Star(path, "particles").GetColumn("rlnTomoName"));
+            Assert.Equal(["2.5"], new Star(path, "optics").GetColumn("rlnImagePixelSize"));
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
     public void DetectPixelSize_DisagreeingOrMissing_ReturnsNull()
     {
         Assert.Null(ImportParticlePositions.DetectPixelSize(
@@ -308,6 +356,12 @@ public class ImportParticlePositionsTests
             Assert.True(particles.Has3dCoords);
             Assert.True(particles.HasAngles);
             Assert.Equal(11.328M, particles.CoordPixelSize);
+
+            // Tomography jobs match particles to tomograms through rlnTomoName
+            var imported = new Star(job.ImportedSinglePath);
+            Assert.Equal(["ts_01.tomostar", "ts_01.tomostar"], imported.GetColumn("rlnTomoName"));
+            Assert.Equal(2, imported.RowCount);
+            Assert.False(new Star(star).HasColumn("rlnTomoName"));
         }
         finally
         {
