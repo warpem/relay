@@ -161,6 +161,9 @@ public partial class SelectParticlesExpandedView : IAsyncDisposable
             // Reset histogram data
             foreach (var key in SelectParticles.FilterKeys)
             {
+                // The markup reads the counts for every key, so they must exist even if loading fails or finds no particles
+                _globalFilterCounts[key] = (0, 0);
+                _tomogramFilterCounts[key] = (0, 0);
                 _globalHistogramBins[key] = Array.Empty<decimal>();
                 _globalFilteredHistogramBins[key] = Array.Empty<decimal>();
                 _tomogramHistogramBins[key] = Array.Empty<decimal>();
@@ -321,8 +324,10 @@ public partial class SelectParticlesExpandedView : IAsyncDisposable
 
                 if (_particleSet.IsSingleStar)
                 {
-                    if (File.Exists(_particleSet.ParticlesSingleStarPath))
-                        particles = await LoadParticlesFromStarFileAsync(combinedParticles[tomogramItem.Path]);
+                    // Tomograms without any particles in the file simply have no entry in the split
+                    if (File.Exists(_particleSet.ParticlesSingleStarPath) &&
+                        combinedParticles.TryGetValue(tomogramItem.Path, out var tomogramTable))
+                        particles = await LoadParticlesFromStarFileAsync(tomogramTable);
                 }
                 else
                 {
