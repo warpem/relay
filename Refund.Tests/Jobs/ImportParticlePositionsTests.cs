@@ -315,6 +315,68 @@ public class ImportParticlePositionsTests
     }
 
     [Fact]
+    public void CountTomograms_ChecksTomoNameOfPositionsInTomograms()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "relay-count-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+
+        try
+        {
+            string ok = Path.Combine(root, "ok.star");
+            Particles(("rlnCoordinateZ", ["1", "2", "3"]), ("rlnTomoName", ["a", "a", "b"])).Save(ok);
+            Assert.Equal(2, ImportParticlePositions.CountTomograms(ok));
+
+            string flat = Path.Combine(root, "flat.star");
+            Particles(("rlnCoordinateX", ["1"]), ("rlnMicrographName", ["mic.mrc"])).Save(flat);
+            Assert.Equal(-1, ImportParticlePositions.CountTomograms(flat));
+
+            string missing = Path.Combine(root, "missing.star");
+            Particles(("rlnCoordinateZ", ["1"]), ("rlnCoordinateX", ["1"])).Save(missing);
+            Assert.Throws<Exception>(() => ImportParticlePositions.CountTomograms(missing));
+
+            string empty = Path.Combine(root, "empty.star");
+            Particles(("rlnCoordinateZ", ["1", "2"]), ("rlnTomoName", ["a", ""])).Save(empty);
+            Assert.Throws<Exception>(() => ImportParticlePositions.CountTomograms(empty));
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public void RunLocal_PositionsInTomogramsWithoutAnyTomogramName_Fails()
+    {
+        EnsurePopulated();
+
+        string root = Path.Combine(Path.GetTempPath(), "relay-notomo-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+
+        try
+        {
+            string star = Path.Combine(root, "noname.star");
+            File.WriteAllText(star,
+                "data_particles\n\nloop_\n_rlnCoordinateX #1\n_rlnCoordinateY #2\n_rlnCoordinateZ #3\n" +
+                "_rlnDetectorPixelSize #4\n1.0\t2.0\t3.0\t10.0\n");
+
+            var job = new ImportParticlePositions
+            {
+                Space = new Space { RootDirectory = root },
+                Id = 1,
+                InputType = InputTypes.SingleFile,
+                SingleFilePath = star
+            };
+
+            var exc = Assert.Throws<Exception>(() => job.RunLocal(CancellationToken.None));
+            Assert.Contains("tomogram", exc.Message);
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
     public void DetectPixelSize_DisagreeingOrMissing_ReturnsNull()
     {
         Assert.Null(ImportParticlePositions.DetectPixelSize(

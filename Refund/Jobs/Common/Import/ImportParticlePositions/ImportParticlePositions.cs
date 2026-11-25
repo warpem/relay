@@ -427,6 +427,19 @@ public class ImportParticlePositions : LocalJob, ILocalJob
                 }
                 logger.WriteLine("Done.");
 
+                if (InputType == InputTypes.SingleFile)
+                {
+                    // Check the file the downstream jobs will actually read, not the one that was picked.
+                    int tomogramCount = CountTomograms(ImportedSinglePath);
+                    if (tomogramCount >= 0)
+                        logger.WriteLine($"Verified rlnTomoName in the imported file: particles belong to {tomogramCount} tomogram(s)");
+                }
+
+                if (HasCoordinates)
+                    logger.WriteLine(HasNormalizedCoordinates ?
+                                         "Coordinates are normalized, no pixel size needed" :
+                                         $"Coordinate pixel size: {CoordinatePixelSize} Å");
+
                 logger.WriteLine("Particle positions imported successfully");
             }
             catch (Exception exc)
@@ -496,6 +509,30 @@ public class ImportParticlePositions : LocalJob, ILocalJob
             particles.Save(path);
 
         return true;
+    }
+
+    /// <summary>
+    /// Checks that a table of positions in tomograms (one with a Z coordinate) names the tomogram of every particle in
+    /// rlnTomoName, which the tomography jobs need to match particles to tomograms. Returns the number of distinct
+    /// tomograms, or -1 if the table has no Z coordinate and the check doesn't apply. Throws if the column is
+    /// missing or has empty values.
+    /// </summary>
+    internal static int CountTomograms(string path)
+    {
+        Star particles = Star.IsMultiTable(path) ? new Star(path, "particles") : new Star(path);
+
+        if (!(particles.HasColumn("rlnCoordinateZ") || particles.HasColumn("rlnCoordinateZAngst")))
+            return -1;
+
+        if (!particles.HasColumn("rlnTomoName"))
+            throw new Exception("The particles have 3D coordinates but don't name their tomogram: the STAR file has " +
+                                "neither rlnTomoName nor rlnMicrographName, so they can't be matched to tomograms.");
+
+        string[] names = particles.GetColumn("rlnTomoName");
+        if (names.Any(string.IsNullOrWhiteSpace))
+            throw new Exception("Some particles have an empty rlnTomoName, so they can't be matched to tomograms.");
+
+        return names.Distinct().Count();
     }
 
     #region Per-series file name suffix
