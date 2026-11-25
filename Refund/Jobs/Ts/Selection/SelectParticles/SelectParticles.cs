@@ -352,7 +352,9 @@ public class SelectParticles : WarpToolsJob, ILocalJob
         }
 
         // Create output directory if it doesn't exist
-        if (!inputPositionSet.IsSingleStar)
+        if (inputPositionSet.IsSingleStar)
+            Directory.CreateDirectory(Path.GetDirectoryName(outputPositionSet.ParticlesSingleStarPath)!);
+        else
             Directory.CreateDirectory(outputPositionSet.ParticlesMultiStarDirectory);
 
         // Prepare to process each tomogram
