@@ -67,6 +67,55 @@ public class SelectParticlesTests : IDisposable
         finally { await operations.ShutdownAsync(CancellationToken.None); }
     }
 
+    [Fact]
+    public async Task FinishInteractiveJob_SingleStarInput_WritesSelectedFileAndGeneratesCard()
+    {
+        var job = new RenderingJob { Id = 31, Space = new Space { RootDirectory = _root }, IsInteractiveFinished = true };
+        Directory.CreateDirectory(job.RelayResultsDirectoryPath);
+        // TS_02 has no particles in the combined file, TS_03 has
+        File.WriteAllText(job.ResProcessedItemsJson, JsonSerializer.Serialize(
+            new[] { "TS_01", "TS_02", "TS_03" }.Select(n => new { Path = $"{n}.tomostar" })));
+        Connect(job, SelectParticles.PortInTomogramSet, () => new TomogramSet
+        {
+            TiltSeriesSet = new TiltSeriesSet { HasMetadata = true },
+            ProcessedItemsJson = job.ResProcessedItemsJson,
+            ToTomogramPath = name => Path.Combine(_root, Path.GetFileNameWithoutExtension(name) + ".mrc")
+        });
+        string combined = Path.Combine(_root, "combined.star");
+        Connect(job, SelectParticles.PortInParticleSet, () => new ParticleSet
+        {
+            Diameter = 100,
+            ParticlesSingleStarPath = combined
+        });
+        File.WriteAllText(combined,
+            "data_\n\nloop_\n_rlnCoordinateX #1\n_rlnCoordinateY #2\n_rlnCoordinateZ #3\n_rlnTomoName #4\n" +
+            "10 20 30 TS_01.tomostar\n20 30 40 TS_01.tomostar\n10 20 30 TS_03.tomostar\n");
+        foreach (string key in SelectParticles.FilterKeys)
+            job.GlobalFilterSettings.Filters[key] = new FilterSetting { Min = -180, Max = 500 };
+
+        job.RunLocal(CancellationToken.None);
+
+        var selected = new Star(Path.Combine(job.DirectoryPath, "matching", "selected.star"));
+        Assert.Equal(["TS_01.tomostar", "TS_01.tomostar", "TS_03.tomostar"], selected.GetColumn("rlnTomoName"));
+        Assert.Equal(3, selected.RowCount);
+
+        var coordinator = new ExecutionCoordinator([new ExecutionQueuePolicy(1, ExecutionBackendKind.ExternalScheduler)]);
+        var attempt = coordinator.RequestRun(new JobAddress(1, 1, 31), 1, ResourceVector.None, true).CreateSnapshot();
+        var operations = new RelayExecutionOperations(_ => job, (updated, action) =>
+        {
+            action(updated);
+            return Task.CompletedTask;
+        });
+        try
+        {
+            await operations.FinalizeAsync(attempt, ExecutionOutcome.Succeeded, CancellationToken.None);
+            Assert.Equal(1, job.RenderCalls);
+            Assert.Equal(Path.Combine(_root, "TS_01.mrc"), job.FirstTomogram);
+            Assert.Equal(Path.Combine(_root, "TS_03.mrc"), job.SecondTomogram);
+        }
+        finally { await operations.ShutdownAsync(CancellationToken.None); }
+    }
+
     private static void Connect<T>(SelectParticles job, string portName, Func<T> resource) where T : Resource
     {
         var input = job.PortsIn[portName];

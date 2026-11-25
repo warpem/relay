@@ -630,7 +630,8 @@ public class SelectParticles : WarpToolsJob, ILocalJob
                         filteredIndices.Add(i);
 
                 // Create a new star file with only the filtered particles
-                filteredTomoTables[tomogramName] = tableIn.CreateSubset(filteredIndices.ToArray());
+                // The indices refer to this tomogram's rows, not to the whole file's
+                filteredTomoTables[tomogramName] = tomoTableIn.CreateSubset(filteredIndices.ToArray());
                 totalKept += filteredIndices.Count;
 
                 bool hasCustomFilters = TomogramFilterSettings.ContainsKey(tomogramName);
@@ -686,13 +687,43 @@ public class SelectParticles : WarpToolsJob, ILocalJob
             ParticleSet particleSet = GetParticleSetResource(0);
             TomogramSet tomogramSet = GetTomogramSetResource(0);
 
-            int secondIndex = Math.Min(1, processedItems.Count - 1);
-            renderCard(tomogramSet.ToTomogramPath(processedItems[0].Path),
-                                                   particleSet.ToMultiStarPath(processedItems[0].Path),
-                                                   tomogramSet.ToTomogramPath(processedItems[secondIndex].Path),
-                                                   particleSet.ToMultiStarPath(processedItems[secondIndex].Path),
-                                                   particleSet.Diameter,
-                                                   VisCard(0));
+            // The card draws particles from per-tomogram files
+            var cardInputs = new List<(string Tomogram, string Star)>();
+            if (particleSet.IsSingleStar)
+            {
+                // Carve them out of the combined file, for the first tomograms that kept any particles
+                var byTomogram = Star.LoadSplitByValue(particleSet.ParticlesSingleStarPath, "rlnTomoName");
+                foreach (var item in processedItems)
+                {
+                    if (!byTomogram.TryGetValue(item.Path, out var table))
+                        continue;
+
+                    string starPath = Path.Combine(RelayResultsDirectoryPath, $"card_{cardInputs.Count}.star");
+                    table.Save(starPath);
+                    cardInputs.Add((tomogramSet.ToTomogramPath(item.Path), starPath));
+                    if (cardInputs.Count == 2)
+                        break;
+                }
+
+                if (cardInputs.Count == 0)
+                    return baseUpdate;
+                if (cardInputs.Count == 1)
+                    cardInputs.Add(cardInputs[0]);
+            }
+            else
+            {
+                int secondIndex = Math.Min(1, processedItems.Count - 1);
+                foreach (int index in new[] { 0, secondIndex })
+                    cardInputs.Add((tomogramSet.ToTomogramPath(processedItems[index].Path),
+                                    particleSet.ToMultiStarPath(processedItems[index].Path)));
+            }
+
+            renderCard(cardInputs[0].Tomogram,
+                       cardInputs[0].Star,
+                       cardInputs[1].Tomogram,
+                       cardInputs[1].Star,
+                       particleSet.Diameter,
+                       VisCard(0));
             
             return () =>
             {
