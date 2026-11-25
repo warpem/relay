@@ -1,6 +1,7 @@
 using Refund.DataModel;
 using Refund.JobResources;
 using Refund.Jobs.Common.Import.ImportParticlePositions;
+using Warp;
 
 namespace Refund.Tests.Jobs;
 
@@ -231,6 +232,87 @@ public class ImportParticlePositionsTests
 
         Assert.Null(particles.ToMultiStarPath);
         Assert.True(particles.IsSingleStar);
+    }
+
+    #endregion
+
+    #region Pixel size without an optics table
+
+    private static Star Particles(params (string Name, string[] Values)[] columns) =>
+        new(columns.Select(c => c.Values).ToArray(), columns.Select(c => c.Name).ToArray());
+
+    [Fact]
+    public void DetectPixelSize_PytomStyleTable_UsesDetectorPixelSize()
+    {
+        var table = Particles(("rlnCoordinateX", ["1", "2"]), ("rlnDetectorPixelSize", ["11.328000", "11.328000"]));
+
+        Assert.Equal(11.328M, ImportParticlePositions.DetectPixelSize(table, null));
+    }
+
+    [Fact]
+    public void DetectPixelSize_OpticsTableTakesPrecedence()
+    {
+        var table = Particles(("rlnCoordinateX", ["1"]), ("rlnDetectorPixelSize", ["11.328"]));
+        var optics = Particles(("rlnOpticsGroup", ["1"]), ("rlnImagePixelSize", ["2.5"]));
+
+        Assert.Equal(2.5M, ImportParticlePositions.DetectPixelSize(table, optics));
+    }
+
+    [Fact]
+    public void DetectPixelSize_DetectorPixelSizeWithMagnification_Scales()
+    {
+        var table = Particles(("rlnDetectorPixelSize", ["5"]), ("rlnMagnification", ["50000"]));
+
+        Assert.Equal(1M, ImportParticlePositions.DetectPixelSize(table, null));
+    }
+
+    [Fact]
+    public void DetectPixelSize_DisagreeingOrMissing_ReturnsNull()
+    {
+        Assert.Null(ImportParticlePositions.DetectPixelSize(
+                        Particles(("rlnDetectorPixelSize", ["1", "2"])), null));
+        Assert.Null(ImportParticlePositions.DetectPixelSize(
+                        Particles(("rlnCoordinateX", ["1"])), null));
+    }
+
+    [Fact]
+    public void RunLocal_NamedParticleBlockWithoutOptics_Imports()
+    {
+        EnsurePopulated();
+
+        string root = Path.Combine(Path.GetTempPath(), "relay-import-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+
+        try
+        {
+            string star = Path.Combine(root, "pytom.star");
+            File.WriteAllText(star,
+                "# Created by the starfile Python package\n\ndata_particles\n\nloop_\n" +
+                "_rlnCoordinateX #1\n_rlnCoordinateY #2\n_rlnCoordinateZ #3\n_rlnAnglePsi #4\n" +
+                "_rlnDetectorPixelSize #5\n_rlnMicrographName #6\n" +
+                "367.000000\t293.000000\t188.000000\t-60.000000\t11.328000\tts_01.tomostar\n" +
+                "239.000000\t258.000000\t189.000000\t0.000000\t11.328000\tts_01.tomostar\n");
+
+            var job = new ImportParticlePositions
+            {
+                Space = new Space { RootDirectory = root },
+                Id = 1,
+                InputType = InputTypes.SingleFile,
+                SingleFilePath = star
+            };
+
+            job.RunLocal(CancellationToken.None);
+
+            var particles = OutputParticles(job);
+            Assert.True(particles.HasPositions);
+            Assert.True(particles.Has3dCoords);
+            Assert.True(particles.HasAngles);
+            Assert.Equal(11.328M, particles.CoordPixelSize);
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
     }
 
     #endregion

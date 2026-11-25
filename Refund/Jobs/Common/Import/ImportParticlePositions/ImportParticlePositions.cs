@@ -325,7 +325,10 @@ public class ImportParticlePositions : LocalJob, ILocalJob
                     if (Star.IsMultiTable(fileToCheck))
                     {
                         tableIn = new(fileToCheck, "particles");
-                        tableOptics = new(fileToCheck, "optics");
+
+                        // RELION 3.0-style tables (e.g. from pytom) sit in a named block without an optics block.
+                        if (Star.ContainsTable(fileToCheck, "optics"))
+                            tableOptics = new(fileToCheck, "optics");
                     }
                     else
                         tableIn = new(fileToCheck);
@@ -373,25 +376,25 @@ public class ImportParticlePositions : LocalJob, ILocalJob
                         logger.WriteLine("Found class numbers");
                     }
                     
-                    if (tableOptics == null && PixelSize == null && 
-                        (tableIn.HasColumn("rlnOriginX") || 
-                         (tableIn.HasColumn("rlnCoordinateX") && !HasNormalizedCoordinates)))
-                        throw new Exception("Pixel size must be specified or optics table must be present when using " +
-                                            "coordinates or shifts without physical units.");
+                    bool needsPixelSize = tableIn.HasColumn("rlnOriginX") ||
+                                          (tableIn.HasColumn("rlnCoordinateX") && !HasNormalizedCoordinates);
 
                     if (PixelSize != null)
                     {
                         CoordinatePixelSize = PixelSize.Value;
                         logger.WriteLine($"Using specified pixel size: {CoordinatePixelSize} Å");
                     }
-                    else if (tableIn.HasColumn("rlnOriginX") || 
-                             (tableIn.HasColumn("rlnCoordinateX") && !HasNormalizedCoordinates))
+                    else if (needsPixelSize)
                     {
-                        if ( tableOptics == null || !tableOptics.HasColumn("rlnImagePixelSize"))
-                            throw new Exception("Optics table doesn't have rlnImagePixelSize column, but it's needed for " +
-                                                "figuring out the pixel size of coordinates or shifts.");
-                        
-                        CoordinatePixelSize = decimal.Parse(tableOptics.GetColumn("rlnImagePixelSize")[0], CultureInfo.InvariantCulture);
+                        var detected = DetectPixelSize(tableIn, tableOptics);
+
+                        if (detected == null)
+                            throw new Exception("Couldn't determine the pixel size of the coordinates or shifts: the file " +
+                                                "has no optics table with rlnImagePixelSize, and its particle table has no " +
+                                                "single rlnDetectorPixelSize. Specify the pixel size manually.");
+
+                        CoordinatePixelSize = detected.Value;
+                        logger.WriteLine($"Found pixel size in the STAR file: {CoordinatePixelSize} Å");
                     }
                     
                     if (tableIn.HasColumn("rlnOriginX") || tableIn.HasColumn("rlnOriginXAngst"))
@@ -430,6 +433,37 @@ public class ImportParticlePositions : LocalJob, ILocalJob
             }
         }
     }
+
+    /// <summary>
+    /// Pixel size of the coordinates and shifts, from the optics table's rlnImagePixelSize if there is one, otherwise
+    /// from the particle table's rlnDetectorPixelSize (the only place RELION 3.0-style files such as pytom's
+    /// record it; scaled by rlnMagnification when that is present too). Null if neither gives one unambiguous value.
+    /// </summary>
+    internal static decimal? DetectPixelSize(Star tableIn, Star tableOptics)
+    {
+        if (tableOptics != null && tableOptics.HasColumn("rlnImagePixelSize") && tableOptics.RowCount > 0 &&
+            TryParsePositive(tableOptics.GetColumn("rlnImagePixelSize")[0], out var imagePixelSize))
+            return imagePixelSize;
+
+        if (!tableIn.HasColumn("rlnDetectorPixelSize"))
+            return null;
+
+        var detector = tableIn.GetColumn("rlnDetectorPixelSize").Distinct().ToArray();
+        if (detector.Length != 1 || !TryParsePositive(detector[0], out var detectorPixelSize))
+            return null;
+
+        if (!tableIn.HasColumn("rlnMagnification"))
+            return detectorPixelSize;
+
+        var magnification = tableIn.GetColumn("rlnMagnification").Distinct().ToArray();
+        if (magnification.Length != 1 || !TryParsePositive(magnification[0], out var mag))
+            return null;
+
+        return detectorPixelSize * 10000M / mag;
+    }
+
+    private static bool TryParsePositive(string text, out decimal value) =>
+        decimal.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value) && value > 0;
 
     #region Per-series file name suffix
 
