@@ -1,6 +1,7 @@
 using Refund.DataModel;
 using Refund.JobResources;
 using Refund.Jobs.Common.Import.ImportParticlePositions;
+using Warp;
 
 namespace Refund.Tests.Jobs;
 
@@ -231,6 +232,203 @@ public class ImportParticlePositionsTests
 
         Assert.Null(particles.ToMultiStarPath);
         Assert.True(particles.IsSingleStar);
+    }
+
+    #endregion
+
+    #region Pixel size without an optics table
+
+    private static Star Particles(params (string Name, string[] Values)[] columns) =>
+        new(columns.Select(c => c.Values).ToArray(), columns.Select(c => c.Name).ToArray());
+
+    [Fact]
+    public void DetectPixelSize_PytomStyleTable_UsesDetectorPixelSize()
+    {
+        var table = Particles(("rlnCoordinateX", ["1", "2"]), ("rlnDetectorPixelSize", ["11.328000", "11.328000"]));
+
+        Assert.Equal(11.328M, ImportParticlePositions.DetectPixelSize(table, null));
+    }
+
+    [Fact]
+    public void DetectPixelSize_OpticsTableTakesPrecedence()
+    {
+        var table = Particles(("rlnCoordinateX", ["1"]), ("rlnDetectorPixelSize", ["11.328"]));
+        var optics = Particles(("rlnOpticsGroup", ["1"]), ("rlnImagePixelSize", ["2.5"]));
+
+        Assert.Equal(2.5M, ImportParticlePositions.DetectPixelSize(table, optics));
+    }
+
+    [Fact]
+    public void DetectPixelSize_DetectorPixelSizeWithMagnification_Scales()
+    {
+        var table = Particles(("rlnDetectorPixelSize", ["5"]), ("rlnMagnification", ["50000"]));
+
+        Assert.Equal(1M, ImportParticlePositions.DetectPixelSize(table, null));
+    }
+
+    [Fact]
+    public void AddTomoNameColumn_ExistingTomoNameOrNo3dCoords_LeavesFileAlone()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "relay-tomoname-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+
+        try
+        {
+            string flat = Path.Combine(root, "flat.star");
+            Particles(("rlnCoordinateX", ["1"]), ("rlnCoordinateY", ["1"]), ("rlnMicrographName", ["mic.mrc"])).Save(flat);
+            Assert.False(ImportParticlePositions.AddTomoNameColumn(flat));
+
+            string named = Path.Combine(root, "named.star");
+            Particles(("rlnCoordinateZ", ["1"]), ("rlnMicrographName", ["a"]), ("rlnTomoName", ["b"])).Save(named);
+            Assert.False(ImportParticlePositions.AddTomoNameColumn(named));
+            Assert.Equal(["b"], new Star(named).GetColumn("rlnTomoName"));
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public void AddTomoNameColumn_MultiTableFile_KeepsOpticsTable()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "relay-tomoname-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+
+        try
+        {
+            string path = Path.Combine(root, "multi.star");
+            Star.SaveMultitable(path, new Dictionary<string, Star>
+            {
+                ["optics"] = Particles(("rlnOpticsGroup", ["1"]), ("rlnImagePixelSize", ["2.5"])),
+                ["particles"] = Particles(("rlnCoordinateZ", ["1"]), ("rlnMicrographName", ["ts.tomostar"]))
+            });
+
+            Assert.True(ImportParticlePositions.AddTomoNameColumn(path));
+            Assert.Equal(["ts.tomostar"], new Star(path, "particles").GetColumn("rlnTomoName"));
+            Assert.Equal(["2.5"], new Star(path, "optics").GetColumn("rlnImagePixelSize"));
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public void CountTomograms_ChecksTomoNameOfPositionsInTomograms()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "relay-count-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+
+        try
+        {
+            string ok = Path.Combine(root, "ok.star");
+            Particles(("rlnCoordinateZ", ["1", "2", "3"]), ("rlnTomoName", ["a", "a", "b"])).Save(ok);
+            Assert.Equal(2, ImportParticlePositions.CountTomograms(ok));
+
+            string flat = Path.Combine(root, "flat.star");
+            Particles(("rlnCoordinateX", ["1"]), ("rlnMicrographName", ["mic.mrc"])).Save(flat);
+            Assert.Equal(-1, ImportParticlePositions.CountTomograms(flat));
+
+            string missing = Path.Combine(root, "missing.star");
+            Particles(("rlnCoordinateZ", ["1"]), ("rlnCoordinateX", ["1"])).Save(missing);
+            Assert.Throws<Exception>(() => ImportParticlePositions.CountTomograms(missing));
+
+            string empty = Path.Combine(root, "empty.star");
+            Particles(("rlnCoordinateZ", ["1", "2"]), ("rlnTomoName", ["a", ""])).Save(empty);
+            Assert.Throws<Exception>(() => ImportParticlePositions.CountTomograms(empty));
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public void RunLocal_PositionsInTomogramsWithoutAnyTomogramName_Fails()
+    {
+        EnsurePopulated();
+
+        string root = Path.Combine(Path.GetTempPath(), "relay-notomo-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+
+        try
+        {
+            string star = Path.Combine(root, "noname.star");
+            File.WriteAllText(star,
+                "data_particles\n\nloop_\n_rlnCoordinateX #1\n_rlnCoordinateY #2\n_rlnCoordinateZ #3\n" +
+                "_rlnDetectorPixelSize #4\n1.0\t2.0\t3.0\t10.0\n");
+
+            var job = new ImportParticlePositions
+            {
+                Space = new Space { RootDirectory = root },
+                Id = 1,
+                InputType = InputTypes.SingleFile,
+                SingleFilePath = star
+            };
+
+            var exc = Assert.Throws<Exception>(() => job.RunLocal(CancellationToken.None));
+            Assert.Contains("tomogram", exc.Message);
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public void DetectPixelSize_DisagreeingOrMissing_ReturnsNull()
+    {
+        Assert.Null(ImportParticlePositions.DetectPixelSize(
+                        Particles(("rlnDetectorPixelSize", ["1", "2"])), null));
+        Assert.Null(ImportParticlePositions.DetectPixelSize(
+                        Particles(("rlnCoordinateX", ["1"])), null));
+    }
+
+    [Fact]
+    public void RunLocal_NamedParticleBlockWithoutOptics_Imports()
+    {
+        EnsurePopulated();
+
+        string root = Path.Combine(Path.GetTempPath(), "relay-import-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+
+        try
+        {
+            string star = Path.Combine(root, "pytom.star");
+            File.WriteAllText(star,
+                "# Created by the starfile Python package\n\ndata_particles\n\nloop_\n" +
+                "_rlnCoordinateX #1\n_rlnCoordinateY #2\n_rlnCoordinateZ #3\n_rlnAnglePsi #4\n" +
+                "_rlnDetectorPixelSize #5\n_rlnMicrographName #6\n" +
+                "367.000000\t293.000000\t188.000000\t-60.000000\t11.328000\tts_01.tomostar\n" +
+                "239.000000\t258.000000\t189.000000\t0.000000\t11.328000\tts_01.tomostar\n");
+
+            var job = new ImportParticlePositions
+            {
+                Space = new Space { RootDirectory = root },
+                Id = 1,
+                InputType = InputTypes.SingleFile,
+                SingleFilePath = star
+            };
+
+            job.RunLocal(CancellationToken.None);
+
+            var particles = OutputParticles(job);
+            Assert.True(particles.HasPositions);
+            Assert.True(particles.Has3dCoords);
+            Assert.True(particles.HasAngles);
+            Assert.Equal(11.328M, particles.CoordPixelSize);
+
+            // Tomography jobs match particles to tomograms through rlnTomoName
+            var imported = new Star(job.ImportedSinglePath);
+            Assert.Equal(["ts_01.tomostar", "ts_01.tomostar"], imported.GetColumn("rlnTomoName"));
+            Assert.Equal(2, imported.RowCount);
+            Assert.False(new Star(star).HasColumn("rlnTomoName"));
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
     }
 
     #endregion

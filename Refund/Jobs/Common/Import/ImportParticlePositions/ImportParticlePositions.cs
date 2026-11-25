@@ -325,7 +325,10 @@ public class ImportParticlePositions : LocalJob, ILocalJob
                     if (Star.IsMultiTable(fileToCheck))
                     {
                         tableIn = new(fileToCheck, "particles");
-                        tableOptics = new(fileToCheck, "optics");
+
+                        // RELION 3.0-style tables (e.g. from pytom) sit in a named block without an optics block.
+                        if (Star.ContainsTable(fileToCheck, "optics"))
+                            tableOptics = new(fileToCheck, "optics");
                     }
                     else
                         tableIn = new(fileToCheck);
@@ -373,25 +376,25 @@ public class ImportParticlePositions : LocalJob, ILocalJob
                         logger.WriteLine("Found class numbers");
                     }
                     
-                    if (tableOptics == null && PixelSize == null && 
-                        (tableIn.HasColumn("rlnOriginX") || 
-                         (tableIn.HasColumn("rlnCoordinateX") && !HasNormalizedCoordinates)))
-                        throw new Exception("Pixel size must be specified or optics table must be present when using " +
-                                            "coordinates or shifts without physical units.");
+                    bool needsPixelSize = tableIn.HasColumn("rlnOriginX") ||
+                                          (tableIn.HasColumn("rlnCoordinateX") && !HasNormalizedCoordinates);
 
                     if (PixelSize != null)
                     {
                         CoordinatePixelSize = PixelSize.Value;
                         logger.WriteLine($"Using specified pixel size: {CoordinatePixelSize} Å");
                     }
-                    else if (tableIn.HasColumn("rlnOriginX") || 
-                             (tableIn.HasColumn("rlnCoordinateX") && !HasNormalizedCoordinates))
+                    else if (needsPixelSize)
                     {
-                        if ( tableOptics == null || !tableOptics.HasColumn("rlnImagePixelSize"))
-                            throw new Exception("Optics table doesn't have rlnImagePixelSize column, but it's needed for " +
-                                                "figuring out the pixel size of coordinates or shifts.");
-                        
-                        CoordinatePixelSize = decimal.Parse(tableOptics.GetColumn("rlnImagePixelSize")[0], CultureInfo.InvariantCulture);
+                        var detected = DetectPixelSize(tableIn, tableOptics);
+
+                        if (detected == null)
+                            throw new Exception("Couldn't determine the pixel size of the coordinates or shifts: the file " +
+                                                "has no optics table with rlnImagePixelSize, and its particle table has no " +
+                                                "single rlnDetectorPixelSize. Specify the pixel size manually.");
+
+                        CoordinatePixelSize = detected.Value;
+                        logger.WriteLine($"Found pixel size in the STAR file: {CoordinatePixelSize} Å");
                     }
                     
                     if (tableIn.HasColumn("rlnOriginX") || tableIn.HasColumn("rlnOriginXAngst"))
@@ -412,6 +415,9 @@ public class ImportParticlePositions : LocalJob, ILocalJob
                     if (InputType == InputTypes.SingleFile)
                     {
                         File.Copy(SingleFilePath, ImportedSinglePath, true);
+
+                        if (AddTomoNameColumn(ImportedSinglePath))
+                            logger.WriteLine("Added rlnTomoName (copied from rlnMicrographName) so that tomogram-based jobs can match particles to tomograms");
                     }
                     else
                     {
@@ -421,6 +427,19 @@ public class ImportParticlePositions : LocalJob, ILocalJob
                 }
                 logger.WriteLine("Done.");
 
+                if (InputType == InputTypes.SingleFile)
+                {
+                    // Check the file the downstream jobs will actually read, not the one that was picked.
+                    int tomogramCount = CountTomograms(ImportedSinglePath);
+                    if (tomogramCount >= 0)
+                        logger.WriteLine($"Verified rlnTomoName in the imported file: particles belong to {tomogramCount} tomogram(s)");
+                }
+
+                if (HasCoordinates)
+                    logger.WriteLine(HasNormalizedCoordinates ?
+                                         "Coordinates are normalized, no pixel size needed" :
+                                         $"Coordinate pixel size: {CoordinatePixelSize} Å");
+
                 logger.WriteLine("Particle positions imported successfully");
             }
             catch (Exception exc)
@@ -429,6 +448,91 @@ public class ImportParticlePositions : LocalJob, ILocalJob
                 throw;
             }
         }
+    }
+
+    /// <summary>
+    /// Pixel size of the coordinates and shifts, from the optics table's rlnImagePixelSize if there is one, otherwise
+    /// from the particle table's rlnDetectorPixelSize (the only place RELION 3.0-style files such as pytom's
+    /// record it; scaled by rlnMagnification when that is present too). Null if neither gives one unambiguous value.
+    /// </summary>
+    internal static decimal? DetectPixelSize(Star tableIn, Star tableOptics)
+    {
+        if (tableOptics != null && tableOptics.HasColumn("rlnImagePixelSize") && tableOptics.RowCount > 0 &&
+            TryParsePositive(tableOptics.GetColumn("rlnImagePixelSize")[0], out var imagePixelSize))
+            return imagePixelSize;
+
+        if (!tableIn.HasColumn("rlnDetectorPixelSize"))
+            return null;
+
+        var detector = tableIn.GetColumn("rlnDetectorPixelSize").Distinct().ToArray();
+        if (detector.Length != 1 || !TryParsePositive(detector[0], out var detectorPixelSize))
+            return null;
+
+        if (!tableIn.HasColumn("rlnMagnification"))
+            return detectorPixelSize;
+
+        var magnification = tableIn.GetColumn("rlnMagnification").Distinct().ToArray();
+        if (magnification.Length != 1 || !TryParsePositive(magnification[0], out var mag))
+            return null;
+
+        return detectorPixelSize * 10000M / mag;
+    }
+
+    private static bool TryParsePositive(string text, out decimal value) =>
+        decimal.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value) && value > 0;
+
+    /// <summary>
+    /// Tomography jobs match particles to tomograms through rlnTomoName, but RELION 3.0-style exports (e.g. pytom's)
+    /// name the tomogram in rlnMicrographName. For a table with 3D coordinates that has only the latter, adds
+    /// rlnTomoName as a copy of it, rewriting the (already copied) file in place. Returns whether it changed anything.
+    /// </summary>
+    internal static bool AddTomoNameColumn(string path)
+    {
+        bool multiTable = Star.IsMultiTable(path);
+        Star particles = multiTable ? new Star(path, "particles") : new Star(path);
+
+        if (particles.HasColumn("rlnTomoName") || !particles.HasColumn("rlnMicrographName") ||
+            !(particles.HasColumn("rlnCoordinateZ") || particles.HasColumn("rlnCoordinateZAngst")))
+            return false;
+
+        particles.AddColumn("rlnTomoName", particles.GetColumn("rlnMicrographName"));
+
+        if (multiTable)
+        {
+            Dictionary<string, Star> tables = new();
+            if (Star.ContainsTable(path, "optics"))
+                tables["optics"] = new Star(path, "optics");
+            tables["particles"] = particles;
+            Star.SaveMultitable(path, tables);
+        }
+        else
+            particles.Save(path);
+
+        return true;
+    }
+
+    /// <summary>
+    /// Checks that a table of positions in tomograms (one with a Z coordinate) names the tomogram of every particle in
+    /// rlnTomoName, which the tomography jobs need to match particles to tomograms. Returns the number of distinct
+    /// tomograms, or -1 if the table has no Z coordinate and the check doesn't apply. Throws if the column is
+    /// missing or has empty values.
+    /// </summary>
+    internal static int CountTomograms(string path)
+    {
+        Star particles = Star.IsMultiTable(path) ? new Star(path, "particles") : new Star(path);
+
+        if (!(particles.HasColumn("rlnCoordinateZ") || particles.HasColumn("rlnCoordinateZAngst")))
+            return -1;
+
+        if (!particles.HasColumn("rlnTomoName"))
+            throw new Exception("The particles have 3D coordinates but don't name their tomogram: the STAR file has " +
+                                "neither rlnTomoName nor rlnMicrographName, so they can't be matched to tomograms.");
+
+        string[] names = particles.GetColumn("rlnTomoName");
+        if (names.Any(string.IsNullOrWhiteSpace))
+            throw new Exception("Some particles have an empty rlnTomoName, so they can't be matched to tomograms.");
+
+        return names.Distinct().Count();
     }
 
     #region Per-series file name suffix
